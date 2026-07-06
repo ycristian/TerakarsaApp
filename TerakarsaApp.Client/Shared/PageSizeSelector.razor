@@ -1,0 +1,22 @@
+<div class="d-flex align-items-center gap-2">
+    <span>Show</span>
+    <select class="form-select form-select-sm" style="width: auto;" @onchange="HandleChange">
+        @foreach (var size in Options)
+        {
+            <option value="@size" selected="@(size == PageSize)">@size</option>
+        }
+    </select>
+    <span>entries</span>
+</div>
+
+@code {
+    [Parameter] public int PageSize { get; set; }
+    [Parameter] public EventCallback<int> PageSizeChanged { get; set; }
+    [Parameter] public int[] Options { get; set; } = [10, 25, 50, 100];
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        var value = int.Parse(e.Value!.ToString()!);
+        await PageSizeChanged.InvokeAsync(value);
+    }
+}

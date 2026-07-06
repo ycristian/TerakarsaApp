@@ -1,0 +1,443 @@
+@page "/users"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Users
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject UserApiService UserApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Kelola User</PageTitle>
+
+<h3>Kelola User</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah User
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari username / nama..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data user.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar User</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Username" Column="Username" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Lengkap" Column="FullName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Role" Column="Role" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Status</th>
+                            <SortableHeader Label="Dibuat" Column="CreatedAt" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@u.Username</td>
+                                <td>@u.FullName</td>
+                                <td>
+                                    <span class="badge @(u.Role == "Admin" ? "bg-danger" : "bg-secondary")">
+                                        @u.Role
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge @(u.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(u.IsActive ? "Aktif" : "Nonaktif")
+                                    </span>
+                                </td>
+                                <td>@u.CreatedAt.ToString("dd/MM/yyyy")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(u)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" title="Reset Password" @onclick="() => OpenResetPasswordForm(u)"><i class="fe fe-key"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(u)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit User" : "Tambah User")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Username</label>
+                            <InputText class="form-control" @bind-Value="formModel.Username" disabled="@isEditMode" />
+                            <ValidationMessage For="@(() => formModel.Username)" class="text-danger" />
+                        </div>
+                        @if (!isEditMode)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label">Password</label>
+                                <InputText type="password" class="form-control" @bind-Value="formModel.Password" />
+                                <ValidationMessage For="@(() => formModel.Password)" class="text-danger" />
+                            </div>
+                        }
+                        <div class="mb-3">
+                            <label class="form-label">Nama Lengkap</label>
+                            <InputText class="form-control" @bind-Value="formModel.FullName" />
+                            <ValidationMessage For="@(() => formModel.FullName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Role</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.Role">
+                                <option value="">-- Pilih Role --</option>
+                                <option value="Admin">Admin</option>
+                                <option value="User">User</option>
+                            </InputSelect>
+                            <ValidationMessage For="@(() => formModel.Role)" class="text-danger" />
+                        </div>
+                        @if (isEditMode)
+                        {
+                            <div class="mb-3 form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
+                                <label class="form-check-label">Aktif</label>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showResetPasswordForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="@(() => showResetPasswordForm = false)">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Reset Password — @resetPasswordModel.Username</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => showResetPasswordForm = false"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="resetPasswordModel" OnValidSubmit="HandleResetPassword">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Password Baru</label>
+                            <InputText type="password" class="form-control" @bind-Value="resetPasswordModel.NewPassword" />
+                            <ValidationMessage For="@(() => resetPasswordModel.NewPassword)" class="text-danger" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-warning w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Reset Password")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus user "@userPendingDelete?.Username"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private UserPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool showResetPasswordForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private UserDto? userPendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    private UserFormModel formModel = new();
+    private ResetPasswordFormModel resetPasswordModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "users");
+
+        if (hasAccess == true)
+            await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        isLoading = true;
+        pagedResult = await UserApi.GetPagedAsync(new UserPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadUsers();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadUsers();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadUsers();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadUsers();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new UserFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(UserDto user)
+    {
+        isEditMode = true;
+        formModel = new UserFormModel
+        {
+            Id = user.Id,
+            Username = user.Username,
+            FullName = user.FullName,
+            Role = user.Role,
+            IsActive = user.IsActive
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenResetPasswordForm(UserDto user)
+    {
+        resetPasswordModel = new ResetPasswordFormModel { Id = user.Id, Username = user.Username };
+        errorMessage = string.Empty;
+        showResetPasswordForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        errorMessage = string.Empty;
+
+        if (!isEditMode && formModel.Password.Length < 6)
+        {
+            errorMessage = "Password minimal 6 karakter.";
+            return;
+        }
+
+        isSaving = true;
+
+        bool success;
+        if (isEditMode)
+        {
+            success = await UserApi.UpdateAsync(new UserUpdateRequest
+            {
+                Id = formModel.Id,
+                FullName = formModel.FullName,
+                Role = formModel.Role,
+                IsActive = formModel.IsActive
+            });
+        }
+        else
+        {
+            success = await UserApi.CreateAsync(new UserCreateRequest
+            {
+                Username = formModel.Username,
+                Password = formModel.Password,
+                FullName = formModel.FullName,
+                Role = formModel.Role
+            });
+        }
+
+        isSaving = false;
+
+        if (success)
+        {
+            showForm = false;
+            await LoadUsers();
+        }
+        else
+        {
+            errorMessage = "Gagal menyimpan data. Pastikan username belum dipakai.";
+        }
+    }
+
+    private async Task HandleResetPassword()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (success, error) = await UserApi.ResetPasswordAsync(new UserResetPasswordRequest
+        {
+            Id = resetPasswordModel.Id,
+            NewPassword = resetPasswordModel.NewPassword
+        });
+
+        isSaving = false;
+
+        if (success)
+            showResetPasswordForm = false;
+        else
+            errorMessage = string.IsNullOrWhiteSpace(error) ? "Gagal reset password." : error;
+    }
+
+    private void HandleDelete(UserDto user)
+    {
+        userPendingDelete = user;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        userPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (userPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await UserApi.DeleteAsync(userPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        userPendingDelete = null;
+
+        if (success)
+            await LoadUsers();
+    }
+
+    public class UserFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Username wajib diisi.")]
+        [StringLength(100, MinimumLength = 3, ErrorMessage = "Username minimal 3 karakter.")]
+        public string Username { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama lengkap wajib diisi.")]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Role wajib dipilih.")]
+        public string Role { get; set; } = string.Empty;
+
+        public bool IsActive { get; set; } = true;
+    }
+
+    public class ResetPasswordFormModel
+    {
+        public int Id { get; set; }
+        public string Username { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Password baru wajib diisi.")]
+        [MinLength(6, ErrorMessage = "Password minimal 6 karakter.")]
+        public string NewPassword { get; set; } = string.Empty;
+    }
+}

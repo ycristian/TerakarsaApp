@@ -1,0 +1,314 @@
+@page "/resource-types"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.ResourceTypes
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ResourceTypeApiService ResourceTypeApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Tipe Resource</PageTitle>
+
+<h3>Data Tipe Resource</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Tipe Resource
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama tipe resource..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data tipe resource.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Tipe Resource</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Kode" Column="ResourceTypeCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Tipe Resource" Column="ResourceTypeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@r.ResourceTypeCode</td>
+                                <td>@r.ResourceTypeName</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(r)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(r)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Tipe Resource" : "Tambah Tipe Resource")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Tipe Resource</label>
+                            <InputText class="form-control" @bind-Value="formModel.ResourceTypeCode" />
+                            <ValidationMessage For="@(() => formModel.ResourceTypeCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Tipe Resource</label>
+                            <InputText class="form-control" @bind-Value="formModel.ResourceTypeName" />
+                            <ValidationMessage For="@(() => formModel.ResourceTypeName)" class="text-danger" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus tipe resource "@resourceTypePendingDelete?.ResourceTypeName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private ResourceTypePagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private ResourceTypeFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private ResourceTypeDto? resourceTypePendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_RESOURCE_TYPE");
+
+        if (hasAccess == true)
+            await LoadResourceTypes();
+    }
+
+    private async Task LoadResourceTypes()
+    {
+        isLoading = true;
+        pagedResult = await ResourceTypeApi.GetPagedAsync(new ResourceTypePagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadResourceTypes();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadResourceTypes();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadResourceTypes();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadResourceTypes();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new ResourceTypeFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(ResourceTypeDto resourceType)
+    {
+        isEditMode = true;
+        formModel = new ResourceTypeFormModel
+        {
+            Id = resourceType.Id,
+            ResourceTypeCode = resourceType.ResourceTypeCode,
+            ResourceTypeName = resourceType.ResourceTypeName
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await ResourceTypeApi.UpdateAsync(new ResourceTypeUpdateRequest
+            {
+                Id = formModel.Id,
+                ResourceTypeCode = formModel.ResourceTypeCode,
+                ResourceTypeName = formModel.ResourceTypeName
+            });
+        }
+        else
+        {
+            result = await ResourceTypeApi.CreateAsync(new ResourceTypeCreateRequest
+            {
+                ResourceTypeCode = formModel.ResourceTypeCode,
+                ResourceTypeName = formModel.ResourceTypeName
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadResourceTypes();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(ResourceTypeDto resourceType)
+    {
+        resourceTypePendingDelete = resourceType;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        resourceTypePendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (resourceTypePendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await ResourceTypeApi.DeleteAsync(resourceTypePendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        resourceTypePendingDelete = null;
+
+        if (success)
+            await LoadResourceTypes();
+    }
+
+    public class ResourceTypeFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Kode tipe resource wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode tipe resource maksimal 30 karakter.")]
+        public string ResourceTypeCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama tipe resource wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama tipe resource maksimal 150 karakter.")]
+        public string ResourceTypeName { get; set; } = string.Empty;
+    }
+}

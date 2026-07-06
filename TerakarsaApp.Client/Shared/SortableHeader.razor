@@ -1,0 +1,26 @@
+<th style="cursor: pointer; user-select: none;" @onclick="HandleClick">
+    @Label
+    <span class="ms-1 text-muted">
+        @if (CurrentColumn == Column)
+        {
+            @(CurrentDirection == "asc" ? "▲" : "▼")
+        }
+        else
+        {
+            @("↕")
+        }
+    </span>
+</th>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Column { get; set; } = string.Empty;
+    [Parameter] public string? CurrentColumn { get; set; }
+    [Parameter] public string CurrentDirection { get; set; } = "asc";
+    [Parameter] public EventCallback<string> OnSort { get; set; }
+
+    private async Task HandleClick()
+    {
+        await OnSort.InvokeAsync(Column);
+    }
+}

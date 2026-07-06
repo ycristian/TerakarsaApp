@@ -1,0 +1,412 @@
+@page "/employees"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Positions
+@using TerakarsaApp.Shared.Resources
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject EmployeeApiService EmployeeApi
+@inject DivisionApiService DivisionApi
+@inject PositionApiService PositionApi
+@inject ResourceApiService ResourceApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Karyawan</PageTitle>
+
+<h3>Data Karyawan</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Karyawan
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama / divisi / jabatan..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data karyawan.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Karyawan</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Kode" Column="EmployeeCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Karyawan" Column="EmployeeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Jabatan" Column="PositionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Resource</th>
+                            <SortableHeader Label="Tgl Bergabung" Column="JoinDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@e.EmployeeCode</td>
+                                <td>@e.EmployeeName</td>
+                                <td>@e.DivisionName</td>
+                                <td>@e.PositionName</td>
+                                <td>@(e.ResourceName ?? "-")</td>
+                                <td>@(e.JoinDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(e)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(e)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Karyawan" : "Tambah Karyawan")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Karyawan</label>
+                            <InputText class="form-control" @bind-Value="formModel.EmployeeCode" />
+                            <ValidationMessage For="@(() => formModel.EmployeeCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Karyawan</label>
+                            <InputText class="form-control" @bind-Value="formModel.EmployeeName" />
+                            <ValidationMessage For="@(() => formModel.EmployeeName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Divisi</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId" @bind-Value:after="OnDivisionChanged">
+                                <option value="0">-- Pilih Divisi --</option>
+                                @foreach (var d in divisionOptions)
+                                {
+                                    <option value="@d.Id">@d.DivisionName</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="@(() => formModel.DivisionId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Jabatan</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.PositionId">
+                                <option value="0">-- Pilih Jabatan --</option>
+                                @foreach (var p in positionOptions)
+                                {
+                                    <option value="@p.Id">@p.PositionName</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="@(() => formModel.PositionId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Resource</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.ResourceId" disabled="@(formModel.DivisionId <= 0)">
+                                <option value="0">- Tidak ada -</option>
+                                @foreach (var r in resourceOptions)
+                                {
+                                    <option value="@r.Id">@r.ResourceName</option>
+                                }
+                            </InputSelect>
+                            @if (formModel.DivisionId <= 0)
+                            {
+                                <div class="form-text">Pilih divisi terlebih dahulu untuk memilih resource.</div>
+                            }
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Bergabung</label>
+                            <InputDate class="form-control" @bind-Value="formModel.JoinDate" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus karyawan "@employeePendingDelete?.EmployeeName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private EmployeePagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private EmployeeFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private EmployeeDto? employeePendingDelete;
+    private List<DivisionDto> divisionOptions = new();
+    private List<PositionDto> positionOptions = new();
+    private List<ResourceLookupDto> resourceOptions = new();
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_EMPLOYEE");
+
+        if (hasAccess == true)
+        {
+            divisionOptions = await DivisionApi.GetActiveAsync();
+            positionOptions = await PositionApi.GetActiveAsync();
+            await LoadEmployees();
+        }
+    }
+
+    private async Task LoadEmployees()
+    {
+        isLoading = true;
+        pagedResult = await EmployeeApi.GetPagedAsync(new EmployeePagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadEmployees();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadEmployees();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadEmployees();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadEmployees();
+    }
+
+    private async Task OnDivisionChanged()
+    {
+        formModel.ResourceId = 0;
+        await LoadResourceOptions();
+    }
+
+    private async Task LoadResourceOptions()
+    {
+        resourceOptions = formModel.DivisionId > 0
+            ? await ResourceApi.GetActiveByDivisionAsync(formModel.DivisionId)
+            : new();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new EmployeeFormModel();
+        resourceOptions = new();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private async Task OpenEditForm(EmployeeDto employee)
+    {
+        isEditMode = true;
+        formModel = new EmployeeFormModel
+        {
+            Id = employee.Id,
+            EmployeeCode = employee.EmployeeCode,
+            EmployeeName = employee.EmployeeName,
+            DivisionId = employee.DivisionId,
+            PositionId = employee.PositionId,
+            ResourceId = employee.ResourceId ?? 0,
+            JoinDate = employee.JoinDate
+        };
+        errorMessage = string.Empty;
+        await LoadResourceOptions();
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await EmployeeApi.UpdateAsync(new EmployeeUpdateRequest
+            {
+                Id = formModel.Id,
+                EmployeeCode = formModel.EmployeeCode,
+                EmployeeName = formModel.EmployeeName,
+                DivisionId = formModel.DivisionId,
+                PositionId = formModel.PositionId,
+                ResourceId = formModel.ResourceId > 0 ? formModel.ResourceId : null,
+                JoinDate = formModel.JoinDate
+            });
+        }
+        else
+        {
+            result = await EmployeeApi.CreateAsync(new EmployeeCreateRequest
+            {
+                EmployeeCode = formModel.EmployeeCode,
+                EmployeeName = formModel.EmployeeName,
+                DivisionId = formModel.DivisionId,
+                PositionId = formModel.PositionId,
+                ResourceId = formModel.ResourceId > 0 ? formModel.ResourceId : null,
+                JoinDate = formModel.JoinDate
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadEmployees();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(EmployeeDto employee)
+    {
+        employeePendingDelete = employee;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        employeePendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (employeePendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await EmployeeApi.DeleteAsync(employeePendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        employeePendingDelete = null;
+
+        if (success)
+            await LoadEmployees();
+    }
+
+    public class EmployeeFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Kode karyawan wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode karyawan maksimal 30 karakter.")]
+        public string EmployeeCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama karyawan wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama karyawan maksimal 150 karakter.")]
+        public string EmployeeName { get; set; } = string.Empty;
+
+        [Range(1, int.MaxValue, ErrorMessage = "Divisi wajib dipilih.")]
+        public int DivisionId { get; set; }
+
+        [Range(1, int.MaxValue, ErrorMessage = "Jabatan wajib dipilih.")]
+        public int PositionId { get; set; }
+
+        public int ResourceId { get; set; }
+
+        public DateTime? JoinDate { get; set; }
+    }
+}

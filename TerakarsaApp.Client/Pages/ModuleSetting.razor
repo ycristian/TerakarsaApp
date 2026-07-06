@@ -1,0 +1,406 @@
+@page "/module-setting"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Modules
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ModuleApiService ModuleApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Module Setting</PageTitle>
+
+<h3>Module Setting</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Module
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari nama / code module..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data module.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Module</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Code" Column="Code" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama" Column="Name" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Category" Column="Category" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Sub Category" Column="SubCategory" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Route" Column="Route" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Icon</th>
+                            <SortableHeader Label="Urutan" Column="SortOrder" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Status</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@m.Code</td>
+                                <td>@m.Name</td>
+                                <td>@m.Category</td>
+                                <td>@(string.IsNullOrWhiteSpace(m.SubCategory) ? "-" : m.SubCategory)</td>
+                                <td>/@m.Route</td>
+                                <td>@m.Icon</td>
+                                <td>@m.SortOrder</td>
+                                <td>
+                                    <span class="badge @(m.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(m.IsActive ? "Aktif" : "Nonaktif")
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(m)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(m)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Module" : "Tambah Module")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Code</label>
+                            <InputText class="form-control" @bind-Value="formModel.Code" />
+                            <ValidationMessage For="@(() => formModel.Code)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Module</label>
+                            <InputText class="form-control" @bind-Value="formModel.Name" />
+                            <ValidationMessage For="@(() => formModel.Name)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Category (sub-category di menu, mis. Production / App Setting)</label>
+                            <InputText class="form-control" @bind-Value="formModel.Category" list="category-options" />
+                            <datalist id="category-options">
+                                @foreach (var c in existingCategories)
+                                {
+                                    <option value="@c"></option>
+                                }
+                            </datalist>
+                            <ValidationMessage For="@(() => formModel.Category)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Sub Category (opsional — kosongkan untuk menu flat, isi untuk jadi grup collapsible, mis. Master Data)</label>
+                            <InputText class="form-control" @bind-Value="formModel.SubCategory" list="subcategory-options" />
+                            <datalist id="subcategory-options">
+                                @foreach (var sc in existingSubCategories)
+                                {
+                                    <option value="@sc"></option>
+                                }
+                            </datalist>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Route (tanpa garis miring depan)</label>
+                            <InputText class="form-control" @bind-Value="formModel.Route" />
+                            <ValidationMessage For="@(() => formModel.Route)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Icon (kelas CSS, mis. fe fe-package)</label>
+                            <InputText class="form-control" @bind-Value="formModel.Icon" />
+                            <ValidationMessage For="@(() => formModel.Icon)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Urutan</label>
+                            <InputNumber class="form-control" @bind-Value="formModel.SortOrder" />
+                        </div>
+                        @if (isEditMode)
+                        {
+                            <div class="mb-3 form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
+                                <label class="form-check-label">Aktif</label>
+                            </div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus module "@modulePendingDelete?.Name"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private ModulePagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private ModuleFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private ModuleDto? modulePendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+    private List<string> existingCategories = new();
+    private List<string> existingSubCategories = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "module-setting");
+
+        if (hasAccess == true)
+            await LoadModules();
+    }
+
+    private async Task LoadModules()
+    {
+        isLoading = true;
+        pagedResult = await ModuleApi.GetPagedAsync(new ModulePagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        existingCategories = pagedResult.Items
+            .Select(m => m.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct()
+            .OrderBy(c => c)
+            .ToList();
+        existingSubCategories = pagedResult.Items
+            .Select(m => m.SubCategory)
+            .Where(sc => !string.IsNullOrWhiteSpace(sc))
+            .Distinct()
+            .OrderBy(sc => sc)
+            .ToList()!;
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadModules();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadModules();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadModules();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadModules();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new ModuleFormModel();
+        showForm = true;
+    }
+
+    private void OpenEditForm(ModuleDto module)
+    {
+        isEditMode = true;
+        formModel = new ModuleFormModel
+        {
+            Id = module.Id,
+            Code = module.Code,
+            Name = module.Name,
+            Category = module.Category,
+            SubCategory = module.SubCategory,
+            Route = module.Route,
+            Icon = module.Icon,
+            SortOrder = module.SortOrder,
+            IsActive = module.IsActive
+        };
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+
+        bool success;
+        if (isEditMode)
+        {
+            success = await ModuleApi.UpdateAsync(new ModuleUpdateRequest
+            {
+                Id = formModel.Id,
+                Code = formModel.Code,
+                Name = formModel.Name,
+                Category = formModel.Category,
+                SubCategory = string.IsNullOrWhiteSpace(formModel.SubCategory) ? null : formModel.SubCategory,
+                Route = formModel.Route,
+                Icon = formModel.Icon,
+                SortOrder = formModel.SortOrder,
+                IsActive = formModel.IsActive
+            });
+        }
+        else
+        {
+            success = await ModuleApi.CreateAsync(new ModuleCreateRequest
+            {
+                Code = formModel.Code,
+                Name = formModel.Name,
+                Category = formModel.Category,
+                SubCategory = string.IsNullOrWhiteSpace(formModel.SubCategory) ? null : formModel.SubCategory,
+                Route = formModel.Route,
+                Icon = formModel.Icon,
+                SortOrder = formModel.SortOrder
+            });
+        }
+
+        isSaving = false;
+
+        if (success)
+        {
+            showForm = false;
+            await LoadModules();
+        }
+    }
+
+    private void HandleDelete(ModuleDto module)
+    {
+        modulePendingDelete = module;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        modulePendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (modulePendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await ModuleApi.DeleteAsync(modulePendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        modulePendingDelete = null;
+
+        if (success)
+            await LoadModules();
+    }
+
+    public class ModuleFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Code wajib diisi.")]
+        [StringLength(50, MinimumLength = 2, ErrorMessage = "Code minimal 2 karakter.")]
+        public string Code { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama module wajib diisi.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Category wajib diisi.")]
+        public string Category { get; set; } = string.Empty;
+
+        [StringLength(100, ErrorMessage = "Sub category maksimal 100 karakter.")]
+        public string? SubCategory { get; set; }
+
+        [Required(ErrorMessage = "Route wajib diisi.")]
+        public string Route { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Icon wajib diisi.")]
+        public string Icon { get; set; } = string.Empty;
+
+        public int SortOrder { get; set; }
+
+        public bool IsActive { get; set; } = true;
+    }
+}

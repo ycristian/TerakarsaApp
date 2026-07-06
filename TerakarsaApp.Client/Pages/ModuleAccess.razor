@@ -1,0 +1,149 @@
+@page "/module-access"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Modules
+@using TerakarsaApp.Shared.Users
+@inject ModuleApiService ModuleApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Module Access</PageTitle>
+
+<h3>Module Access</h3>
+<p class="text-muted">Atur module (Production maupun App Setting) yang bisa diakses tiap user, terlepas dari role-nya.</p>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-4">
+            <div class="mb-3">
+                <label class="form-label">Pilih User</label>
+                <select class="form-select" @onchange="HandleUserChange">
+                    <option value="">-- Pilih User --</option>
+                    @foreach (var u in users)
+                    {
+                        <option value="@u.Id">@u.Username (@u.FullName)</option>
+                    }
+                </select>
+            </div>
+        </div>
+    </div>
+
+    @if (selectedUserId is not null)
+    {
+        @if (isLoading)
+        {
+            <p>Memuat module...</p>
+        }
+        else
+        {
+            @foreach (var group in moduleGroups)
+            {
+                <h6>@group.Category</h6>
+                <div class="mb-3">
+                    @foreach (var m in group.Modules)
+                    {
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="module-@m.Id"
+                                   checked="@assignedModuleIds.Contains(m.Id)"
+                                   @onchange="e => HandleToggle(m.Id, e.Value)" />
+                            <label class="form-check-label" for="module-@m.Id">@m.Name</label>
+                        </div>
+                    }
+                </div>
+            }
+
+            <button class="btn btn-primary" disabled="@isSaving" @onclick="HandleSave">
+                @(isSaving ? "Menyimpan..." : "Simpan Akses")
+            </button>
+
+            @if (savedMessage is not null)
+            {
+                <div class="alert alert-success mt-3">@savedMessage</div>
+            }
+        }
+    }
+}
+
+@code {
+    private record ModuleGroup(string Category, List<ModuleDto> Modules);
+
+    private List<UserDto> users = new();
+    private List<ModuleGroup> moduleGroups = new();
+    private HashSet<int> assignedModuleIds = new();
+    private int? selectedUserId;
+    private bool isLoading = false;
+    private bool isSaving = false;
+    private bool? hasAccess = null;
+    private string? savedMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "module-access");
+
+        if (hasAccess != true) return;
+
+        users = await ModuleApi.GetUsersAsync();
+
+        var allModules = await ModuleApi.GetAllAsync();
+        moduleGroups = allModules
+            .GroupBy(m => m.Category)
+            .Select(g => new ModuleGroup(g.Key, g.OrderBy(m => m.SortOrder).ToList()))
+            .OrderBy(g => g.Modules.Min(m => m.SortOrder))
+            .ToList();
+    }
+
+    private async Task HandleUserChange(ChangeEventArgs e)
+    {
+        savedMessage = null;
+
+        if (string.IsNullOrWhiteSpace(e.Value?.ToString()))
+        {
+            selectedUserId = null;
+            return;
+        }
+
+        selectedUserId = int.Parse(e.Value.ToString()!);
+        isLoading = true;
+
+        var ids = await ModuleApi.GetAccessAsync(selectedUserId.Value);
+        assignedModuleIds = new HashSet<int>(ids);
+
+        isLoading = false;
+    }
+
+    private void HandleToggle(int moduleId, object? isChecked)
+    {
+        if (isChecked is bool value && value)
+            assignedModuleIds.Add(moduleId);
+        else
+            assignedModuleIds.Remove(moduleId);
+    }
+
+    private async Task HandleSave()
+    {
+        if (selectedUserId is null) return;
+
+        isSaving = true;
+        savedMessage = null;
+
+        var success = await ModuleApi.SetAccessAsync(new UserModuleAssignRequest
+        {
+            UserId = selectedUserId.Value,
+            ModuleIds = assignedModuleIds.ToList()
+        });
+
+        isSaving = false;
+        savedMessage = success ? "Akses module berhasil disimpan." : "Gagal menyimpan akses module.";
+    }
+}

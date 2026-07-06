@@ -1,0 +1,389 @@
+@page "/projects/edit/{Id:int}"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Projects
+@using TerakarsaApp.Shared.Buyers
+@using TerakarsaApp.Shared.Employees
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ProjectApiService ProjectApi
+@inject ProjectAttachmentApiService AttachmentApi
+@inject BuyerApiService BuyerApi
+@inject EmployeeApiService EmployeeApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Edit Project</PageTitle>
+
+<h3>Edit Project</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (project is null)
+{
+    <div class="alert alert-danger">Project tidak ditemukan.</div>
+}
+else
+{
+    <div class="mb-3">
+        <button class="btn btn-light" @onclick="BackToList"><i class="fe fe-arrow-left"></i> Kembali ke Daftar</button>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="card-title">Detail Project</h3>
+        </div>
+        <div class="card-body">
+            <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="text-danger mb-3" />
+
+                <div class="mb-3">
+                    <label class="form-label">Nama Project</label>
+                    <InputText class="form-control" @bind-Value="formModel.ProjectName" />
+                    <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Buyer</label>
+                    <InputSelect class="form-select" @bind-Value="formModel.CustomerId">
+                        <option value="0">-- Pilih Buyer --</option>
+                        @foreach (var b in buyerOptions)
+                        {
+                            <option value="@b.Id">@b.BuyerName</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">MD</label>
+                    <InputSelect class="form-select" @bind-Value="formModel.ProjectMd">
+                        <option value="0">- Tidak ada -</option>
+                        @foreach (var e in employeeOptions)
+                        {
+                            <option value="@e.Id">@e.EmployeeName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">PIC</label>
+                    <InputSelect class="form-select" @bind-Value="formModel.ProjectPic">
+                        <option value="0">- Tidak ada -</option>
+                        @foreach (var e in employeeOptions)
+                        {
+                            <option value="@e.Id">@e.EmployeeName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">No PO</label>
+                    <InputText class="form-control" @bind-Value="formModel.NoPo" />
+                    <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tanggal Order</label>
+                    <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tanggal Mulai</label>
+                    <InputDate class="form-control" @bind-Value="formModel.StartDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Deadline</label>
+                    <InputDate class="form-control" @bind-Value="formModel.Deadline" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tanggal Kirim</label>
+                    <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <div class="alert alert-success">@successMessage</div>
+                }
+                <button type="submit" class="btn btn-primary" disabled="@isSaving">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </EditForm>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Lampiran</h3>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 align-items-end mb-3">
+                <div class="col-md-5">
+                    <label class="form-label">File (jpg, png, pdf, xlsx - maks. 10 MB)</label>
+                    <InputFile class="form-control" OnChange="HandleFileSelected" />
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label">Deskripsi (opsional)</label>
+                    <input class="form-control" maxlength="255" @bind="uploadDescription" />
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" disabled="@(selectedFile is null || isUploading)" @onclick="HandleUpload">
+                        @(isUploading ? "Mengunggah..." : "Unggah")
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(uploadError))
+            {
+                <div class="alert alert-danger">@uploadError</div>
+            }
+
+            @if (isLoadingAttachments)
+            {
+                <p>Memuat lampiran...</p>
+            }
+            else if (attachments.Count == 0)
+            {
+                <p>Belum ada lampiran.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0">
+                        <thead>
+                            <tr>
+                                <th>Nama File</th>
+                                <th>Tipe</th>
+                                <th>Ukuran (KB)</th>
+                                <th>Deskripsi</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var a in attachments)
+                            {
+                                <tr>
+                                    <td>@a.FileName</td>
+                                    <td>@a.FileType</td>
+                                    <td>@a.FileSizeKb</td>
+                                    <td>@(a.Description ?? "-")</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-secondary me-1" title="Download" @onclick="() => HandleDownload(a)"><i class="fe fe-download"></i></button>
+                                        <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteAttachment(a)"><i class="fe fe-trash-2"></i></button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeletingAttachment" OnConfirm="ConfirmDeleteAttachment" OnCancel="CancelDeleteAttachment">
+        <Message>Yakin ingin menghapus lampiran "@attachmentPendingDelete?.FileName"?</Message>
+    </ConfirmDeleteModal>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool? hasAccess = null;
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private ProjectDto? project;
+    private ProjectFormModel formModel = new();
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private List<BuyerDto> buyerOptions = new();
+    private List<EmployeeDto> employeeOptions = new();
+
+    private List<ProjectAttachmentDto> attachments = new();
+    private bool isLoadingAttachments = true;
+    private IBrowserFile? selectedFile;
+    private string? uploadDescription;
+    private bool isUploading = false;
+    private string uploadError = string.Empty;
+    private bool showDeleteConfirm = false;
+    private bool isDeletingAttachment = false;
+    private ProjectAttachmentDto? attachmentPendingDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
+
+        if (hasAccess == true)
+        {
+            buyerOptions = await BuyerApi.GetActiveAsync();
+            employeeOptions = await EmployeeApi.GetActiveAsync();
+            await LoadProject();
+            await LoadAttachments();
+        }
+    }
+
+    private async Task LoadProject()
+    {
+        isLoading = true;
+        project = await ProjectApi.GetByIdAsync(Id);
+        if (project is not null)
+        {
+            formModel = new ProjectFormModel
+            {
+                ProjectName = project.ProjectName,
+                CustomerId = project.CustomerId,
+                ProjectMd = project.ProjectMd ?? 0,
+                ProjectPic = project.ProjectPic ?? 0,
+                NoPo = project.NoPo,
+                OrderDate = project.OrderDate,
+                StartDate = project.StartDate,
+                Deadline = project.Deadline,
+                DeliveryDate = project.DeliveryDate
+            };
+        }
+        isLoading = false;
+    }
+
+    private async Task LoadAttachments()
+    {
+        isLoadingAttachments = true;
+        attachments = await AttachmentApi.GetByProjectAsync(Id);
+        isLoadingAttachments = false;
+    }
+
+    private void BackToList()
+    {
+        Nav.NavigateTo("/projects");
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var result = await ProjectApi.UpdateAsync(new ProjectUpdateRequest
+        {
+            Id = Id,
+            ProjectName = formModel.ProjectName,
+            CustomerId = formModel.CustomerId,
+            ProjectMd = formModel.ProjectMd > 0 ? formModel.ProjectMd : null,
+            ProjectPic = formModel.ProjectPic > 0 ? formModel.ProjectPic : null,
+            NoPo = string.IsNullOrWhiteSpace(formModel.NoPo) ? null : formModel.NoPo,
+            OrderDate = formModel.OrderDate,
+            StartDate = formModel.StartDate,
+            Deadline = formModel.Deadline,
+            DeliveryDate = formModel.DeliveryDate
+        });
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            successMessage = "Perubahan berhasil disimpan.";
+            await LoadProject();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        uploadError = string.Empty;
+    }
+
+    private async Task HandleUpload()
+    {
+        if (selectedFile is null) return;
+
+        isUploading = true;
+        uploadError = string.Empty;
+
+        var result = await AttachmentApi.UploadAsync(Id, selectedFile, uploadDescription);
+
+        isUploading = false;
+
+        if (result.Success)
+        {
+            selectedFile = null;
+            uploadDescription = null;
+            await LoadAttachments();
+        }
+        else
+        {
+            uploadError = result.Error;
+        }
+    }
+
+    private async Task HandleDownload(ProjectAttachmentDto attachment)
+    {
+        var result = await AttachmentApi.DownloadAsync(Id, attachment.Id);
+        if (result is null) return;
+
+        var base64 = Convert.ToBase64String(result.Value.Bytes);
+        await JS.InvokeVoidAsync("downloadFileFromBytes", result.Value.FileName, result.Value.ContentType, base64);
+    }
+
+    private void HandleDeleteAttachment(ProjectAttachmentDto attachment)
+    {
+        attachmentPendingDelete = attachment;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDeleteAttachment()
+    {
+        showDeleteConfirm = false;
+        attachmentPendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteAttachment()
+    {
+        if (attachmentPendingDelete is null) return;
+
+        isDeletingAttachment = true;
+        var success = await AttachmentApi.DeleteAsync(attachmentPendingDelete.Id);
+        isDeletingAttachment = false;
+
+        showDeleteConfirm = false;
+        attachmentPendingDelete = null;
+
+        if (success)
+            await LoadAttachments();
+    }
+
+    public class ProjectFormModel
+    {
+        [Required(ErrorMessage = "Nama project wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama project maksimal 150 karakter.")]
+        public string ProjectName { get; set; } = string.Empty;
+
+        [Range(1, int.MaxValue, ErrorMessage = "Buyer wajib dipilih.")]
+        public int CustomerId { get; set; }
+
+        public int ProjectMd { get; set; }
+
+        public int ProjectPic { get; set; }
+
+        [StringLength(50, ErrorMessage = "No PO maksimal 50 karakter.")]
+        public string? NoPo { get; set; }
+
+        public DateTime? OrderDate { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? Deadline { get; set; }
+        public DateTime? DeliveryDate { get; set; }
+    }
+}

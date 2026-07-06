@@ -1,0 +1,72 @@
+namespace TerakarsaApp.Shared.Projects;
+
+public class ProjectDto
+{
+    public int Id { get; set; }
+    public int CustomerId { get; set; }
+    public string BuyerName { get; set; } = string.Empty;
+    public int? ProjectMd { get; set; }
+    public string? ProjectMdName { get; set; }
+    public int? ProjectPic { get; set; }
+    public string? ProjectPicName { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? Deadline { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public int CreatedBy { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public int? UpdatedBy { get; set; }
+}
+
+public class ProjectCreateRequest
+{
+    public int CustomerId { get; set; }
+    public int? ProjectMd { get; set; }
+    public int? ProjectPic { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? Deadline { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+}
+
+public class ProjectUpdateRequest
+{
+    public int Id { get; set; }
+    public int CustomerId { get; set; }
+    public int? ProjectMd { get; set; }
+    public int? ProjectPic { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? Deadline { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+}
+
+public class ProjectCreateResult
+{
+    public int Id { get; set; }
+}
+
+public class ProjectPagedRequest
+{
+    public string? Search { get; set; }
+    public int PageNumber { get; set; } = 1;
+    public int PageSize { get; set; } = 10;
+    public string? SortColumn { get; set; }
+    public string SortDirection { get; set; } = "asc";
+}
+
+public class ProjectPagedResult
+{
+    public List<ProjectDto> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int PageNumber { get; set; }
+    public int PageSize { get; set; }
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+}

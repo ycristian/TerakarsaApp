@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="TerakarsaApp.API/TerakarsaApp.API.csproj" />
+  <Project Path="TerakarsaApp.Shared/TerakarsaApp.Shared.csproj" />
+  <Project Path="TerakarsaApp.Client/TerakarsaApp.Client.csproj" />
+</Solution>

@@ -1,0 +1,41 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@inject TerakarsaApp.Client.Auth.AuthApiService AuthApi
+
+@if (isInitialized)
+{
+    <CascadingAuthenticationState>
+        <Router AppAssembly="@typeof(App).Assembly">
+            <Found Context="routeData">
+                <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+                    <NotAuthorized>
+                        <RedirectToLogin />
+                    </NotAuthorized>
+                </AuthorizeRouteView>
+                <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+            </Found>
+            <NotFound>
+                <PageTitle>Not found</PageTitle>
+                <LayoutView Layout="@typeof(Layout.MainLayout)">
+                    <p role="alert">Halaman tidak ditemukan.</p>
+                </LayoutView>
+            </NotFound>
+        </Router>
+    </CascadingAuthenticationState>
+}
+else
+{
+    <div id="global-loader">
+        <img src="assets/images/loader.svg" class="loader-img" alt="Loader">
+    </div>
+    @* <p>Memuat aplikasi...</p> *@
+}
+
+@code {
+    private bool isInitialized = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthApi.InitializeAsync();
+        isInitialized = true;
+    }
+}

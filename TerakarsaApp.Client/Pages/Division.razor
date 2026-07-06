@@ -1,0 +1,314 @@
+@page "/divisions"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject DivisionApiService DivisionApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Divisi</PageTitle>
+
+<h3>Data Divisi</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Divisi
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama divisi..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data divisi.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Divisi</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Kode" Column="DivisionCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@d.DivisionCode</td>
+                                <td>@d.DivisionName</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(d)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(d)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Divisi" : "Tambah Divisi")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Divisi</label>
+                            <InputText class="form-control" @bind-Value="formModel.DivisionCode" />
+                            <ValidationMessage For="@(() => formModel.DivisionCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Divisi</label>
+                            <InputText class="form-control" @bind-Value="formModel.DivisionName" />
+                            <ValidationMessage For="@(() => formModel.DivisionName)" class="text-danger" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus divisi "@divisionPendingDelete?.DivisionName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private DivisionPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private DivisionFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private DivisionDto? divisionPendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_DIVISION");
+
+        if (hasAccess == true)
+            await LoadDivisions();
+    }
+
+    private async Task LoadDivisions()
+    {
+        isLoading = true;
+        pagedResult = await DivisionApi.GetPagedAsync(new DivisionPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadDivisions();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadDivisions();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadDivisions();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadDivisions();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new DivisionFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(DivisionDto division)
+    {
+        isEditMode = true;
+        formModel = new DivisionFormModel
+        {
+            Id = division.Id,
+            DivisionCode = division.DivisionCode,
+            DivisionName = division.DivisionName
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await DivisionApi.UpdateAsync(new DivisionUpdateRequest
+            {
+                Id = formModel.Id,
+                DivisionCode = formModel.DivisionCode,
+                DivisionName = formModel.DivisionName
+            });
+        }
+        else
+        {
+            result = await DivisionApi.CreateAsync(new DivisionCreateRequest
+            {
+                DivisionCode = formModel.DivisionCode,
+                DivisionName = formModel.DivisionName
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadDivisions();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(DivisionDto division)
+    {
+        divisionPendingDelete = division;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        divisionPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (divisionPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await DivisionApi.DeleteAsync(divisionPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        divisionPendingDelete = null;
+
+        if (success)
+            await LoadDivisions();
+    }
+
+    public class DivisionFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Kode divisi wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode divisi maksimal 30 karakter.")]
+        public string DivisionCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama divisi wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama divisi maksimal 150 karakter.")]
+        public string DivisionName { get; set; } = string.Empty;
+    }
+}

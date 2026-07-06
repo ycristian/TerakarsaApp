@@ -1,0 +1,60 @@
+@page "/login"
+@using TerakarsaApp.Client.Auth
+@inject AuthApiService AuthApi
+@inject NavigationManager Nav
+
+<PageTitle>Login</PageTitle>
+
+<div class="container mt-5" style="max-width: 400px;">
+    <h3 class="mb-4">Login</h3>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    <EditForm Model="loginModel" OnValidSubmit="HandleLogin">
+        <div class="mb-3">
+            <label class="form-label">Username</label>
+            <InputText class="form-control" @bind-Value="loginModel.Username" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Password</label>
+            <InputText type="password" class="form-control" @bind-Value="loginModel.Password" />
+        </div>
+        <button type="submit" class="btn btn-primary w-100" disabled="@isLoading">
+            @(isLoading ? "Memproses..." : "Login")
+        </button>
+    </EditForm>
+</div>
+
+@code {
+    private LoginFormModel loginModel = new();
+    private string? errorMessage;
+    private bool isLoading;
+
+    private async Task HandleLogin()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        var (success, error) = await AuthApi.LoginAsync(loginModel.Username, loginModel.Password);
+
+        isLoading = false;
+
+        if (success)
+        {
+            Nav.NavigateTo("/", forceLoad: false);
+        }
+        else
+        {
+            errorMessage = error;
+        }
+    }
+
+    public class LoginFormModel
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}

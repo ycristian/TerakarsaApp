@@ -1,0 +1,48 @@
+<div class="d-flex justify-content-between align-items-center">
+    <span>Showing @From to @To of @TotalCount entries</span>
+
+    <ul class="pagination pagination-sm mb-0">
+        <li class="page-item @(PageNumber <= 1 ? "disabled" : "")">
+            <button class="page-link" @onclick="() => Go(PageNumber - 1)">Previous</button>
+        </li>
+        @foreach (var p in PageWindow())
+        {
+            <li class="page-item @(p == PageNumber ? "active" : "")">
+                <button class="page-link" @onclick="() => Go(p)">@p</button>
+            </li>
+        }
+        <li class="page-item @(PageNumber >= TotalPages ? "disabled" : "")">
+            <button class="page-link" @onclick="() => Go(PageNumber + 1)">Next</button>
+        </li>
+    </ul>
+</div>
+
+@code {
+    [Parameter] public int PageNumber { get; set; }
+    [Parameter] public int PageSize { get; set; }
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public int TotalPages { get; set; }
+    [Parameter] public EventCallback<int> PageNumberChanged { get; set; }
+
+    private int From => TotalCount == 0 ? 0 : (PageNumber - 1) * PageSize + 1;
+    private int To => Math.Min(PageNumber * PageSize, TotalCount);
+
+    private async Task Go(int page)
+    {
+        var totalPages = Math.Max(TotalPages, 1);
+        if (page < 1 || page > totalPages || page == PageNumber) return;
+        await PageNumberChanged.InvokeAsync(page);
+    }
+
+    private List<int> PageWindow()
+    {
+        const int windowSize = 5;
+        var totalPages = Math.Max(TotalPages, 1);
+
+        var start = Math.Max(1, PageNumber - windowSize / 2);
+        var end = Math.Min(totalPages, start + windowSize - 1);
+        start = Math.Max(1, end - windowSize + 1);
+
+        return Enumerable.Range(start, end - start + 1).ToList();
+    }
+}

@@ -1,0 +1,300 @@
+@page "/positions"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Positions
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject PositionApiService PositionApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Jabatan</PageTitle>
+
+<h3>Data Jabatan</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Jabatan
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari nama jabatan..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data jabatan.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Jabatan</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Nama Jabatan" Column="PositionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@p.PositionName</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(p)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Jabatan" : "Tambah Jabatan")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Nama Jabatan</label>
+                            <InputText class="form-control" @bind-Value="formModel.PositionName" />
+                            <ValidationMessage For="@(() => formModel.PositionName)" class="text-danger" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus jabatan "@positionPendingDelete?.PositionName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private PositionPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private PositionFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private PositionDto? positionPendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_POSITION");
+
+        if (hasAccess == true)
+            await LoadPositions();
+    }
+
+    private async Task LoadPositions()
+    {
+        isLoading = true;
+        pagedResult = await PositionApi.GetPagedAsync(new PositionPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadPositions();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadPositions();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadPositions();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadPositions();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new PositionFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(PositionDto position)
+    {
+        isEditMode = true;
+        formModel = new PositionFormModel
+        {
+            Id = position.Id,
+            PositionName = position.PositionName
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await PositionApi.UpdateAsync(new PositionUpdateRequest
+            {
+                Id = formModel.Id,
+                PositionName = formModel.PositionName
+            });
+        }
+        else
+        {
+            result = await PositionApi.CreateAsync(new PositionCreateRequest
+            {
+                PositionName = formModel.PositionName
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadPositions();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(PositionDto position)
+    {
+        positionPendingDelete = position;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        positionPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (positionPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await PositionApi.DeleteAsync(positionPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        positionPendingDelete = null;
+
+        if (success)
+            await LoadPositions();
+    }
+
+    public class PositionFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Nama jabatan wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama jabatan maksimal 150 karakter.")]
+        public string PositionName { get; set; } = string.Empty;
+    }
+}

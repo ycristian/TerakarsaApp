@@ -1,0 +1,36 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "API: .NET Launch",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build-api",
+            "program": "${workspaceFolder}/TerakarsaApp.API/bin/Debug/net10.0/TerakarsaApp.API.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/TerakarsaApp.API",
+            "stopAtEntry": false,
+            "console": "internalConsole",
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            }
+        },
+        {
+            "name": "Client: Blazor WASM Launch",
+            "type": "blazorwasm",
+            "request": "launch",
+            "preLaunchTask": "build-client",
+            "cwd": "${workspaceFolder}/TerakarsaApp.Client",
+            "url": "http://localhost:5244"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "API + Client",
+            "configurations": [
+                "API: .NET Launch",
+                "Client: Blazor WASM Launch"
+            ]
+        }
+    ]
+}

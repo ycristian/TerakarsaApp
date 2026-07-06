@@ -1,0 +1,375 @@
+@page "/projects"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Projects
+@using TerakarsaApp.Shared.Buyers
+@using TerakarsaApp.Shared.Employees
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ProjectApiService ProjectApi
+@inject BuyerApiService BuyerApi
+@inject EmployeeApiService EmployeeApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<PageTitle>Data Project</PageTitle>
+
+<h3>Data Project</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Project
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari nama project / no PO / buyer..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data project.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Project</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Nama Project" Column="ProjectName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="No PO" Column="NoPo" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Tgl Order" Column="OrderDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Deadline" Column="Deadline" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>MD</th>
+                            <th>PIC</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@p.ProjectName</td>
+                                <td>@p.BuyerName</td>
+                                <td>@(p.NoPo ?? "-")</td>
+                                <td>@(p.OrderDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td>@(p.Deadline?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td>@(p.ProjectMdName ?? "-")</td>
+                                <td>@(p.ProjectPicName ?? "-")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => GoToEdit(p.Id)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tambah Project</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Nama Project</label>
+                            <InputText class="form-control" @bind-Value="formModel.ProjectName" />
+                            <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Buyer</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.CustomerId">
+                                <option value="0">-- Pilih Buyer --</option>
+                                @foreach (var b in buyerOptions)
+                                {
+                                    <option value="@b.Id">@b.BuyerName</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">MD</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.ProjectMd">
+                                <option value="0">- Tidak ada -</option>
+                                @foreach (var e in employeeOptions)
+                                {
+                                    <option value="@e.Id">@e.EmployeeName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">PIC</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.ProjectPic">
+                                <option value="0">- Tidak ada -</option>
+                                @foreach (var e in employeeOptions)
+                                {
+                                    <option value="@e.Id">@e.EmployeeName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">No PO</label>
+                            <InputText class="form-control" @bind-Value="formModel.NoPo" />
+                            <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Order</label>
+                            <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Mulai</label>
+                            <InputDate class="form-control" @bind-Value="formModel.StartDate" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Deadline</label>
+                            <InputDate class="form-control" @bind-Value="formModel.Deadline" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Kirim</label>
+                            <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus project "@projectPendingDelete?.ProjectName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private ProjectPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private ProjectFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private ProjectDto? projectPendingDelete;
+    private List<BuyerDto> buyerOptions = new();
+    private List<EmployeeDto> employeeOptions = new();
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
+
+        if (hasAccess == true)
+        {
+            buyerOptions = await BuyerApi.GetActiveAsync();
+            employeeOptions = await EmployeeApi.GetActiveAsync();
+            await LoadProjects();
+        }
+    }
+
+    private async Task LoadProjects()
+    {
+        isLoading = true;
+        pagedResult = await ProjectApi.GetPagedAsync(new ProjectPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadProjects();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadProjects();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadProjects();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadProjects();
+    }
+
+    private void OpenCreateForm()
+    {
+        formModel = new ProjectFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void GoToEdit(int id)
+    {
+        Nav.NavigateTo($"/projects/edit/{id}");
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var result = await ProjectApi.CreateAsync(new ProjectCreateRequest
+        {
+            ProjectName = formModel.ProjectName,
+            CustomerId = formModel.CustomerId,
+            ProjectMd = formModel.ProjectMd > 0 ? formModel.ProjectMd : null,
+            ProjectPic = formModel.ProjectPic > 0 ? formModel.ProjectPic : null,
+            NoPo = string.IsNullOrWhiteSpace(formModel.NoPo) ? null : formModel.NoPo,
+            OrderDate = formModel.OrderDate,
+            StartDate = formModel.StartDate,
+            Deadline = formModel.Deadline,
+            DeliveryDate = formModel.DeliveryDate
+        });
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            Nav.NavigateTo($"/projects/edit/{result.Id}");
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(ProjectDto project)
+    {
+        projectPendingDelete = project;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        projectPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (projectPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await ProjectApi.DeleteAsync(projectPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        projectPendingDelete = null;
+
+        if (success)
+            await LoadProjects();
+    }
+
+    public class ProjectFormModel
+    {
+        [Required(ErrorMessage = "Nama project wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama project maksimal 150 karakter.")]
+        public string ProjectName { get; set; } = string.Empty;
+
+        [Range(1, int.MaxValue, ErrorMessage = "Buyer wajib dipilih.")]
+        public int CustomerId { get; set; }
+
+        public int ProjectMd { get; set; }
+
+        public int ProjectPic { get; set; }
+
+        [StringLength(50, ErrorMessage = "No PO maksimal 50 karakter.")]
+        public string? NoPo { get; set; }
+
+        public DateTime? OrderDate { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? Deadline { get; set; }
+        public DateTime? DeliveryDate { get; set; }
+    }
+}

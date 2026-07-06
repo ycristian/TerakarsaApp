@@ -1,0 +1,35 @@
+@if (Show)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="HandleBackdropClick">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@IsBusy"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    @Message
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" @onclick="Cancel" disabled="@IsBusy">Tidak</button>
+                    <button type="button" class="btn btn-danger" @onclick="Confirm" disabled="@IsBusy">
+                        @(IsBusy ? "Menghapus..." : "Ya, Hapus")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public string Title { get; set; } = "Konfirmasi Hapus";
+    [Parameter] public RenderFragment? Message { get; set; }
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Task Confirm() => OnConfirm.InvokeAsync();
+    private Task Cancel() => OnCancel.InvokeAsync();
+    private Task HandleBackdropClick() => IsBusy ? Task.CompletedTask : Cancel();
+}

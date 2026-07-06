@@ -1,0 +1,340 @@
+@page "/buyers"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Buyers
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject BuyerApiService BuyerApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Buyer</PageTitle>
+
+<h3>Data Buyer</h3>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Buyer
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama buyer..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data buyer.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Buyer</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Kode" Column="BuyerCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Alamat</th>
+                            <th>Telepon</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var b in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@b.BuyerCode</td>
+                                <td>@b.BuyerName</td>
+                                <td>@b.Address</td>
+                                <td>@b.Phone</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(b)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(b)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Buyer" : "Tambah Buyer")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Buyer</label>
+                            <InputText class="form-control" @bind-Value="formModel.BuyerCode" />
+                            <ValidationMessage For="@(() => formModel.BuyerCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Buyer</label>
+                            <InputText class="form-control" @bind-Value="formModel.BuyerName" />
+                            <ValidationMessage For="@(() => formModel.BuyerName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Alamat</label>
+                            <InputTextArea class="form-control" rows="3" @bind-Value="formModel.Address" />
+                            <ValidationMessage For="@(() => formModel.Address)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Telepon</label>
+                            <InputText class="form-control" @bind-Value="formModel.Phone" />
+                            <ValidationMessage For="@(() => formModel.Phone)" class="text-danger" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus buyer "@buyerPendingDelete?.BuyerName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private BuyerPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private BuyerFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private BuyerDto? buyerPendingDelete;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_BUYER");
+
+        if (hasAccess == true)
+            await LoadBuyers();
+    }
+
+    private async Task LoadBuyers()
+    {
+        isLoading = true;
+        pagedResult = await BuyerApi.GetPagedAsync(new BuyerPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadBuyers();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadBuyers();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadBuyers();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadBuyers();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new BuyerFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(BuyerDto buyer)
+    {
+        isEditMode = true;
+        formModel = new BuyerFormModel
+        {
+            Id = buyer.Id,
+            BuyerCode = buyer.BuyerCode,
+            BuyerName = buyer.BuyerName,
+            Address = buyer.Address,
+            Phone = buyer.Phone
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await BuyerApi.UpdateAsync(new BuyerUpdateRequest
+            {
+                Id = formModel.Id,
+                BuyerCode = formModel.BuyerCode,
+                BuyerName = formModel.BuyerName,
+                Address = formModel.Address,
+                Phone = formModel.Phone
+            });
+        }
+        else
+        {
+            result = await BuyerApi.CreateAsync(new BuyerCreateRequest
+            {
+                BuyerCode = formModel.BuyerCode,
+                BuyerName = formModel.BuyerName,
+                Address = formModel.Address,
+                Phone = formModel.Phone
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadBuyers();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void HandleDelete(BuyerDto buyer)
+    {
+        buyerPendingDelete = buyer;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        buyerPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (buyerPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await BuyerApi.DeleteAsync(buyerPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        buyerPendingDelete = null;
+
+        if (success)
+            await LoadBuyers();
+    }
+
+    public class BuyerFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Kode buyer wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode buyer maksimal 30 karakter.")]
+        public string BuyerCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama buyer wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama buyer maksimal 150 karakter.")]
+        public string BuyerName { get; set; } = string.Empty;
+
+        [StringLength(255, ErrorMessage = "Alamat maksimal 255 karakter.")]
+        public string? Address { get; set; }
+
+        [StringLength(30, ErrorMessage = "Telepon maksimal 30 karakter.")]
+        public string? Phone { get; set; }
+    }
+}
