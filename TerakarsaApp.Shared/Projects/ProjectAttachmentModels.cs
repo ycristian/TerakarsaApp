@@ -11,3 +11,10 @@ public class ProjectAttachmentDto
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
 }
+
+public class ProjectAttachmentUploadResultDto
+{
+    public string FileName { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public string? Error { get; set; }
+}

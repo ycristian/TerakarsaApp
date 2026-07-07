@@ -29,11 +29,23 @@ public class ProjectAttachmentController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Upload([FromForm] int projectId, IFormFile file, [FromForm] string? description)
+    public async Task<IActionResult> Upload([FromForm] int projectId, [FromForm] List<IFormFile> files, [FromForm] string? description)
     {
-        var (success, error) = await _attachmentService.UploadAsync(projectId, file, description, CurrentUserId);
-        if (!success) return BadRequest(error);
-        return Ok();
+        if (files is null || files.Count == 0)
+            return BadRequest("File wajib diunggah.");
+
+        var results = await _attachmentService.UploadManyAsync(projectId, files, description, CurrentUserId);
+        return Ok(results);
+    }
+
+    [HttpGet("{projectId}/first-photo")]
+    public async Task<IActionResult> GetFirstPhoto(int projectId)
+    {
+        var result = await _attachmentService.GetFirstPhotoForDownloadAsync(projectId);
+        if (result is null) return NotFound();
+
+        var (stream, contentType, fileName) = result.Value;
+        return File(stream, contentType, fileName);
     }
 
     [HttpGet("{projectId}/{attachmentId}/download")]

@@ -10,22 +10,22 @@ public class LocalFileStorageService : IFileStorageService
             ?? throw new InvalidOperationException("FileStorage:BasePath belum dikonfigurasi.");
     }
 
-    public async Task<(string RelativePath, long SizeKb)> SaveAsync(IFormFile file, string subfolder)
+    public async Task<string> SaveAsync(Stream content, string fileNameWithExtension, string subfolder)
     {
         var folder = Path.Combine(_basePath, subfolder);
         Directory.CreateDirectory(folder);
 
-        var diskFileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+        var extension = Path.GetExtension(fileNameWithExtension);
+        var diskFileName = $"{Guid.NewGuid()}{extension}";
         var fullPath = Path.Combine(folder, diskFileName);
 
+        content.Position = 0;
         using (var stream = new FileStream(fullPath, FileMode.Create))
         {
-            await file.CopyToAsync(stream);
+            await content.CopyToAsync(stream);
         }
 
-        var relativePath = Path.Combine(subfolder, diskFileName).Replace('\\', '/');
-        var sizeKb = (long)Math.Ceiling(file.Length / 1024.0);
-        return (relativePath, sizeKb);
+        return Path.Combine(subfolder, diskFileName).Replace('\\', '/');
     }
 
     public Stream OpenRead(string relativePath)

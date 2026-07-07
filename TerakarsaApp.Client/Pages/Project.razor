@@ -9,6 +9,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
 @inject ProjectApiService ProjectApi
+@inject ProjectAttachmentApiService AttachmentApi
 @inject BuyerApiService BuyerApi
 @inject EmployeeApiService EmployeeApi
 @inject AuthenticationStateProvider AuthStateProvider
@@ -61,6 +62,7 @@ else
                 <table class="table table-bordered border text-nowrap mb-0">
                     <thead>
                         <tr>
+                            <th>Foto</th>
                             <SortableHeader Label="Nama Project" Column="ProjectName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="No PO" Column="NoPo" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
@@ -75,6 +77,16 @@ else
                         @foreach (var p in pagedResult.Items)
                         {
                             <tr>
+                                <td>
+                                    @if (thumbnails.TryGetValue(p.Id, out var thumbUrl))
+                                    {
+                                        <img src="@thumbUrl" alt="Foto" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px;" />
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
                                 <td>@p.ProjectName</td>
                                 <td>@p.BuyerName</td>
                                 <td>@(p.NoPo ?? "-")</td>
@@ -118,34 +130,22 @@ else
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Buyer</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.CustomerId">
-                                <option value="0">-- Pilih Buyer --</option>
-                                @foreach (var b in buyerOptions)
-                                {
-                                    <option value="@b.Id">@b.BuyerName</option>
-                                }
-                            </InputSelect>
+                            <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
+                                              IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
+                                              Placeholder="Cari buyer..." />
                             <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">MD</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.ProjectMd">
-                                <option value="0">- Tidak ada -</option>
-                                @foreach (var e in employeeOptions)
-                                {
-                                    <option value="@e.Id">@e.EmployeeName</option>
-                                }
-                            </InputSelect>
+                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">PIC</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.ProjectPic">
-                                <option value="0">- Tidak ada -</option>
-                                @foreach (var e in employeeOptions)
-                                {
-                                    <option value="@e.Id">@e.EmployeeName</option>
-                                }
-                            </InputSelect>
+                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">No PO</label>
@@ -200,6 +200,7 @@ else
     private ProjectDto? projectPendingDelete;
     private List<BuyerDto> buyerOptions = new();
     private List<EmployeeDto> employeeOptions = new();
+    private Dictionary<int, string> thumbnails = new();
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -233,6 +234,22 @@ else
             SortDirection = sortDirection
         });
         isLoading = false;
+        await LoadThumbnails();
+    }
+
+    private async Task LoadThumbnails()
+    {
+        var tasks = pagedResult.Items.Select(async p =>
+        {
+            var result = await AttachmentApi.GetFirstPhotoAsync(p.Id);
+            if (result is null) return (p.Id, Url: (string?)null);
+
+            var base64 = Convert.ToBase64String(result.Value.Bytes);
+            return (p.Id, Url: (string?)$"data:{result.Value.ContentType};base64,{base64}");
+        });
+
+        var results = await Task.WhenAll(tasks);
+        thumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
     }
 
     private async Task HandlePageSizeChange(int newSize)

@@ -44,6 +44,8 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ProjectAttachmentService>();
 builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
+builder.Services.AddScoped<ImageCompressionService>();
+builder.Services.Configure<ImageCompressionOptions>(builder.Configuration.GetSection("ImageCompression"));
 
 builder.Services.AddCors(options =>
 {

@@ -23,22 +23,53 @@ public class ProjectAttachmentApiService
         return await response.Content.ReadFromJsonAsync<List<ProjectAttachmentDto>>() ?? new();
     }
 
-    public async Task<(bool Success, string Error)> UploadAsync(int projectId, IBrowserFile file, string? description)
+    public async Task<(bool Success, string Error, List<ProjectAttachmentUploadResultDto> Results)> UploadManyAsync(
+        int projectId, IReadOnlyList<IBrowserFile> files, string? description)
     {
         using var content = new MultipartFormDataContent();
         content.Add(new StringContent(projectId.ToString()), "projectId");
         if (!string.IsNullOrWhiteSpace(description))
             content.Add(new StringContent(description), "description");
 
-        using var fileContent = new StreamContent(file.OpenReadStream(MaxFileSizeBytes));
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue(
-            string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType);
-        content.Add(fileContent, "file", file.Name);
+        var streams = new List<Stream>();
+        try
+        {
+            foreach (var file in files)
+            {
+                var stream = file.OpenReadStream(MaxFileSizeBytes);
+                streams.Add(stream);
 
-        var response = await _http.PostAsync("api/project-attachments", content);
-        if (response.IsSuccessStatusCode) return (true, string.Empty);
-        var error = await response.Content.ReadAsStringAsync();
-        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengunggah lampiran." : error.Trim('"'));
+                var fileContent = new StreamContent(stream);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue(
+                    string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType);
+                content.Add(fileContent, "files", file.Name);
+            }
+
+            var response = await _http.PostAsync("api/project-attachments", content);
+            if (response.IsSuccessStatusCode)
+            {
+                var results = await response.Content.ReadFromJsonAsync<List<ProjectAttachmentUploadResultDto>>() ?? new();
+                return (true, string.Empty, results);
+            }
+
+            var error = await response.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengunggah lampiran." : error.Trim('"'), new());
+        }
+        finally
+        {
+            foreach (var stream in streams)
+                stream.Dispose();
+        }
+    }
+
+    public async Task<(byte[] Bytes, string ContentType)?> GetFirstPhotoAsync(int projectId)
+    {
+        var response = await _http.GetAsync($"api/project-attachments/{projectId}/first-photo");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        return (bytes, contentType);
     }
 
     public async Task<(byte[] Bytes, string ContentType, string FileName)?> DownloadAsync(int projectId, int attachmentId)

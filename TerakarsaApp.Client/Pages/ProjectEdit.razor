@@ -41,153 +41,216 @@ else
         <button class="btn btn-light" @onclick="BackToList"><i class="fe fe-arrow-left"></i> Kembali ke Daftar</button>
     </div>
 
-    <div class="card mb-4">
-        <div class="card-header">
-            <h3 class="card-title">Detail Project</h3>
-        </div>
-        <div class="card-body">
-            <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
-                <DataAnnotationsValidator />
-                <ValidationSummary class="text-danger mb-3" />
+    <div class="row mb-4">
+        <div class="col-lg-7 mb-4 mb-lg-0">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h3 class="card-title">Detail Project</h3>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
 
-                <div class="mb-3">
-                    <label class="form-label">Nama Project</label>
-                    <InputText class="form-control" @bind-Value="formModel.ProjectName" />
-                    <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Buyer</label>
-                    <InputSelect class="form-select" @bind-Value="formModel.CustomerId">
-                        <option value="0">-- Pilih Buyer --</option>
-                        @foreach (var b in buyerOptions)
-                        {
-                            <option value="@b.Id">@b.BuyerName</option>
-                        }
-                    </InputSelect>
-                    <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">MD</label>
-                    <InputSelect class="form-select" @bind-Value="formModel.ProjectMd">
-                        <option value="0">- Tidak ada -</option>
-                        @foreach (var e in employeeOptions)
-                        {
-                            <option value="@e.Id">@e.EmployeeName</option>
-                        }
-                    </InputSelect>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">PIC</label>
-                    <InputSelect class="form-select" @bind-Value="formModel.ProjectPic">
-                        <option value="0">- Tidak ada -</option>
-                        @foreach (var e in employeeOptions)
-                        {
-                            <option value="@e.Id">@e.EmployeeName</option>
-                        }
-                    </InputSelect>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">No PO</label>
-                    <InputText class="form-control" @bind-Value="formModel.NoPo" />
-                    <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Tanggal Order</label>
-                    <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Tanggal Mulai</label>
-                    <InputDate class="form-control" @bind-Value="formModel.StartDate" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Deadline</label>
-                    <InputDate class="form-control" @bind-Value="formModel.Deadline" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Tanggal Kirim</label>
-                    <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
-                </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Project</label>
+                            <InputText class="form-control" @bind-Value="formModel.ProjectName" />
+                            <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Buyer</label>
+                            <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
+                                              IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
+                                              Placeholder="Cari buyer..." />
+                            <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">MD</label>
+                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">PIC</label>
+                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">No PO</label>
+                            <InputText class="form-control" @bind-Value="formModel.NoPo" />
+                            <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Order</label>
+                            <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Mulai</label>
+                            <InputDate class="form-control" @bind-Value="formModel.StartDate" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Deadline</label>
+                            <InputDate class="form-control" @bind-Value="formModel.Deadline" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tanggal Kirim</label>
+                            <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                        </div>
 
-                @if (!string.IsNullOrEmpty(errorMessage))
-                {
-                    <div class="alert alert-danger">@errorMessage</div>
-                }
-                @if (!string.IsNullOrEmpty(successMessage))
-                {
-                    <div class="alert alert-success">@successMessage</div>
-                }
-                <button type="submit" class="btn btn-primary" disabled="@isSaving">
-                    @(isSaving ? "Menyimpan..." : "Simpan")
-                </button>
-            </EditForm>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        @if (!string.IsNullOrEmpty(successMessage))
+                        {
+                            <div class="alert alert-success">@successMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Lampiran</h3>
-        </div>
-        <div class="card-body">
-            <div class="row g-2 align-items-end mb-3">
-                <div class="col-md-5">
-                    <label class="form-label">File (jpg, png, pdf, xlsx - maks. 10 MB)</label>
-                    <InputFile class="form-control" OnChange="HandleFileSelected" />
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Galeri Foto</h3>
                 </div>
-                <div class="col-md-5">
-                    <label class="form-label">Deskripsi (opsional)</label>
-                    <input class="form-control" maxlength="255" @bind="uploadDescription" />
-                </div>
-                <div class="col-md-2">
-                    <button class="btn btn-primary w-100" disabled="@(selectedFile is null || isUploading)" @onclick="HandleUpload">
-                        @(isUploading ? "Mengunggah..." : "Unggah")
-                    </button>
+                <div class="card-body">
+                    @if (isLoadingAttachments)
+                    {
+                        <p>Memuat foto...</p>
+                    }
+                    else if (PhotoAttachments.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Belum ada foto (jpg/png) yang diunggah. Dokumen (pdf/xlsx) tidak ditampilkan di sini.</p>
+                    }
+                    else
+                    {
+                        <div class="product-carousel">
+                            <div id="projectPhotoSlider" class="carousel slide border" data-bs-ride="false">
+                                <div class="carousel-inner">
+                                    @for (var i = 0; i < PhotoAttachments.Count; i++)
+                                    {
+                                        var photo = PhotoAttachments[i];
+                                        <div class="carousel-item @(i == 0 ? "active" : "")">
+                                            @if (photoPreviews.TryGetValue(photo.Id, out var mainSrc))
+                                            {
+                                                <img src="@mainSrc" alt="@photo.FileName" class="img-fluid mx-auto d-block" style="max-height: 320px; object-fit: contain;" />
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                @if (PhotoAttachments.Count > 1)
+                                {
+                                    <a class="carousel-control-prev" href="#projectPhotoSlider" data-bs-slide="prev">
+                                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                                    </a>
+                                    <a class="carousel-control-next" href="#projectPhotoSlider" data-bs-slide="next">
+                                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                                    </a>
+                                }
+                            </div>
+                        </div>
+                        @if (PhotoAttachments.Count > 1)
+                        {
+                            <div class="clearfix carousel-slider">
+                                <div id="projectPhotoThumbs" class="carousel slide">
+                                    <div class="carousel-inner">
+                                        <ul class="carousel-item active ps-0 mb-0 d-flex flex-wrap">
+                                            @for (var i = 0; i < PhotoAttachments.Count; i++)
+                                            {
+                                                var photo = PhotoAttachments[i];
+                                                <li data-bs-target="#projectPhotoSlider" data-bs-slide-to="@i" class="thumb @(i == 0 ? "active" : "") m-2" style="cursor: pointer;">
+                                                    @if (photoPreviews.TryGetValue(photo.Id, out var thumbSrc))
+                                                    {
+                                                        <img src="@thumbSrc" alt="@photo.FileName" style="width: 70px; height: 70px; object-fit: cover;" />
+                                                    }
+                                                </li>
+                                            }
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
                 </div>
             </div>
 
-            @if (!string.IsNullOrEmpty(uploadError))
-            {
-                <div class="alert alert-danger">@uploadError</div>
-            }
-
-            @if (isLoadingAttachments)
-            {
-                <p>Memuat lampiran...</p>
-            }
-            else if (attachments.Count == 0)
-            {
-                <p>Belum ada lampiran.</p>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-bordered border text-nowrap mb-0">
-                        <thead>
-                            <tr>
-                                <th>Nama File</th>
-                                <th>Tipe</th>
-                                <th>Ukuran (KB)</th>
-                                <th>Deskripsi</th>
-                                <th>Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var a in attachments)
-                            {
-                                <tr>
-                                    <td>@a.FileName</td>
-                                    <td>@a.FileType</td>
-                                    <td>@a.FileSizeKb</td>
-                                    <td>@(a.Description ?? "-")</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-secondary me-1" title="Download" @onclick="() => HandleDownload(a)"><i class="fe fe-download"></i></button>
-                                        <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteAttachment(a)"><i class="fe fe-trash-2"></i></button>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
+            <div class="card mt-4 mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Lampiran</h3>
                 </div>
-            }
+                <div class="card-body">
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-12">
+                            <label class="form-label">File (jpg, png, pdf, xlsx - maks. 10 MB, bisa pilih beberapa sekaligus)</label>
+                            <InputFile class="form-control" multiple OnChange="HandleFilesSelected" />
+                            @if (selectedFiles.Count > 0)
+                            {
+                                <div class="form-text">@selectedFiles.Count file dipilih: @string.Join(", ", selectedFiles.Select(f => f.Name))</div>
+                            }
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Deskripsi (opsional)</label>
+                            <input class="form-control" maxlength="255" @bind="uploadDescription" />
+                        </div>
+                        <div class="col-12">
+                            <button class="btn btn-primary w-100" disabled="@(selectedFiles.Count == 0 || isUploading)" @onclick="HandleUpload">
+                                @(isUploading ? "Mengunggah..." : "Unggah")
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(uploadError))
+                    {
+                        <div class="alert alert-danger">@uploadError</div>
+                    }
+
+                    @if (isLoadingAttachments)
+                    {
+                        <p>Memuat lampiran...</p>
+                    }
+                    else if (attachments.Count == 0)
+                    {
+                        <p>Belum ada lampiran.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border text-nowrap mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Nama File</th>
+                                        <th>Tipe</th>
+                                        <th>Ukuran (KB)</th>
+                                        <th>Deskripsi</th>
+                                        <th>Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var a in attachments)
+                                    {
+                                        <tr>
+                                            <td>@a.FileName</td>
+                                            <td>@a.FileType</td>
+                                            <td>@a.FileSizeKb</td>
+                                            <td>@(a.Description ?? "-")</td>
+                                            <td>
+                                                <button class="btn btn-sm btn-secondary me-1" title="Download" @onclick="() => HandleDownload(a)"><i class="fe fe-download"></i></button>
+                                                <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteAttachment(a)"><i class="fe fe-trash-2"></i></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
         </div>
     </div>
 
@@ -211,13 +274,16 @@ else
 
     private List<ProjectAttachmentDto> attachments = new();
     private bool isLoadingAttachments = true;
-    private IBrowserFile? selectedFile;
+    private List<IBrowserFile> selectedFiles = new();
     private string? uploadDescription;
     private bool isUploading = false;
     private string uploadError = string.Empty;
     private bool showDeleteConfirm = false;
     private bool isDeletingAttachment = false;
     private ProjectAttachmentDto? attachmentPendingDelete;
+
+    private Dictionary<int, string> photoPreviews = new();
+    private List<ProjectAttachmentDto> PhotoAttachments => attachments.Where(a => a.FileType is "jpg" or "png").ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -260,6 +326,26 @@ else
         isLoadingAttachments = true;
         attachments = await AttachmentApi.GetByProjectAsync(Id);
         isLoadingAttachments = false;
+        await LoadPhotoPreviews();
+    }
+
+    private async Task LoadPhotoPreviews()
+    {
+        var photos = PhotoAttachments;
+
+        foreach (var staleId in photoPreviews.Keys.Where(id => photos.All(p => p.Id != id)).ToList())
+            photoPreviews.Remove(staleId);
+
+        foreach (var photo in photos)
+        {
+            if (photoPreviews.ContainsKey(photo.Id)) continue;
+
+            var result = await AttachmentApi.DownloadAsync(Id, photo.Id);
+            if (result is null) continue;
+
+            var base64 = Convert.ToBase64String(result.Value.Bytes);
+            photoPreviews[photo.Id] = $"data:{result.Value.ContentType};base64,{base64}";
+        }
     }
 
     private void BackToList()
@@ -300,33 +386,37 @@ else
         }
     }
 
-    private void HandleFileSelected(InputFileChangeEventArgs e)
+    private void HandleFilesSelected(InputFileChangeEventArgs e)
     {
-        selectedFile = e.File;
+        selectedFiles = e.GetMultipleFiles(20).ToList();
         uploadError = string.Empty;
     }
 
     private async Task HandleUpload()
     {
-        if (selectedFile is null) return;
+        if (selectedFiles.Count == 0) return;
 
         isUploading = true;
         uploadError = string.Empty;
 
-        var result = await AttachmentApi.UploadAsync(Id, selectedFile, uploadDescription);
+        var (success, error, results) = await AttachmentApi.UploadManyAsync(Id, selectedFiles, uploadDescription);
 
         isUploading = false;
 
-        if (result.Success)
+        if (!success)
         {
-            selectedFile = null;
-            uploadDescription = null;
-            await LoadAttachments();
+            uploadError = error;
+            return;
         }
-        else
-        {
-            uploadError = result.Error;
-        }
+
+        var failures = results.Where(r => !r.Success).ToList();
+        uploadError = failures.Count > 0
+            ? string.Join(" | ", failures.Select(f => $"{f.FileName}: {f.Error}"))
+            : string.Empty;
+
+        selectedFiles = new();
+        uploadDescription = null;
+        await LoadAttachments();
     }
 
     private async Task HandleDownload(ProjectAttachmentDto attachment)

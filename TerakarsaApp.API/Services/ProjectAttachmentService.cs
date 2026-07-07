@@ -22,16 +22,19 @@ public class ProjectAttachmentRow
 public class ProjectAttachmentService
 {
     private static readonly string[] AllowedExtensions = { "jpg", "jpeg", "png", "pdf", "xlsx" };
+    private static readonly string[] PhotoExtensions = { "jpg", "jpeg", "png" };
     private const long MaxFileSizeBytes = 10 * 1024 * 1024;
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
 
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
+    private readonly ImageCompressionService _imageCompression;
 
-    public ProjectAttachmentService(AppDbContext db, IFileStorageService fileStorage)
+    public ProjectAttachmentService(AppDbContext db, IFileStorageService fileStorage, ImageCompressionService imageCompression)
     {
         _db = db;
         _fileStorage = fileStorage;
+        _imageCompression = imageCompression;
     }
 
     public async Task<List<ProjectAttachmentDto>> GetByProjectAsync(int projectId)
@@ -50,41 +53,95 @@ public class ProjectAttachmentService
         }).ToList();
     }
 
-    public async Task<(bool Success, string Error)> UploadAsync(int projectId, IFormFile? file, string? description, int userId)
+    public async Task<List<ProjectAttachmentUploadResultDto>> UploadManyAsync(int projectId, IReadOnlyList<IFormFile> files, string? description, int userId)
     {
-        if (file is null || file.Length == 0)
-            return (false, "File wajib diunggah.");
+        var results = new List<ProjectAttachmentUploadResultDto>();
+        foreach (var file in files)
+        {
+            results.Add(await UploadOneAsync(projectId, file, description, userId));
+        }
+        return results;
+    }
+
+    private async Task<ProjectAttachmentUploadResultDto> UploadOneAsync(int projectId, IFormFile file, string? description, int userId)
+    {
+        var result = new ProjectAttachmentUploadResultDto { FileName = file.FileName };
+
+        if (file.Length == 0)
+        {
+            result.Error = "File kosong.";
+            return result;
+        }
 
         if (file.Length > MaxFileSizeBytes)
-            return (false, "Ukuran file maksimal 10 MB.");
+        {
+            result.Error = "Ukuran file maksimal 10 MB.";
+            return result;
+        }
 
         var extension = Path.GetExtension(file.FileName).TrimStart('.').ToLowerInvariant();
         if (!AllowedExtensions.Contains(extension))
-            return (false, "Tipe file hanya boleh jpg, png, pdf, atau xlsx.");
+        {
+            result.Error = "Tipe file hanya boleh jpg, png, pdf, atau xlsx.";
+            return result;
+        }
 
-        var fileType = extension == "jpeg" ? "jpg" : extension;
-        var (relativePath, sizeKb) = await _fileStorage.SaveAsync(file, $"projects/{projectId}");
-
-        var actionParam = new SqlParameter("@Action", "CREATE");
-        var projectIdParam = new SqlParameter("@ProjectId", projectId);
-        var fileNameParam = new SqlParameter("@FileName", file.FileName);
-        var filePathParam = new SqlParameter("@FilePath", relativePath);
-        var fileSizeKbParam = new SqlParameter("@FileSizeKb", sizeKb);
-        var fileTypeParam = new SqlParameter("@FileType", fileType);
-        var descriptionParam = new SqlParameter("@Description", (object?)description ?? DBNull.Value);
-        var userIdParam = new SqlParameter("@UserId", userId);
-
+        CompressResult compressed;
         try
         {
-            await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_ProjectAttachment_Manage @Action = @Action, @ProjectId = @ProjectId, @FileName = @FileName, @FilePath = @FilePath, @FileSizeKb = @FileSizeKb, @FileType = @FileType, @Description = @Description, @UserId = @UserId",
-                actionParam, projectIdParam, fileNameParam, filePathParam, fileSizeKbParam, fileTypeParam, descriptionParam, userIdParam);
-            return (true, string.Empty);
+            using var inputStream = file.OpenReadStream();
+            compressed = await _imageCompression.CompressAsync(inputStream, extension);
         }
-        catch (SqlException ex)
+        catch (InvalidOperationException ex)
         {
-            return (false, ex.Message);
+            result.Error = ex.Message;
+            return result;
         }
+
+        using (compressed.Stream)
+        {
+            var fileType = compressed.FileExtension;
+            var baseName = Path.GetFileNameWithoutExtension(file.FileName);
+            var finalFileName = $"{baseName}.{fileType}";
+
+            var relativePath = await _fileStorage.SaveAsync(compressed.Stream, finalFileName, $"projects/{projectId}");
+
+            var actionParam = new SqlParameter("@Action", "CREATE");
+            var projectIdParam = new SqlParameter("@ProjectId", projectId);
+            var fileNameParam = new SqlParameter("@FileName", finalFileName);
+            var filePathParam = new SqlParameter("@FilePath", relativePath);
+            var fileSizeKbParam = new SqlParameter("@FileSizeKb", compressed.SizeKb);
+            var fileTypeParam = new SqlParameter("@FileType", fileType);
+            var descriptionParam = new SqlParameter("@Description", (object?)description ?? DBNull.Value);
+            var userIdParam = new SqlParameter("@UserId", userId);
+
+            try
+            {
+                await _db.Database.ExecuteSqlRawAsync(
+                    "EXEC SIS_ProjectAttachment_Manage @Action = @Action, @ProjectId = @ProjectId, @FileName = @FileName, @FilePath = @FilePath, @FileSizeKb = @FileSizeKb, @FileType = @FileType, @Description = @Description, @UserId = @UserId",
+                    actionParam, projectIdParam, fileNameParam, filePathParam, fileSizeKbParam, fileTypeParam, descriptionParam, userIdParam);
+                result.Success = true;
+            }
+            catch (SqlException ex)
+            {
+                result.Error = ex.Message;
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<(Stream Stream, string ContentType, string FileName)?> GetFirstPhotoForDownloadAsync(int projectId)
+    {
+        var rows = await GetRowsByProjectAsync(projectId);
+        var row = rows.FirstOrDefault(r => PhotoExtensions.Contains(r.FileType.ToLowerInvariant()));
+        if (row is null) return null;
+
+        if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))
+            contentType = "application/octet-stream";
+
+        var stream = _fileStorage.OpenRead(row.FilePath);
+        return (stream, contentType, row.FileName);
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)?> GetFileForDownloadAsync(int projectId, int attachmentId)

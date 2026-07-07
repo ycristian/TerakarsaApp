@@ -1,0 +1,96 @@
+@typeparam TItem
+
+<div class="position-relative">
+    <input type="text" class="form-control" placeholder="@Placeholder"
+           value="@(isOpen ? searchText : SelectedLabel)"
+           disabled="@Disabled"
+           @oninput="OnInput"
+           @onfocus="OnFocus"
+           @onblur="OnBlur" />
+
+    @if (isOpen)
+    {
+        <div class="dropdown-menu show w-100" style="max-height: 220px; overflow-y: auto;">
+            @if (AllowNone)
+            {
+                <button type="button" class="dropdown-item" @onmousedown="SelectNone" @onmousedown:preventDefault="true">@NoneLabel</button>
+            }
+            @if (FilteredItems.Count == 0)
+            {
+                <span class="dropdown-item-text text-muted">Tidak ada hasil.</span>
+            }
+            else
+            {
+                @foreach (var item in FilteredItems)
+                {
+                    <button type="button" class="dropdown-item" @onmousedown="@(() => SelectItem(item))" @onmousedown:preventDefault="true">@TextSelector(item)</button>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<TItem> Items { get; set; } = new();
+    [Parameter] public int Value { get; set; }
+    [Parameter] public EventCallback<int> ValueChanged { get; set; }
+    [Parameter, EditorRequired] public Func<TItem, int> IdSelector { get; set; } = default!;
+    [Parameter, EditorRequired] public Func<TItem, string> TextSelector { get; set; } = default!;
+    [Parameter] public string Placeholder { get; set; } = "Cari...";
+    [Parameter] public bool AllowNone { get; set; } = false;
+    [Parameter] public string NoneLabel { get; set; } = "- Tidak ada -";
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    private bool isOpen = false;
+    private string searchText = string.Empty;
+
+    private string SelectedLabel
+    {
+        get
+        {
+            if (Value <= 0) return AllowNone ? NoneLabel : string.Empty;
+            var match = Items.FirstOrDefault(i => IdSelector(i) == Value);
+            return match is null ? string.Empty : TextSelector(match);
+        }
+    }
+
+    private List<TItem> FilteredItems => string.IsNullOrWhiteSpace(searchText)
+        ? Items
+        : Items.Where(i => TextSelector(i).Contains(searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private void OnFocus()
+    {
+        isOpen = true;
+        searchText = string.Empty;
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        isOpen = true;
+    }
+
+    private async Task OnBlur()
+    {
+        await Task.Delay(150);
+        isOpen = false;
+        searchText = string.Empty;
+        StateHasChanged();
+    }
+
+    private async Task SelectItem(TItem item)
+    {
+        Value = IdSelector(item);
+        isOpen = false;
+        searchText = string.Empty;
+        await ValueChanged.InvokeAsync(Value);
+    }
+
+    private async Task SelectNone()
+    {
+        Value = 0;
+        isOpen = false;
+        searchText = string.Empty;
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

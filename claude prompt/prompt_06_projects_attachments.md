@@ -57,3 +57,58 @@ Soft delete, filter deleted_at IS NULL, UserId dari JWT, konfirmasi delete, UI b
 2. IFileStorageService + upload + list + download + delete lampiran
 
 Setelah selesai: daftar file yang dibuat/diubah + script SQL yang harus dijalankan manual (SP + registrasi module + appsettings key yang perlu diisi).
+
+
+# Prompt Claude Code — Poin 7: Kompres Gambar + Multi-File Upload Lampiran
+
+Sempurnakan fitur lampiran project (Lampiran di halaman edit project) yang sudah jadi:
+1. Kompres otomatis gambar di server sebelum disimpan
+2. Upload bisa banyak file sekaligus
+
+## 1. Image Compression Service
+
+Install package SixLabors.ImageSharp (versi stable terbaru) di TerakarsaApp.API.
+
+Buat `ImageCompressionService` di TerakarsaApp.API/Services:
+
+`Task<CompressResult> CompressAsync(Stream input, string fileExtension)`
+
+Aturan:
+- Hanya proses .jpg, .jpeg, .png. Ekstensi lain (pdf, xlsx) kembalikan apa adanya tanpa diubah.
+- Kalau lebar gambar > 1920px, resize ke lebar 1920 (aspect ratio dijaga).
+- Simpan ulang sebagai JPEG quality 80 — termasuk input PNG, jadi output gambar selalu .jpg.
+- CompressResult: Stream hasil, ekstensi akhir, ukuran akhir dalam KB.
+- File yang gagal dibaca sebagai gambar (corrupt) → lempar exception dengan pesan jelas, endpoint tangani jadi BadRequest per file (file lain di batch tetap lanjut).
+
+Registrasi DI di Program.cs (scoped).
+
+Nilai max width (1920) dan quality (80) di appsettings.json section "ImageCompression".
+
+## 2. Integrasi ke endpoint upload lampiran
+
+- Panggil ImageCompressionService sebelum file disimpan ke folder.
+- Yang disimpan hanya versi kompres — original dibuang.
+- `file_size_kb` di project_attachments = ukuran setelah kompres.
+- Kalau ekstensi berubah (png → jpg): `file_type` = jpg, dan file_name yang disimpan sesuaikan ekstensinya jadi .jpg (nama dasar tetap).
+- Validasi tipe file (jpg/png/pdf/xlsx) dan max 10 MB tetap berlaku, dicek terhadap file asli sebelum kompres.
+
+## 3. Multi-file upload
+
+- API: ubah/tambah endpoint upload agar menerima banyak file dalam satu request.
+- Deskripsi (opsional) berlaku untuk semua file dalam batch tersebut.
+- Response berisi hasil per file: sukses atau gagal + alasan (misal tipe tidak didukung, terlalu besar, corrupt). Satu file gagal tidak membatalkan file lain.
+- Blazor: InputFile dengan atribut multiple, tampilkan daftar file terpilih sebelum tombol Unggah ditekan, dan tampilkan hasil per file setelah upload (yang gagal ditandai dengan alasannya).
+- Setelah upload selesai, refresh tabel lampiran.
+
+## Batasan
+- Jangan ubah struktur tabel.
+- Jangan sentuh fitur lain.
+- UI bahasa Indonesia.
+
+## Verifikasi
+1. Upload jpg 4000px → tersimpan lebar 1920px, ukuran jauh lebih kecil, file_size_kb sesuai hasil kompres.
+2. Upload png → tersimpan sebagai .jpg, file_type = jpg.
+3. Upload pdf → tersimpan apa adanya.
+4. Upload 3 file sekaligus (1 di antaranya file .txt yang di-rename jadi .jpg) → 2 sukses, 1 gagal dengan pesan jelas.
+
+Setelah selesai: daftar file yang dibuat/diubah + script SQL kalau ada.

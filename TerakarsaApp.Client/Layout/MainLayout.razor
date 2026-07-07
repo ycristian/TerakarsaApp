@@ -21,7 +21,14 @@
     {
         if (firstRender)
         {
-            await JS.InvokeVoidAsync("jumpsPrevent");
+            try
+            {
+                await JS.InvokeVoidAsync("jumpsPrevent");
+            }
+            catch (Microsoft.JSInterop.JSException)
+            {
+                // If the JS function isn't available or fails, ignore to avoid breaking render.
+            }
         }
     }
 }
