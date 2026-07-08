@@ -13,6 +13,7 @@
 @inject EmployeeApiService EmployeeApi
 @inject ArticleApiService ArticleApi
 @inject ArticlePhotoApiService ArticlePhotoApi
+@inject ArticleWorkflowApiService ArticleWorkflowApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -152,6 +153,7 @@ else
                                         <th>Size Pack</th>
                                         <th>Total Qty</th>
                                         <th>Size</th>
+                                        <th>Workflow</th>
                                         <th>Aksi</th>
                                     </tr>
                                 </thead>
@@ -183,6 +185,16 @@ else
                                                             <div>@(s.SizeName) : @s.Qty</div>
                                                         }
                                                     </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (articleWorkflowTemplateNames.TryGetValue(a.Id, out var wfName) && !string.IsNullOrEmpty(wfName))
+                                                {
+                                                    @wfName
                                                 }
                                                 else
                                                 {
@@ -386,6 +398,7 @@ else
     private bool isLoadingArticles = true;
     private Dictionary<int, string> articleThumbnails = new();
     private Dictionary<int, List<ArticleSizeSummaryDto>> articleSizes = new();
+    private Dictionary<int, string?> articleWorkflowTemplateNames = new();
     private bool showDeleteArticleConfirm = false;
     private bool isDeletingArticle = false;
     private ArticleListItemDto? articlePendingDelete;
@@ -568,12 +581,25 @@ else
         isLoadingArticles = false;
         await LoadArticleThumbnails();
         await LoadArticleSizes();
+        await LoadArticleWorkflows();
     }
 
     private async Task LoadArticleSizes()
     {
         var sizes = await ArticleApi.GetSizesByProjectAsync(Id);
         articleSizes = sizes.GroupBy(s => s.ArticleId).ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    private async Task LoadArticleWorkflows()
+    {
+        var tasks = articles.Select(async a =>
+        {
+            var workflow = await ArticleWorkflowApi.GetByArticleAsync(a.Id);
+            return (a.Id, workflow.WorkflowTemplateName);
+        });
+
+        var results = await Task.WhenAll(tasks);
+        articleWorkflowTemplateNames = results.ToDictionary(r => r.Id, r => r.WorkflowTemplateName);
     }
 
     private async Task LoadArticleThumbnails()

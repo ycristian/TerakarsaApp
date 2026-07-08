@@ -1,0 +1,493 @@
+@page "/workflow-templates"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.WorkflowTemplates
+@using TerakarsaApp.Shared.Divisions
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject WorkflowTemplateApiService WorkflowTemplateApi
+@inject DivisionApiService DivisionApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Master Workflow Template</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Master Workflow Template</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Master Workflow Template</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Workflow Template
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama workflow..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data workflow template.</p>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-8 mb-4 mb-lg-0">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Daftar Workflow Template</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <SortableHeader Label="Kode" Column="WorkflowCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="Nama Workflow" Column="WorkflowName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <th>Jumlah Step</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var wt in pagedResult.Items)
+                                {
+                                    <tr @onclick="() => SelectWorkflowTemplate(wt.Id)" style="cursor: pointer; @(wt.Id == selectedWorkflowTemplateId ? "background-color: #f5f5f5;" : "")">
+                                        <td>@wt.WorkflowCode</td>
+                                        <td>@wt.WorkflowName</td>
+                                        <td>@wt.StepCount</td>
+                                        <td @onclick:stopPropagation="true">
+                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(wt.Id)"><i class="fe fe-edit"></i></button>
+                                            <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(wt)"><i class="fe fe-trash-2"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">Detail Step</h3>
+                </div>
+                <div class="card-body">
+                    @if (selectedWorkflowTemplateId is null)
+                    {
+                        <p class="text-muted mb-0">Pilih workflow template untuk melihat detail step.</p>
+                    }
+                    else if (isLoadingDetails)
+                    {
+                        <p class="mb-0">Memuat detail step...</p>
+                    }
+                    else if (selectedSteps.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Belum ada data step.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Urutan</th>
+                                        <th>Step</th>
+                                        <th>Divisi</th>
+                                        <th>Butuh Bundle</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in selectedSteps)
+                                    {
+                                        <tr>
+                                            <td>@s.SortOrder</td>
+                                            <td>@s.StepName</td>
+                                            <td>@s.DivisionName</td>
+                                            <td>@(s.RequiresBundle ? "Ya" : "Tidak")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Workflow Template" : "Tambah Workflow Template")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Workflow</label>
+                            <InputText class="form-control" @bind-Value="formModel.WorkflowCode" />
+                            <ValidationMessage For="@(() => formModel.WorkflowCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Workflow</label>
+                            <InputText class="form-control" @bind-Value="formModel.WorkflowName" />
+                            <ValidationMessage For="@(() => formModel.WorkflowName)" class="text-danger" />
+                        </div>
+
+                        <div class="mb-2 d-flex justify-content-between align-items-center">
+                            <label class="form-label mb-0">Steps</label>
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddStepRow">+ Tambah Baris</button>
+                        </div>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 35%;">Nama Step</th>
+                                        <th style="width: 25%;">Divisi</th>
+                                        <th style="width: 12%;">Urutan</th>
+                                        <th style="width: 13%;">Butuh Bundle</th>
+                                        <th style="width: 60px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (var i = 0; i < formModel.Steps.Count; i++)
+                                    {
+                                        var row = formModel.Steps[i];
+                                        <tr>
+                                            <td><input class="form-control" maxlength="150" @bind="row.StepName" /></td>
+                                            <td>
+                                                <SearchableSelect TItem="DivisionDto" Items="divisionOptions" @bind-Value="row.DivisionId"
+                                                                  IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                                                  Placeholder="Cari divisi..." />
+                                            </td>
+                                            <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
+                                            <td class="text-center">
+                                                <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                            </td>
+                                            <td class="text-center">
+                                                <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveStepRow(row)" disabled="@(formModel.Steps.Count <= 1)"><i class="fe fe-trash-2"></i></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus workflow template "@workflowTemplatePendingDelete?.WorkflowName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private WorkflowTemplatePagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private int editingId;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private WorkflowTemplateFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private WorkflowTemplateDto? workflowTemplatePendingDelete;
+    private List<DivisionDto> divisionOptions = new();
+
+    private int? selectedWorkflowTemplateId;
+    private List<WorkflowTemplateStepDto> selectedSteps = new();
+    private bool isLoadingDetails = false;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_WORKFLOW");
+
+        if (hasAccess == true)
+        {
+            divisionOptions = await DivisionApi.GetActiveAsync();
+            await LoadWorkflowTemplates();
+        }
+    }
+
+    private async Task LoadWorkflowTemplates()
+    {
+        isLoading = true;
+        pagedResult = await WorkflowTemplateApi.GetPagedAsync(new WorkflowTemplatePagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadWorkflowTemplates();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadWorkflowTemplates();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadWorkflowTemplates();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadWorkflowTemplates();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        editingId = 0;
+        formModel = new WorkflowTemplateFormModel();
+        AddStepRow();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private async Task OpenEditForm(int id)
+    {
+        var workflowTemplate = await WorkflowTemplateApi.GetByIdAsync(id);
+        if (workflowTemplate is null) return;
+
+        isEditMode = true;
+        editingId = id;
+        formModel = new WorkflowTemplateFormModel
+        {
+            WorkflowCode = workflowTemplate.WorkflowCode,
+            WorkflowName = workflowTemplate.WorkflowName,
+            Steps = workflowTemplate.Steps.Select(s => new WorkflowTemplateStepRowModel
+            {
+                Id = s.Id,
+                StepName = s.StepName,
+                DivisionId = s.DivisionId,
+                SortOrder = s.SortOrder,
+                RequiresBundle = s.RequiresBundle
+            }).ToList()
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private void AddStepRow()
+    {
+        var nextSort = formModel.Steps.Count == 0 ? 1 : formModel.Steps.Max(s => s.SortOrder) + 1;
+        formModel.Steps.Add(new WorkflowTemplateStepRowModel { SortOrder = nextSort });
+    }
+
+    private void RemoveStepRow(WorkflowTemplateStepRowModel row)
+    {
+        if (formModel.Steps.Count <= 1) return;
+        formModel.Steps.Remove(row);
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (formModel.Steps.Count == 0)
+        {
+            errorMessage = "Minimal 1 baris step wajib diisi.";
+            return;
+        }
+
+        if (formModel.Steps.Any(s => string.IsNullOrWhiteSpace(s.StepName) || s.DivisionId <= 0))
+        {
+            errorMessage = "Nama step dan divisi wajib diisi untuk setiap baris.";
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var steps = formModel.Steps.Select(s => new WorkflowTemplateStepRequest
+        {
+            Id = s.Id,
+            StepName = s.StepName,
+            DivisionId = s.DivisionId,
+            SortOrder = s.SortOrder,
+            RequiresBundle = s.RequiresBundle
+        }).ToList();
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await WorkflowTemplateApi.UpdateAsync(new WorkflowTemplateUpdateRequest
+            {
+                Id = editingId,
+                WorkflowCode = formModel.WorkflowCode,
+                WorkflowName = formModel.WorkflowName,
+                Steps = steps
+            });
+        }
+        else
+        {
+            result = await WorkflowTemplateApi.CreateAsync(new WorkflowTemplateCreateRequest
+            {
+                WorkflowCode = formModel.WorkflowCode,
+                WorkflowName = formModel.WorkflowName,
+                Steps = steps
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadWorkflowTemplates();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private async Task SelectWorkflowTemplate(int id)
+    {
+        selectedWorkflowTemplateId = id;
+        isLoadingDetails = true;
+        var workflowTemplate = await WorkflowTemplateApi.GetByIdAsync(id);
+        selectedSteps = workflowTemplate?.Steps ?? new();
+        isLoadingDetails = false;
+    }
+
+    private void HandleDelete(WorkflowTemplateDto workflowTemplate)
+    {
+        workflowTemplatePendingDelete = workflowTemplate;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        workflowTemplatePendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (workflowTemplatePendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await WorkflowTemplateApi.DeleteAsync(workflowTemplatePendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        workflowTemplatePendingDelete = null;
+
+        if (success)
+            await LoadWorkflowTemplates();
+    }
+
+    public class WorkflowTemplateFormModel
+    {
+        [Required(ErrorMessage = "Kode workflow wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode workflow maksimal 30 karakter.")]
+        public string WorkflowCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama workflow wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama workflow maksimal 150 karakter.")]
+        public string WorkflowName { get; set; } = string.Empty;
+
+        public List<WorkflowTemplateStepRowModel> Steps { get; set; } = new();
+    }
+
+    public class WorkflowTemplateStepRowModel
+    {
+        public int? Id { get; set; }
+        public string StepName { get; set; } = string.Empty;
+        public int DivisionId { get; set; }
+        public int SortOrder { get; set; }
+        public bool RequiresBundle { get; set; } = true;
+    }
+}

@@ -6,12 +6,17 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.SizePacks
+@using TerakarsaApp.Shared.WorkflowTemplates
+@using TerakarsaApp.Shared.Divisions
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Authorization
 @inject ArticleApiService ArticleApi
 @inject ArticlePhotoApiService ArticlePhotoApi
 @inject SizePackApiService SizePackApi
 @inject ProjectApiService ProjectApi
+@inject ArticleWorkflowApiService ArticleWorkflowApi
+@inject WorkflowTemplateApiService WorkflowTemplateApi
+@inject DivisionApiService DivisionApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -204,6 +209,108 @@ else
         </div>
     </div>
 
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Workflow</h3>
+                </div>
+                <div class="card-body">
+                    @if (IsCreate)
+                    {
+                        <p class="text-muted mb-0">Simpan artikel terlebih dahulu untuk mengatur workflow.</p>
+                    }
+                    else if (isLoadingWorkflow)
+                    {
+                        <p class="mb-0">Memuat workflow...</p>
+                    }
+                    else if (workflow is null || workflow.Steps.Count == 0)
+                    {
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-8">
+                                <label class="form-label">Template Workflow</label>
+                                <SearchableSelect TItem="WorkflowTemplateDto" Items="templateOptions" @bind-Value="selectedTemplateId"
+                                                  IdSelector="@(t => t.Id)" TextSelector="@(t => t.WorkflowName)"
+                                                  Placeholder="Cari template workflow..." />
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-primary w-100" disabled="@(selectedTemplateId <= 0 || isApplyingTemplate)" @onclick="HandleApplyTemplate">
+                                    @(isApplyingTemplate ? "Menerapkan..." : "Terapkan Template")
+                                </button>
+                            </div>
+                        </div>
+                        @if (templateOptions.Count == 0)
+                        {
+                            <div class="form-text text-warning">Belum ada template workflow. Buat template terlebih dahulu di menu Master Workflow Template.</div>
+                        }
+                        @if (!string.IsNullOrEmpty(workflowError))
+                        {
+                            <div class="alert alert-danger mt-3 mb-0">@workflowError</div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="mb-3">Template asal: <strong>@(workflow.WorkflowTemplateName ?? "Manual")</strong></p>
+
+                        <div class="mb-2 d-flex justify-content-between align-items-center">
+                            <label class="form-label mb-0">Steps</label>
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddWorkflowRow">+ Tambah Baris</button>
+                        </div>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 60px;">No</th>
+                                        <th>Nama Step</th>
+                                        <th style="width: 22%;">Divisi</th>
+                                        <th style="width: 12%;">Urutan</th>
+                                        <th style="width: 13%;">Butuh Bundle</th>
+                                        <th style="width: 60px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (var i = 0; i < workflowRows.Count; i++)
+                                    {
+                                        var row = workflowRows[i];
+                                        var idx = i + 1;
+                                        <tr>
+                                            <td class="align-middle">@idx</td>
+                                            <td><input class="form-control" maxlength="150" @bind="row.StepName" /></td>
+                                            <td>
+                                                <SearchableSelect TItem="DivisionDto" Items="divisionOptions" @bind-Value="row.DivisionId"
+                                                                  IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                                                  Placeholder="Cari divisi..." />
+                                            </td>
+                                            <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
+                                            <td class="text-center">
+                                                <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                            </td>
+                                            <td class="text-center">
+                                                <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(workflowError))
+                        {
+                            <div class="alert alert-danger">@workflowError</div>
+                        }
+                        @if (!string.IsNullOrEmpty(workflowSuccessMessage))
+                        {
+                            <div class="alert alert-success">@workflowSuccessMessage</div>
+                        }
+                        <button class="btn btn-primary" disabled="@isSavingWorkflow" @onclick="HandleSaveWorkflow">
+                            @(isSavingWorkflow ? "Menyimpan..." : "Simpan Workflow")
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
     <ConfirmDeleteModal Show="showDeletePhotoConfirm" IsBusy="isDeletingPhoto" OnConfirm="ConfirmDeletePhoto" OnCancel="CancelDeletePhoto">
         <Message>Yakin ingin menghapus foto "@photoPendingDelete?.FileName"?</Message>
     </ConfirmDeleteModal>
@@ -236,6 +343,17 @@ else
     private bool showDeletePhotoConfirm = false;
     private bool isDeletingPhoto = false;
     private ArticlePhotoDto? photoPendingDelete;
+
+    private ArticleWorkflowDto? workflow;
+    private bool isLoadingWorkflow = false;
+    private List<WorkflowTemplateDto> templateOptions = new();
+    private List<DivisionDto> divisionOptions = new();
+    private int selectedTemplateId;
+    private bool isApplyingTemplate = false;
+    private List<WorkflowStepRowModel> workflowRows = new();
+    private bool isSavingWorkflow = false;
+    private string workflowError = string.Empty;
+    private string workflowSuccessMessage = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -278,6 +396,7 @@ else
                     }).ToList();
 
                     await LoadPhotos();
+                    await LoadWorkflow();
                 }
             }
         }
@@ -507,6 +626,111 @@ else
             await LoadPhotos();
     }
 
+    private async Task LoadWorkflow()
+    {
+        if (ArticleId is null) return;
+
+        isLoadingWorkflow = true;
+        workflow = await ArticleWorkflowApi.GetByArticleAsync(ArticleId.Value);
+
+        if (workflow.Steps.Count == 0)
+        {
+            templateOptions = await WorkflowTemplateApi.GetActiveAsync();
+        }
+        else
+        {
+            workflowRows = workflow.Steps.Select(s => new WorkflowStepRowModel
+            {
+                Id = s.Id,
+                StepName = s.StepName,
+                DivisionId = s.DivisionId,
+                SortOrder = s.SortOrder,
+                RequiresBundle = s.RequiresBundle
+            }).ToList();
+        }
+
+        if (divisionOptions.Count == 0)
+            divisionOptions = await DivisionApi.GetActiveAsync();
+
+        isLoadingWorkflow = false;
+    }
+
+    private async Task HandleApplyTemplate()
+    {
+        if (ArticleId is null || selectedTemplateId <= 0) return;
+
+        isApplyingTemplate = true;
+        workflowError = string.Empty;
+
+        var result = await ArticleWorkflowApi.ApplyAsync(new ArticleWorkflowApplyRequest
+        {
+            ArticleId = ArticleId.Value,
+            WorkflowTemplateId = selectedTemplateId
+        });
+
+        isApplyingTemplate = false;
+
+        if (result.Success)
+        {
+            await LoadWorkflow();
+        }
+        else
+        {
+            workflowError = result.Error;
+        }
+    }
+
+    private void AddWorkflowRow()
+    {
+        var nextSort = workflowRows.Count == 0 ? 1 : workflowRows.Max(r => r.SortOrder) + 1;
+        workflowRows.Add(new WorkflowStepRowModel { SortOrder = nextSort });
+    }
+
+    private void RemoveWorkflowRow(WorkflowStepRowModel row)
+    {
+        workflowRows.Remove(row);
+    }
+
+    private async Task HandleSaveWorkflow()
+    {
+        if (ArticleId is null) return;
+
+        if (workflowRows.Any(r => string.IsNullOrWhiteSpace(r.StepName) || r.DivisionId <= 0))
+        {
+            workflowError = "Nama step dan divisi wajib diisi untuk setiap baris.";
+            return;
+        }
+
+        isSavingWorkflow = true;
+        workflowError = string.Empty;
+        workflowSuccessMessage = string.Empty;
+
+        var result = await ArticleWorkflowApi.SaveAsync(new ArticleWorkflowSaveRequest
+        {
+            ArticleId = ArticleId.Value,
+            Steps = workflowRows.Select(r => new ArticleWorkflowStepRequest
+            {
+                Id = r.Id,
+                StepName = r.StepName,
+                DivisionId = r.DivisionId,
+                SortOrder = r.SortOrder,
+                RequiresBundle = r.RequiresBundle
+            }).ToList()
+        });
+
+        isSavingWorkflow = false;
+
+        if (result.Success)
+        {
+            workflowSuccessMessage = "Workflow berhasil disimpan.";
+            await LoadWorkflow();
+        }
+        else
+        {
+            workflowError = result.Error;
+        }
+    }
+
     public class ArticleFormModel
     {
         [Required(ErrorMessage = "Nama artikel wajib diisi.")]
@@ -529,5 +753,14 @@ else
         public string SizeName { get; set; } = string.Empty;
         public int Qty { get; set; }
         public int BundleQty { get; set; }
+    }
+
+    public class WorkflowStepRowModel
+    {
+        public int? Id { get; set; }
+        public string StepName { get; set; } = string.Empty;
+        public int DivisionId { get; set; }
+        public int SortOrder { get; set; }
+        public bool RequiresBundle { get; set; } = true;
     }
 }

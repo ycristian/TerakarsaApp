@@ -351,6 +351,7 @@ CREATE TABLE workflow_template_steps(
  division_id int not null
    constraint FK_wts_divisions foreign key references divisions(division_id),
  sort_order int not null default 0,
+ requires_bundle bit not null default 1,     -- 0 = step boleh log tanpa bundle (mis. Cutting)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -371,6 +372,7 @@ CREATE TABLE article_workflows(
  division_id int not null
    constraint FK_aw_divisions foreign key references divisions(division_id),
  sort_order int not null default 0,
+ requires_bundle bit not null default 1,     -- salinan dari template step
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -403,11 +405,15 @@ CREATE TABLE bundles(
 
 -- LOG MURNI: tidak boleh di-update. Salah input = soft delete
 -- (hanya supervisor/admin) + input baris baru. delete_reason wajib diisi saat delete.
+-- bundle_id NULL hanya untuk step dengan requires_bundle = 0 (mis. Cutting).
+-- Validasi di sp_WorkflowLog_Manage (Phase D/E):
+--   1. requires_bundle = 1 -> bundle_id wajib diisi
+--   2. bundle_id diisi -> bundles.article_id harus = article_workflows.article_id
 CREATE TABLE article_workflow_logs(
  workflow_log_id int primary key identity(1,1),
  article_workflow_id int not null
    constraint FK_awl_article_workflows foreign key references article_workflows(article_workflow_id),
- bundle_id int not null
+ bundle_id int null                          -- NULL = log level artikel (step pra-bundle, mis. Cutting)
    constraint FK_awl_bundles foreign key references bundles(bundle_id),
  division_id int not null
    constraint FK_awl_divisions foreign key references divisions(division_id),

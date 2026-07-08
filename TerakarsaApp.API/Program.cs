@@ -46,6 +46,8 @@ builder.Services.AddScoped<ProjectAttachmentService>();
 builder.Services.AddScoped<SizePackService>();
 builder.Services.AddScoped<ArticleService>();
 builder.Services.AddScoped<ArticlePhotoService>();
+builder.Services.AddScoped<WorkflowTemplateService>();
+builder.Services.AddScoped<ArticleWorkflowService>();
 builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
 builder.Services.AddScoped<ImageCompressionService>();
 builder.Services.Configure<ImageCompressionOptions>(builder.Configuration.GetSection("ImageCompression"));

@@ -43,5 +43,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ProjectAttachmentApiServ
 builder.Services.AddScoped<TerakarsaApp.Client.Services.SizePackApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticlePhotoApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowTemplateApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleWorkflowApiService>();
 
 await builder.Build().RunAsync();
