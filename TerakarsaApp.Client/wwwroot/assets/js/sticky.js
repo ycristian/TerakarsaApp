@@ -2,11 +2,19 @@
     'use strict'
 
     let stickyClass = "sticky-pin",
-     stickyPos = 66; //Distance from the top of the window.
+     stickyPos = 66, //Distance from the top of the window.
+     jumpsPreventInserted = false;
 
     function jumpsPrevent() {
         let stickyElement = $(".sticky");
         if (!stickyElement.length) return;
+
+        ///Create a negative margin to prevent content 'jumps':
+        if (!jumpsPreventInserted) {
+            stickyElement.after('<div class="jumps-prevent"></div>');
+            jumpsPreventInserted = true;
+        }
+
         let stickyHeight = stickyElement.innerHeight();
         stickyElement.css({ "margin-bottom": "-" + stickyHeight + "px" });
         stickyElement.next().css({ "padding-top": +stickyHeight + "px" });

@@ -1,0 +1,477 @@
+@page "/size-packs"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.SizePacks
+@using TerakarsaApp.Shared.Buyers
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject SizePackApiService SizePackApi
+@inject BuyerApiService BuyerApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Data Size Pack</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Data Size Pack</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Data Size Pack</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Size Pack
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari nama size pack / buyer..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data size pack.</p>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-8 mb-4 mb-lg-0">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Daftar Size Pack</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <SortableHeader Label="Nama Size Pack" Column="SizePackName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sp in pagedResult.Items)
+                                {
+                                    <tr @onclick="() => SelectSizePack(sp.Id)" style="cursor: pointer; @(sp.Id == selectedSizePackId ? "background-color: #f5f5f5;" : "")">
+                                        <td>@sp.SizePackName</td>
+                                        <td>@(sp.BuyerName ?? "-")</td>
+                                        <td @onclick:stopPropagation="true">
+                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(sp.Id)"><i class="fe fe-edit"></i></button>
+                                            <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(sp)"><i class="fe fe-trash-2"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">Detail Ukuran</h3>
+                </div>
+                <div class="card-body">
+                    @if (selectedSizePackId is null)
+                    {
+                        <p class="text-muted mb-0">Pilih size pack untuk melihat detail ukuran.</p>
+                    }
+                    else if (isLoadingDetails)
+                    {
+                        <p class="mb-0">Memuat detail ukuran...</p>
+                    }
+                    else if (selectedSizePackDetails.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Belum ada data ukuran.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Ukuran</th>
+                                        <th>Urutan</th>
+                                        <th>Deskripsi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var d in selectedSizePackDetails)
+                                    {
+                                        <tr>
+                                            <td>@d.SizeName</td>
+                                            <td>@d.SortOrder</td>
+                                            <td>@(d.Description ?? "-")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Size Pack" : "Tambah Size Pack")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Buyer (opsional)</label>
+                            <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.BuyerId"
+                                              IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
+                                              Placeholder="Cari buyer..." AllowNone="true" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Size Pack</label>
+                            <InputText class="form-control" @bind-Value="formModel.SizePackName" />
+                            <ValidationMessage For="@(() => formModel.SizePackName)" class="text-danger" />
+                        </div>
+
+                        <div class="mb-2 d-flex justify-content-between align-items-center">
+                            <label class="form-label mb-0">Detail Ukuran</label>
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddDetailRow">+ Tambah Baris</button>
+                        </div>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 30%;">Nama Ukuran</th>
+                                        <th style="width: 15%;">Urutan</th>
+                                        <th>Deskripsi</th>
+                                        <th style="width: 60px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (var i = 0; i < formModel.Details.Count; i++)
+                                    {
+                                        var row = formModel.Details[i];
+                                        <tr>
+                                            <td><input class="form-control" maxlength="50" @bind="row.SizeName" /></td>
+                                            <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
+                                            <td><input class="form-control" maxlength="255" @bind="row.Description" /></td>
+                                            <td class="text-center">
+                                                <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveDetailRow(row)" disabled="@(formModel.Details.Count <= 1)"><i class="fe fe-trash-2"></i></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus size pack "@sizePackPendingDelete?.SizePackName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private SizePackPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private int editingId;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private SizePackFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private SizePackDto? sizePackPendingDelete;
+    private List<BuyerDto> buyerOptions = new();
+
+    private int? selectedSizePackId;
+    private List<SizePackDetailDto> selectedSizePackDetails = new();
+    private bool isLoadingDetails = false;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "MASTER_SIZE_PACK");
+
+        if (hasAccess == true)
+        {
+            buyerOptions = await BuyerApi.GetActiveAsync();
+            await LoadSizePacks();
+        }
+    }
+
+    private async Task LoadSizePacks()
+    {
+        isLoading = true;
+        pagedResult = await SizePackApi.GetPagedAsync(new SizePackPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadSizePacks();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadSizePacks();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadSizePacks();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadSizePacks();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        editingId = 0;
+        formModel = new SizePackFormModel();
+        AddDetailRow();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private async Task OpenEditForm(int id)
+    {
+        var sizePack = await SizePackApi.GetByIdAsync(id);
+        if (sizePack is null) return;
+
+        isEditMode = true;
+        editingId = id;
+        formModel = new SizePackFormModel
+        {
+            BuyerId = sizePack.BuyerId ?? 0,
+            SizePackName = sizePack.SizePackName,
+            Details = sizePack.Details.Select(d => new SizePackDetailRowModel
+            {
+                Id = d.Id,
+                SizeName = d.SizeName,
+                SortOrder = d.SortOrder,
+                Description = d.Description
+            }).ToList()
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private void AddDetailRow()
+    {
+        var nextSort = formModel.Details.Count == 0 ? 1 : formModel.Details.Max(d => d.SortOrder) + 1;
+        formModel.Details.Add(new SizePackDetailRowModel { SortOrder = nextSort });
+    }
+
+    private void RemoveDetailRow(SizePackDetailRowModel row)
+    {
+        if (formModel.Details.Count <= 1) return;
+        formModel.Details.Remove(row);
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (formModel.Details.Count == 0)
+        {
+            errorMessage = "Minimal 1 baris ukuran wajib diisi.";
+            return;
+        }
+
+        if (formModel.Details.Any(d => string.IsNullOrWhiteSpace(d.SizeName)))
+        {
+            errorMessage = "Nama ukuran wajib diisi untuk setiap baris.";
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var details = formModel.Details.Select(d => new SizePackDetailRequest
+        {
+            Id = d.Id,
+            SizeName = d.SizeName,
+            SortOrder = d.SortOrder,
+            Description = string.IsNullOrWhiteSpace(d.Description) ? null : d.Description
+        }).ToList();
+
+        (bool Success, string Error) result;
+        if (isEditMode)
+        {
+            result = await SizePackApi.UpdateAsync(new SizePackUpdateRequest
+            {
+                Id = editingId,
+                BuyerId = formModel.BuyerId > 0 ? formModel.BuyerId : null,
+                SizePackName = formModel.SizePackName,
+                Details = details
+            });
+        }
+        else
+        {
+            result = await SizePackApi.CreateAsync(new SizePackCreateRequest
+            {
+                BuyerId = formModel.BuyerId > 0 ? formModel.BuyerId : null,
+                SizePackName = formModel.SizePackName,
+                Details = details
+            });
+        }
+
+        isSaving = false;
+
+        if (result.Success)
+        {
+            showForm = false;
+            await LoadSizePacks();
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private async Task SelectSizePack(int id)
+    {
+        selectedSizePackId = id;
+        isLoadingDetails = true;
+        var sizePack = await SizePackApi.GetByIdAsync(id);
+        selectedSizePackDetails = sizePack?.Details ?? new();
+        isLoadingDetails = false;
+    }
+
+    private void HandleDelete(SizePackDto sizePack)
+    {
+        sizePackPendingDelete = sizePack;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        sizePackPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (sizePackPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await SizePackApi.DeleteAsync(sizePackPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        sizePackPendingDelete = null;
+
+        if (success)
+            await LoadSizePacks();
+    }
+
+    public class SizePackFormModel
+    {
+        public int BuyerId { get; set; }
+
+        [Required(ErrorMessage = "Nama size pack wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama size pack maksimal 150 karakter.")]
+        public string SizePackName { get; set; } = string.Empty;
+
+        public List<SizePackDetailRowModel> Details { get; set; } = new();
+    }
+
+    public class SizePackDetailRowModel
+    {
+        public int? Id { get; set; }
+        public string SizeName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public string? Description { get; set; }
+    }
+}

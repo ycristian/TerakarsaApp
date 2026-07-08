@@ -1,0 +1,533 @@
+@page "/projects/{ProjectId:int}/articles/create"
+@page "/projects/{ProjectId:int}/articles/{ArticleId:int}/edit"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Projects
+@using TerakarsaApp.Shared.SizePacks
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ArticleApiService ArticleApi
+@inject ArticlePhotoApiService ArticlePhotoApi
+@inject SizePackApiService SizePackApi
+@inject ProjectApiService ProjectApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@(IsCreate ? "Tambah Artikel" : "Edit Artikel")</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">@(IsCreate ? "Tambah Artikel" : "Edit Artikel")</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">@(IsCreate ? "Tambah Artikel" : "Edit Artikel")</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (project is null)
+{
+    <div class="alert alert-danger">Project tidak ditemukan.</div>
+}
+else
+{
+    <div class="mb-3">
+        <button class="btn btn-light" @onclick="BackToProjectEdit"><i class="fe fe-arrow-left"></i> Kembali ke Edit Project</button>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-7 mb-4 mb-lg-0">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h3 class="card-title">Detail Artikel</h3>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Nama Artikel</label>
+                            <InputText class="form-control" @bind-Value="formModel.ArticleName" />
+                            <ValidationMessage For="@(() => formModel.ArticleName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Style</label>
+                            <InputText class="form-control" @bind-Value="formModel.Style" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Color</label>
+                            <InputText class="form-control" @bind-Value="formModel.Color" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Size Pack</label>
+                            <SearchableSelect TItem="SizePackDto" Items="sizePackOptions" Value="formModel.SizePackId"
+                                              ValueChanged="HandleSizePackChanged"
+                                              IdSelector="@(sp => sp.Id)" TextSelector="@(sp => sp.SizePackName)"
+                                              Placeholder="Cari size pack..." />
+                            <ValidationMessage For="@(() => formModel.SizePackId)" class="text-danger" />
+                            @if (sizePackOptions.Count == 0)
+                            {
+                                <div class="form-text text-warning">Buyer project ini belum memiliki size pack. Buat size pack untuk buyer ini terlebih dahulu.</div>
+                            }
+                        </div>
+
+                        <label class="form-label">Grid Ukuran</label>
+                        @if (sizeRows.Count == 0)
+                        {
+                            <p class="text-muted">Pilih size pack untuk menampilkan grid ukuran.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive mb-3">
+                                <table class="table table-bordered border mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Ukuran</th>
+                                            <th>Qty</th>
+                                            <th>Bundle Qty</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in sizeRows)
+                                        {
+                                            <tr>
+                                                <td class="align-middle">@row.SizeName</td>
+                                                <td><input type="number" min="0" class="form-control" @bind="row.Qty" /></td>
+                                                <td><input type="number" min="0" class="form-control" @bind="row.BundleQty" /></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        @if (!string.IsNullOrEmpty(successMessage))
+                        {
+                            <div class="alert alert-success">@successMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Foto Artikel</h3>
+                </div>
+                <div class="card-body">
+                    @if (IsCreate)
+                    {
+                        <p class="text-muted mb-0">Simpan artikel terlebih dahulu untuk mengunggah foto.</p>
+                    }
+                    else
+                    {
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-12">
+                                <label class="form-label">File (jpg, png - maks. 10 MB, bisa pilih beberapa sekaligus)</label>
+                                <InputFile class="form-control" multiple OnChange="HandleFilesSelected" />
+                                @if (selectedFiles.Count > 0)
+                                {
+                                    <div class="form-text">@selectedFiles.Count file dipilih: @string.Join(", ", selectedFiles.Select(f => f.Name))</div>
+                                }
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-primary w-100" disabled="@(selectedFiles.Count == 0 || isUploading)" @onclick="HandleUpload">
+                                    @(isUploading ? "Mengunggah..." : "Unggah")
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(uploadError))
+                        {
+                            <div class="alert alert-danger">@uploadError</div>
+                        }
+
+                        @if (isLoadingPhotos)
+                        {
+                            <p>Memuat foto...</p>
+                        }
+                        else if (photos.Count == 0)
+                        {
+                            <p>Belum ada foto.</p>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-wrap gap-3">
+                                @foreach (var photo in photos)
+                                {
+                                    <div class="text-center" style="width: 130px;">
+                                        @if (photoPreviews.TryGetValue(photo.Id, out var src))
+                                        {
+                                            <img src="@src" alt="@photo.FileName" style="width: 130px; height: 130px; object-fit: cover; border-radius: 4px;" class="mb-1" />
+                                        }
+                                        <div class="small text-truncate" title="@photo.FileName">@photo.FileName</div>
+                                        @if (photo.IsPrimary)
+                                        {
+                                            <span class="badge bg-primary mb-1">Utama</span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary mb-1 w-100" @onclick="() => HandleSetPrimary(photo)">Jadikan Utama</button>
+                                        }
+                                        <button class="btn btn-sm btn-danger w-100" @onclick="() => HandleDeletePhoto(photo)"><i class="fe fe-trash-2"></i> Hapus</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ConfirmDeleteModal Show="showDeletePhotoConfirm" IsBusy="isDeletingPhoto" OnConfirm="ConfirmDeletePhoto" OnCancel="CancelDeletePhoto">
+        <Message>Yakin ingin menghapus foto "@photoPendingDelete?.FileName"?</Message>
+    </ConfirmDeleteModal>
+}
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+    [Parameter] public int? ArticleId { get; set; }
+
+    private bool IsCreate => ArticleId is null;
+
+    private bool? hasAccess = null;
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    private TerakarsaApp.Shared.Projects.ProjectDto? project;
+    private List<SizePackDto> sizePackOptions = new();
+    private ArticleFormModel formModel = new();
+    private List<ArticleSizeRowModel> sizeRows = new();
+    private int? loadedSizePackId;
+
+    private List<ArticlePhotoDto> photos = new();
+    private bool isLoadingPhotos = false;
+    private Dictionary<int, string> photoPreviews = new();
+    private List<IBrowserFile> selectedFiles = new();
+    private bool isUploading = false;
+    private string uploadError = string.Empty;
+    private bool showDeletePhotoConfirm = false;
+    private bool isDeletingPhoto = false;
+    private ArticlePhotoDto? photoPendingDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
+
+        if (hasAccess != true)
+        {
+            isLoading = false;
+            return;
+        }
+
+        isLoading = true;
+        project = await ProjectApi.GetByIdAsync(ProjectId);
+
+        if (project is not null)
+        {
+            var allSizePacks = await SizePackApi.GetActiveAsync();
+            sizePackOptions = allSizePacks.Where(sp => sp.BuyerId is null || sp.BuyerId == project.CustomerId).ToList();
+
+            if (!IsCreate)
+            {
+                var article = await ArticleApi.GetByIdAsync(ArticleId!.Value);
+                if (article is not null)
+                {
+                    formModel = new ArticleFormModel
+                    {
+                        ArticleName = article.ArticleName,
+                        Style = article.Style,
+                        Color = article.Color,
+                        SizePackId = article.SizePackId
+                    };
+                    loadedSizePackId = article.SizePackId;
+                    sizeRows = article.Sizes.Select(s => new ArticleSizeRowModel
+                    {
+                        SizePackDetailId = s.SizePackDetailId,
+                        SizeName = s.SizeName,
+                        Qty = s.Qty,
+                        BundleQty = s.BundleQty
+                    }).ToList();
+
+                    await LoadPhotos();
+                }
+            }
+        }
+
+        isLoading = false;
+    }
+
+    private async Task HandleSizePackChanged(int newSizePackId)
+    {
+        if (!IsCreate && loadedSizePackId.HasValue && loadedSizePackId.Value != newSizePackId && sizeRows.Count > 0)
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm",
+                "Mengganti size pack akan menghapus baris ukuran lama dan menggenerate ulang grid ukuran. Lanjutkan?");
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
+        formModel.SizePackId = newSizePackId;
+        await RegenerateSizeRows(newSizePackId);
+    }
+
+    private async Task RegenerateSizeRows(int sizePackId)
+    {
+        if (sizePackId <= 0)
+        {
+            sizeRows = new();
+            return;
+        }
+
+        var sizePack = await SizePackApi.GetByIdAsync(sizePackId);
+        if (sizePack is null)
+        {
+            sizeRows = new();
+            return;
+        }
+
+        sizeRows = sizePack.Details
+            .OrderBy(d => d.SortOrder)
+            .Select(d => new ArticleSizeRowModel
+            {
+                SizePackDetailId = d.Id,
+                SizeName = d.SizeName,
+                Qty = 0,
+                BundleQty = 0
+            }).ToList();
+    }
+
+    private void BackToProjectEdit()
+    {
+        Nav.NavigateTo($"/projects/edit/{ProjectId}");
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (formModel.SizePackId <= 0 || sizeRows.Count == 0)
+        {
+            errorMessage = "Size pack wajib dipilih.";
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var sizes = sizeRows.Select(r => new ArticleSizeRequest
+        {
+            SizePackDetailId = r.SizePackDetailId,
+            Qty = r.Qty,
+            BundleQty = r.BundleQty
+        }).ToList();
+
+        if (IsCreate)
+        {
+            var result = await ArticleApi.CreateAsync(new ArticleCreateRequest
+            {
+                ProjectId = ProjectId,
+                SizePackId = formModel.SizePackId,
+                ArticleName = formModel.ArticleName,
+                Style = string.IsNullOrWhiteSpace(formModel.Style) ? null : formModel.Style,
+                Color = string.IsNullOrWhiteSpace(formModel.Color) ? null : formModel.Color,
+                Sizes = sizes
+            });
+
+            isSaving = false;
+
+            if (result.Success)
+            {
+                Nav.NavigateTo($"/projects/{ProjectId}/articles/{result.Id}/edit");
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+        else
+        {
+            var result = await ArticleApi.UpdateAsync(new ArticleUpdateRequest
+            {
+                Id = ArticleId!.Value,
+                SizePackId = formModel.SizePackId,
+                ArticleName = formModel.ArticleName,
+                Style = string.IsNullOrWhiteSpace(formModel.Style) ? null : formModel.Style,
+                Color = string.IsNullOrWhiteSpace(formModel.Color) ? null : formModel.Color,
+                Sizes = sizes
+            });
+
+            isSaving = false;
+
+            if (result.Success)
+            {
+                successMessage = "Perubahan berhasil disimpan.";
+                loadedSizePackId = formModel.SizePackId;
+
+                var article = await ArticleApi.GetByIdAsync(ArticleId!.Value);
+                if (article is not null)
+                {
+                    sizeRows = article.Sizes.Select(s => new ArticleSizeRowModel
+                    {
+                        SizePackDetailId = s.SizePackDetailId,
+                        SizeName = s.SizeName,
+                        Qty = s.Qty,
+                        BundleQty = s.BundleQty
+                    }).ToList();
+                }
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+    }
+
+    private async Task LoadPhotos()
+    {
+        if (ArticleId is null) return;
+
+        isLoadingPhotos = true;
+        photos = await ArticlePhotoApi.GetByArticleAsync(ArticleId.Value);
+        isLoadingPhotos = false;
+        await LoadPhotoPreviews();
+    }
+
+    private async Task LoadPhotoPreviews()
+    {
+        if (ArticleId is null) return;
+
+        foreach (var staleId in photoPreviews.Keys.Where(id => photos.All(p => p.Id != id)).ToList())
+            photoPreviews.Remove(staleId);
+
+        foreach (var photo in photos)
+        {
+            if (photoPreviews.ContainsKey(photo.Id)) continue;
+
+            var result = await ArticlePhotoApi.DownloadAsync(ArticleId.Value, photo.Id);
+            if (result is null) continue;
+
+            var base64 = Convert.ToBase64String(result.Value.Bytes);
+            photoPreviews[photo.Id] = $"data:{result.Value.ContentType};base64,{base64}";
+        }
+    }
+
+    private void HandleFilesSelected(InputFileChangeEventArgs e)
+    {
+        selectedFiles = e.GetMultipleFiles(20).ToList();
+        uploadError = string.Empty;
+    }
+
+    private async Task HandleUpload()
+    {
+        if (selectedFiles.Count == 0 || ArticleId is null) return;
+
+        isUploading = true;
+        uploadError = string.Empty;
+
+        var (success, error, results) = await ArticlePhotoApi.UploadManyAsync(ArticleId.Value, selectedFiles);
+
+        isUploading = false;
+
+        if (!success)
+        {
+            uploadError = error;
+            return;
+        }
+
+        var failures = results.Where(r => !r.Success).ToList();
+        uploadError = failures.Count > 0
+            ? string.Join(" | ", failures.Select(f => $"{f.FileName}: {f.Error}"))
+            : string.Empty;
+
+        selectedFiles = new();
+        await LoadPhotos();
+    }
+
+    private async Task HandleSetPrimary(ArticlePhotoDto photo)
+    {
+        var success = await ArticlePhotoApi.SetPrimaryAsync(photo.Id);
+        if (success)
+            await LoadPhotos();
+    }
+
+    private void HandleDeletePhoto(ArticlePhotoDto photo)
+    {
+        photoPendingDelete = photo;
+        showDeletePhotoConfirm = true;
+    }
+
+    private void CancelDeletePhoto()
+    {
+        showDeletePhotoConfirm = false;
+        photoPendingDelete = null;
+    }
+
+    private async Task ConfirmDeletePhoto()
+    {
+        if (photoPendingDelete is null) return;
+
+        isDeletingPhoto = true;
+        var success = await ArticlePhotoApi.DeleteAsync(photoPendingDelete.Id);
+        isDeletingPhoto = false;
+
+        showDeletePhotoConfirm = false;
+        photoPendingDelete = null;
+
+        if (success)
+            await LoadPhotos();
+    }
+
+    public class ArticleFormModel
+    {
+        [Required(ErrorMessage = "Nama artikel wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama artikel maksimal 150 karakter.")]
+        public string ArticleName { get; set; } = string.Empty;
+
+        [StringLength(100, ErrorMessage = "Style maksimal 100 karakter.")]
+        public string? Style { get; set; }
+
+        [StringLength(100, ErrorMessage = "Color maksimal 100 karakter.")]
+        public string? Color { get; set; }
+
+        [Range(1, int.MaxValue, ErrorMessage = "Size pack wajib dipilih.")]
+        public int SizePackId { get; set; }
+    }
+
+    public class ArticleSizeRowModel
+    {
+        public int SizePackDetailId { get; set; }
+        public string SizeName { get; set; } = string.Empty;
+        public int Qty { get; set; }
+        public int BundleQty { get; set; }
+    }
+}

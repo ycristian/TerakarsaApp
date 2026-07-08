@@ -40,5 +40,8 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.BuyerApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.EmployeeApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProjectApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProjectAttachmentApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.SizePackApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticlePhotoApiService>();
 
 await builder.Build().RunAsync();

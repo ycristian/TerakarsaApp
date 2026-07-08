@@ -219,11 +219,14 @@ hovermenu();
 
 // ______________HOVER JS start
 function hovermenu() {
-    $(".app-sidebar").hover(function () {
+    // delegated on document (not bound directly to .app-sidebar) so it still
+    // works once Blazor renders the sidebar after this script has already run
+    $(document).on('mouseenter', '.app-sidebar', function () {
         if ($('body').hasClass('sidenav-toggled')) {
             $('body').addClass('sidenav-toggled-open');
         }
-    }, function () {
+    });
+    $(document).on('mouseleave', '.app-sidebar', function () {
         if ($('body').hasClass('sidenav-toggled')) {
             $('body').removeClass('sidenav-toggled-open');
         }
@@ -294,10 +297,10 @@ function icontext() {
 
 let slideLeft = document.querySelector(".slide-left");
 let slideRight = document.querySelector(".slide-right");
-slideLeft.addEventListener("click", () => {
+slideLeft?.addEventListener("click", () => {
     slideClick()
 }, true)
-slideRight.addEventListener("click", () => { slideClick() }, true)
+slideRight?.addEventListener("click", () => { slideClick() }, true)
 
 // used to remove is-expanded class and remove class on clicking arrow buttons
 function slideClick() {
@@ -435,7 +438,10 @@ function checkHoriMenu() {
     setTimeout(()=>{
         let menuWidth = document.querySelector('.horizontal-main')
         let menuItems = document.querySelector('.side-menu')
-        let mainSidemenuWidth = document.querySelector('.main-sidemenu')    
+        let mainSidemenuWidth = document.querySelector('.main-sidemenu')
+        // horizontal-menu variant only (not used by this app's vertical sidebar);
+        // also guards against Blazor not having rendered these yet.
+        if (!menuWidth || !menuItems || !mainSidemenuWidth) return;
         let menuContainerWidth = menuWidth?.offsetWidth - mainSidemenuWidth?.offsetWidth
         let marginLeftValue = Math.ceil(window.getComputedStyle(menuItems).marginLeft.split('px')[0]);
         let marginRightValue = Math.ceil(window.getComputedStyle(menuItems).marginRight.split('px')[0]);
@@ -642,9 +648,12 @@ $(document).on("click", ".rtl #slide-right", function () {
 });
 
 // FOOTER
-document.getElementById("year").innerHTML = new Date().getFullYear();
+// (guarded: Blazor hasn't rendered the layout yet when this script first runs,
+// and this app doesn't render a footer with a #year element at all)
+const yearEl = document.getElementById("year");
+if (yearEl) yearEl.innerHTML = new Date().getFullYear();
 
-document.querySelector('.main-content').addEventListener('click', ()=>{
+document.querySelector('.main-content')?.addEventListener('click', ()=>{
     if (document.querySelector('body').classList.contains('horizontal')) {
         let li = document.querySelectorAll('.side-menu li')
         li.forEach((e, i) => {

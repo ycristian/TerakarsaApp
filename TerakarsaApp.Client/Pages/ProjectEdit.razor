@@ -11,13 +11,23 @@
 @inject ProjectAttachmentApiService AttachmentApi
 @inject BuyerApiService BuyerApi
 @inject EmployeeApiService EmployeeApi
+@inject ArticleApiService ArticleApi
+@inject ArticlePhotoApiService ArticlePhotoApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
 <PageTitle>Edit Project</PageTitle>
 
-<h3>Edit Project</h3>
+<div class="page-header">
+    <h1 class="page-title">Edit Project</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Edit Project</li>
+        </ol>
+    </div>
+</div>
 
 @if (hasAccess is null)
 {
@@ -42,7 +52,7 @@ else
     </div>
 
     <div class="row mb-4">
-        <div class="col-lg-7 mb-4 mb-lg-0">
+        <div class="col-lg-4 mb-4 mb-lg-0">
             <div class="card h-100">
                 <div class="card-header">
                     <h3 class="card-title">Detail Project</h3>
@@ -114,8 +124,89 @@ else
             </div>
         </div>
 
-        <div class="col-lg-5">
-            <div class="card">
+        <div class="col-lg-8">
+            <div class="card h-100 mb-0">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h3 class="card-title mb-0">Artikel</h3>
+                    <button class="btn btn-primary" @onclick="GoToCreateArticle">+ Tambah Artikel</button>
+                </div>
+                <div class="card-body">
+                    @if (isLoadingArticles)
+                    {
+                        <p class="mb-0">Memuat artikel...</p>
+                    }
+                    else if (articles.Count == 0)
+                    {
+                        <p class="mb-0">Belum ada artikel untuk project ini.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border text-nowrap mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Foto</th>
+                                        <th>Nama Artikel</th>
+                                        <th>Style</th>
+                                        <th>Color</th>
+                                        <th>Size Pack</th>
+                                        <th>Total Qty</th>
+                                        <th>Size</th>
+                                        <th>Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var a in articles)
+                                    {
+                                        <tr>
+                                            <td>
+                                                @if (articleThumbnails.TryGetValue(a.Id, out var thumbUrl))
+                                                {
+                                                    <img src="@thumbUrl" alt="Foto" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px;" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
+                                            <td>@a.ArticleName</td>
+                                            <td>@(a.Style ?? "-")</td>
+                                            <td>@(a.Color ?? "-")</td>
+                                            <td>@a.SizePackName</td>
+                                            <td>@a.TotalQty</td>
+                                            <td>
+                                                @if (articleSizes.TryGetValue(a.Id, out var sizes) && sizes.Count > 0)
+                                                {
+                                                    <div style="font-size: 11px; line-height: 1.4;">
+                                                        @foreach (var s in sizes)
+                                                        {
+                                                            <div>@(s.SizeName) : @s.Qty</div>
+                                                        }
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => GoToEditArticle(a.Id)"><i class="fe fe-edit"></i></button>
+                                                <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteArticle(a)"><i class="fe fe-trash-2"></i></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-6 mb-4 mb-lg-0">
+            <div class="card h-100 mb-0">
                 <div class="card-header">
                     <h3 class="card-title">Galeri Foto</h3>
                 </div>
@@ -179,8 +270,10 @@ else
                     }
                 </div>
             </div>
+        </div>
 
-            <div class="card mt-4 mb-0">
+        <div class="col-lg-6">
+            <div class="card h-100 mb-0">
                 <div class="card-header">
                     <h3 class="card-title">Lampiran</h3>
                 </div>
@@ -257,6 +350,10 @@ else
     <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeletingAttachment" OnConfirm="ConfirmDeleteAttachment" OnCancel="CancelDeleteAttachment">
         <Message>Yakin ingin menghapus lampiran "@attachmentPendingDelete?.FileName"?</Message>
     </ConfirmDeleteModal>
+
+    <ConfirmDeleteModal Show="showDeleteArticleConfirm" IsBusy="isDeletingArticle" OnConfirm="ConfirmDeleteArticle" OnCancel="CancelDeleteArticle">
+        <Message>Yakin ingin menghapus artikel "@articlePendingDelete?.ArticleName"?</Message>
+    </ConfirmDeleteModal>
 }
 
 @code {
@@ -285,6 +382,14 @@ else
     private Dictionary<int, string> photoPreviews = new();
     private List<ProjectAttachmentDto> PhotoAttachments => attachments.Where(a => a.FileType is "jpg" or "png").ToList();
 
+    private List<ArticleListItemDto> articles = new();
+    private bool isLoadingArticles = true;
+    private Dictionary<int, string> articleThumbnails = new();
+    private Dictionary<int, List<ArticleSizeSummaryDto>> articleSizes = new();
+    private bool showDeleteArticleConfirm = false;
+    private bool isDeletingArticle = false;
+    private ArticleListItemDto? articlePendingDelete;
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -296,6 +401,7 @@ else
             employeeOptions = await EmployeeApi.GetActiveAsync();
             await LoadProject();
             await LoadAttachments();
+            await LoadArticles();
         }
     }
 
@@ -453,6 +559,73 @@ else
 
         if (success)
             await LoadAttachments();
+    }
+
+    private async Task LoadArticles()
+    {
+        isLoadingArticles = true;
+        articles = await ArticleApi.GetByProjectAsync(Id);
+        isLoadingArticles = false;
+        await LoadArticleThumbnails();
+        await LoadArticleSizes();
+    }
+
+    private async Task LoadArticleSizes()
+    {
+        var sizes = await ArticleApi.GetSizesByProjectAsync(Id);
+        articleSizes = sizes.GroupBy(s => s.ArticleId).ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    private async Task LoadArticleThumbnails()
+    {
+        var tasks = articles.Select(async a =>
+        {
+            var result = await ArticlePhotoApi.GetPrimaryPhotoAsync(a.Id);
+            if (result is null) return (a.Id, Url: (string?)null);
+
+            var base64 = Convert.ToBase64String(result.Value.Bytes);
+            return (a.Id, Url: (string?)$"data:{result.Value.ContentType};base64,{base64}");
+        });
+
+        var results = await Task.WhenAll(tasks);
+        articleThumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
+    }
+
+    private void GoToCreateArticle()
+    {
+        Nav.NavigateTo($"/projects/{Id}/articles/create");
+    }
+
+    private void GoToEditArticle(int articleId)
+    {
+        Nav.NavigateTo($"/projects/{Id}/articles/{articleId}/edit");
+    }
+
+    private void HandleDeleteArticle(ArticleListItemDto article)
+    {
+        articlePendingDelete = article;
+        showDeleteArticleConfirm = true;
+    }
+
+    private void CancelDeleteArticle()
+    {
+        showDeleteArticleConfirm = false;
+        articlePendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteArticle()
+    {
+        if (articlePendingDelete is null) return;
+
+        isDeletingArticle = true;
+        var success = await ArticleApi.DeleteAsync(articlePendingDelete.Id);
+        isDeletingArticle = false;
+
+        showDeleteArticleConfirm = false;
+        articlePendingDelete = null;
+
+        if (success)
+            await LoadArticles();
     }
 
     public class ProjectFormModel

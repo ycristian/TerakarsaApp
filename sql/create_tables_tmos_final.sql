@@ -239,7 +239,7 @@ CREATE TABLE projects(
 
 CREATE TABLE size_packs(
  size_pack_id int primary key identity(1,1),
- buyer_id int not null
+ buyer_id int null
    constraint FK_size_packs_buyers foreign key references buyers(buyer_id),
  size_pack_name varchar(150) not null,
  created_at datetime2 not null default sysdatetime(),

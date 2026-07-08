@@ -12,12 +12,22 @@
 @inject ProjectAttachmentApiService AttachmentApi
 @inject BuyerApiService BuyerApi
 @inject EmployeeApiService EmployeeApi
+@inject ArticleApiService ArticleApi
+@inject ArticlePhotoApiService ArticlePhotoApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 
 <PageTitle>Data Project</PageTitle>
 
-<h3>Data Project</h3>
+<div class="page-header">
+    <h1 class="page-title">Data Project</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Data Project</li>
+        </ol>
+    </div>
+</div>
 
 @if (hasAccess is null)
 {
@@ -43,71 +53,134 @@ else
     </div>
 </div>
 
-@if (isLoading)
-{
-    <p>Memuat data...</p>
-}
-else if (pagedResult.Items.Count == 0)
-{
-    <p>Tidak ada data project.</p>
-}
-else
-{
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Daftar Project</h3>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-bordered border text-nowrap mb-0">
-                    <thead>
-                        <tr>
-                            <th>Foto</th>
-                            <SortableHeader Label="Nama Project" Column="ProjectName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <SortableHeader Label="No PO" Column="NoPo" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <SortableHeader Label="Tgl Order" Column="OrderDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <SortableHeader Label="Deadline" Column="Deadline" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <th>MD</th>
-                            <th>PIC</th>
-                            <th>Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var p in pagedResult.Items)
-                        {
-                            <tr>
-                                <td>
-                                    @if (thumbnails.TryGetValue(p.Id, out var thumbUrl))
-                                    {
-                                        <img src="@thumbUrl" alt="Foto" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px;" />
-                                    }
-                                    else
-                                    {
-                                        <span class="text-muted">-</span>
-                                    }
-                                </td>
-                                <td>@p.ProjectName</td>
-                                <td>@p.BuyerName</td>
-                                <td>@(p.NoPo ?? "-")</td>
-                                <td>@(p.OrderDate?.ToString("dd/MM/yyyy") ?? "-")</td>
-                                <td>@(p.Deadline?.ToString("dd/MM/yyyy") ?? "-")</td>
-                                <td>@(p.ProjectMdName ?? "-")</td>
-                                <td>@(p.ProjectPicName ?? "-")</td>
-                                <td>
-                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => GoToEdit(p.Id)"><i class="fe fe-edit"></i></button>
-                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+<div class="row">
+    <div class="col-lg-8 mb-4 mb-lg-0">
+        @if (isLoading)
+        {
+            <p>Memuat data...</p>
+        }
+        else if (pagedResult.Items.Count == 0)
+        {
+            <p>Tidak ada data project.</p>
+        }
+        else
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Daftar Project</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Foto</th>
+                                    <SortableHeader Label="Nama Project" Column="ProjectName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="No PO" Column="NoPo" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="Tgl Order" Column="OrderDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <SortableHeader Label="Deadline" Column="Deadline" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <th>MD</th>
+                                    <th>PIC</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in pagedResult.Items)
+                                {
+                                    <tr @onclick="() => SelectProject(p.Id)" style="cursor: pointer; @(p.Id == selectedProjectId ? "background-color: #f5f5f5;" : "")">
+                                        <td>
+                                            @if (thumbnails.TryGetValue(p.Id, out var thumbUrl))
+                                            {
+                                                <img src="@thumbUrl" alt="Foto" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px;" />
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td>@p.ProjectName</td>
+                                        <td>@p.BuyerName</td>
+                                        <td>@(p.NoPo ?? "-")</td>
+                                        <td>@(p.OrderDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                        <td>@(p.Deadline?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                        <td>@(p.ProjectMdName ?? "-")</td>
+                                        <td>@(p.ProjectPicName ?? "-")</td>
+                                        <td @onclick:stopPropagation="true">
+                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => GoToEdit(p.Id)"><i class="fe fe-edit"></i></button>
+                                            <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
 
-            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+                    <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="card-title mb-0">Artikel</h3>
+                <button class="btn btn-sm btn-primary" disabled="@(selectedProjectId is null)" @onclick="GoToCreateArticle">+ Tambah Artikel</button>
+            </div>
+            <div class="card-body">
+                @if (selectedProjectId is null)
+                {
+                    <p class="text-muted mb-0">Pilih project untuk melihat artikel.</p>
+                }
+                else if (isLoadingArticles)
+                {
+                    <p class="mb-0">Memuat artikel...</p>
+                }
+                else if (selectedProjectArticles.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada artikel untuk project ini.</p>
+                }
+                else
+                {
+                    @foreach (var a in selectedProjectArticles)
+                    {
+                        <div class="d-flex align-items-start border-bottom pb-2 mb-2">
+                            <div class="me-2">
+                                @if (articleThumbnails.TryGetValue(a.Id, out var thumbUrl))
+                                {
+                                    <img src="@thumbUrl" alt="Foto" style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px;" />
+                                }
+                                else
+                                {
+                                    <div class="d-flex align-items-center justify-content-center bg-light text-muted" style="width: 48px; height: 48px; border-radius: 4px;">-</div>
+                                }
+                            </div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">@a.ArticleName</div>
+                                <div class="small text-muted">@(a.Style ?? "-") / @(a.Color ?? "-")</div>
+                                <div class="small">Qty: @a.TotalQty</div>
+                            </div>
+                            @if (articleSizes.TryGetValue(a.Id, out var sizes) && sizes.Count > 0)
+                            {
+                                <div class="ms-2" style="font-size: 11px; line-height: 1.4; white-space: nowrap;">
+                                    @foreach (var s in sizes)
+                                    {
+                                        <div>@(s.SizeName) : @s.Qty</div>
+                                    }
+                                </div>
+                            }
+                            <div class="ms-2 d-flex flex-column gap-1">
+                                <button class="btn btn-sm btn-primary" title="Edit" @onclick="() => GoToEditArticle(a.Id)"><i class="fe fe-edit"></i></button>
+                                <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteArticle(a)"><i class="fe fe-trash-2"></i></button>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
         </div>
     </div>
-}
+</div>
 
 @if (showForm)
 {
@@ -185,6 +258,10 @@ else
 <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
     <Message>Yakin ingin menghapus project "@projectPendingDelete?.ProjectName"?</Message>
 </ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="showDeleteArticleConfirm" IsBusy="isDeletingArticle" OnConfirm="ConfirmDeleteArticle" OnCancel="CancelDeleteArticle">
+    <Message>Yakin ingin menghapus artikel "@articlePendingDelete?.ArticleName"?</Message>
+</ConfirmDeleteModal>
 }
 
 @code {
@@ -201,6 +278,15 @@ else
     private List<BuyerDto> buyerOptions = new();
     private List<EmployeeDto> employeeOptions = new();
     private Dictionary<int, string> thumbnails = new();
+
+    private int? selectedProjectId;
+    private List<ArticleListItemDto> selectedProjectArticles = new();
+    private bool isLoadingArticles = false;
+    private Dictionary<int, string> articleThumbnails = new();
+    private Dictionary<int, List<ArticleSizeSummaryDto>> articleSizes = new();
+    private bool showDeleteArticleConfirm = false;
+    private bool isDeletingArticle = false;
+    private ArticleListItemDto? articlePendingDelete;
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -366,6 +452,76 @@ else
 
         if (success)
             await LoadProjects();
+    }
+
+    private async Task SelectProject(int projectId)
+    {
+        selectedProjectId = projectId;
+        isLoadingArticles = true;
+        selectedProjectArticles = await ArticleApi.GetByProjectAsync(projectId);
+        isLoadingArticles = false;
+        await LoadArticleThumbnails();
+        await LoadArticleSizes(projectId);
+    }
+
+    private async Task LoadArticleSizes(int projectId)
+    {
+        var sizes = await ArticleApi.GetSizesByProjectAsync(projectId);
+        articleSizes = sizes.GroupBy(s => s.ArticleId).ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    private async Task LoadArticleThumbnails()
+    {
+        var tasks = selectedProjectArticles.Select(async a =>
+        {
+            var result = await ArticlePhotoApi.GetPrimaryPhotoAsync(a.Id);
+            if (result is null) return (a.Id, Url: (string?)null);
+
+            var base64 = Convert.ToBase64String(result.Value.Bytes);
+            return (a.Id, Url: (string?)$"data:{result.Value.ContentType};base64,{base64}");
+        });
+
+        var results = await Task.WhenAll(tasks);
+        articleThumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
+    }
+
+    private void GoToCreateArticle()
+    {
+        if (selectedProjectId is null) return;
+        Nav.NavigateTo($"/projects/{selectedProjectId}/articles/create");
+    }
+
+    private void GoToEditArticle(int articleId)
+    {
+        if (selectedProjectId is null) return;
+        Nav.NavigateTo($"/projects/{selectedProjectId}/articles/{articleId}/edit");
+    }
+
+    private void HandleDeleteArticle(ArticleListItemDto article)
+    {
+        articlePendingDelete = article;
+        showDeleteArticleConfirm = true;
+    }
+
+    private void CancelDeleteArticle()
+    {
+        showDeleteArticleConfirm = false;
+        articlePendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteArticle()
+    {
+        if (articlePendingDelete is null || selectedProjectId is null) return;
+
+        isDeletingArticle = true;
+        var success = await ArticleApi.DeleteAsync(articlePendingDelete.Id);
+        isDeletingArticle = false;
+
+        showDeleteArticleConfirm = false;
+        articlePendingDelete = null;
+
+        if (success)
+            await SelectProject(selectedProjectId.Value);
     }
 
     public class ProjectFormModel

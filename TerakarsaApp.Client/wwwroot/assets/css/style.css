@@ -62004,7 +62004,7 @@ ul {
     -o-transition: margin-left 450ms ease;
     transition: margin-left 450ms ease;
     overflow: clip;
-    margin-top: 100px;
+    margin-top: 0px;
 }
 
 .app-content .side-app {

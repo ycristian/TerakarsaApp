@@ -63,12 +63,19 @@
     <!-- Plugins (must come after jQuery) -->
     <script src="assets/plugins/select2/select2.full.min.js"></script>
 
+    <!-- Side-menu JS: handles the [data-bs-toggle="sidebar"] collapse toggle
+         and the [data-bs-toggle="slide"] submenu expand/collapse (e.g. Master Data) -->
+    <script src="assets/plugins/sidemenu/sidemenu.js"></script>
+
     <!-- App scripts -->
     <script src="assets/js/select2.js"></script>
     <script src="assets/js/sticky.js"></script>
-    <script src="assets/js/index1.js"></script>
-    <script src="assets/js/index.js"></script>
     <script src="assets/js/custom.js"></script>
+    <!-- index.js/index1.js are the vendor dashboard demo init scripts; they run
+         against chart libraries/DOM elements that don't exist until Home.razor
+         mounts, so they're loaded dynamically by dashboardScripts.js instead. -->
+    <script src="js/dashboardScripts.js"></script>
+    <script src="js/fileDownload.js"></script>
 
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
 </body>
