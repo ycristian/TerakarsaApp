@@ -28,6 +28,14 @@ builder.Services.AddHttpClient("API", client =>
 builder.Services.AddScoped(sp =>
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("API"));
 
+builder.Services.AddScoped<TerakarsaApp.Client.Auth.StationTokenHandler>();
+
+builder.Services.AddHttpClient<TerakarsaApp.Client.Services.StationDeviceApiService>(client =>
+{
+    client.BaseAddress = new Uri("http://localhost:5281/");
+})
+.AddHttpMessageHandler<TerakarsaApp.Client.Auth.StationTokenHandler>();
+
 builder.Services.AddScoped<AuthApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProductApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.UserApiService>();
@@ -45,5 +53,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticlePhotoApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowTemplateApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleWorkflowApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.StationApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowLogApiService>();
 
 await builder.Build().RunAsync();

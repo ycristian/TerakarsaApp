@@ -7,6 +7,7 @@
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.SizePacks
 @using TerakarsaApp.Shared.WorkflowTemplates
+@using TerakarsaApp.Shared.WorkflowLogs
 @using TerakarsaApp.Shared.Divisions
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Authorization
@@ -16,6 +17,7 @@
 @inject ProjectApiService ProjectApi
 @inject ArticleWorkflowApiService ArticleWorkflowApi
 @inject WorkflowTemplateApiService WorkflowTemplateApi
+@inject WorkflowLogApiService WorkflowLogApi
 @inject DivisionApiService DivisionApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
@@ -311,8 +313,97 @@ else
         </div>
     </div>
 
+    @if (!IsCreate)
+    {
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card mb-0">
+                    <div class="card-header">
+                        <h3 class="card-title">Riwayat Log Workflow</h3>
+                    </div>
+                    <div class="card-body">
+                        @if (isLoadingWorkflowLogs)
+                        {
+                            <p class="mb-0">Memuat riwayat...</p>
+                        }
+                        else if (workflowLogs.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Belum ada log workflow untuk artikel ini.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-bordered border text-nowrap mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Step</th>
+                                            <th>Status</th>
+                                            <th>Divisi</th>
+                                            <th>Operator</th>
+                                            <th>Bundle</th>
+                                            <th>Qty OK</th>
+                                            <th>Reject Print</th>
+                                            <th>Reject Bahan</th>
+                                            <th>Reject Jahit</th>
+                                            <th>Rework</th>
+                                            <th>Tujuan</th>
+                                            <th>Catatan</th>
+                                            <th>Waktu</th>
+                                            @if (isAdmin)
+                                            {
+                                                <th>Aksi</th>
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var log in workflowLogs)
+                                        {
+                                            <tr>
+                                                <td>@log.StepName</td>
+                                                <td><span class="badge @(log.Status == "COMPLETED" ? "bg-success" : "bg-info")">@log.Status</span></td>
+                                                <td>@log.DivisionName</td>
+                                                <td>@(log.ResourceName ?? "-")</td>
+                                                <td>@(log.BundleSerial ?? "-")</td>
+                                                <td>@log.QtyOk</td>
+                                                <td>@log.QtyRejectPrint</td>
+                                                <td>@log.QtyRejectFabric</td>
+                                                <td>@log.QtyRejectSewing</td>
+                                                <td>@log.QtyRework</td>
+                                                <td>@(log.TargetDivisionName ?? "-")</td>
+                                                <td>@(log.Remark ?? "-")</td>
+                                                <td>@log.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                                                @if (isAdmin)
+                                                {
+                                                    <td>
+                                                        <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteLog(log)"><i class="fe fe-trash-2"></i></button>
+                                                    </td>
+                                                }
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
     <ConfirmDeleteModal Show="showDeletePhotoConfirm" IsBusy="isDeletingPhoto" OnConfirm="ConfirmDeletePhoto" OnCancel="CancelDeletePhoto">
         <Message>Yakin ingin menghapus foto "@photoPendingDelete?.FileName"?</Message>
+    </ConfirmDeleteModal>
+
+    <ConfirmDeleteModal Show="showDeleteLogConfirm" IsBusy="isDeletingLog" OnConfirm="ConfirmDeleteLog" OnCancel="CancelDeleteLog">
+        <Message>
+            <p>Yakin ingin menghapus log "@logPendingDelete?.StepName" (@logPendingDelete?.Status)?</p>
+            <label class="form-label">Alasan hapus (wajib)</label>
+            <textarea class="form-control" rows="2" @bind="deleteLogReason"></textarea>
+            @if (!string.IsNullOrEmpty(deleteLogError))
+            {
+                <div class="text-danger mt-2">@deleteLogError</div>
+            }
+        </Message>
     </ConfirmDeleteModal>
 }
 
@@ -355,10 +446,20 @@ else
     private string workflowError = string.Empty;
     private string workflowSuccessMessage = string.Empty;
 
+    private List<WorkflowLogDto> workflowLogs = new();
+    private bool isLoadingWorkflowLogs = false;
+    private bool isAdmin = false;
+    private bool showDeleteLogConfirm = false;
+    private bool isDeletingLog = false;
+    private WorkflowLogDto? logPendingDelete;
+    private string deleteLogReason = string.Empty;
+    private string deleteLogError = string.Empty;
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
+        isAdmin = state.User.IsInRole("Admin");
 
         if (hasAccess != true)
         {
@@ -397,11 +498,59 @@ else
 
                     await LoadPhotos();
                     await LoadWorkflow();
+                    await LoadWorkflowLogs();
                 }
             }
         }
 
         isLoading = false;
+    }
+
+    private async Task LoadWorkflowLogs()
+    {
+        isLoadingWorkflowLogs = true;
+        workflowLogs = await WorkflowLogApi.GetByArticleAsync(ArticleId!.Value);
+        isLoadingWorkflowLogs = false;
+    }
+
+    private void HandleDeleteLog(WorkflowLogDto log)
+    {
+        logPendingDelete = log;
+        deleteLogReason = string.Empty;
+        deleteLogError = string.Empty;
+        showDeleteLogConfirm = true;
+    }
+
+    private void CancelDeleteLog()
+    {
+        showDeleteLogConfirm = false;
+        logPendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteLog()
+    {
+        if (logPendingDelete is null) return;
+
+        if (string.IsNullOrWhiteSpace(deleteLogReason))
+        {
+            deleteLogError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
+        isDeletingLog = true;
+        var result = await WorkflowLogApi.DeleteAsync(logPendingDelete.Id, deleteLogReason);
+        isDeletingLog = false;
+
+        if (result.Success)
+        {
+            showDeleteLogConfirm = false;
+            logPendingDelete = null;
+            await LoadWorkflowLogs();
+        }
+        else
+        {
+            deleteLogError = result.Error;
+        }
     }
 
     private async Task HandleSizePackChanged(int newSizePackId)

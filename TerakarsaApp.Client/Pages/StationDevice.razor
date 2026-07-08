@@ -1,0 +1,559 @@
+@page "/station"
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Resources
+@using TerakarsaApp.Shared.Stations
+@using TerakarsaApp.Shared.WorkflowLogs
+@inject StationDeviceApiService StationApi
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Stasiun</PageTitle>
+
+<div class="container-fluid py-3" style="max-width: 900px; font-size: 1.1rem;">
+
+@if (isLoadingSetup)
+{
+    <p class="text-center fs-4 mt-5">Memuat...</p>
+}
+else if (station is null)
+{
+    <div class="card mt-5">
+        <div class="card-body">
+            <h3 class="card-title mb-3">Setup Perangkat Stasiun</h3>
+            <p class="text-muted">Tempelkan token stasiun yang diberikan admin untuk mengaktifkan perangkat ini.</p>
+            <div class="mb-3">
+                <input class="form-control form-control-lg" placeholder="Token stasiun..." @bind="tokenInput" @bind:event="oninput" />
+            </div>
+            @if (!string.IsNullOrEmpty(setupError))
+            {
+                <div class="alert alert-danger">@setupError</div>
+            }
+            <button class="btn btn-primary btn-lg w-100" disabled="@isValidatingToken" @onclick="HandleSetupSubmit">
+                @(isValidatingToken ? "Memeriksa..." : "Aktifkan Perangkat")
+            </button>
+        </div>
+    </div>
+}
+else if (currentOperatorId is null)
+{
+    <div class="text-center mb-4">
+        <h3 class="mb-0">@station.StationName</h3>
+        <p class="text-muted mb-0">@station.DivisionName</p>
+    </div>
+    <h4 class="mb-3">Pilih Operator</h4>
+    @if (operators.Count == 0)
+    {
+        <div class="alert alert-warning">Belum ada resource aktif untuk divisi ini. Hubungi admin.</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var op in operators)
+            {
+                <div class="col-6 col-md-4">
+                    <button class="btn btn-outline-primary btn-lg w-100 py-4" @onclick="() => SelectOperator(op)">
+                        @op.ResourceName
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0">@station.StationName <span class="text-muted fs-6">(@station.DivisionName)</span></h4>
+            <p class="mb-0">Operator: <strong>@currentOperatorName</strong></p>
+        </div>
+        <div>
+            <button class="btn btn-outline-secondary" @onclick="RefreshLists" disabled="@isLoadingLists">
+                <i class="fe fe-refresh-cw"></i> Refresh
+            </button>
+            <button class="btn btn-outline-danger" @onclick="ChangeOperator">Ganti Operator</button>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link @(activeTab == "pending" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("pending")'>
+                Menunggu Diterima <span class="badge bg-primary">@pendingReceives.Count</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @(activeTab == "active" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("active")'>
+                Dikerjakan <span class="badge bg-primary">@activeWork.Count</span>
+            </a>
+        </li>
+    </ul>
+
+    @if (activeTab == "pending")
+    {
+        @if (pendingReceives.Count == 0)
+        {
+            <p class="text-muted">Tidak ada kiriman yang menunggu diterima.</p>
+        }
+        else
+        {
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="selectAllPending" @onchange="ToggleSelectAllPending" checked="@(selectedPendingIds.Count > 0 && selectedPendingIds.Count == pendingReceives.Count)" />
+                    <label class="form-check-label" for="selectAllPending">Pilih Semua</label>
+                </div>
+                <button class="btn btn-success" disabled="@(selectedPendingIds.Count == 0 || isBusy)" @onclick="ReceiveSelected">
+                    Terima Terpilih (@selectedPendingIds.Count)
+                </button>
+            </div>
+
+            @foreach (var item in pendingReceives)
+            {
+                <div class="card mb-2">
+                    <div class="card-body d-flex align-items-center gap-3">
+                        <input class="form-check-input mt-0" type="checkbox" style="width: 1.5em; height: 1.5em;"
+                               checked="@selectedPendingIds.Contains(item.ArticleWorkflowId)"
+                               @onchange="e => TogglePendingSelect(item.ArticleWorkflowId, e.Value)" />
+                        <div class="flex-grow-1">
+                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
+                            <p class="mb-1 text-muted">
+                                @item.Style @item.Color &middot; Step: <strong>@item.StepName</strong>
+                            </p>
+                            <p class="mb-0">Qty kirim: <strong>@item.QtyOk</strong> &middot; Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</p>
+                        </div>
+                        <div class="d-flex flex-column gap-2">
+                            <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveOne(item)">Terima</button>
+                            <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModal(item)">Dengan Catatan</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    }
+    else
+    {
+        @if (activeWork.Count == 0)
+        {
+            <p class="text-muted">Tidak ada pekerjaan aktif saat ini.</p>
+        }
+        else
+        {
+            @foreach (var item in activeWork)
+            {
+                <div class="card mb-2">
+                    <div class="card-body d-flex align-items-center gap-3">
+                        <div class="flex-grow-1">
+                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
+                            <p class="mb-0 text-muted">
+                                @item.Style @item.Color &middot; Step: <strong>@item.StepName</strong>
+                            </p>
+                        </div>
+                        <button class="btn btn-primary btn-lg" disabled="@isBusy" @onclick="() => OpenCompleteModal(item)">Selesai</button>
+                    </div>
+                </div>
+            }
+        }
+    }
+
+    @if (!string.IsNullOrEmpty(actionError))
+    {
+        <div class="alert alert-danger mt-3">@actionError</div>
+    }
+}
+
+</div>
+
+@if (showReceiveNoteModal && receiveNoteTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseReceiveNoteModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Terima dengan Catatan</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReceiveNoteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>@receiveNoteTarget.ArticleName</strong> &middot; @receiveNoteTarget.StepName</p>
+                    <label class="form-label">Catatan (wajib)</label>
+                    <textarea class="form-control" rows="3" @bind="receiveNoteText"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseReceiveNoteModal">Batal</button>
+                    <button class="btn btn-success" disabled="@(string.IsNullOrWhiteSpace(receiveNoteText) || isBusy)" @onclick="ConfirmReceiveWithNote">Terima</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showCompleteModal && completeTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseCompleteModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Selesaikan Step</h5>
+                    <button type="button" class="btn-close" @onclick="CloseCompleteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>@completeTarget.ArticleName</strong> &middot; @completeTarget.StepName</p>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label">Qty OK</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyOk" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Print</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectPrint" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Bahan</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectFabric" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Jahit</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectSewing" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRework" />
+                        </div>
+                    </div>
+
+                    @if (!completeTarget.IsLastStep)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Divisi Tujuan</label>
+                            <select class="form-select form-select-lg" @bind="completeTargetDivisionId">
+                                <option value="0">-- Pilih Divisi --</option>
+                                @foreach (var d in targetDivisions)
+                                {
+                                    <option value="@d.Id">@d.DivisionName</option>
+                                }
+                            </select>
+                        </div>
+                    }
+
+                    <label class="form-label">Catatan (opsional)</label>
+                    <textarea class="form-control" rows="2" @bind="completeRemark"></textarea>
+
+                    @if (!string.IsNullOrEmpty(completeError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@completeError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseCompleteModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmComplete">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const string TokenKey = "stationToken";
+    private const string OperatorIdKey = "stationOperatorId";
+    private const string OperatorNameKey = "stationOperatorName";
+
+    private bool isLoadingSetup = true;
+    private StationMeDto? station;
+    private string tokenInput = string.Empty;
+    private string setupError = string.Empty;
+    private bool isValidatingToken = false;
+
+    private List<ResourceLookupDto> operators = new();
+    private int? currentOperatorId;
+    private string? currentOperatorName;
+
+    private string activeTab = "pending";
+    private List<StationPendingReceiveDto> pendingReceives = new();
+    private List<StationActiveWorkDto> activeWork = new();
+    private List<DivisionDto> targetDivisions = new();
+    private bool isLoadingLists = false;
+    private bool isBusy = false;
+    private string actionError = string.Empty;
+
+    private HashSet<int> selectedPendingIds = new();
+
+    private bool showReceiveNoteModal = false;
+    private StationPendingReceiveDto? receiveNoteTarget;
+    private string receiveNoteText = string.Empty;
+
+    private bool showCompleteModal = false;
+    private StationActiveWorkDto? completeTarget;
+    private int completeQtyOk;
+    private int completeQtyRejectPrint;
+    private int completeQtyRejectFabric;
+    private int completeQtyRejectSewing;
+    private int completeQtyRework;
+    private int completeTargetDivisionId;
+    private string completeRemark = string.Empty;
+    private string completeError = string.Empty;
+
+    private System.Threading.Timer? pollTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoadingSetup = true;
+
+        var existingToken = await JS.InvokeAsync<string?>("localStorage.getItem", TokenKey);
+        if (!string.IsNullOrWhiteSpace(existingToken))
+        {
+            station = await StationApi.GetMeAsync();
+            if (station is null)
+                await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+        }
+
+        isLoadingSetup = false;
+
+        if (station is not null)
+            await LoadOperatorSessionAsync();
+    }
+
+    private async Task HandleSetupSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(tokenInput))
+        {
+            setupError = "Token wajib diisi.";
+            return;
+        }
+
+        isValidatingToken = true;
+        setupError = string.Empty;
+        await JS.InvokeVoidAsync("localStorage.setItem", TokenKey, tokenInput.Trim());
+
+        station = await StationApi.GetMeAsync();
+        isValidatingToken = false;
+
+        if (station is null)
+        {
+            setupError = "Token tidak valid atau perangkat nonaktif.";
+            await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+            return;
+        }
+
+        tokenInput = string.Empty;
+        await LoadOperatorSessionAsync();
+    }
+
+    private async Task LoadOperatorSessionAsync()
+    {
+        operators = await StationApi.GetResourcesAsync();
+
+        var savedId = await JS.InvokeAsync<string?>("localStorage.getItem", OperatorIdKey);
+        if (int.TryParse(savedId, out var id) && operators.Any(o => o.Id == id))
+        {
+            currentOperatorId = id;
+            currentOperatorName = operators.First(o => o.Id == id).ResourceName;
+            await StartSessionAsync();
+        }
+    }
+
+    private async Task SelectOperator(ResourceLookupDto op)
+    {
+        currentOperatorId = op.Id;
+        currentOperatorName = op.ResourceName;
+        await JS.InvokeVoidAsync("localStorage.setItem", OperatorIdKey, op.Id.ToString());
+        await JS.InvokeVoidAsync("localStorage.setItem", OperatorNameKey, op.ResourceName);
+        await StartSessionAsync();
+    }
+
+    private async Task ChangeOperator()
+    {
+        StopPolling();
+        currentOperatorId = null;
+        currentOperatorName = null;
+        selectedPendingIds.Clear();
+        await JS.InvokeVoidAsync("localStorage.removeItem", OperatorIdKey);
+        await JS.InvokeVoidAsync("localStorage.removeItem", OperatorNameKey);
+    }
+
+    private async Task StartSessionAsync()
+    {
+        targetDivisions = await StationApi.GetTargetDivisionsAsync();
+        await RefreshLists();
+        StartPolling();
+    }
+
+    private void StartPolling()
+    {
+        pollTimer?.Dispose();
+        pollTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshLists();
+                StateHasChanged();
+            });
+        }, null, 15000, 15000);
+    }
+
+    private void StopPolling()
+    {
+        pollTimer?.Dispose();
+        pollTimer = null;
+    }
+
+    private async Task RefreshLists()
+    {
+        isLoadingLists = true;
+        pendingReceives = await StationApi.GetPendingReceivesAsync();
+        activeWork = await StationApi.GetActiveWorkAsync();
+        selectedPendingIds.RemoveWhere(id => pendingReceives.All(p => p.ArticleWorkflowId != id));
+        isLoadingLists = false;
+        StateHasChanged();
+    }
+
+    private void SetTab(string tab)
+    {
+        activeTab = tab;
+    }
+
+    private void ToggleSelectAllPending(ChangeEventArgs e)
+    {
+        var check = e.Value is bool b && b;
+        selectedPendingIds = check ? pendingReceives.Select(p => p.ArticleWorkflowId).ToHashSet() : new();
+    }
+
+    private void TogglePendingSelect(int articleWorkflowId, object? value)
+    {
+        var check = value is bool b && b;
+        if (check) selectedPendingIds.Add(articleWorkflowId);
+        else selectedPendingIds.Remove(articleWorkflowId);
+    }
+
+    private async Task ReceiveOne(StationPendingReceiveDto item)
+    {
+        await DoReceiveAsync(item.ArticleWorkflowId, null);
+    }
+
+    private async Task ReceiveSelected()
+    {
+        isBusy = true;
+        actionError = string.Empty;
+
+        foreach (var id in selectedPendingIds.ToList())
+        {
+            var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
+            {
+                ArticleWorkflowId = id,
+                ResourceId = currentOperatorId!.Value
+            });
+
+            if (!success)
+            {
+                actionError = error;
+                break;
+            }
+        }
+
+        selectedPendingIds.Clear();
+        isBusy = false;
+        await RefreshLists();
+    }
+
+    private void OpenReceiveNoteModal(StationPendingReceiveDto item)
+    {
+        receiveNoteTarget = item;
+        receiveNoteText = string.Empty;
+        showReceiveNoteModal = true;
+    }
+
+    private void CloseReceiveNoteModal()
+    {
+        showReceiveNoteModal = false;
+        receiveNoteTarget = null;
+        receiveNoteText = string.Empty;
+    }
+
+    private async Task ConfirmReceiveWithNote()
+    {
+        if (receiveNoteTarget is null || string.IsNullOrWhiteSpace(receiveNoteText)) return;
+
+        var articleWorkflowId = receiveNoteTarget.ArticleWorkflowId;
+        var remark = receiveNoteText;
+        CloseReceiveNoteModal();
+        await DoReceiveAsync(articleWorkflowId, remark);
+    }
+
+    private async Task DoReceiveAsync(int articleWorkflowId, string? remark)
+    {
+        isBusy = true;
+        actionError = string.Empty;
+
+        var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
+        {
+            ArticleWorkflowId = articleWorkflowId,
+            ResourceId = currentOperatorId!.Value,
+            Remark = remark
+        });
+
+        isBusy = false;
+        if (!success) actionError = error;
+        await RefreshLists();
+    }
+
+    private void OpenCompleteModal(StationActiveWorkDto item)
+    {
+        completeTarget = item;
+        completeQtyOk = 0;
+        completeQtyRejectPrint = 0;
+        completeQtyRejectFabric = 0;
+        completeQtyRejectSewing = 0;
+        completeQtyRework = 0;
+        completeTargetDivisionId = 0;
+        completeRemark = string.Empty;
+        completeError = string.Empty;
+        showCompleteModal = true;
+    }
+
+    private void CloseCompleteModal()
+    {
+        showCompleteModal = false;
+        completeTarget = null;
+    }
+
+    private async Task ConfirmComplete()
+    {
+        if (completeTarget is null) return;
+
+        if (!completeTarget.IsLastStep && completeTargetDivisionId <= 0)
+        {
+            completeError = "Divisi tujuan wajib dipilih.";
+            return;
+        }
+
+        isBusy = true;
+        completeError = string.Empty;
+
+        var (success, error) = await StationApi.CompleteAsync(new StationCompleteRequest
+        {
+            ArticleWorkflowId = completeTarget.ArticleWorkflowId,
+            ResourceId = currentOperatorId!.Value,
+            QtyOk = completeQtyOk,
+            QtyRejectPrint = completeQtyRejectPrint,
+            QtyRejectFabric = completeQtyRejectFabric,
+            QtyRejectSewing = completeQtyRejectSewing,
+            QtyRework = completeQtyRework,
+            TargetDivisionId = completeTarget.IsLastStep ? null : completeTargetDivisionId,
+            Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            completeError = error;
+            return;
+        }
+
+        CloseCompleteModal();
+        await RefreshLists();
+    }
+
+    public void Dispose()
+    {
+        pollTimer?.Dispose();
+    }
+}

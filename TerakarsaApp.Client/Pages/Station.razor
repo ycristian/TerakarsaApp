@@ -1,0 +1,444 @@
+@page "/stations"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Stations
+@using TerakarsaApp.Shared.Divisions
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject StationApiService StationApi
+@inject DivisionApiService DivisionApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<PageTitle>Kelola Stasiun</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Kelola Stasiun</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Kelola Stasiun</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah Stasiun
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari kode / nama stasiun / divisi..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Tidak ada data stasiun.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar Stasiun</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Kode" Column="StationCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Nama Stasiun" Column="StationName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Status</th>
+                            <th>Token</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@s.StationCode</td>
+                                <td>@s.StationName</td>
+                                <td>@s.DivisionName</td>
+                                <td>
+                                    <span class="badge @(s.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(s.IsActive ? "Aktif" : "Nonaktif")
+                                    </span>
+                                </td>
+                                <td><code>@s.TokenPreview</code></td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(s)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" title="Generate Ulang Token" disabled="@isRegenerating" @onclick="() => RegenerateToken(s)"><i class="fe fe-refresh-cw"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(s)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit Stasiun" : "Tambah Stasiun")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Kode Stasiun</label>
+                            <InputText class="form-control" @bind-Value="formModel.StationCode" />
+                            <ValidationMessage For="@(() => formModel.StationCode)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Stasiun</label>
+                            <InputText class="form-control" @bind-Value="formModel.StationName" />
+                            <ValidationMessage For="@(() => formModel.StationName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Divisi</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId">
+                                <option value="0">-- Pilih Divisi --</option>
+                                @foreach (var d in divisionOptions)
+                                {
+                                    <option value="@d.Id">@d.DivisionName</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="@(() => formModel.DivisionId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
+                            <label class="form-check-label">Aktif</label>
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showTokenModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Token Stasiun</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">Token lama langsung tidak berlaku. Simpan/salin token ini sekarang — token penuh tidak akan ditampilkan lagi setelah modal ini ditutup.</div>
+                    <div class="input-group">
+                        <input class="form-control" readonly value="@revealedToken" />
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyToken">
+                            @(copied ? "Tersalin!" : "Salin")
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="CloseTokenModal">Selesai</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus stasiun "@stationPendingDelete?.StationName"?</Message>
+</ConfirmDeleteModal>
+}
+
+@code {
+    private StationPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private StationFormModel formModel = new();
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private StationDto? stationPendingDelete;
+    private List<DivisionDto> divisionOptions = new();
+    private bool isRegenerating = false;
+    private bool showTokenModal = false;
+    private string revealedToken = string.Empty;
+    private bool copied = false;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "STATION_MANAGE");
+
+        if (hasAccess == true)
+        {
+            divisionOptions = await DivisionApi.GetActiveAsync();
+            await LoadStations();
+        }
+    }
+
+    private async Task LoadStations()
+    {
+        isLoading = true;
+        pagedResult = await StationApi.GetPagedAsync(new StationPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadStations();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadStations();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadStations();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadStations();
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new StationFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(StationDto station)
+    {
+        isEditMode = true;
+        formModel = new StationFormModel
+        {
+            Id = station.Id,
+            StationCode = station.StationCode,
+            StationName = station.StationName,
+            DivisionId = station.DivisionId,
+            IsActive = station.IsActive
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        if (isEditMode)
+        {
+            var result = await StationApi.UpdateAsync(new StationUpdateRequest
+            {
+                Id = formModel.Id,
+                StationCode = formModel.StationCode,
+                StationName = formModel.StationName,
+                DivisionId = formModel.DivisionId,
+                IsActive = formModel.IsActive
+            });
+
+            isSaving = false;
+
+            if (result.Success)
+            {
+                showForm = false;
+                await LoadStations();
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+        else
+        {
+            var result = await StationApi.CreateAsync(new StationCreateRequest
+            {
+                StationCode = formModel.StationCode,
+                StationName = formModel.StationName,
+                DivisionId = formModel.DivisionId,
+                IsActive = formModel.IsActive
+            });
+
+            isSaving = false;
+
+            if (result.Success)
+            {
+                showForm = false;
+                await LoadStations();
+                RevealToken(result.Result?.Token ?? string.Empty);
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+    }
+
+    private async Task RegenerateToken(StationDto station)
+    {
+        isRegenerating = true;
+        var result = await StationApi.RegenerateTokenAsync(station.Id);
+        isRegenerating = false;
+
+        if (result.Success)
+        {
+            await LoadStations();
+            RevealToken(result.Result?.Token ?? string.Empty);
+        }
+        else
+        {
+            errorMessage = result.Error;
+        }
+    }
+
+    private void RevealToken(string token)
+    {
+        revealedToken = token;
+        copied = false;
+        showTokenModal = true;
+    }
+
+    private async Task CopyToken()
+    {
+        await JS.InvokeVoidAsync("copyToClipboard", revealedToken);
+        copied = true;
+    }
+
+    private void CloseTokenModal()
+    {
+        showTokenModal = false;
+        revealedToken = string.Empty;
+        copied = false;
+    }
+
+    private void HandleDelete(StationDto station)
+    {
+        stationPendingDelete = station;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        stationPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (stationPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await StationApi.DeleteAsync(stationPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        stationPendingDelete = null;
+
+        if (success)
+            await LoadStations();
+    }
+
+    public class StationFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Kode stasiun wajib diisi.")]
+        [StringLength(30, ErrorMessage = "Kode stasiun maksimal 30 karakter.")]
+        public string StationCode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama stasiun wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama stasiun maksimal 150 karakter.")]
+        public string StationName { get; set; } = string.Empty;
+
+        [Range(1, int.MaxValue, ErrorMessage = "Divisi wajib dipilih.")]
+        public int DivisionId { get; set; }
+
+        public bool IsActive { get; set; } = true;
+    }
+}

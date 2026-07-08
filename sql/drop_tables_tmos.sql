@@ -2,6 +2,9 @@
 -- Urutan sudah disusun: tabel anak (yang punya FK) dihapus lebih dulu,
 -- jadi tidak akan kena error FK constraint. Aman dijalankan berulang.
 
+-- Stasiun
+DROP TABLE IF EXISTS stations;
+
 -- Produksi & workflow
 DROP TABLE IF EXISTS article_workflow_logs;
 DROP TABLE IF EXISTS bundles;

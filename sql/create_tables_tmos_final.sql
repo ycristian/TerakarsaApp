@@ -584,9 +584,29 @@ CREATE TABLE material_adjustment_details(
  deleted_at datetime2 null,
  deleted_by int null
 );
+
+-- ============ 9. STASIUN ============
+-- Perangkat di lantai produksi yang mencatat log workflow tanpa login user
+-- (autentikasi via station_token per perangkat, lihat sp_Station_GetByToken).
+
+CREATE TABLE stations(
+ station_id int primary key identity(1,1),
+ station_code varchar(30) not null,
+ station_name varchar(150) not null,
+ division_id int not null
+   constraint FK_stations_divisions foreign key references divisions(division_id),
+ station_token varchar(64) not null,        -- GUID tanpa strip, digenerate server
+ is_active bit not null default 1,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
 GO
 
--- ============ 9. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
+-- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
 
 CREATE UNIQUE INDEX UX_buyers_code            ON buyers(buyer_code)                 WHERE deleted_at IS NULL;
@@ -606,9 +626,11 @@ CREATE UNIQUE INDEX UX_bundles_serial         ON bundles(serial)                
 CREATE UNIQUE INDEX UX_receipts_no            ON material_receipts(receipt_no)      WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stocks_serial          ON material_stocks(serial)            WHERE deleted_at IS NULL AND serial IS NOT NULL;
 CREATE UNIQUE INDEX UX_adjustments_no         ON material_adjustments(adjustment_no) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_stations_code          ON stations(station_code)             WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_stations_token         ON stations(station_token)            WHERE deleted_at IS NULL;
 GO
 
--- ============ 10. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
+-- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
 
 CREATE INDEX IX_movement_stock      ON material_movement(stock_id)  WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_bundle          ON article_workflow_logs(bundle_id) WHERE deleted_at IS NULL;
@@ -616,4 +638,5 @@ CREATE INDEX IX_awl_article_workflow ON article_workflow_logs(article_workflow_i
 CREATE INDEX IX_bundles_article     ON bundles(article_id);
 CREATE INDEX IX_articles_project    ON articles(project_id);
 CREATE INDEX IX_stocks_material     ON material_stocks(material_id);
+CREATE INDEX IX_stations_division   ON stations(division_id) WHERE deleted_at IS NULL;
 GO
