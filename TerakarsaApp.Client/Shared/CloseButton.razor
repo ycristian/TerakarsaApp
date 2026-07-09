@@ -1,0 +1,14 @@
+@* Tombol "Tutup" standar untuk halaman turunan (edit article, edit bundle, dst.).
+   Aturan: semua halaman turunan WAJIB memakai komponen ini, bukan tombol "Kembali ke X" buatan sendiri.
+   Halaman yang memakai komponen ini WAJIB dibuka lewat link/anchor target="_blank" TANPA rel="noopener",
+   supaya browser mengizinkan window.close() (auxiliary browsing context). *@
+@inject IJSRuntime JS
+
+<button class="btn btn-light" @onclick="HandleClick"><i class="fe fe-x"></i> Tutup</button>
+
+@code {
+    private async Task HandleClick()
+    {
+        await JS.InvokeVoidAsync("close");
+    }
+}

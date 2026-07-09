@@ -54,10 +54,10 @@ else if (project is null)
 else
 {
     <div class="mb-3 d-flex justify-content-between align-items-center">
-        <button class="btn btn-light" @onclick="BackToProjectEdit"><i class="fe fe-arrow-left"></i> Kembali ke Edit Project</button>
+        <CloseButton />
         @if (!IsCreate && hasBundleManageAccess)
         {
-            <button class="btn btn-primary" @onclick="GoToBundles"><i class="fe fe-package"></i> Kelola Bundle</button>
+            <a class="btn btn-primary" href="@($"/bundles/{ArticleId}/edit")" target="_blank"><i class="fe fe-package"></i> Kelola Bundle</a>
         }
     </div>
 
@@ -599,16 +599,6 @@ else
                 Qty = 0,
                 BundleQty = 0
             }).ToList();
-    }
-
-    private void BackToProjectEdit()
-    {
-        Nav.NavigateTo($"/projects/edit/{ProjectId}");
-    }
-
-    private void GoToBundles()
-    {
-        Nav.NavigateTo($"/articles/{ArticleId}/bundles");
     }
 
     private async Task HandleSubmit()

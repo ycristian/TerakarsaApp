@@ -155,7 +155,7 @@ else
                                                 <td>@b.BundleNo</td>
                                                 <td>@b.Serial</td>
                                                 <td>@b.Qty</td>
-                                                <td>@(b.ResourceName ?? b.ResourcePersonName ?? "-")</td>
+                                                <td>@FormatPenjahit(b)</td>
                                                 <td><span class="badge @LabelBadgeClass(b.LabelStatus)">@LabelBadgeText(b.LabelStatus)</span></td>
                                                 <td>
                                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(b)"><i class="fe fe-edit"></i></button>
@@ -429,6 +429,14 @@ else
         if (result.Success)
             await LoadBundles();
     }
+
+    private static string FormatPenjahit(BundleDto b) => (b.ResourceName, b.ResourcePersonName) switch
+    {
+        ({ Length: > 0 } resource, { Length: > 0 } person) => $"{resource} - {person}",
+        ({ Length: > 0 } resource, _) => resource,
+        (_, { Length: > 0 } person) => person,
+        _ => "-"
+    };
 
     private static string LabelBadgeClass(string? status) => status switch
     {

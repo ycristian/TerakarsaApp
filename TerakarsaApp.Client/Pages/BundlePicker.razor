@@ -86,7 +86,7 @@ else
                                             <td>@a.TotalQty</td>
                                             <td>@a.BundleCount</td>
                                             <td>
-                                                <button class="btn btn-sm btn-primary" @onclick="() => SelectArticle(a.Id)">Kelola</button>
+                                                <a class="btn btn-sm btn-primary" href="@($"/bundles/{a.Id}/edit")" target="_blank">Kelola</a>
                                             </td>
                                         </tr>
                                     }
@@ -120,10 +120,10 @@ else
                         <div class="list-group mt-3">
                             @foreach (var r in searchResults)
                             {
-                                <button type="button" class="list-group-item list-group-item-action" @onclick="() => SelectArticle(r.Id)">
+                                <a class="list-group-item list-group-item-action" href="@($"/bundles/{r.Id}/edit")" target="_blank">
                                     <div class="fw-semibold">@r.ArticleName @(string.IsNullOrEmpty(r.Style) ? "" : $"- {r.Style}") @(r.Color ?? "")</div>
                                     <div class="text-muted small">@r.ProjectName</div>
-                                </button>
+                                </a>
                             }
                         </div>
                     }
@@ -131,11 +131,6 @@ else
             </div>
         </div>
     </div>
-
-    @if (selectedArticleId.HasValue)
-    {
-        <BundleManager ArticleId="selectedArticleId.Value" @key="selectedArticleId.Value" />
-    }
 }
 
 @code {
@@ -151,8 +146,6 @@ else
     private bool isSearching = false;
     private List<ArticleSearchDto> searchResults = new();
     private System.Threading.Timer? debounceTimer;
-
-    private int? selectedArticleId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -211,10 +204,5 @@ else
                 StateHasChanged();
             });
         }, null, 400, Timeout.Infinite);
-    }
-
-    private void SelectArticle(int articleId)
-    {
-        selectedArticleId = articleId;
     }
 }

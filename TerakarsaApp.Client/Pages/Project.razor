@@ -107,7 +107,7 @@ else
                                         <td>@(p.ProjectMdName ?? "-")</td>
                                         <td>@(p.ProjectPicName ?? "-")</td>
                                         <td @onclick:stopPropagation="true">
-                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => GoToEdit(p.Id)"><i class="fe fe-edit"></i></button>
+                                            <a class="btn btn-sm btn-primary me-1" title="Edit" href="@($"/projects/edit/{p.Id}")" target="_blank"><i class="fe fe-edit"></i></a>
                                             <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
                                         </td>
                                     </tr>
@@ -126,7 +126,7 @@ else
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h3 class="card-title mb-0">Artikel</h3>
-                <button class="btn btn-sm btn-primary" disabled="@(selectedProjectId is null)" @onclick="GoToCreateArticle">+ Tambah Artikel</button>
+                <a class="btn btn-sm btn-primary @(selectedProjectId is null ? "disabled" : "")" href="@($"/projects/{selectedProjectId}/articles/create")" target="_blank">+ Tambah Artikel</a>
             </div>
             <div class="card-body">
                 @if (selectedProjectId is null)
@@ -171,7 +171,8 @@ else
                                 </div>
                             }
                             <div class="ms-2 d-flex flex-column gap-1">
-                                <button class="btn btn-sm btn-primary" title="Edit" @onclick="() => GoToEditArticle(a.Id)"><i class="fe fe-edit"></i></button>
+                                <a class="btn btn-sm btn-primary" title="Edit" href="@($"/projects/{selectedProjectId}/articles/{a.Id}/edit")" target="_blank"><i class="fe fe-edit"></i></a>
+                                <a class="btn btn-sm btn-info" title="Kelola Bundle" href="@($"/bundles/{a.Id}/edit")" target="_blank"><i class="fe fe-package"></i></a>
                                 <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteArticle(a)"><i class="fe fe-trash-2"></i></button>
                             </div>
                         </div>
@@ -386,11 +387,6 @@ else
         showForm = true;
     }
 
-    private void GoToEdit(int id)
-    {
-        Nav.NavigateTo($"/projects/edit/{id}");
-    }
-
     private void CloseForm()
     {
         showForm = false;
@@ -483,18 +479,6 @@ else
 
         var results = await Task.WhenAll(tasks);
         articleThumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
-    }
-
-    private void GoToCreateArticle()
-    {
-        if (selectedProjectId is null) return;
-        Nav.NavigateTo($"/projects/{selectedProjectId}/articles/create");
-    }
-
-    private void GoToEditArticle(int articleId)
-    {
-        if (selectedProjectId is null) return;
-        Nav.NavigateTo($"/projects/{selectedProjectId}/articles/{articleId}/edit");
     }
 
     private void HandleDeleteArticle(ArticleListItemDto article)
