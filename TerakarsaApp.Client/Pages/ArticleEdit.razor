@@ -53,8 +53,12 @@ else if (project is null)
 }
 else
 {
-    <div class="mb-3">
+    <div class="mb-3 d-flex justify-content-between align-items-center">
         <button class="btn btn-light" @onclick="BackToProjectEdit"><i class="fe fe-arrow-left"></i> Kembali ke Edit Project</button>
+        @if (!IsCreate && hasBundleManageAccess)
+        {
+            <button class="btn btn-primary" @onclick="GoToBundles"><i class="fe fe-package"></i> Kelola Bundle</button>
+        }
     </div>
 
     <div class="row mb-4">
@@ -449,6 +453,7 @@ else
     private List<WorkflowLogDto> workflowLogs = new();
     private bool isLoadingWorkflowLogs = false;
     private bool isAdmin = false;
+    private bool hasBundleManageAccess = false;
     private bool showDeleteLogConfirm = false;
     private bool isDeletingLog = false;
     private WorkflowLogDto? logPendingDelete;
@@ -460,6 +465,7 @@ else
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
         isAdmin = state.User.IsInRole("Admin");
+        hasBundleManageAccess = state.User.HasClaim("module", "BUNDLE_MANAGE");
 
         if (hasAccess != true)
         {
@@ -598,6 +604,11 @@ else
     private void BackToProjectEdit()
     {
         Nav.NavigateTo($"/projects/edit/{ProjectId}");
+    }
+
+    private void GoToBundles()
+    {
+        Nav.NavigateTo($"/articles/{ArticleId}/bundles");
     }
 
     private async Task HandleSubmit()

@@ -1,0 +1,220 @@
+@page "/bundles"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Projects
+@inject BundleApiService BundleApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Kelola Bundle</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Kelola Bundle</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Kelola Bundle</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="row mb-4">
+        <div class="col-lg-7 mb-4 mb-lg-0">
+            <div class="card h-100 mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Pilih Artikel</h3>
+                </div>
+                <div class="card-body">
+                    <label class="form-label">Project</label>
+                    <SearchableSelect TItem="ProjectDto" Items="projects" Value="selectedProjectId" ValueChanged="HandleProjectChanged"
+                                      IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                      Placeholder="Cari project..." />
+
+                    @if (isLoadingArticles)
+                    {
+                        <p class="mt-3 mb-0">Memuat artikel...</p>
+                    }
+                    else if (selectedProjectId > 0 && articles.Count == 0)
+                    {
+                        <p class="mt-3 mb-0 text-muted">Project ini belum punya artikel.</p>
+                    }
+                    else if (articles.Count > 0)
+                    {
+                        <div class="table-responsive mt-3">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>Artikel</th>
+                                        <th>Qty Order</th>
+                                        <th>Jumlah Bundle</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var a in articles)
+                                    {
+                                        <tr>
+                                            <td style="width: 56px;">
+                                                @if (thumbnails.TryGetValue(a.Id, out var src))
+                                                {
+                                                    <img src="@src" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;" />
+                                                }
+                                                else
+                                                {
+                                                    <div class="bg-light d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; border-radius: 4px;">
+                                                        <i class="fe fe-image text-muted"></i>
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div>@a.ArticleName</div>
+                                                <div class="text-muted small">@(string.IsNullOrEmpty(a.Style) ? "" : $"{a.Style} ") @(a.Color ?? "")</div>
+                                            </td>
+                                            <td>@a.TotalQty</td>
+                                            <td>@a.BundleCount</td>
+                                            <td>
+                                                <button class="btn btn-sm btn-primary" @onclick="() => SelectArticle(a.Id)">Kelola</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card h-100 mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Cari Artikel Lintas Project</h3>
+                </div>
+                <div class="card-body">
+                    <input class="form-control" placeholder="Ketik min. 3 huruf (nama artikel / style)..."
+                           @bind="searchKeyword" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+
+                    @if (isSearching)
+                    {
+                        <p class="mt-3 mb-0">Mencari...</p>
+                    }
+                    else if (searchKeyword.Trim().Length >= 3 && searchResults.Count == 0)
+                    {
+                        <p class="mt-3 mb-0 text-muted">Tidak ada artikel yang cocok.</p>
+                    }
+                    else if (searchResults.Count > 0)
+                    {
+                        <div class="list-group mt-3">
+                            @foreach (var r in searchResults)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action" @onclick="() => SelectArticle(r.Id)">
+                                    <div class="fw-semibold">@r.ArticleName @(string.IsNullOrEmpty(r.Style) ? "" : $"- {r.Style}") @(r.Color ?? "")</div>
+                                    <div class="text-muted small">@r.ProjectName</div>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (selectedArticleId.HasValue)
+    {
+        <BundleManager ArticleId="selectedArticleId.Value" @key="selectedArticleId.Value" />
+    }
+}
+
+@code {
+    private bool? hasAccess = null;
+
+    private List<ProjectDto> projects = new();
+    private int selectedProjectId;
+    private bool isLoadingArticles = false;
+    private List<ArticleListItemDto> articles = new();
+    private Dictionary<int, string> thumbnails = new();
+
+    private string searchKeyword = string.Empty;
+    private bool isSearching = false;
+    private List<ArticleSearchDto> searchResults = new();
+    private System.Threading.Timer? debounceTimer;
+
+    private int? selectedArticleId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "BUNDLE_MANAGE");
+
+        if (hasAccess == true)
+        {
+            projects = await BundleApi.GetProjectsAsync();
+        }
+    }
+
+    private async Task HandleProjectChanged(int projectId)
+    {
+        selectedProjectId = projectId;
+        articles = new();
+        thumbnails = new();
+
+        if (projectId <= 0) return;
+
+        isLoadingArticles = true;
+        articles = await BundleApi.GetArticlesByProjectAsync(projectId);
+        isLoadingArticles = false;
+
+        foreach (var a in articles)
+        {
+            var result = await BundleApi.GetArticleThumbnailAsync(a.Id);
+            if (result is not null)
+            {
+                var base64 = Convert.ToBase64String(result.Value.Bytes);
+                thumbnails[a.Id] = $"data:{result.Value.ContentType};base64,{base64}";
+            }
+        }
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                var keyword = searchKeyword.Trim();
+                if (keyword.Length < 3)
+                {
+                    searchResults = new();
+                    isSearching = false;
+                    StateHasChanged();
+                    return;
+                }
+
+                isSearching = true;
+                StateHasChanged();
+                searchResults = await BundleApi.SearchArticlesAsync(keyword);
+                isSearching = false;
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private void SelectArticle(int articleId)
+    {
+        selectedArticleId = articleId;
+    }
+}

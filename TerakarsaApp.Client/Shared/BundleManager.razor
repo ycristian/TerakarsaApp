@@ -1,0 +1,463 @@
+@* Panel lengkap kelola bundle untuk satu artikel: ringkasan per ukuran, form tambah,
+   daftar bundle (edit/hapus/cetak ulang). Dipakai di dua tempat:
+   - /articles/{articleId}/bundles (TerakarsaApp.Client/Pages/Bundle.razor)
+   - /bundles setelah memilih artikel (TerakarsaApp.Client/Pages/BundlePicker.razor)
+   Pemanggil yang mengganti ArticleId secara dinamis (tanpa navigasi halaman, mis. BundlePicker)
+   WAJIB memasang @key="ArticleId" supaya komponen dibuat ulang bersih per artikel. *@
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Projects
+@using TerakarsaApp.Shared.Resources
+@using Microsoft.AspNetCore.Components.Authorization
+@inject BundleApiService BundleApi
+@inject ArticleApiService ArticleApi
+@inject ProjectApiService ProjectApi
+@inject ResourceApiService ResourceApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (article is null)
+{
+    <div class="alert alert-danger">Artikel tidak ditemukan.</div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="mb-1">@project?.ProjectName</h5>
+            <p class="mb-0 text-muted">@article.ArticleName @(string.IsNullOrEmpty(article.Style) ? "" : $"- {article.Style}") @(string.IsNullOrEmpty(article.Color) ? "" : $"/ {article.Color}")</p>
+        </div>
+    </div>
+
+    @if (showCuttingBanner)
+    {
+        <div class="alert alert-warning">Hasil cutting belum dikonfirmasi diterima. Bundle tetap bisa dibuat.</div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="card-title">Ringkasan per Ukuran</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border mb-0">
+                    <thead>
+                        <tr>
+                            <th>Ukuran</th>
+                            <th>Qty Order</th>
+                            <th>Saran Bundle Qty</th>
+                            <th>Jumlah Bundle</th>
+                            <th>Total Qty Bundle</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in summary)
+                        {
+                            <tr class="@(s.TotalBundleQty != s.QtyOrder ? "table-warning" : "")">
+                                <td>@s.SizeName</td>
+                                <td>@s.QtyOrder</td>
+                                <td>@s.BundleQty</td>
+                                <td>@s.BundleCount</td>
+                                <td>@s.TotalBundleQty</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-0">
+        <div class="col-lg-3 mb-4 mb-lg-0">
+            <div class="card h-100 mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Tambah Bundle</h3>
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <label class="form-label">Ukuran</label>
+                        <SearchableSelect TItem="BundleSizeSummaryDto" Items="summary" Value="addForm.ArticleSizeId" ValueChanged="HandleSizeChanged"
+                                          IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => s.SizeName)"
+                                          Placeholder="Cari ukuran..." />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Qty</label>
+                        <input type="number" min="1" class="form-control" @bind="addForm.Qty" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Penjahit (resource)</label>
+                        <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="addForm.ResourceId"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Nama Penjahit (bebas)</label>
+                        <input class="form-control" maxlength="150" @bind="addForm.ResourcePersonName" />
+                    </div>
+                    <button class="btn btn-primary w-100" disabled="@isSavingAdd" @onclick="HandleAddBundle">
+                        @(isSavingAdd ? "Menyimpan..." : "Simpan")
+                    </button>
+                    @if (!string.IsNullOrEmpty(addError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@addError</div>
+                    }
+                    @if (!string.IsNullOrEmpty(addSuccessMessage))
+                    {
+                        <div class="alert alert-success mt-3 mb-0">@addSuccessMessage</div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-9">
+            <div class="card h-100 mb-0">
+                <div class="card-header">
+                    <h3 class="card-title">Daftar Bundle</h3>
+                </div>
+                <div class="card-body">
+                    @if (bundles.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Belum ada bundle untuk artikel ini.</p>
+                    }
+                    else
+                    {
+                        @foreach (var sizeGroup in bundles.GroupBy(b => new { b.ArticleSizeId, b.SizeName }))
+                        {
+                            <h6 class="mt-2">@sizeGroup.Key.SizeName</h6>
+                            <div class="table-responsive mb-3">
+                                <table class="table table-bordered border text-nowrap mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>No</th>
+                                            <th>Serial</th>
+                                            <th>Qty</th>
+                                            <th>Penjahit</th>
+                                            <th>Status Label</th>
+                                            <th>Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var b in sizeGroup)
+                                        {
+                                            <tr>
+                                                <td>@b.BundleNo</td>
+                                                <td>@b.Serial</td>
+                                                <td>@b.Qty</td>
+                                                <td>@(b.ResourceName ?? b.ResourcePersonName ?? "-")</td>
+                                                <td><span class="badge @LabelBadgeClass(b.LabelStatus)">@LabelBadgeText(b.LabelStatus)</span></td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(b)"><i class="fe fe-edit"></i></button>
+                                                    <button class="btn btn-sm btn-outline-secondary me-1" title="Cetak Ulang" disabled="@(reprintingId == b.Id)" @onclick="() => HandleReprint(b)"><i class="fe fe-printer"></i></button>
+                                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(b)"><i class="fe fe-trash-2"></i></button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (showEditForm)
+    {
+        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseEditForm">
+            <div class="modal-dialog" @onclick:stopPropagation="true">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Bundle @editForm.Serial</h5>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseEditForm"><span aria-hidden="true">&times;</span></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Qty</label>
+                            <input type="number" min="1" class="form-control" @bind="editForm.Qty" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Penjahit (resource)</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="editForm.ResourceId"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Penjahit (bebas)</label>
+                            <input class="form-control" maxlength="150" @bind="editForm.ResourcePersonName" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(editError))
+                        {
+                            <div class="alert alert-danger">@editError</div>
+                        }
+                        <button type="button" class="btn btn-primary w-100" disabled="@isSavingEdit" @onclick="HandleSaveEdit">
+                            @(isSavingEdit ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+        <Message>
+            <p class="mb-0">Yakin ingin menghapus bundle "@bundlePendingDelete?.Serial"?</p>
+            @if (!string.IsNullOrEmpty(deleteError))
+            {
+                <div class="text-danger mt-2">@deleteError</div>
+            }
+        </Message>
+    </ConfirmDeleteModal>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ArticleId { get; set; }
+
+    private bool? hasAccess = null;
+    private bool isLoading = true;
+
+    private ArticleDto? article;
+    private ProjectDto? project;
+    private List<BundleSizeSummaryDto> summary = new();
+    private List<BundleDto> bundles = new();
+    private List<ResourceLookupDto> resourceOptions = new();
+
+    private bool showCuttingBanner => summary.Count > 0 && summary[0].HasFirstBundleStep && !summary[0].IsFirstBundleStepReceived;
+
+    private BundleAddFormModel addForm = new();
+    private bool isSavingAdd = false;
+    private string addError = string.Empty;
+    private string addSuccessMessage = string.Empty;
+
+    private bool showEditForm = false;
+    private BundleEditFormModel editForm = new();
+    private bool isSavingEdit = false;
+    private string editError = string.Empty;
+
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private string deleteError = string.Empty;
+    private BundleDto? bundlePendingDelete;
+
+    private int? reprintingId = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "BUNDLE_MANAGE");
+
+        if (hasAccess != true)
+        {
+            isLoading = false;
+            return;
+        }
+
+        isLoading = true;
+
+        article = await ArticleApi.GetByIdAsync(ArticleId);
+        if (article is not null)
+        {
+            project = await ProjectApi.GetByIdAsync(article.ProjectId);
+            await LoadBundles();
+        }
+
+        isLoading = false;
+    }
+
+    private async Task LoadBundles()
+    {
+        var data = await BundleApi.GetByArticleAsync(ArticleId);
+        summary = data.Summary;
+        bundles = data.Bundles;
+
+        var divisionId = summary.FirstOrDefault()?.FirstBundleStepDivisionId;
+        if (divisionId.HasValue)
+            resourceOptions = await ResourceApi.GetActiveByDivisionAsync(divisionId.Value);
+    }
+
+    private void HandleSizeChanged(int articleSizeId)
+    {
+        addForm.ArticleSizeId = articleSizeId;
+        var sizeInfo = summary.FirstOrDefault(s => s.ArticleSizeId == articleSizeId);
+        if (sizeInfo is not null)
+            addForm.Qty = sizeInfo.BundleQty;
+    }
+
+    private async Task HandleAddBundle()
+    {
+        addError = string.Empty;
+        addSuccessMessage = string.Empty;
+
+        if (addForm.ArticleSizeId <= 0)
+        {
+            addError = "Ukuran wajib dipilih.";
+            return;
+        }
+
+        if (addForm.Qty <= 0)
+        {
+            addError = "Qty bundle harus lebih dari 0.";
+            return;
+        }
+
+        isSavingAdd = true;
+
+        var result = await BundleApi.CreateAsync(new BundleCreateRequest
+        {
+            ArticleId = ArticleId,
+            ArticleSizeId = addForm.ArticleSizeId,
+            Qty = addForm.Qty,
+            ResourceId = addForm.ResourceId > 0 ? addForm.ResourceId : null,
+            ResourcePersonName = string.IsNullOrWhiteSpace(addForm.ResourcePersonName) ? null : addForm.ResourcePersonName
+        });
+
+        isSavingAdd = false;
+
+        if (result.Success)
+        {
+            addSuccessMessage = $"Bundle #{result.BundleNo} dibuat.";
+            await LoadBundles();
+        }
+        else
+        {
+            addError = result.Error;
+        }
+    }
+
+    private void OpenEditForm(BundleDto bundle)
+    {
+        editForm = new BundleEditFormModel
+        {
+            Id = bundle.Id,
+            Serial = bundle.Serial,
+            Qty = bundle.Qty,
+            ResourceId = bundle.ResourceId ?? 0,
+            ResourcePersonName = bundle.ResourcePersonName
+        };
+        editError = string.Empty;
+        showEditForm = true;
+    }
+
+    private void CloseEditForm()
+    {
+        showEditForm = false;
+    }
+
+    private async Task HandleSaveEdit()
+    {
+        if (editForm.Qty <= 0)
+        {
+            editError = "Qty bundle harus lebih dari 0.";
+            return;
+        }
+
+        isSavingEdit = true;
+        editError = string.Empty;
+
+        var result = await BundleApi.UpdateAsync(editForm.Id, new BundleUpdateRequest
+        {
+            Id = editForm.Id,
+            Qty = editForm.Qty,
+            ResourceId = editForm.ResourceId > 0 ? editForm.ResourceId : null,
+            ResourcePersonName = string.IsNullOrWhiteSpace(editForm.ResourcePersonName) ? null : editForm.ResourcePersonName
+        });
+
+        isSavingEdit = false;
+
+        if (result.Success)
+        {
+            showEditForm = false;
+            await LoadBundles();
+        }
+        else
+        {
+            editError = result.Error;
+        }
+    }
+
+    private void HandleDelete(BundleDto bundle)
+    {
+        bundlePendingDelete = bundle;
+        deleteError = string.Empty;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        bundlePendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (bundlePendingDelete is null) return;
+
+        isDeleting = true;
+        var result = await BundleApi.DeleteAsync(bundlePendingDelete.Id);
+        isDeleting = false;
+
+        if (result.Success)
+        {
+            showDeleteConfirm = false;
+            bundlePendingDelete = null;
+            await LoadBundles();
+        }
+        else
+        {
+            deleteError = result.Error;
+        }
+    }
+
+    private async Task HandleReprint(BundleDto bundle)
+    {
+        reprintingId = bundle.Id;
+        var result = await BundleApi.ReprintAsync(bundle.Id);
+        reprintingId = null;
+
+        if (result.Success)
+            await LoadBundles();
+    }
+
+    private static string LabelBadgeClass(string? status) => status switch
+    {
+        "DONE" => "bg-success",
+        "ERROR" => "bg-danger",
+        _ => "bg-warning"
+    };
+
+    private static string LabelBadgeText(string? status) => status switch
+    {
+        "DONE" => "Dicetak",
+        "ERROR" => "Gagal",
+        _ => "Menunggu Cetak"
+    };
+
+    public class BundleAddFormModel
+    {
+        public int ArticleSizeId { get; set; }
+        public int Qty { get; set; }
+        public int ResourceId { get; set; }
+        public string? ResourcePersonName { get; set; }
+    }
+
+    public class BundleEditFormModel
+    {
+        public int Id { get; set; }
+        public string Serial { get; set; } = string.Empty;
+        public int Qty { get; set; }
+        public int ResourceId { get; set; }
+        public string? ResourcePersonName { get; set; }
+    }
+}

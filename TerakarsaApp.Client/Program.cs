@@ -55,5 +55,6 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowTemplateApiServi
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ArticleWorkflowApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.StationApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowLogApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.BundleApiService>();
 
 await builder.Build().RunAsync();

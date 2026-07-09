@@ -390,6 +390,7 @@ CREATE TABLE bundles(
  article_size_id int not null
    constraint FK_bundles_article_sizes foreign key references article_sizes(article_size_id),
  serial varchar(20) not null,
+ bundle_no int not null,    -- nomor urut per project, generate di sp_Bundle_Manage, tidak dipakai ulang
  qty int not null default 0,
  sort_order int not null default 0,
  resource_id int null
@@ -438,6 +439,26 @@ CREATE TABLE article_workflow_logs(
  deleted_at datetime2 null,
  deleted_by int null,
  delete_reason varchar(255) null
+);
+
+-- Antrian cetak label QR. Dibuat otomatis saat bundle dibuat (job_type BUNDLE_LABEL,
+-- ref_id = bundle_id) atau lewat cetak ulang. Pencetakan fisik (Windows service,
+-- perakitan TSPL dari payload) dikerjakan di Prompt 11 -- di sini hanya antrian.
+CREATE TABLE print_jobs(
+ print_job_id int primary key identity(1,1),
+ job_type varchar(30) not null,             -- 'BUNDLE_LABEL' (nanti: 'MATERIAL_LABEL')
+ ref_id int not null,                       -- bundle_id untuk BUNDLE_LABEL
+ payload nvarchar(max) not null,            -- JSON data label; TSPL dirakit oleh print service
+ [status] varchar(20) not null default 'PENDING',  -- PENDING/PRINTING/DONE/ERROR
+ error_message varchar(500) null,
+ retry_count int not null default 0,
+ printed_at datetime2 null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
 );
 
 -- ============ 6. COSTING ============
@@ -639,4 +660,6 @@ CREATE INDEX IX_bundles_article     ON bundles(article_id);
 CREATE INDEX IX_articles_project    ON articles(project_id);
 CREATE INDEX IX_stocks_material     ON material_stocks(material_id);
 CREATE INDEX IX_stations_division   ON stations(division_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_print_jobs_status   ON print_jobs([status]) WHERE deleted_at IS NULL;
+CREATE INDEX IX_print_jobs_ref      ON print_jobs(job_type, ref_id) WHERE deleted_at IS NULL;
 GO

@@ -1,0 +1,42 @@
+@page "/articles/{ArticleId:int}/bundles"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@inject ArticleApiService ArticleApi
+@inject NavigationManager Nav
+
+<PageTitle>Kelola Bundle</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Kelola Bundle</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Kelola Bundle</li>
+        </ol>
+    </div>
+</div>
+
+<div class="mb-3">
+    <button class="btn btn-light" @onclick="BackToArticle"><i class="fe fe-arrow-left"></i> Kembali ke Edit Artikel</button>
+</div>
+
+<BundleManager ArticleId="ArticleId" />
+
+@code {
+    [Parameter] public int ArticleId { get; set; }
+
+    private int? projectId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var article = await ArticleApi.GetByIdAsync(ArticleId);
+        projectId = article?.ProjectId;
+    }
+
+    private void BackToArticle()
+    {
+        if (projectId.HasValue)
+            Nav.NavigateTo($"/projects/{projectId}/articles/{ArticleId}/edit");
+    }
+}

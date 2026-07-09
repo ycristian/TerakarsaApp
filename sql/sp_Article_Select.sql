@@ -18,13 +18,37 @@ BEGIN
            a.size_pack_id AS SizePackId, sp.size_pack_name AS SizePackName,
            a.article_name AS ArticleName, a.style AS Style, a.color AS Color,
            ISNULL(SUM(asz.qty), 0) AS TotalQty,
-           (SELECT COUNT(*) FROM article_photos ap WHERE ap.article_id = a.article_id AND ap.deleted_at IS NULL) AS PhotoCount
+           (SELECT COUNT(*) FROM article_photos ap WHERE ap.article_id = a.article_id AND ap.deleted_at IS NULL) AS PhotoCount,
+           (SELECT COUNT(*) FROM bundles b WHERE b.article_id = a.article_id AND b.deleted_at IS NULL) AS BundleCount
     FROM articles a
     INNER JOIN size_packs sp ON sp.size_pack_id = a.size_pack_id
     LEFT JOIN article_sizes asz ON asz.article_id = a.article_id AND asz.deleted_at IS NULL
     WHERE a.project_id = @ProjectId AND a.deleted_at IS NULL
     GROUP BY a.article_id, a.project_id, a.size_pack_id, sp.size_pack_name, a.article_name, a.style, a.color
     ORDER BY a.article_id ASC;
+END;
+GO
+
+-- Pencarian artikel lintas project (jalan pintas di halaman "Kelola Bundle" mandiri,
+-- /bundles) -- dipakai lewat BundleController, bukan ArticleController, supaya user
+-- dengan module BUNDLE_MANAGE saja (tanpa ORDER_PROJECT) tetap bisa mencari artikel.
+CREATE OR ALTER PROCEDURE SIS_Article_Search
+    @Keyword VARCHAR(150)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP (20)
+        a.article_id AS Id,
+        a.article_name AS ArticleName,
+        a.style AS Style,
+        a.color AS Color,
+        p.project_name AS ProjectName
+    FROM articles a
+    INNER JOIN projects p ON p.project_id = a.project_id
+    WHERE a.deleted_at IS NULL
+      AND (a.article_name LIKE '%' + @Keyword + '%' OR a.style LIKE '%' + @Keyword + '%')
+    ORDER BY a.article_name ASC;
 END;
 GO
 

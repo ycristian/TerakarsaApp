@@ -29,6 +29,16 @@ public class ArticleListItemDto
     public string? Color { get; set; }
     public int TotalQty { get; set; }
     public int PhotoCount { get; set; }
+    public int BundleCount { get; set; }
+}
+
+public class ArticleSearchDto
+{
+    public int Id { get; set; }
+    public string ArticleName { get; set; } = string.Empty;
+    public string? Style { get; set; }
+    public string? Color { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
 }
 
 public class ArticleDto

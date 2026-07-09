@@ -24,6 +24,15 @@ public class ArticleService
             .ToListAsync();
     }
 
+    public async Task<List<ArticleSearchDto>> SearchAsync(string keyword)
+    {
+        var keywordParam = new SqlParameter("@Keyword", keyword);
+
+        return await _db.Database
+            .SqlQueryRaw<ArticleSearchDto>("EXEC SIS_Article_Search @Keyword = @Keyword", keywordParam)
+            .ToListAsync();
+    }
+
     public async Task<List<ArticleSizeSummaryDto>> GetSizesByProjectAsync(int projectId)
     {
         var projectIdParam = new SqlParameter("@ProjectId", projectId);
