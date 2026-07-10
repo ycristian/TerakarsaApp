@@ -1,0 +1,48 @@
+@page "/workflow-input"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@inject WorkflowInputApiService WorkflowInputApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Hasil Cutting</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Hasil Cutting</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Hasil Cutting</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <ArticlePicker LoadProjectsAsync="WorkflowInputApi.GetProjectsAsync"
+                    LoadArticlesAsync="WorkflowInputApi.GetArticlesByProjectAsync"
+                    SearchArticlesAsync="WorkflowInputApi.SearchArticlesAsync"
+                    LoadThumbnailAsync="WorkflowInputApi.GetArticleThumbnailAsync"
+                    DetailUrl="@(a => $"/workflow-input/{a.Id}")"
+                    SearchDetailUrl="@(r => $"/workflow-input/{r.Id}")"
+                    ActionLabel="Pilih" />
+}
+
+@code {
+    private bool? hasAccess = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "WORKFLOW_INPUT");
+    }
+}

@@ -387,6 +387,14 @@ else
             return;
         }
 
+        var minBundleSort = formModel.Steps.Where(s => s.RequiresBundle).Select(s => s.SortOrder).DefaultIfEmpty(int.MaxValue).Min();
+        var maxNonBundleSort = formModel.Steps.Where(s => !s.RequiresBundle).Select(s => s.SortOrder).DefaultIfEmpty(int.MinValue).Max();
+        if (minBundleSort < maxNonBundleSort)
+        {
+            errorMessage = "Step tanpa bundle harus berada sebelum semua step ber-bundle.";
+            return;
+        }
+
         isSaving = true;
         errorMessage = string.Empty;
 

@@ -1,0 +1,181 @@
+@page "/b/{Serial}"
+@layout TerakarsaApp.Client.Layout.BlankLayout
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Shared.Bundles
+@inject StationDeviceApiService StationApi
+@inject PublicBundleApiService PublicApi
+@inject IJSRuntime JS
+
+<PageTitle>Bundle @Serial</PageTitle>
+
+@if (isLoading)
+{
+    <p class="text-center fs-4 mt-5">Memuat...</p>
+}
+else if (notFound)
+{
+    <div class="alert alert-danger mt-5">Bundle dengan serial <strong>@Serial</strong> tidak ditemukan.</div>
+}
+else if (hasStationToken)
+{
+    @if (operatorId is null)
+    {
+        <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
+    }
+    <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
+                    OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" />
+}
+else
+{
+    <BundleScanCard Info="scanInfo!" ReadOnly="true" />
+
+    @if (wip.Count > 0)
+    {
+        <h5 class="mt-4">Progres Artikel</h5>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered">
+                <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Divisi</th>
+                        <th>Bundle Diterima</th>
+                        <th>Bundle Selesai</th>
+                        <th>Total Bundle</th>
+                        <th>Rincian / Qty OK</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var w in wip)
+                    {
+                        <tr>
+                            <td>@w.StepName</td>
+                            <td>@w.DivisionName</td>
+                            <td>@(w.RequiresBundle ? $"{w.ReceivedBundleCount}/{w.TotalBundleCount}" : "-")</td>
+                            <td>@(w.RequiresBundle ? $"{w.CompletedBundleCount}/{w.TotalBundleCount}" : $"{w.EntryCount}x input")</td>
+                            <td>@w.TotalBundleCount</td>
+                            <td>
+                                @if (w.RequiresBundle)
+                                {
+                                    @w.TotalQtyOkCompleted
+                                }
+                                else
+                                {
+                                    @string.Join(", ", w.SizeBreakdown.Select(s => $"{s.SizeName}: {s.QtyOk}"))
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string Serial { get; set; } = string.Empty;
+
+    private bool isLoading = true;
+    private bool notFound = false;
+    private bool hasStationToken = false;
+    private BundleScanInfoDto? scanInfo;
+    private List<ArticleWipStepDto> wip = new();
+    private bool actionBusy = false;
+    private string actionError = string.Empty;
+    private int? operatorId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var token = await JS.InvokeAsync<string?>("localStorage.getItem", "stationToken");
+        hasStationToken = !string.IsNullOrWhiteSpace(token);
+
+        if (hasStationToken)
+        {
+            var savedOperatorId = await JS.InvokeAsync<string?>("localStorage.getItem", "stationOperatorId");
+            if (int.TryParse(savedOperatorId, out var opId)) operatorId = opId;
+
+            scanInfo = await StationApi.ScanAsync(Serial, operatorId);
+        }
+        else
+        {
+            var detail = await PublicApi.GetBundleAsync(Serial);
+            scanInfo = detail?.ScanInfo;
+            wip = detail?.Wip ?? new();
+        }
+
+        notFound = scanInfo is null;
+        isLoading = false;
+    }
+
+    private async Task Rescan()
+    {
+        scanInfo = await StationApi.ScanAsync(Serial, operatorId);
+        notFound = scanInfo is null;
+    }
+
+    private async Task HandleReceive(string? remark)
+    {
+        if (scanInfo?.Action.ActionWorkflowLogId is null || operatorId is null) return;
+
+        actionBusy = true;
+        actionError = string.Empty;
+
+        var (success, error) = await StationApi.ReceiveAsync(new TerakarsaApp.Shared.WorkflowLogs.StationReceiveRequest
+        {
+            WorkflowLogId = scanInfo.Action.ActionWorkflowLogId.Value,
+            ResourceId = operatorId.Value,
+            Remark = remark
+        });
+
+        actionBusy = false;
+        if (!success) { actionError = error; return; }
+        await Rescan();
+    }
+
+    private async Task HandleComplete(BundleCompleteFormValues values)
+    {
+        if (scanInfo?.Action.ActionArticleWorkflowId is null || operatorId is null) return;
+
+        actionBusy = true;
+        actionError = string.Empty;
+
+        var (success, error) = await StationApi.CompleteAsync(new TerakarsaApp.Shared.WorkflowLogs.StationCompleteRequest
+        {
+            ArticleWorkflowId = scanInfo.Action.ActionArticleWorkflowId.Value,
+            BundleId = scanInfo.Bundle.BundleId,
+            ResourceId = operatorId.Value,
+            QtyOk = values.QtyOk,
+            QtyRejectPrint = values.QtyRejectPrint,
+            QtyRejectFabric = values.QtyRejectFabric,
+            QtyRejectSewing = values.QtyRejectSewing,
+            QtyRework = values.QtyRework,
+            Remark = values.Remark
+        });
+
+        actionBusy = false;
+        if (!success) { actionError = error; return; }
+        await Rescan();
+    }
+
+    private async Task HandleEdit(BundleCompleteFormValues values)
+    {
+        if (scanInfo?.Action.ActionWorkflowLogId is null) return;
+
+        actionBusy = true;
+        actionError = string.Empty;
+
+        var (success, error) = await StationApi.UpdateLogAsync(scanInfo.Action.ActionWorkflowLogId.Value, new TerakarsaApp.Shared.WorkflowLogs.StationLogUpdateRequest
+        {
+            QtyOk = values.QtyOk,
+            QtyRejectPrint = values.QtyRejectPrint,
+            QtyRejectFabric = values.QtyRejectFabric,
+            QtyRejectSewing = values.QtyRejectSewing,
+            QtyRework = values.QtyRework,
+            Remark = values.Remark
+        });
+
+        actionBusy = false;
+        if (!success) { actionError = error; return; }
+        await Rescan();
+    }
+}

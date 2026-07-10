@@ -65,7 +65,7 @@ BEGIN
     DECLARE @HasFirstBundleStep BIT = CASE WHEN @FirstBundleStepId IS NULL THEN 0 ELSE 1 END;
     DECLARE @IsFirstBundleStepReceived BIT = CASE WHEN EXISTS (
         SELECT 1 FROM article_workflow_logs
-        WHERE article_workflow_id = @FirstBundleStepId AND [status] = 'RECEIVED' AND deleted_at IS NULL
+        WHERE article_workflow_id = @FirstBundleStepId AND received_at IS NOT NULL AND deleted_at IS NULL
     ) THEN 1 ELSE 0 END;
 
     SELECT

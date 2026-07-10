@@ -1,0 +1,284 @@
+@* Kartu hasil scan bundle — dipakai di panel Scan /station (aksi kontekstual aktif)
+   dan halaman publik /b/{serial} (ReadOnly=true, tanpa tombol aksi). *@
+@using TerakarsaApp.Shared.Bundles
+
+<div class="card">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+            <div>
+                <h2 class="mb-0">No. @Info.Bundle.BundleNo</h2>
+                <p class="text-muted mb-0">@Info.Bundle.Serial</p>
+            </div>
+            <div class="text-end">
+                <h4 class="mb-0">@Info.Bundle.Qty <small class="text-muted">pcs</small></h4>
+                <span class="badge bg-secondary">@Info.Bundle.SizeName</span>
+            </div>
+        </div>
+
+        <hr />
+
+        <p class="mb-1"><strong>@Info.Bundle.ArticleName</strong> @Info.Bundle.Style @Info.Bundle.Color</p>
+        <p class="text-muted mb-1">@Info.Bundle.ProjectName</p>
+        @if (!string.IsNullOrEmpty(Info.Bundle.Line))
+        {
+            <p class="mb-1">Line: <strong>@Info.Bundle.Line</strong></p>
+        }
+        <p class="mb-3">
+            Posisi terakhir: <strong>@Info.Bundle.LastStepName</strong>
+            @if (!string.IsNullOrEmpty(Info.Bundle.LastDivisionName))
+            {
+                <span>(@Info.Bundle.LastDivisionName)</span>
+            }
+            — <span class="badge bg-info">@Info.Bundle.LastStatus</span>
+        </p>
+
+        <h6>Timeline</h6>
+        @{
+            var shown = showFullTimeline ? Info.Timeline : Info.Timeline.TakeLast(5).ToList();
+        }
+        <ul class="list-group list-group-flush mb-2">
+            @foreach (var t in shown)
+            {
+                <li class="list-group-item px-0 py-1">
+                    <div class="d-flex justify-content-between">
+                        <span>
+                            <strong>@t.StepName</strong>
+                            @(t.SizeName is not null ? $"({t.SizeName})" : "")
+                            @(t.DivisionName is not null ? $"— {t.DivisionName}" : "")
+                        </span>
+                        <span class="text-muted">Selesai @t.CreatedAt.ToString("dd/MM HH:mm") @(t.ResourceName is not null ? $"({t.ResourceName})" : "")</span>
+                    </div>
+                    @if (t.QtyOk > 0 || !string.IsNullOrEmpty(t.TargetDivisionName))
+                    {
+                        <small class="text-muted d-block">
+                            @(t.QtyOk > 0 ? $"Qty OK: {t.QtyOk}" : "")
+                            @(!string.IsNullOrEmpty(t.TargetDivisionName) ? $" → {t.TargetDivisionName}" : "")
+                        </small>
+                    }
+                    @if (t.ReceivedAt is not null)
+                    {
+                        <small class="text-success d-block">
+                            Diterima @t.ReceivedAt.Value.ToString("dd/MM HH:mm") @(t.ReceivedByResourceName is not null ? $"oleh {t.ReceivedByResourceName}" : "")
+                            @(!string.IsNullOrEmpty(t.ReceivedRemark) ? $"— {t.ReceivedRemark}" : "")
+                        </small>
+                    }
+                </li>
+            }
+        </ul>
+        @if (Info.Timeline.Count > 5)
+        {
+            <button class="btn btn-link btn-sm p-0 mb-3" @onclick="() => showFullTimeline = !showFullTimeline">
+                @(showFullTimeline ? "Sembunyikan" : $"Lihat semua ({Info.Timeline.Count})")
+            </button>
+        }
+
+        @if (!ReadOnly)
+        {
+            <hr />
+
+            @if (Info.Action.AllowedAction == "RECEIVE")
+            {
+                @if (!showReceiveNote)
+                {
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-success btn-lg flex-grow-1" disabled="@Busy" @onclick="() => OnReceive.InvokeAsync(null)">Terima</button>
+                        <button class="btn btn-outline-secondary" disabled="@Busy" @onclick="() => showReceiveNote = true">Dengan Catatan</button>
+                    </div>
+                }
+                else
+                {
+                    <label class="form-label">Catatan</label>
+                    <textarea class="form-control mb-2" rows="2" @bind="receiveNoteText"></textarea>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-light" disabled="@Busy" @onclick="() => showReceiveNote = false">Batal</button>
+                        <button class="btn btn-success flex-grow-1" disabled="@(Busy || string.IsNullOrWhiteSpace(receiveNoteText))"
+                                @onclick="() => OnReceive.InvokeAsync(receiveNoteText)">Terima</button>
+                    </div>
+                }
+            }
+            else if (Info.Action.AllowedAction == "COMPLETE")
+            {
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label">Qty OK</label>
+                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyOk" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Reject Print</label>
+                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectPrint" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Reject Bahan</label>
+                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectFabric" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Reject Jahit</label>
+                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectSewing" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Rework</label>
+                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRework" />
+                    </div>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label">Divisi Tujuan</label>
+                    <div class="form-control form-control-lg bg-light">
+                        @(Info.Action.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (Info.Action.NextDivisionName ?? "-"))
+                    </div>
+                </div>
+
+                <label class="form-label">Catatan (opsional)</label>
+                <textarea class="form-control mb-2" rows="2" @bind="completeRemark"></textarea>
+
+                <button class="btn btn-primary btn-lg w-100" disabled="@Busy" @onclick="SubmitComplete">
+                    Selesaikan
+                </button>
+            }
+            else if (Info.Action.AllowedAction == "EDIT")
+            {
+                <div class="alert alert-info d-flex justify-content-between align-items-center mb-0">
+                    <span>Bundle ini sudah kamu serahkan, masih menunggu diterima tujuan — masih bisa direvisi.</span>
+                    <button class="btn btn-outline-primary btn-sm ms-2" disabled="@Busy" @onclick="OpenEditModal">Edit</button>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-warning mb-0">@(Info.Action.Message ?? "Tidak ada aksi untuk bundle ini saat ini.")</div>
+            }
+
+            @if (!string.IsNullOrEmpty(ActionError))
+            {
+                <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
+            }
+        }
+    </div>
+</div>
+
+@if (showEditModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseEditModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Revisi Data</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>No. @Info.Bundle.BundleNo</strong> &middot; @Info.Bundle.Serial</p>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label">Qty OK</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyOk" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Print</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectPrint" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Bahan</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectFabric" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Jahit</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRework" />
+                        </div>
+                    </div>
+
+                    <label class="form-label">Catatan (opsional)</label>
+                    <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
+
+                    @if (!string.IsNullOrEmpty(ActionError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseEditModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@Busy" @onclick="SubmitEdit">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public BundleScanInfoDto Info { get; set; } = null!;
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? ActionError { get; set; }
+    [Parameter] public EventCallback<string?> OnReceive { get; set; }
+    [Parameter] public EventCallback<BundleCompleteFormValues> OnComplete { get; set; }
+    [Parameter] public EventCallback<BundleCompleteFormValues> OnEdit { get; set; }
+
+    private bool showFullTimeline = false;
+    private bool showReceiveNote = false;
+    private string receiveNoteText = string.Empty;
+
+    private int completeQtyOk;
+    private int completeQtyRejectPrint;
+    private int completeQtyRejectFabric;
+    private int completeQtyRejectSewing;
+    private int completeQtyRework;
+    private string completeRemark = string.Empty;
+
+    private Task SubmitComplete()
+    {
+        return OnComplete.InvokeAsync(new BundleCompleteFormValues
+        {
+            QtyOk = completeQtyOk,
+            QtyRejectPrint = completeQtyRejectPrint,
+            QtyRejectFabric = completeQtyRejectFabric,
+            QtyRejectSewing = completeQtyRejectSewing,
+            QtyRework = completeQtyRework,
+            Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark
+        });
+    }
+
+    private bool showEditModal = false;
+    private int editQtyOk;
+    private int editQtyRejectPrint;
+    private int editQtyRejectFabric;
+    private int editQtyRejectSewing;
+    private int editQtyRework;
+    private string editRemark = string.Empty;
+
+    private void OpenEditModal()
+    {
+        editQtyOk = Info.Action.ActionQtyOk ?? 0;
+        editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
+        editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
+        editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
+        editQtyRework = Info.Action.ActionQtyRework ?? 0;
+        editRemark = Info.Action.ActionRemark ?? string.Empty;
+        showEditModal = true;
+    }
+
+    private void CloseEditModal()
+    {
+        showEditModal = false;
+    }
+
+    private async Task SubmitEdit()
+    {
+        await OnEdit.InvokeAsync(new BundleCompleteFormValues
+        {
+            QtyOk = editQtyOk,
+            QtyRejectPrint = editQtyRejectPrint,
+            QtyRejectFabric = editQtyRejectFabric,
+            QtyRejectSewing = editQtyRejectSewing,
+            QtyRework = editQtyRework,
+            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark
+        });
+
+        if (string.IsNullOrEmpty(ActionError))
+        {
+            showEditModal = false;
+        }
+    }
+}

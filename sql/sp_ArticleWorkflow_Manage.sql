@@ -36,6 +36,20 @@ BEGIN
             RETURN;
         END
 
+        IF EXISTS (
+            SELECT 1 FROM workflow_template_steps nb
+            WHERE nb.workflow_template_id = @WorkflowTemplateId AND nb.deleted_at IS NULL AND nb.requires_bundle = 0
+              AND EXISTS (
+                  SELECT 1 FROM workflow_template_steps b
+                  WHERE b.workflow_template_id = @WorkflowTemplateId AND b.deleted_at IS NULL
+                    AND b.requires_bundle = 1 AND b.sort_order < nb.sort_order
+              )
+        )
+        BEGIN
+            RAISERROR('Step tanpa bundle harus berada sebelum semua step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, created_at, created_by)
@@ -65,6 +79,19 @@ BEGIN
         )
         BEGIN
             RAISERROR('Tidak bisa menghapus step yang sudah memiliki log produksi.', 16, 1);
+            RETURN;
+        END
+
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') nb
+            WHERE nb.RequiresBundle = 0
+              AND EXISTS (
+                  SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') b
+                  WHERE b.RequiresBundle = 1 AND b.SortOrder < nb.SortOrder
+              )
+        )
+        BEGIN
+            RAISERROR('Step tanpa bundle harus berada sebelum semua step ber-bundle.', 16, 1);
             RETURN;
         END
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -120,6 +121,146 @@ public class BundleService
         {
             return (false, ex.Message);
         }
+    }
+
+    // SIS_Bundle_ScanInfo mengembalikan 3 result set sekaligus (info, timeline, aksi) —
+    // EF Core SqlQueryRaw hanya mendukung satu result set, jadi di sini pakai SqlCommand
+    // mentah + reader.NextResultAsync() langsung di atas koneksi yang sama dengan AppDbContext.
+    public async Task<BundleScanInfoDto?> GetScanInfoAsync(string serial, int? divisionId, int? resourceId)
+    {
+        var conn = (SqlConnection)_db.Database.GetDbConnection();
+        var wasClosed = conn.State != System.Data.ConnectionState.Open;
+        if (wasClosed) await conn.OpenAsync();
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SIS_Bundle_ScanInfo";
+            cmd.CommandType = System.Data.CommandType.StoredProcedure;
+            cmd.Parameters.Add(new SqlParameter("@Serial", serial));
+            cmd.Parameters.Add(new SqlParameter("@DivisionId", (object?)divisionId ?? DBNull.Value));
+            cmd.Parameters.Add(new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value));
+
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            if (!await reader.ReadAsync()) return null;
+
+            var bundle = new BundleScanBundleDto
+            {
+                BundleId = reader.GetInt32(reader.GetOrdinal("BundleId")),
+                BundleNo = reader.GetInt32(reader.GetOrdinal("BundleNo")),
+                Serial = reader.GetString(reader.GetOrdinal("Serial")),
+                Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
+                SizeName = reader.GetString(reader.GetOrdinal("SizeName")),
+                ArticleId = reader.GetInt32(reader.GetOrdinal("ArticleId")),
+                ArticleName = reader.GetString(reader.GetOrdinal("ArticleName")),
+                Style = reader.IsDBNull(reader.GetOrdinal("Style")) ? null : reader.GetString(reader.GetOrdinal("Style")),
+                Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? null : reader.GetString(reader.GetOrdinal("Color")),
+                ProjectName = reader.GetString(reader.GetOrdinal("ProjectName")),
+                Line = reader.IsDBNull(reader.GetOrdinal("Line")) ? null : reader.GetString(reader.GetOrdinal("Line")),
+                LastStepName = reader.IsDBNull(reader.GetOrdinal("LastStepName")) ? null : reader.GetString(reader.GetOrdinal("LastStepName")),
+                LastStatus = reader.IsDBNull(reader.GetOrdinal("LastStatus")) ? null : reader.GetString(reader.GetOrdinal("LastStatus")),
+                LastDivisionName = reader.IsDBNull(reader.GetOrdinal("LastDivisionName")) ? null : reader.GetString(reader.GetOrdinal("LastDivisionName")),
+            };
+
+            await reader.NextResultAsync();
+            var timeline = new List<BundleScanTimelineDto>();
+            while (await reader.ReadAsync())
+            {
+                timeline.Add(new BundleScanTimelineDto
+                {
+                    StepName = reader.GetString(reader.GetOrdinal("StepName")),
+                    SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                    SizeName = reader.IsDBNull(reader.GetOrdinal("SizeName")) ? null : reader.GetString(reader.GetOrdinal("SizeName")),
+                    DivisionName = reader.IsDBNull(reader.GetOrdinal("DivisionName")) ? null : reader.GetString(reader.GetOrdinal("DivisionName")),
+                    ResourceName = reader.IsDBNull(reader.GetOrdinal("ResourceName")) ? null : reader.GetString(reader.GetOrdinal("ResourceName")),
+                    QtyOk = reader.GetInt32(reader.GetOrdinal("QtyOk")),
+                    TargetDivisionName = reader.IsDBNull(reader.GetOrdinal("TargetDivisionName")) ? null : reader.GetString(reader.GetOrdinal("TargetDivisionName")),
+                    CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+                    ReceivedAt = reader.IsDBNull(reader.GetOrdinal("ReceivedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedAt")),
+                    ReceivedByResourceName = reader.IsDBNull(reader.GetOrdinal("ReceivedByResourceName")) ? null : reader.GetString(reader.GetOrdinal("ReceivedByResourceName")),
+                    ReceivedRemark = reader.IsDBNull(reader.GetOrdinal("ReceivedRemark")) ? null : reader.GetString(reader.GetOrdinal("ReceivedRemark")),
+                });
+            }
+
+            await reader.NextResultAsync();
+            var action = new BundleScanActionDto();
+            if (await reader.ReadAsync())
+            {
+                action.AllowedAction = reader.GetString(reader.GetOrdinal("AllowedAction"));
+                var actionStepOrdinal = reader.GetOrdinal("ActionArticleWorkflowId");
+                action.ActionArticleWorkflowId = reader.IsDBNull(actionStepOrdinal) ? null : reader.GetInt32(actionStepOrdinal);
+                var actionLogOrdinal = reader.GetOrdinal("ActionWorkflowLogId");
+                action.ActionWorkflowLogId = reader.IsDBNull(actionLogOrdinal) ? null : reader.GetInt32(actionLogOrdinal);
+                var messageOrdinal = reader.GetOrdinal("Message");
+                action.Message = reader.IsDBNull(messageOrdinal) ? null : reader.GetString(messageOrdinal);
+                action.IsLastStep = reader.GetBoolean(reader.GetOrdinal("IsLastStep"));
+                var nextDivisionIdOrdinal = reader.GetOrdinal("NextDivisionId");
+                action.NextDivisionId = reader.IsDBNull(nextDivisionIdOrdinal) ? null : reader.GetInt32(nextDivisionIdOrdinal);
+                var nextDivisionNameOrdinal = reader.GetOrdinal("NextDivisionName");
+                action.NextDivisionName = reader.IsDBNull(nextDivisionNameOrdinal) ? null : reader.GetString(nextDivisionNameOrdinal);
+
+                var actionQtyOkOrdinal = reader.GetOrdinal("ActionQtyOk");
+                action.ActionQtyOk = reader.IsDBNull(actionQtyOkOrdinal) ? null : reader.GetInt32(actionQtyOkOrdinal);
+                var actionQtyRejectPrintOrdinal = reader.GetOrdinal("ActionQtyRejectPrint");
+                action.ActionQtyRejectPrint = reader.IsDBNull(actionQtyRejectPrintOrdinal) ? null : reader.GetInt32(actionQtyRejectPrintOrdinal);
+                var actionQtyRejectFabricOrdinal = reader.GetOrdinal("ActionQtyRejectFabric");
+                action.ActionQtyRejectFabric = reader.IsDBNull(actionQtyRejectFabricOrdinal) ? null : reader.GetInt32(actionQtyRejectFabricOrdinal);
+                var actionQtyRejectSewingOrdinal = reader.GetOrdinal("ActionQtyRejectSewing");
+                action.ActionQtyRejectSewing = reader.IsDBNull(actionQtyRejectSewingOrdinal) ? null : reader.GetInt32(actionQtyRejectSewingOrdinal);
+                var actionQtyReworkOrdinal = reader.GetOrdinal("ActionQtyRework");
+                action.ActionQtyRework = reader.IsDBNull(actionQtyReworkOrdinal) ? null : reader.GetInt32(actionQtyReworkOrdinal);
+                var actionRemarkOrdinal = reader.GetOrdinal("ActionRemark");
+                action.ActionRemark = reader.IsDBNull(actionRemarkOrdinal) ? null : reader.GetString(actionRemarkOrdinal);
+            }
+
+            return new BundleScanInfoDto { Bundle = bundle, Timeline = timeline, Action = action };
+        }
+        finally
+        {
+            if (wasClosed) await conn.CloseAsync();
+        }
+    }
+
+    private class ArticleWipStepRow
+    {
+        public int ArticleWorkflowId { get; set; }
+        public string StepName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public string? DivisionName { get; set; }
+        public bool RequiresBundle { get; set; }
+        public int ReceivedBundleCount { get; set; }
+        public int CompletedBundleCount { get; set; }
+        public int TotalBundleCount { get; set; }
+        public int TotalQtyOkCompleted { get; set; }
+        public int EntryCount { get; set; }
+        public string? SizeBreakdownJson { get; set; }
+    }
+
+    public async Task<List<ArticleWipStepDto>> GetArticleWipAsync(int articleId)
+    {
+        var articleIdParam = new SqlParameter("@ArticleId", articleId);
+
+        var rows = await _db.Database
+            .SqlQueryRaw<ArticleWipStepRow>("EXEC SIS_Article_Wip @ArticleId = @ArticleId", articleIdParam)
+            .ToListAsync();
+
+        return rows.Select(row => new ArticleWipStepDto
+        {
+            ArticleWorkflowId = row.ArticleWorkflowId,
+            StepName = row.StepName,
+            SortOrder = row.SortOrder,
+            DivisionName = row.DivisionName,
+            RequiresBundle = row.RequiresBundle,
+            ReceivedBundleCount = row.ReceivedBundleCount,
+            CompletedBundleCount = row.CompletedBundleCount,
+            TotalBundleCount = row.TotalBundleCount,
+            TotalQtyOkCompleted = row.TotalQtyOkCompleted,
+            EntryCount = row.EntryCount,
+            SizeBreakdown = string.IsNullOrEmpty(row.SizeBreakdownJson)
+                ? new()
+                : JsonSerializer.Deserialize<List<ArticleWipSizeBreakdownDto>>(row.SizeBreakdownJson) ?? new()
+        }).ToList();
     }
 
     public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int bundleId, int userId)

@@ -15,6 +15,8 @@
 @inject ProjectApiService ProjectApi
 @inject ResourceApiService ResourceApi
 @inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavManager
+@inject IJSRuntime JS
 
 @if (hasAccess is null)
 {
@@ -185,6 +187,18 @@ else
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
+                            <label class="form-label">URL Bundle</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" readonly value="@BundleUrl(editForm.Serial)" />
+                                <a class="btn btn-outline-secondary" title="Buka" target="_blank" href="@BundleUrl(editForm.Serial)"><i class="fe fe-external-link"></i></a>
+                                <button type="button" class="btn btn-outline-secondary" title="Salin" @onclick="() => CopyBundleUrl(editForm.Serial)"><i class="fe fe-copy"></i></button>
+                            </div>
+                            @if (!string.IsNullOrEmpty(copyMessage))
+                            {
+                                <div class="form-text text-success">@copyMessage</div>
+                            }
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Qty</label>
                             <input type="number" min="1" class="form-control" @bind="editForm.Qty" />
                         </div>
@@ -245,6 +259,7 @@ else
     private BundleEditFormModel editForm = new();
     private bool isSavingEdit = false;
     private string editError = string.Empty;
+    private string copyMessage = string.Empty;
 
     private bool showDeleteConfirm = false;
     private bool isDeleting = false;
@@ -347,12 +362,21 @@ else
             ResourcePersonName = bundle.ResourcePersonName
         };
         editError = string.Empty;
+        copyMessage = string.Empty;
         showEditForm = true;
     }
 
     private void CloseEditForm()
     {
         showEditForm = false;
+    }
+
+    private string BundleUrl(string serial) => $"{NavManager.BaseUri}b/{serial}";
+
+    private async Task CopyBundleUrl(string serial)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", BundleUrl(serial));
+        copyMessage = "URL disalin.";
     }
 
     private async Task HandleSaveEdit()

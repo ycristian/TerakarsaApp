@@ -341,7 +341,7 @@ else
                                     <thead>
                                         <tr>
                                             <th>Step</th>
-                                            <th>Status</th>
+                                            <th>Size</th>
                                             <th>Divisi</th>
                                             <th>Operator</th>
                                             <th>Bundle</th>
@@ -351,6 +351,7 @@ else
                                             <th>Reject Jahit</th>
                                             <th>Rework</th>
                                             <th>Tujuan</th>
+                                            <th>Status Terima</th>
                                             <th>Catatan</th>
                                             <th>Waktu</th>
                                             @if (isAdmin)
@@ -364,7 +365,7 @@ else
                                         {
                                             <tr>
                                                 <td>@log.StepName</td>
-                                                <td><span class="badge @(log.Status == "COMPLETED" ? "bg-success" : "bg-info")">@log.Status</span></td>
+                                                <td>@(log.SizeName ?? "-")</td>
                                                 <td>@log.DivisionName</td>
                                                 <td>@(log.ResourceName ?? "-")</td>
                                                 <td>@(log.BundleSerial ?? "-")</td>
@@ -374,6 +375,20 @@ else
                                                 <td>@log.QtyRejectSewing</td>
                                                 <td>@log.QtyRework</td>
                                                 <td>@(log.TargetDivisionName ?? "-")</td>
+                                                <td>
+                                                    @if (log.TargetDivisionId is null)
+                                                    {
+                                                        <span class="text-muted">-</span>
+                                                    }
+                                                    else if (log.ReceivedAt is not null)
+                                                    {
+                                                        <span class="badge bg-success">Diterima @log.ReceivedAt.Value.ToString("dd/MM HH:mm") oleh @(log.ReceivedByResourceName ?? "-")</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-warning">Menunggu diterima</span>
+                                                    }
+                                                </td>
                                                 <td>@(log.Remark ?? "-")</td>
                                                 <td>@log.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
                                                 @if (isAdmin)
@@ -400,7 +415,7 @@ else
 
     <ConfirmDeleteModal Show="showDeleteLogConfirm" IsBusy="isDeletingLog" OnConfirm="ConfirmDeleteLog" OnCancel="CancelDeleteLog">
         <Message>
-            <p>Yakin ingin menghapus log "@logPendingDelete?.StepName" (@logPendingDelete?.Status)?</p>
+            <p>Yakin ingin menghapus log "@logPendingDelete?.StepName" (@logPendingDelete?.CreatedAt.ToString("dd/MM/yyyy HH:mm"))?</p>
             <label class="form-label">Alasan hapus (wajib)</label>
             <textarea class="form-control" rows="2" @bind="deleteLogReason"></textarea>
             @if (!string.IsNullOrEmpty(deleteLogError))
@@ -848,6 +863,14 @@ else
         if (workflowRows.Any(r => string.IsNullOrWhiteSpace(r.StepName) || r.DivisionId <= 0))
         {
             workflowError = "Nama step dan divisi wajib diisi untuk setiap baris.";
+            return;
+        }
+
+        var minBundleSort = workflowRows.Where(r => r.RequiresBundle).Select(r => r.SortOrder).DefaultIfEmpty(int.MaxValue).Min();
+        var maxNonBundleSort = workflowRows.Where(r => !r.RequiresBundle).Select(r => r.SortOrder).DefaultIfEmpty(int.MinValue).Max();
+        if (minBundleSort < maxNonBundleSort)
+        {
+            workflowError = "Step tanpa bundle harus berada sebelum semua step ber-bundle.";
             return;
         }
 

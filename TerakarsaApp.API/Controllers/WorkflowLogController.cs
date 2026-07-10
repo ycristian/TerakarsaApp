@@ -7,12 +7,14 @@ using TerakarsaApp.Shared.WorkflowLogs;
 
 namespace TerakarsaApp.API.Controllers;
 
-// Riwayat log workflow (read-only) untuk halaman Edit Article, login biasa.
-// Pencatatan log dari lantai produksi ada di StationDeviceController (token stasiun).
+// Riwayat log workflow (read-only + hapus) untuk halaman Edit Article (ORDER_PROJECT) dan
+// halaman Hasil Cutting /workflow-input (WORKFLOW_INPUT, lihat WorkflowInputController untuk
+// pencatatan step non-bundle). Pencatatan log per-bundle dari lantai produksi ada di
+// StationDeviceController (token stasiun).
 [ApiController]
 [Route("api")]
 [Authorize]
-[RequireModule("ORDER_PROJECT")]
+[RequireModule("ORDER_PROJECT", "WORKFLOW_INPUT")]
 public class WorkflowLogController : ControllerBase
 {
     private readonly WorkflowLogService _workflowLogService;

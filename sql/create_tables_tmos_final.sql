@@ -404,18 +404,26 @@ CREATE TABLE bundles(
  deleted_by int null
 );
 
--- LOG MURNI: tidak boleh di-update. Salah input = soft delete
--- (hanya supervisor/admin) + input baris baru. delete_reason wajib diisi saat delete.
--- bundle_id NULL hanya untuk step dengan requires_bundle = 0 (mis. Cutting).
--- Validasi di sp_WorkflowLog_Manage (Phase D/E):
---   1. requires_bundle = 1 -> bundle_id wajib diisi
---   2. bundle_id diisi -> bundles.article_id harus = article_workflows.article_id
+-- LOG MURNI, MODEL 1-BARIS-PER-SERAH-TERIMA (Prompt 12b): tidak boleh di-update
+-- kecuali trio received_* lewat action RECEIVE. Salah input = soft delete (hanya
+-- supervisor/admin) + input baris baru. delete_reason wajib diisi saat delete.
+-- INSERT = pekerjaan step selesai (dulu berstatus 'COMPLETED'). Penerimaan oleh divisi
+-- tujuan mengisi received_at/received_by_resource_id/received_remark pada baris yang
+-- SAMA (dulu baris terpisah berstatus 'RECEIVED') -- status kini selalu diturunkan dari
+-- ada/tidaknya received_at, tidak ada kolom status.
+-- bundle_id NULL untuk step requires_bundle = 0 (mis. Cutting) -- baris ini bebas
+-- berulang, tidak pernah jadi prasyarat step ber-bundle mana pun; article_size_id wajib
+-- diisi untuk baris ini (input qty per ukuran). Untuk step requires_bundle = 1, bundle_id
+-- wajib diisi (article_size_id NULL, size sudah melekat di bundle) dan maksimal satu
+-- baris hidup per (step, bundle). Validasi lengkap di sp_WorkflowLog_Manage.
 CREATE TABLE article_workflow_logs(
  workflow_log_id int primary key identity(1,1),
  article_workflow_id int not null
    constraint FK_awl_article_workflows foreign key references article_workflows(article_workflow_id),
  bundle_id int null                          -- NULL = log level artikel (step pra-bundle, mis. Cutting)
    constraint FK_awl_bundles foreign key references bundles(bundle_id),
+ article_size_id int null                    -- diisi untuk baris non-bundle (input size manual)
+   constraint FK_awl_article_sizes foreign key references article_sizes(article_size_id),
  division_id int not null
    constraint FK_awl_divisions foreign key references divisions(division_id),
  resource_id int null
@@ -431,9 +439,9 @@ CREATE TABLE article_workflow_logs(
  received_at datetime2 null,
  received_by_resource_id int null           -- sebelumnya received_by, dipertegas ini FK ke resources
    constraint FK_awl_received_by foreign key references resources(resource_id),
+ received_remark varchar(500) null,
  target_division_id int null                -- sebelumnya target_division, disamakan pola _id
    constraint FK_awl_target_division foreign key references divisions(division_id),
- [status] varchar(20) not null,
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  deleted_at datetime2 null,

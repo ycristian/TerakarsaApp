@@ -29,6 +29,19 @@ BEGIN
             RETURN;
         END
 
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') nb
+            WHERE nb.RequiresBundle = 0
+              AND EXISTS (
+                  SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') b
+                  WHERE b.RequiresBundle = 1 AND b.SortOrder < nb.SortOrder
+              )
+        )
+        BEGIN
+            RAISERROR('Step tanpa bundle harus berada sebelum semua step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             INSERT INTO workflow_templates (workflow_code, workflow_name, created_at, created_by)
@@ -63,6 +76,19 @@ BEGIN
         )
         BEGIN
             RAISERROR('Kode workflow "%s" sudah digunakan.', 16, 1, @WorkflowCode);
+            RETURN;
+        END
+
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') nb
+            WHERE nb.RequiresBundle = 0
+              AND EXISTS (
+                  SELECT 1 FROM OPENJSON(@Steps) WITH (SortOrder INT '$.SortOrder', RequiresBundle BIT '$.RequiresBundle') b
+                  WHERE b.RequiresBundle = 1 AND b.SortOrder < nb.SortOrder
+              )
+        )
+        BEGIN
+            RAISERROR('Step tanpa bundle harus berada sebelum semua step ber-bundle.', 16, 1);
             RETURN;
         END
 
