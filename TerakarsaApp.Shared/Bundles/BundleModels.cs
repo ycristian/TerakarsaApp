@@ -92,6 +92,9 @@ public class BundleScanTimelineDto
     public string? DivisionName { get; set; }
     public string? ResourceName { get; set; }
     public int QtyOk { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
     public string? TargetDivisionName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ReceivedAt { get; set; }
@@ -116,7 +119,6 @@ public class BundleScanActionDto
     public int? ActionQtyRejectPrint { get; set; }
     public int? ActionQtyRejectFabric { get; set; }
     public int? ActionQtyRejectSewing { get; set; }
-    public int? ActionQtyRework { get; set; }
     public string? ActionRemark { get; set; }
 }
 

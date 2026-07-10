@@ -175,6 +175,9 @@ public class BundleService
                     DivisionName = reader.IsDBNull(reader.GetOrdinal("DivisionName")) ? null : reader.GetString(reader.GetOrdinal("DivisionName")),
                     ResourceName = reader.IsDBNull(reader.GetOrdinal("ResourceName")) ? null : reader.GetString(reader.GetOrdinal("ResourceName")),
                     QtyOk = reader.GetInt32(reader.GetOrdinal("QtyOk")),
+                    QtyRejectPrint = reader.GetInt32(reader.GetOrdinal("QtyRejectPrint")),
+                    QtyRejectFabric = reader.GetInt32(reader.GetOrdinal("QtyRejectFabric")),
+                    QtyRejectSewing = reader.GetInt32(reader.GetOrdinal("QtyRejectSewing")),
                     TargetDivisionName = reader.IsDBNull(reader.GetOrdinal("TargetDivisionName")) ? null : reader.GetString(reader.GetOrdinal("TargetDivisionName")),
                     CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
                     ReceivedAt = reader.IsDBNull(reader.GetOrdinal("ReceivedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedAt")),
@@ -208,8 +211,6 @@ public class BundleService
                 action.ActionQtyRejectFabric = reader.IsDBNull(actionQtyRejectFabricOrdinal) ? null : reader.GetInt32(actionQtyRejectFabricOrdinal);
                 var actionQtyRejectSewingOrdinal = reader.GetOrdinal("ActionQtyRejectSewing");
                 action.ActionQtyRejectSewing = reader.IsDBNull(actionQtyRejectSewingOrdinal) ? null : reader.GetInt32(actionQtyRejectSewingOrdinal);
-                var actionQtyReworkOrdinal = reader.GetOrdinal("ActionQtyRework");
-                action.ActionQtyRework = reader.IsDBNull(actionQtyReworkOrdinal) ? null : reader.GetInt32(actionQtyReworkOrdinal);
                 var actionRemarkOrdinal = reader.GetOrdinal("ActionRemark");
                 action.ActionRemark = reader.IsDBNull(actionRemarkOrdinal) ? null : reader.GetString(actionRemarkOrdinal);
             }

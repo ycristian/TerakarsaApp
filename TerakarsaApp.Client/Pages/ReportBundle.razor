@@ -1,0 +1,671 @@
+@page "/report-bundle"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Projects
+@using TerakarsaApp.Shared.Reports
+@inject ReportBundleApiService ReportApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Laporan Bundle</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Laporan Bundle</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Laporan Bundle</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <ul class="nav nav-tabs card-header-tabs">
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "wip" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("wip")'>WIP</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "progress" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("progress")'>Progres</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "riwayat" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("riwayat")'>Riwayat</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "selisih" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("selisih")'>Selisih</a>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body">
+            @if (activeTab == "wip")
+            {
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Project</label>
+                        <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="wipProjectId"
+                                          IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                          AllowNone="true" NoneLabel="- Semua Project -" Placeholder="Cari project..."
+                                          @bind-Value:after="OnWipProjectChanged" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Artikel</label>
+                        <SearchableSelect TItem="ArticleListItemDto" Items="wipArticles" @bind-Value="wipArticleId"
+                                          IdSelector="@(a => a.Id)" TextSelector="@(a => a.ArticleName)"
+                                          AllowNone="true" NoneLabel="- Semua Artikel -" Placeholder="Cari artikel..." />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Divisi Posisi</label>
+                        <SearchableSelect TItem="DivisionDto" Items="divisions" @bind-Value="wipDivisionId"
+                                          IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                          AllowNone="true" NoneLabel="- Semua Divisi -" Placeholder="Cari divisi..." />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" @bind="wipStatus">
+                            <option value="">- Semua Status -</option>
+                            <option value="BELUM_MULAI">Belum Mulai</option>
+                            <option value="TRANSIT">Transit</option>
+                            <option value="DIKERJAKAN">Dikerjakan</option>
+                            <option value="SELESAI">Selesai</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <button class="btn btn-primary w-100" disabled="@isLoadingWip" @onclick="LoadWip">Terapkan</button>
+                    </div>
+                </div>
+
+                @if (!isLoadingWip && wipResults.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <span class="badge bg-secondary">Belum Mulai: @WipCount("BELUM_MULAI")</span>
+                        <span class="badge bg-warning">Transit: @WipCount("TRANSIT")</span>
+                        <span class="badge bg-info">Dikerjakan: @WipCount("DIKERJAKAN")</span>
+                        <span class="badge bg-success">Selesai: @WipCount("SELESAI")</span>
+                    </div>
+                }
+
+                @if (isLoadingWip)
+                {
+                    <p class="mb-0">Memuat data...</p>
+                }
+                else if (wipResults.Count == 0)
+                {
+                    <p class="text-muted mb-0">Tidak ada bundle yang cocok dengan filter.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Bundle No</th>
+                                    <th>Serial</th>
+                                    <th>Project</th>
+                                    <th>Artikel</th>
+                                    <th>Size</th>
+                                    <th>Qty</th>
+                                    <th>Step</th>
+                                    <th>Posisi</th>
+                                    <th>Status</th>
+                                    <th>Penjahit</th>
+                                    <th>Waktu</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in wipResults)
+                                {
+                                    <tr role="button" @onclick="() => OpenHistoryFromWip(item)">
+                                        <td>@item.BundleNo</td>
+                                        <td>@item.Serial</td>
+                                        <td>@item.ProjectName</td>
+                                        <td>@item.ArticleName</td>
+                                        <td>@item.SizeName</td>
+                                        <td>@item.Qty</td>
+                                        <td>@(item.StepName ?? "-")</td>
+                                        <td>@(item.PosisiDivisionName ?? "-")</td>
+                                        <td><span class="badge @StatusBadgeClass(item.Status)">@StatusLabel(item.Status)</span></td>
+                                        <td>@(item.TailorName ?? "-")</td>
+                                        <td>@(item.UpdatedInfo?.ToString("dd/MM/yyyy HH:mm") ?? "-")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+            else if (activeTab == "progress")
+            {
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Project</label>
+                        <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="progressProjectId"
+                                          IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                          Placeholder="Cari project..." @bind-Value:after="LoadProgress" />
+                    </div>
+                </div>
+
+                @if (isLoadingProgress)
+                {
+                    <p class="mb-0">Memuat data...</p>
+                }
+                else if (progressProjectId <= 0)
+                {
+                    <p class="text-muted mb-0">Pilih project untuk melihat progres.</p>
+                }
+                else if (ProgressArticles.Count == 0)
+                {
+                    <p class="text-muted mb-0">Project ini belum punya artikel/step.</p>
+                }
+                else
+                {
+                    @foreach (var articleId in ProgressArticles)
+                    {
+                        var rows = ProgressRowsFor(articleId);
+                        var totalBundle = rows.FirstOrDefault(r => r.IsBundle)?.TotalBundle ?? 0;
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h3 class="card-title">@ArticleName(articleId) <span class="text-muted fs-6">(@totalBundle bundle)</span></h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered border mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Step</th>
+                                                <th>Divisi</th>
+                                                <th>Selesai/Total</th>
+                                                <th>Diterima</th>
+                                                <th>Qty OK</th>
+                                                <th>Qty Reject</th>
+                                                <th style="min-width:140px">Progres</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var row in rows)
+                                            {
+                                                <tr>
+                                                    <td>@row.StepName</td>
+                                                    <td>@row.DivisionName</td>
+                                                    <td>@(row.IsBundle ? $"{row.BundleSelesai}/{row.TotalBundle}" : "-")</td>
+                                                    <td>@(row.IsBundle ? row.BundleDiterima.ToString() : "-")</td>
+                                                    <td>@row.QtyOk</td>
+                                                    <td>@row.QtyReject</td>
+                                                    <td>
+                                                        <div class="progress" style="height: 8px;">
+                                                            <div class="progress-bar" role="progressbar" style="width: @(row.ProgressPercentCapped)%"></div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                @if (!row.IsBundle)
+                                                {
+                                                    @foreach (var s in SurplusFor(row.ArticleWorkflowId))
+                                                    {
+                                                        <tr>
+                                                            <td colspan="7" class="py-1">
+                                                                <span class="badge bg-warning">+@s.Surplus pcs @s.SizeName</span>
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            }
+            else if (activeTab == "riwayat")
+            {
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Serial</label>
+                        <div class="input-group">
+                            <input class="form-control" placeholder="Ketik/tempel serial (mis. B26-000010)..." @bind="historySerial"
+                                   @onkeyup='e => { if (e.Key == "Enter") { _ = SearchHistoryBySerial(); } }' />
+                            <button class="btn btn-primary" disabled="@isLoadingHistory" @onclick="SearchHistoryBySerial">Cari</button>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label">Atau pilih Project + Bundle No</label>
+                        <div class="input-group">
+                            <div style="min-width:220px">
+                                <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="historyProjectId"
+                                                  IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                                  Placeholder="Cari project..." />
+                            </div>
+                            <input type="number" min="1" class="form-control" placeholder="No. Bundle" @bind="historyBundleNoText" />
+                            <button class="btn btn-primary" disabled="@isLoadingHistory" @onclick="SearchHistoryByBundleNo">Cari</button>
+                        </div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(historyError))
+                {
+                    <div class="alert alert-danger">@historyError</div>
+                }
+
+                @if (isLoadingHistory)
+                {
+                    <p class="mb-0">Memuat riwayat...</p>
+                }
+                else if (historyResult?.Header is not null)
+                {
+                    var h = historyResult.Header;
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h2 class="mb-0">No. @h.BundleNo</h2>
+                                    <p class="text-muted mb-0">@h.Serial</p>
+                                </div>
+                                <div class="text-end">
+                                    <h4 class="mb-0">@h.Qty <small class="text-muted">pcs</small></h4>
+                                    <span class="badge bg-secondary">@h.SizeName</span>
+                                </div>
+                            </div>
+                            <hr />
+                            <p class="mb-1"><strong>@h.ArticleName</strong></p>
+                            <p class="text-muted mb-1">@h.ProjectName</p>
+                            @if (!string.IsNullOrEmpty(h.TailorName))
+                            {
+                                <p class="mb-1">Penjahit: <strong>@h.TailorName</strong></p>
+                            }
+                            <p class="mb-0">
+                                Posisi: <strong>@(h.StepName ?? "-")</strong>
+                                @if (!string.IsNullOrEmpty(h.PosisiDivisionName))
+                                {
+                                    <span>(@h.PosisiDivisionName)</span>
+                                }
+                                — <span class="badge @StatusBadgeClass(h.Status)">@StatusLabel(h.Status)</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title">Timeline</h3></div>
+                        <div class="card-body">
+                            @if (historyResult.Timeline.Count == 0)
+                            {
+                                <p class="text-muted mb-0">Belum ada log untuk bundle ini.</p>
+                            }
+                            else
+                            {
+                                <ul class="list-group list-group-flush mb-0">
+                                    @foreach (var t in historyResult.Timeline)
+                                    {
+                                        <li class="list-group-item px-0 py-1">
+                                            <div class="d-flex justify-content-between">
+                                                <span>
+                                                    <strong>@t.StepName</strong>
+                                                    @(t.DivisionName is not null ? $"— {t.DivisionName}" : "")
+                                                </span>
+                                                <span class="text-muted">Selesai @t.CreatedAt.ToString("dd/MM/yyyy HH:mm") @(t.CreatedByName is not null ? $"({t.CreatedByName})" : "")</span>
+                                            </div>
+                                            @if (t.QtyOk > 0 || t.QtyReject > 0 || !string.IsNullOrEmpty(t.PelaksanaName) || !string.IsNullOrEmpty(t.Remark) || !string.IsNullOrEmpty(t.TargetDivisionName))
+                                            {
+                                                <div class="text-muted small">
+                                                    @if (!string.IsNullOrEmpty(t.PelaksanaName))
+                                                    {
+                                                        <div>Pelaksana: @(!string.IsNullOrEmpty(t.DivisionName) ? $"{t.DivisionName} - " : "")@t.PelaksanaName</div>
+                                                    }
+                                                    @if (t.QtyOk > 0)
+                                                    {
+                                                        <div>Qty OK: @t.QtyOk</div>
+                                                    }
+                                                    @if (t.QtyReject > 0)
+                                                    {
+                                                        <div class="text-danger">Reject: @t.QtyReject</div>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(t.Remark))
+                                                    {
+                                                        <div>@t.Remark</div>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(t.TargetDivisionName))
+                                                    {
+                                                        <div>Target Division: @t.TargetDivisionName</div>
+                                                    }
+                                                </div>
+                                            }
+                                            @if (t.ReceivedAt is not null)
+                                            {
+                                                <small class="text-success d-block">
+                                                    Diterima @t.ReceivedAt.Value.ToString("dd/MM/yyyy HH:mm") @(t.ReceivedByResourceName is not null ? $"oleh {t.ReceivedByResourceName}" : "")
+                                                    @(!string.IsNullOrEmpty(t.ReceivedRemark) ? $"— {t.ReceivedRemark}" : "")
+                                                </small>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-muted mb-0">Cari bundle lewat serial atau project + no bundle untuk melihat riwayat.</p>
+                }
+            }
+            else
+            {
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Project</label>
+                        <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="varianceProjectId"
+                                          IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                          AllowNone="true" NoneLabel="- Semua Project -" Placeholder="Cari project..."
+                                          @bind-Value:after="OnVarianceProjectChanged" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Artikel</label>
+                        <SearchableSelect TItem="ArticleListItemDto" Items="varianceArticles" @bind-Value="varianceArticleId"
+                                          IdSelector="@(a => a.Id)" TextSelector="@(a => a.ArticleName)"
+                                          AllowNone="true" NoneLabel="- Semua Artikel -" Placeholder="Cari artikel..." />
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100" disabled="@isLoadingVariance" @onclick="LoadVariance">Terapkan</button>
+                    </div>
+                </div>
+
+                @if (!isLoadingVariance && varianceResults.Count > 0)
+                {
+                    <div class="mb-3">
+                        <span class="badge bg-secondary">Total baris selisih: @varianceResults.Count</span>
+                        <span class="badge bg-danger ms-1">Kurang: @varianceResults.Count(v => v.Selisih > 0)</span>
+                        <span class="badge bg-warning ms-1">Lebih: @varianceResults.Count(v => v.Selisih < 0)</span>
+                    </div>
+                }
+
+                @if (isLoadingVariance)
+                {
+                    <p class="mb-0">Memuat data...</p>
+                }
+                else if (varianceResults.Count == 0)
+                {
+                    <p class="text-muted mb-0">Tidak ada selisih qty (semua step yang sudah dikerjakan seimbang).</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Bundle No</th>
+                                    <th>Serial</th>
+                                    <th>Artikel</th>
+                                    <th>Size</th>
+                                    <th>Step</th>
+                                    <th>Qty Masuk</th>
+                                    <th>Qty Keluar</th>
+                                    <th>Selisih</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var v in varianceResults)
+                                {
+                                    <tr>
+                                        <td>@v.BundleNo</td>
+                                        <td>@v.Serial</td>
+                                        <td>@v.ArticleName</td>
+                                        <td>@v.SizeName</td>
+                                        <td>@v.StepName</td>
+                                        <td>@v.QtyMasuk</td>
+                                        <td>@v.QtyKeluar</td>
+                                        <td><span class="badge @(v.Selisih > 0 ? "bg-danger" : "bg-warning")">@v.Selisih</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool? hasAccess = null;
+    private string activeTab = "wip";
+
+    private List<ProjectDto> projects = new();
+    private List<DivisionDto> divisions = new();
+
+    // --- WIP ---
+    private int wipProjectId;
+    private int wipArticleId;
+    private int wipDivisionId;
+    private string wipStatus = string.Empty;
+    private List<ArticleListItemDto> wipArticles = new();
+    private List<BundleWipDto> wipResults = new();
+    private bool isLoadingWip = false;
+
+    // --- Progres ---
+    private int progressProjectId;
+    private ArticleProgressResultDto progressResult = new();
+    private Dictionary<int, string> progressArticleNames = new();
+    private bool isLoadingProgress = false;
+
+    private class ProgressRow
+    {
+        public int ArticleWorkflowId { get; set; }
+        public string StepName { get; set; } = string.Empty;
+        public string DivisionName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public bool IsBundle { get; set; }
+        public int TotalBundle { get; set; }
+        public int BundleSelesai { get; set; }
+        public int BundleDiterima { get; set; }
+        public int QtyOk { get; set; }
+        public int QtyReject { get; set; }
+        public int QtyTarget { get; set; }
+        public double ProgressPercent =>
+            IsBundle
+                ? (TotalBundle > 0 ? Math.Round(100.0 * BundleSelesai / TotalBundle, 1) : 0)
+                : (QtyTarget > 0 ? Math.Round(100.0 * QtyOk / QtyTarget, 1) : 0);
+        public double ProgressPercentCapped => Math.Min(ProgressPercent, 100);
+    }
+
+    private List<int> ProgressArticles => progressResult.BundleSteps.Select(s => s.ArticleId)
+        .Concat(progressResult.NonBundleSteps.Select(s => s.ArticleId))
+        .Distinct()
+        .OrderBy(id => ArticleName(id))
+        .ToList();
+
+    private string ArticleName(int articleId) => progressArticleNames.TryGetValue(articleId, out var name) ? name : $"Artikel #{articleId}";
+
+    private List<ProgressRow> ProgressRowsFor(int articleId)
+    {
+        var bundleRows = progressResult.BundleSteps.Where(s => s.ArticleId == articleId).Select(s => new ProgressRow
+        {
+            ArticleWorkflowId = s.ArticleWorkflowId,
+            StepName = s.StepName,
+            DivisionName = s.DivisionName,
+            SortOrder = s.SortOrder,
+            IsBundle = true,
+            TotalBundle = s.TotalBundle,
+            BundleSelesai = s.BundleSelesai,
+            BundleDiterima = s.BundleDiterima,
+            QtyOk = s.QtyOk,
+            QtyReject = s.QtyReject
+        });
+
+        var nonBundleRows = progressResult.NonBundleSteps.Where(s => s.ArticleId == articleId).Select(s => new ProgressRow
+        {
+            ArticleWorkflowId = s.ArticleWorkflowId,
+            StepName = s.StepName,
+            DivisionName = s.DivisionName,
+            SortOrder = s.SortOrder,
+            IsBundle = false,
+            QtyOk = s.QtyOk,
+            QtyReject = s.QtyReject,
+            QtyTarget = s.QtyTarget
+        });
+
+        return bundleRows.Concat(nonBundleRows).OrderBy(r => r.SortOrder).ToList();
+    }
+
+    private List<ArticleProgressSizeSurplusDto> SurplusFor(int articleWorkflowId) =>
+        progressResult.SizeSurplus.Where(s => s.ArticleWorkflowId == articleWorkflowId).ToList();
+
+    // --- Riwayat ---
+    private string historySerial = string.Empty;
+    private int historyProjectId;
+    private string historyBundleNoText = string.Empty;
+    private BundleHistoryResultDto? historyResult;
+    private string historyError = string.Empty;
+    private bool isLoadingHistory = false;
+
+    // --- Selisih ---
+    private int varianceProjectId;
+    private int varianceArticleId;
+    private List<ArticleListItemDto> varianceArticles = new();
+    private List<BundleVarianceDto> varianceResults = new();
+    private bool isLoadingVariance = false;
+
+    private async Task OnVarianceProjectChanged()
+    {
+        varianceArticleId = 0;
+        varianceArticles = varianceProjectId > 0 ? await ReportApi.GetArticlesByProjectAsync(varianceProjectId) : new();
+    }
+
+    private async Task LoadVariance()
+    {
+        isLoadingVariance = true;
+        varianceResults = await ReportApi.GetVarianceAsync(
+            varianceProjectId > 0 ? varianceProjectId : null,
+            varianceArticleId > 0 ? varianceArticleId : null);
+        isLoadingVariance = false;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "REPORT_BUNDLE");
+
+        if (hasAccess != true) return;
+
+        projects = await ReportApi.GetProjectsAsync();
+        divisions = await ReportApi.GetDivisionsAsync();
+    }
+
+    private int WipCount(string status) => wipResults.Count(r => r.Status == status);
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "BELUM_MULAI" => "Belum Mulai",
+        "TRANSIT" => "Transit",
+        "DIKERJAKAN" => "Dikerjakan",
+        "SELESAI" => "Selesai",
+        _ => status
+    };
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        "BELUM_MULAI" => "bg-secondary",
+        "TRANSIT" => "bg-warning",
+        "DIKERJAKAN" => "bg-info",
+        "SELESAI" => "bg-success",
+        _ => "bg-secondary"
+    };
+
+    private void SetTab(string tab)
+    {
+        activeTab = tab;
+    }
+
+    private async Task OnWipProjectChanged()
+    {
+        wipArticleId = 0;
+        wipArticles = wipProjectId > 0 ? await ReportApi.GetArticlesByProjectAsync(wipProjectId) : new();
+    }
+
+    private async Task LoadWip()
+    {
+        isLoadingWip = true;
+        wipResults = await ReportApi.GetWipAsync(
+            wipProjectId > 0 ? wipProjectId : null,
+            wipArticleId > 0 ? wipArticleId : null,
+            wipDivisionId > 0 ? wipDivisionId : null,
+            string.IsNullOrEmpty(wipStatus) ? null : wipStatus);
+        isLoadingWip = false;
+    }
+
+    private async Task LoadProgress()
+    {
+        if (progressProjectId <= 0)
+        {
+            progressResult = new();
+            return;
+        }
+
+        isLoadingProgress = true;
+        progressResult = await ReportApi.GetProgressAsync(progressProjectId);
+
+        var articles = await ReportApi.GetArticlesByProjectAsync(progressProjectId);
+        progressArticleNames = articles.ToDictionary(a => a.Id, a => a.ArticleName);
+
+        isLoadingProgress = false;
+    }
+
+    private async Task SearchHistoryBySerial()
+    {
+        if (string.IsNullOrWhiteSpace(historySerial)) return;
+
+        isLoadingHistory = true;
+        historyError = string.Empty;
+        var (success, error, result) = await ReportApi.GetHistoryAsync(historySerial.Trim(), null, null);
+        isLoadingHistory = false;
+
+        if (!success)
+        {
+            historyError = error;
+            historyResult = null;
+            return;
+        }
+
+        historyResult = result;
+    }
+
+    private async Task SearchHistoryByBundleNo()
+    {
+        if (historyProjectId <= 0 || !int.TryParse(historyBundleNoText, out var bundleNo) || bundleNo <= 0)
+        {
+            historyError = "Project dan No. Bundle wajib diisi.";
+            return;
+        }
+
+        isLoadingHistory = true;
+        historyError = string.Empty;
+        var (success, error, result) = await ReportApi.GetHistoryAsync(null, historyProjectId, bundleNo);
+        isLoadingHistory = false;
+
+        if (!success)
+        {
+            historyError = error;
+            historyResult = null;
+            return;
+        }
+
+        historyResult = result;
+    }
+
+    private async Task OpenHistoryFromWip(BundleWipDto item)
+    {
+        activeTab = "riwayat";
+        historySerial = item.Serial;
+        await SearchHistoryBySerial();
+    }
+}

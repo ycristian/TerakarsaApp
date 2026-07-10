@@ -5,10 +5,12 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Stations
 @using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Resources
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
 @inject StationApiService StationApi
 @inject DivisionApiService DivisionApi
+@inject ResourceApiService ResourceApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
 
@@ -72,6 +74,7 @@ else
                             <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Status</th>
                             <th>Token</th>
+                            <th>Resource Bawaan</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -88,6 +91,13 @@ else
                                     </span>
                                 </td>
                                 <td><code>@s.TokenPreview</code></td>
+                                <td>
+                                    @(string.IsNullOrEmpty(s.DefaultResourceName) ? "-" : s.DefaultResourceName)
+                                    @if (!s.AllowResourceChange && !string.IsNullOrEmpty(s.DefaultResourceName))
+                                    {
+                                        <i class="fe fe-lock ms-1" title="Terkunci ke resource bawaan"></i>
+                                    }
+                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(s)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-warning me-1" title="Generate Ulang Token" disabled="@isRegenerating" @onclick="() => RegenerateToken(s)"><i class="fe fe-refresh-cw"></i></button>
@@ -130,7 +140,7 @@ else
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Divisi</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId">
+                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId" @bind-Value:after="OnDivisionChanged">
                                 <option value="0">-- Pilih Divisi --</option>
                                 @foreach (var d in divisionOptions)
                                 {
@@ -138,6 +148,20 @@ else
                                 }
                             </InputSelect>
                             <ValidationMessage For="@(() => formModel.DivisionId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Resource Bawaan (opsional)</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="formModel.DefaultResourceId" @bind-Value:after="OnDefaultResourceChanged"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                            @if (formModel.DivisionId <= 0)
+                            {
+                                <div class="form-text">Pilih divisi terlebih dahulu untuk memilih resource.</div>
+                            }
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input class="form-check-input" type="checkbox" id="lockToDefaultCheck" disabled="@(formModel.DefaultResourceId <= 0)" @bind="formModel.LockToDefault" />
+                            <label class="form-check-label" for="lockToDefaultCheck">Kunci ke resource bawaan</label>
                         </div>
                         <div class="mb-3 form-check">
                             <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
@@ -200,6 +224,7 @@ else
     private bool isDeleting = false;
     private StationDto? stationPendingDelete;
     private List<DivisionDto> divisionOptions = new();
+    private List<ResourceLookupDto> resourceOptions = new();
     private bool isRegenerating = false;
     private bool showTokenModal = false;
     private string revealedToken = string.Empty;
@@ -283,11 +308,12 @@ else
     {
         isEditMode = false;
         formModel = new StationFormModel();
+        resourceOptions = new();
         errorMessage = string.Empty;
         showForm = true;
     }
 
-    private void OpenEditForm(StationDto station)
+    private async Task OpenEditForm(StationDto station)
     {
         isEditMode = true;
         formModel = new StationFormModel
@@ -296,10 +322,33 @@ else
             StationCode = station.StationCode,
             StationName = station.StationName,
             DivisionId = station.DivisionId,
-            IsActive = station.IsActive
+            IsActive = station.IsActive,
+            DefaultResourceId = station.DefaultResourceId ?? 0,
+            AllowResourceChange = station.AllowResourceChange
         };
         errorMessage = string.Empty;
+        await LoadResourceOptions();
         showForm = true;
+    }
+
+    private async Task OnDivisionChanged()
+    {
+        formModel.DefaultResourceId = 0;
+        formModel.AllowResourceChange = true;
+        await LoadResourceOptions();
+    }
+
+    private async Task LoadResourceOptions()
+    {
+        resourceOptions = formModel.DivisionId > 0
+            ? await ResourceApi.GetActiveByDivisionAsync(formModel.DivisionId)
+            : new();
+    }
+
+    private void OnDefaultResourceChanged()
+    {
+        if (formModel.DefaultResourceId <= 0)
+            formModel.AllowResourceChange = true;
     }
 
     private void CloseForm()
@@ -320,7 +369,9 @@ else
                 StationCode = formModel.StationCode,
                 StationName = formModel.StationName,
                 DivisionId = formModel.DivisionId,
-                IsActive = formModel.IsActive
+                IsActive = formModel.IsActive,
+                DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
+                AllowResourceChange = formModel.AllowResourceChange
             });
 
             isSaving = false;
@@ -342,7 +393,9 @@ else
                 StationCode = formModel.StationCode,
                 StationName = formModel.StationName,
                 DivisionId = formModel.DivisionId,
-                IsActive = formModel.IsActive
+                IsActive = formModel.IsActive,
+                DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
+                AllowResourceChange = formModel.AllowResourceChange
             });
 
             isSaving = false;
@@ -440,5 +493,15 @@ else
         public int DivisionId { get; set; }
 
         public bool IsActive { get; set; } = true;
+
+        public int DefaultResourceId { get; set; }
+        public bool AllowResourceChange { get; set; } = true;
+
+        // Kebalikan AllowResourceChange, khusus untuk binding checkbox "Kunci ke resource bawaan".
+        public bool LockToDefault
+        {
+            get => !AllowResourceChange;
+            set => AllowResourceChange = !value;
+        }
     }
 }

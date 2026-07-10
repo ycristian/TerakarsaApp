@@ -9,6 +9,10 @@ public class StationDto
     public string DivisionName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public string TokenPreview { get; set; } = string.Empty;
+    // Prompt 16: resource bawaan perangkat (1 device = 1 resource, opsional).
+    public int? DefaultResourceId { get; set; }
+    public string? DefaultResourceName { get; set; }
+    public bool AllowResourceChange { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -21,6 +25,8 @@ public class StationCreateRequest
     public string StationName { get; set; } = string.Empty;
     public int DivisionId { get; set; }
     public bool IsActive { get; set; } = true;
+    public int? DefaultResourceId { get; set; }
+    public bool AllowResourceChange { get; set; } = true;
 }
 
 public class StationUpdateRequest
@@ -30,6 +36,8 @@ public class StationUpdateRequest
     public string StationName { get; set; } = string.Empty;
     public int DivisionId { get; set; }
     public bool IsActive { get; set; }
+    public int? DefaultResourceId { get; set; }
+    public bool AllowResourceChange { get; set; } = true;
 }
 
 public class StationPagedRequest
@@ -65,4 +73,8 @@ public class StationMeDto
     public string StationName { get; set; } = string.Empty;
     public int DivisionId { get; set; }
     public string DivisionName { get; set; } = string.Empty;
+    // Prompt 16: resource bawaan perangkat -- lihat StationDevice.razor untuk 3 mode pakainya.
+    public int? DefaultResourceId { get; set; }
+    public string? DefaultResourceName { get; set; }
+    public bool AllowResourceChange { get; set; } = true;
 }

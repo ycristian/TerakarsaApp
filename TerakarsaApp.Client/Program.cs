@@ -14,14 +14,20 @@ builder.Services.AddAuthorizationCore();
 
 builder.Services.AddScoped<AuthorizedHandler>();
 
+// API selalu di-host di mesin yang sama dengan Client, port beda -- host-nya ikut dari mana
+// halaman ini dibuka (localhost saat dev di PC, IP LAN saat diakses dari device lain).
+var clientUri = new Uri(builder.HostEnvironment.BaseAddress);
+var apiPort = clientUri.Scheme == "https" ? 7130 : 5281;
+var apiBaseUrl = $"{clientUri.Scheme}://{clientUri.Host}:{apiPort}/";
+
 builder.Services.AddHttpClient("AuthAPI", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5281/");
+    client.BaseAddress = new Uri(apiBaseUrl);
 });
 
 builder.Services.AddHttpClient("API", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5281/");
+    client.BaseAddress = new Uri(apiBaseUrl);
 })
 .AddHttpMessageHandler<AuthorizedHandler>();
 
@@ -32,7 +38,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Auth.StationTokenHandler>();
 
 builder.Services.AddHttpClient<TerakarsaApp.Client.Services.StationDeviceApiService>(client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5281/");
+    client.BaseAddress = new Uri(apiBaseUrl);
 })
 .AddHttpMessageHandler<TerakarsaApp.Client.Auth.StationTokenHandler>();
 
@@ -58,5 +64,6 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowLogApiService>()
 builder.Services.AddScoped<TerakarsaApp.Client.Services.BundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicBundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowInputApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportBundleApiService>();
 
 await builder.Build().RunAsync();

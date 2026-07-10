@@ -343,17 +343,18 @@ else
                                             <th>Step</th>
                                             <th>Size</th>
                                             <th>Divisi</th>
-                                            <th>Operator</th>
+                                            <th>Pelaksana</th>
                                             <th>Bundle</th>
                                             <th>Qty OK</th>
                                             <th>Reject Print</th>
                                             <th>Reject Bahan</th>
                                             <th>Reject Jahit</th>
-                                            <th>Rework</th>
                                             <th>Tujuan</th>
                                             <th>Status Terima</th>
                                             <th>Catatan</th>
+                                            <th>Pencatat</th>
                                             <th>Waktu</th>
+                                            <th>Direvisi</th>
                                             @if (isAdmin)
                                             {
                                                 <th>Aksi</th>
@@ -373,7 +374,6 @@ else
                                                 <td>@log.QtyRejectPrint</td>
                                                 <td>@log.QtyRejectFabric</td>
                                                 <td>@log.QtyRejectSewing</td>
-                                                <td>@log.QtyRework</td>
                                                 <td>@(log.TargetDivisionName ?? "-")</td>
                                                 <td>
                                                     @if (log.TargetDivisionId is null)
@@ -390,7 +390,9 @@ else
                                                     }
                                                 </td>
                                                 <td>@(log.Remark ?? "-")</td>
+                                                <td>@(log.CreatedByName ?? "-")</td>
                                                 <td>@log.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                                                <td>@(log.UpdatedAt is not null ? $"{log.UpdatedAt.Value:dd/MM HH:mm} oleh {log.UpdatedByResourceName ?? log.UpdatedByName ?? "-"}" : "-")</td>
                                                 @if (isAdmin)
                                                 {
                                                     <td>

@@ -15,9 +15,10 @@
 --        - 'RECEIVE' kalau ada baris bundle ini yang target_division_id = @DivisionId
 --          dan received_at masih NULL (menunggu diterima divisiku).
 --        - 'COMPLETE' kalau tidak ada yang menunggu diterima, DAN step ber-bundle
---          berikutnya yang belum ada barisnya untuk bundle ini adalah milik @DivisionId --
---          untuk step ber-bundle PERTAMA tanpa prasyarat (kecuali cocok resource bila
---          bundle ditugaskan ke line tertentu); untuk step SELANJUTNYA disyaratkan step
+--          berikutnya yang kuotanya belum habis (Prompt 14b -- boleh sudah punya baris
+--          susulan, lihat sisa qty) untuk bundle ini adalah milik @DivisionId -- untuk step
+--          ber-bundle PERTAMA tanpa prasyarat (kecuali cocok resource bila bundle
+--          ditugaskan ke line tertentu); untuk step SELANJUTNYA disyaratkan step
 --          sebelumnya (bundle sama) sudah received_at + target_division_id = divisi ini.
 --        - Selain itu 'NONE' + pesan posisi (kalau @DivisionId NULL/pengunjung publik,
 --          selalu NONE tanpa pesan negatif).
@@ -57,7 +58,8 @@ BEGIN
         SizeName VARCHAR(255) NULL,
         DivisionName VARCHAR(255) NULL,
         ResourceName VARCHAR(255) NULL,
-        QtyOk INT, TargetDivisionName VARCHAR(255) NULL,
+        QtyOk INT, QtyRejectPrint INT, QtyRejectFabric INT, QtyRejectSewing INT,
+        TargetDivisionName VARCHAR(255) NULL,
         CreatedAt DATETIME2,
         ReceivedAt DATETIME2 NULL, ReceivedByResourceName VARCHAR(255) NULL, ReceivedRemark VARCHAR(500) NULL
     );
@@ -67,7 +69,8 @@ BEGIN
            spd.size_name,
            d.division_name,
            r.resource_name,
-           awl.qty_ok, td.division_name,
+           awl.qty_ok, awl.qty_reject_print, awl.qty_reject_fabric, awl.qty_reject_sewing,
+           td.division_name,
            awl.created_at,
            awl.received_at, rr.resource_name, awl.received_remark
     FROM article_workflow_logs awl
@@ -114,7 +117,8 @@ BEGIN
 
     -- 2. Timeline lengkap
     SELECT StepName, SortOrder, SizeName, DivisionName, ResourceName,
-           QtyOk, TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark
+           QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing,
+           TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark
     FROM @Timeline
     ORDER BY SortOrder ASC, CreatedAt ASC;
 
@@ -136,7 +140,6 @@ BEGIN
     DECLARE @ActionQtyRejectPrint INT = NULL;
     DECLARE @ActionQtyRejectFabric INT = NULL;
     DECLARE @ActionQtyRejectSewing INT = NULL;
-    DECLARE @ActionQtyRework INT = NULL;
     DECLARE @ActionRemark VARCHAR(500) = NULL;
 
     DECLARE @MaxArticleSort INT = (
@@ -180,7 +183,7 @@ BEGIN
             SELECT TOP 1 @EditWorkflowLogId = awl.workflow_log_id, @EditStepId = aw.article_workflow_id,
                          @ActionQtyOk = awl.qty_ok, @ActionQtyRejectPrint = awl.qty_reject_print,
                          @ActionQtyRejectFabric = awl.qty_reject_fabric, @ActionQtyRejectSewing = awl.qty_reject_sewing,
-                         @ActionQtyRework = awl.qty_rework, @ActionRemark = awl.remark
+                         @ActionRemark = awl.remark
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
@@ -194,16 +197,45 @@ BEGIN
             END
             ELSE
             BEGIN
+                -- Prompt 14b: "step berikutnya yang harus dikerjakan" (frontier) tidak lagi
+                -- sekadar "step tanpa baris sama sekali" -- satu step ber-bundle boleh sudah
+                -- punya baris (susulan) selama kuotanya belum habis. Hitung QtyMasuk/QtySudah
+                -- tiap step ber-bundle artikel ini (logika sama dengan Prompt 14 di
+                -- sp_WorkflowLog_Manage.sql), lalu ambil step PERTAMA (sort_order terkecil)
+                -- yang sisanya masih > 0.
+                DECLARE @StepQuota TABLE (
+                    ArticleWorkflowId INT, StepName VARCHAR(255), SortOrder INT, DivisionId INT,
+                    QtyMasuk INT, QtySudah INT
+                );
+
+                ;WITH BundleSteps AS (
+                    SELECT aw.article_workflow_id, aw.step_name, aw.sort_order, aw.division_id,
+                           LAG(aw.article_workflow_id) OVER (ORDER BY aw.sort_order) AS PrevArticleWorkflowId
+                    FROM article_workflows aw
+                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                )
+                INSERT INTO @StepQuota (ArticleWorkflowId, StepName, SortOrder, DivisionId, QtyMasuk, QtySudah)
+                SELECT bs.article_workflow_id, bs.step_name, bs.sort_order, bs.division_id,
+                    CASE WHEN bs.PrevArticleWorkflowId IS NULL
+                         THEN ISNULL((SELECT qty FROM bundles WHERE bundle_id = @BundleId), 0)
+                         ELSE ISNULL((
+                             SELECT SUM(qty_ok) FROM article_workflow_logs
+                             WHERE article_workflow_id = bs.PrevArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL
+                         ), 0)
+                    END,
+                    ISNULL((
+                        SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing)
+                        FROM article_workflow_logs
+                        WHERE article_workflow_id = bs.article_workflow_id AND bundle_id = @BundleId AND deleted_at IS NULL
+                    ), 0)
+                FROM BundleSteps bs;
+
                 DECLARE @CurStepId INT, @CurStepName VARCHAR(255), @CurSort INT, @CurDivisionId INT;
-                SELECT TOP 1 @CurStepId = aw.article_workflow_id, @CurStepName = aw.step_name,
-                             @CurSort = aw.sort_order, @CurDivisionId = aw.division_id
-                FROM article_workflows aw
-                WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM article_workflow_logs l
-                      WHERE l.article_workflow_id = aw.article_workflow_id AND l.bundle_id = @BundleId AND l.deleted_at IS NULL
-                  )
-                ORDER BY aw.sort_order ASC;
+                SELECT TOP 1 @CurStepId = ArticleWorkflowId, @CurStepName = StepName,
+                             @CurSort = SortOrder, @CurDivisionId = DivisionId
+                FROM @StepQuota
+                WHERE (QtyMasuk - QtySudah) > 0
+                ORDER BY SortOrder ASC;
 
                 IF @CurStepId IS NULL
                 BEGIN
@@ -222,7 +254,19 @@ BEGIN
 
                     IF @DivisionId <> @CurDivisionId
                     BEGIN
-                        SET @Message = 'Bundle sedang menunggu di step ' + @CurStepName + ' (' + ISNULL(@CurDivisionName, '-') + ').';
+                        -- Divisi ini mungkin sudah mengerjakan step-nya sendiri untuk bundle
+                        -- ini sampai kuota habis (Sisa = 0) -- lebih relevan bilang "step kamu
+                        -- sudah lengkap" daripada "menunggu di step lain" yang membingungkan.
+                        DECLARE @OwnStepDone VARCHAR(255);
+                        SELECT TOP 1 @OwnStepDone = StepName
+                        FROM @StepQuota
+                        WHERE DivisionId = @DivisionId AND QtySudah > 0 AND (QtyMasuk - QtySudah) <= 0
+                        ORDER BY SortOrder DESC;
+
+                        IF @OwnStepDone IS NOT NULL
+                            SET @Message = 'Step ini sudah lengkap.';
+                        ELSE
+                            SET @Message = 'Bundle sedang menunggu di step ' + @CurStepName + ' (' + ISNULL(@CurDivisionName, '-') + ').';
                     END
                     ELSE IF @CurSort = @FirstBundleSort
                     BEGIN
@@ -274,6 +318,6 @@ BEGIN
            @NextDivisionId AS NextDivisionId, @NextDivisionName AS NextDivisionName,
            @ActionQtyOk AS ActionQtyOk, @ActionQtyRejectPrint AS ActionQtyRejectPrint,
            @ActionQtyRejectFabric AS ActionQtyRejectFabric, @ActionQtyRejectSewing AS ActionQtyRejectSewing,
-           @ActionQtyRework AS ActionQtyRework, @ActionRemark AS ActionRemark;
+           @ActionRemark AS ActionRemark;
 END;
 GO

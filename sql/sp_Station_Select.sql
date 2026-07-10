@@ -48,10 +48,13 @@ BEGIN
                    s.division_id AS DivisionId, d.division_name AS DivisionName,
                    s.is_active AS IsActive,
                    LEFT(s.station_token, 8) + ''...'' AS TokenPreview,
+                   s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
+                   s.allow_resource_change AS AllowResourceChange,
                    s.created_at AS CreatedAt, s.created_by AS CreatedBy,
                    s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
             FROM stations s
             INNER JOIN divisions d ON d.division_id = s.division_id
+            LEFT JOIN resources r ON r.resource_id = s.default_resource_id
             WHERE s.deleted_at IS NULL
               AND (@SearchTerm IS NULL
                    OR s.station_code LIKE ''%'' + @SearchTerm + ''%''
@@ -78,10 +81,13 @@ BEGIN
            s.division_id AS DivisionId, d.division_name AS DivisionName,
            s.is_active AS IsActive,
            LEFT(s.station_token, 8) + '...' AS TokenPreview,
+           s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
+           s.allow_resource_change AS AllowResourceChange,
            s.created_at AS CreatedAt, s.created_by AS CreatedBy,
            s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
     FROM stations s
     INNER JOIN divisions d ON d.division_id = s.division_id
+    LEFT JOIN resources r ON r.resource_id = s.default_resource_id
     WHERE s.station_id = @Id AND s.deleted_at IS NULL;
 END;
 GO
@@ -95,9 +101,12 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT s.station_id AS StationId, s.station_name AS StationName,
-           s.division_id AS DivisionId, d.division_name AS DivisionName
+           s.division_id AS DivisionId, d.division_name AS DivisionName,
+           s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
+           s.allow_resource_change AS AllowResourceChange
     FROM stations s
     INNER JOIN divisions d ON d.division_id = s.division_id
+    LEFT JOIN resources r ON r.resource_id = s.default_resource_id
     WHERE s.station_token = @Token AND s.is_active = 1 AND s.deleted_at IS NULL;
 END;
 GO

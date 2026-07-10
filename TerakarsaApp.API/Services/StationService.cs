@@ -87,14 +87,16 @@ public class StationService
         var nameParam = new SqlParameter("@StationName", request.StationName);
         var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
+        var defaultResourceIdParam = new SqlParameter("@DefaultResourceId", request.DefaultResourceId ?? (object)DBNull.Value);
+        var allowResourceChangeParam = new SqlParameter("@AllowResourceChange", request.AllowResourceChange);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<NewStationRow>(
-                    "EXEC SIS_Station_Manage @Action = @Action, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @UserId = @UserId",
-                    actionParam, codeParam, nameParam, divisionIdParam, isActiveParam, userIdParam)
+                    "EXEC SIS_Station_Manage @Action = @Action, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @UserId = @UserId",
+                    actionParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, userIdParam)
                 .ToListAsync();
 
             var row = result.FirstOrDefault();
@@ -116,13 +118,15 @@ public class StationService
         var nameParam = new SqlParameter("@StationName", request.StationName);
         var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
+        var defaultResourceIdParam = new SqlParameter("@DefaultResourceId", request.DefaultResourceId ?? (object)DBNull.Value);
+        var allowResourceChangeParam = new SqlParameter("@AllowResourceChange", request.AllowResourceChange);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Station_Manage @Action = @Action, @Id = @Id, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @UserId = @UserId",
-                actionParam, idParam, codeParam, nameParam, divisionIdParam, isActiveParam, userIdParam);
+                "EXEC SIS_Station_Manage @Action = @Action, @Id = @Id, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @UserId = @UserId",
+                actionParam, idParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

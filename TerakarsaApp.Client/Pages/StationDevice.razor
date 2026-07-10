@@ -77,13 +77,22 @@ else
         <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
                 <h4 class="mb-0">@station.StationName <span class="text-muted fs-6">(@station.DivisionName)</span></h4>
-                <p class="mb-0 text-muted">Operator: <strong class="text-dark">@currentOperatorName</strong></p>
+                <p class="mb-0 text-muted">
+                    Operator: <strong class="text-dark">@currentOperatorName</strong>
+                    @if (IsLocked)
+                    {
+                        <i class="fe fe-lock ms-1" title="Terkunci ke resource bawaan"></i>
+                    }
+                </p>
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshLists" disabled="@isLoadingLists">
                     <i class="fe fe-refresh-cw"></i> Refresh
                 </button>
-                <button class="btn btn-outline-danger btn-sm" @onclick="ChangeOperator">Ganti Operator</button>
+                @if (!IsLocked)
+                {
+                    <button class="btn btn-outline-danger btn-sm" @onclick="ChangeOperator">Ganti Operator</button>
+                }
                 <button class="btn btn-outline-danger btn-sm" @onclick="ReleaseToken">Lepas Token</button>
             </div>
         </div>
@@ -146,6 +155,11 @@ else
                         Menunggu Diserahkan <span class="badge bg-primary ms-1">@pendingHandover.Count</span>
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "recent" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("recent")'>
+                        Baru Diterima
+                    </a>
+                </li>
             </ul>
         </div>
         <div class="card-body">
@@ -195,7 +209,12 @@ else
                                 <hr class="my-2" />
                                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                                     <p class="mb-0">
-                                        Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong><br />
+                                        Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong>
+                                        @if (item.UpdatedAt is not null)
+                                        {
+                                            <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                        }
+                                        <br />
                                         <span class="text-muted">Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</span>
                                     </p>
                                     <div class="d-flex gap-2">
@@ -208,7 +227,7 @@ else
                     }
                 }
             }
-            else
+            else if (activeTab == "handover")
             {
                 @if (pendingHandover.Count == 0)
                 {
@@ -237,25 +256,76 @@ else
                                     </div>
                                 </div>
                                 <hr class="my-2" />
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                    <div>
+                                        <p class="mb-1">
+                                            Step: <strong>@item.StepName</strong>
+                                            @if (!string.IsNullOrEmpty(item.ResourceName))
+                                            {
+                                                <text> &middot; Oleh: <strong>@item.ResourceName</strong></text>
+                                            }
+                                            @if (item.UpdatedAt is not null)
+                                            {
+                                                <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                            }
+                                        </p>
+                                        <div>Qty OK: <strong>@item.QtyOk</strong></div>
+                                        @foreach (var line in RejectLines(item))
+                                        {
+                                            <div class="text-danger">@line</div>
+                                        }
+                                        <div class="text-muted mt-1">Tujuan: @item.TargetDivisionName &middot; @item.CreatedAt.ToString("dd/MM HH:mm")</div>
+                                    </div>
+                                    <button class="btn btn-outline-primary" disabled="@isBusy" @onclick="() => OpenEditHandoverModal(item)">Edit</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            }
+            else
+            {
+                @if (recentReceived.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada yang diterima.</p>
+                }
+                else
+                {
+                    @foreach (var item in recentReceived)
+                    {
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h5 class="mb-1">@item.ArticleName</h5>
+                                    <div class="text-end">
+                                        @if (item.BundleNo is not null)
+                                        {
+                                            <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(item.SizeName))
+                                        {
+                                            <span class="badge bg-secondary">@item.SizeName</span>
+                                        }
+                                    </div>
+                                </div>
+                                <hr class="my-2" />
                                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                                     <p class="mb-0">
-                                        Step: <strong>@item.StepName</strong>
-                                        @if (!string.IsNullOrEmpty(item.ResourceName))
-                                        {
-                                            <text> &middot; Oleh: <strong>@item.ResourceName</strong></text>
-                                        }
-                                        &middot; Qty OK: <strong>@item.QtyOk</strong>
-                                        @{
-                                            var rejectSummary = RejectSummary(item);
-                                        }
-                                        @if (!string.IsNullOrEmpty(rejectSummary))
-                                        {
-                                            <text> &middot; <span class="text-danger">@rejectSummary</span></text>
-                                        }
+                                        Step: <strong>@item.StepName</strong> &middot; Qty: <strong>@item.QtyOk</strong>
                                         <br />
-                                        <span class="text-muted">Tujuan: @item.TargetDivisionName &middot; @item.CreatedAt.ToString("dd/MM HH:mm")</span>
+                                        <span class="text-muted">
+                                            Dari: @item.DivisionAsalName &middot; Diterima @item.ReceivedAt.ToString("dd/MM HH:mm")
+                                            @if (!string.IsNullOrEmpty(item.ReceivedByResourceName))
+                                            {
+                                                <text> oleh @item.ReceivedByResourceName</text>
+                                            }
+                                        </span>
                                     </p>
-                                    <button class="btn btn-outline-primary" disabled="@isBusy" @onclick="() => OpenEditHandoverModal(item)">Edit</button>
+                                    <button class="btn btn-outline-danger" disabled="@(!item.CanUnreceive || isBusy)"
+                                            title="@(item.CanUnreceive ? null : "Sudah ada hasil tercatat di step berikutnya.")"
+                                            @onclick="() => OpenUnreceiveModal(item)">
+                                        Batal Terima
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -340,23 +410,77 @@ else
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
                         </div>
-                        <div class="col-6">
-                            <label class="form-label">Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRework" />
-                        </div>
                     </div>
+
+                    @if (editQuotaInfo is not null)
+                    {
+                        <div class="form-text mb-2">Masuk: @editQuotaInfo.QtyMasuk &middot; Tercatat: @editQuotaInfo.QtySudah &middot; Sisa: @editQuotaInfo.Sisa</div>
+                    }
 
                     <label class="form-label">Catatan (opsional)</label>
                     <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
 
-                    @if (!string.IsNullOrEmpty(editError))
+                    @if (!string.IsNullOrEmpty(editError) && editError.StartsWith("QTY_EXCEED|"))
+                    {
+                        <div class="alert alert-warning mt-2 mb-0">
+                            <p class="mb-2">@(editError["QTY_EXCEED|".Length..])</p>
+                            <p class="mb-2">Yakin tetap simpan?</p>
+                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmEditHandover(true, false)">Ya, tetap simpan</button>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(editError) && editError.StartsWith("QTY_SHORT|"))
+                    {
+                        <div class="alert alert-warning mt-2 mb-0">
+                            <p class="mb-2">@(editError["QTY_SHORT|".Length..])</p>
+                            <p class="mb-2">Yakin tetap simpan?</p>
+                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmEditHandover(false, true)">Ya, tetap simpan</button>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(editError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@editError</div>
                     }
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseEditHandoverModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmEditHandover">Simpan</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="() => ConfirmEditHandover(false, false)">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showUnreceiveModal && unreceiveTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseUnreceiveModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Batalkan Penerimaan</h5>
+                    <button type="button" class="btn-close" @onclick="CloseUnreceiveModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">
+                        Batalkan penerimaan
+                        @if (unreceiveTarget.BundleNo is not null)
+                        {
+                            <text> bundle No. @unreceiveTarget.BundleNo</text>
+                        }
+                        else
+                        {
+                            <text> @unreceiveTarget.ArticleName</text>
+                        }
+                        &middot; @unreceiveTarget.StepName?
+                    </p>
+                    <p class="text-muted mb-0">Baris akan kembali ke Menunggu Diterima.</p>
+                    @if (!string.IsNullOrEmpty(unreceiveError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@unreceiveError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseUnreceiveModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmUnreceive">Ya, Batalkan</button>
                 </div>
             </div>
         </div>
@@ -381,6 +505,7 @@ else
     private string activeTab = "pending";
     private List<StationPendingReceiveDto> pendingReceives = new();
     private List<StationPendingHandoverDto> pendingHandover = new();
+    private List<StationRecentReceivedDto> recentReceived = new();
     private bool isLoadingLists = false;
     private bool isBusy = false;
     private string actionError = string.Empty;
@@ -397,10 +522,14 @@ else
     private int editQtyRejectPrint;
     private int editQtyRejectFabric;
     private int editQtyRejectSewing;
-    private int editQtyRework;
     private int editArticleSizeId;
     private string editRemark = string.Empty;
     private string editError = string.Empty;
+    private WorkflowQuotaInfoDto? editQuotaInfo;
+
+    private bool showUnreceiveModal = false;
+    private StationRecentReceivedDto? unreceiveTarget;
+    private string unreceiveError = string.Empty;
 
     private System.Threading.Timer? pollTimer;
 
@@ -459,15 +588,35 @@ else
         await LoadOperatorSessionAsync();
     }
 
+    private bool IsLocked => station is not null && !station.AllowResourceChange && station.DefaultResourceId is not null;
+
     private async Task LoadOperatorSessionAsync()
     {
         operators = await StationApi.GetResourcesAsync();
+
+        // Prompt 16: stasiun terkunci selalu memakai resource bawaan, abaikan sesi lama
+        // yang mungkin tersimpan sebelum stasiun dikunci admin.
+        if (IsLocked)
+        {
+            currentOperatorId = station!.DefaultResourceId;
+            currentOperatorName = station.DefaultResourceName;
+            await StartSessionAsync();
+            return;
+        }
 
         var savedId = await JS.InvokeAsync<string?>("localStorage.getItem", OperatorIdKey);
         if (int.TryParse(savedId, out var id) && operators.Any(o => o.Id == id))
         {
             currentOperatorId = id;
             currentOperatorName = operators.First(o => o.Id == id).ResourceName;
+            await StartSessionAsync();
+            return;
+        }
+
+        if (station!.DefaultResourceId is not null)
+        {
+            currentOperatorId = station.DefaultResourceId;
+            currentOperatorName = station.DefaultResourceName;
             await StartSessionAsync();
         }
     }
@@ -540,6 +689,7 @@ else
         isLoadingLists = true;
         pendingReceives = await StationApi.GetPendingReceivesAsync();
         pendingHandover = await StationApi.GetPendingHandoverAsync();
+        recentReceived = await StationApi.GetRecentReceivedAsync();
         selectedPendingIds.RemoveWhere(id => pendingReceives.All(p => p.WorkflowLogId != id));
         isLoadingLists = false;
         StateHasChanged();
@@ -550,14 +700,13 @@ else
         activeTab = tab;
     }
 
-    private static string RejectSummary(StationPendingHandoverDto item)
+    private static List<string> RejectLines(StationPendingHandoverDto item)
     {
         var parts = new List<string>();
         if (item.QtyRejectPrint > 0) parts.Add($"Reject Print: {item.QtyRejectPrint}");
         if (item.QtyRejectFabric > 0) parts.Add($"Reject Bahan: {item.QtyRejectFabric}");
         if (item.QtyRejectSewing > 0) parts.Add($"Reject Jahit: {item.QtyRejectSewing}");
-        if (item.QtyRework > 0) parts.Add($"Rework: {item.QtyRework}");
-        return string.Join(" · ", parts);
+        return parts;
     }
 
     private void ToggleSelectAllPending(ChangeEventArgs e)
@@ -644,17 +793,19 @@ else
         await RefreshLists();
     }
 
-    private void OpenEditHandoverModal(StationPendingHandoverDto item)
+    private async Task OpenEditHandoverModal(StationPendingHandoverDto item)
     {
         editHandoverTarget = item;
         editQtyOk = item.QtyOk;
         editQtyRejectPrint = item.QtyRejectPrint;
         editQtyRejectFabric = item.QtyRejectFabric;
         editQtyRejectSewing = item.QtyRejectSewing;
-        editQtyRework = item.QtyRework;
         editArticleSizeId = item.ArticleSizeId ?? 0;
         editRemark = item.Remark ?? string.Empty;
         editError = string.Empty;
+        editQuotaInfo = item.BundleId is not null
+            ? await StationApi.GetQuotaInfoAsync(item.ArticleWorkflowId, item.BundleId.Value)
+            : null;
         showEditHandoverModal = true;
     }
 
@@ -664,7 +815,7 @@ else
         editHandoverTarget = null;
     }
 
-    private async Task ConfirmEditHandover()
+    private async Task ConfirmEditHandover(bool confirmExceed, bool confirmShort)
     {
         if (editHandoverTarget is null) return;
 
@@ -684,8 +835,10 @@ else
             QtyRejectPrint = editQtyRejectPrint,
             QtyRejectFabric = editQtyRejectFabric,
             QtyRejectSewing = editQtyRejectSewing,
-            QtyRework = editQtyRework,
-            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark
+            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark,
+            ResourceId = currentOperatorId!.Value,
+            ConfirmExceed = confirmExceed,
+            ConfirmShort = confirmShort
         });
 
         isBusy = false;
@@ -697,6 +850,44 @@ else
         }
 
         CloseEditHandoverModal();
+        await RefreshLists();
+    }
+
+    private void OpenUnreceiveModal(StationRecentReceivedDto item)
+    {
+        unreceiveTarget = item;
+        unreceiveError = string.Empty;
+        showUnreceiveModal = true;
+    }
+
+    private void CloseUnreceiveModal()
+    {
+        showUnreceiveModal = false;
+        unreceiveTarget = null;
+        unreceiveError = string.Empty;
+    }
+
+    private async Task ConfirmUnreceive()
+    {
+        if (unreceiveTarget is null || currentOperatorId is null) return;
+
+        isBusy = true;
+        unreceiveError = string.Empty;
+
+        var (success, error) = await StationApi.UnreceiveAsync(unreceiveTarget.WorkflowLogId, new StationUnreceiveRequest
+        {
+            ResourceId = currentOperatorId.Value
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            unreceiveError = error;
+            return;
+        }
+
+        CloseUnreceiveModal();
         await RefreshLists();
     }
 
@@ -837,8 +1028,9 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
-            QtyRework = values.QtyRework,
-            Remark = values.Remark
+            Remark = values.Remark,
+            ConfirmExceed = values.ConfirmExceed,
+            ConfirmShort = values.ConfirmShort
         });
 
         scanActionBusy = false;
@@ -853,7 +1045,7 @@ else
 
     private async Task HandleScanEdit(TerakarsaApp.Client.Shared.BundleCompleteFormValues values)
     {
-        if (scanResult?.Action.ActionWorkflowLogId is null) return;
+        if (scanResult?.Action.ActionWorkflowLogId is null || currentOperatorId is null) return;
 
         scanActionBusy = true;
         scanActionError = string.Empty;
@@ -864,8 +1056,10 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
-            QtyRework = values.QtyRework,
-            Remark = values.Remark
+            Remark = values.Remark,
+            ResourceId = currentOperatorId.Value,
+            ConfirmExceed = values.ConfirmExceed,
+            ConfirmShort = values.ConfirmShort
         });
 
         scanActionBusy = false;

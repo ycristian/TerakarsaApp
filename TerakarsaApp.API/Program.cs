@@ -52,6 +52,7 @@ builder.Services.AddScoped<StationService>();
 builder.Services.AddScoped<WorkflowLogService>();
 builder.Services.AddScoped<BundleService>();
 builder.Services.AddScoped<PrintJobService>();
+builder.Services.AddScoped<ReportBundleService>();
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
 builder.Services.Configure<PrintServiceOptions>(builder.Configuration.GetSection("PrintService"));
@@ -61,8 +62,11 @@ builder.Services.Configure<ImageCompressionOptions>(builder.Configuration.GetSec
 
 builder.Services.AddCors(options =>
 {
+    // AllowAnyOrigin aman di sini karena auth pakai Bearer token di header (bukan cookie),
+    // jadi tidak butuh AllowCredentials -- perlu supaya device lain di LAN (IP berubah-ubah)
+    // bisa mengakses API ini.
     options.AddPolicy("AllowBlazor", policy =>
-        policy.WithOrigins("http://localhost:5244")
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod());
 });

@@ -405,8 +405,13 @@ CREATE TABLE bundles(
 );
 
 -- LOG MURNI, MODEL 1-BARIS-PER-SERAH-TERIMA (Prompt 12b): tidak boleh di-update
--- kecuali trio received_* lewat action RECEIVE. Salah input = soft delete (hanya
+-- kecuali trio received_* lewat action RECEIVE, atau (Prompt 12d) trio updated_* lewat
+-- action UPDATE selama received_at masih NULL. Salah input = soft delete (hanya
 -- supervisor/admin) + input baris baru. delete_reason wajib diisi saat delete.
+-- Identitas (Prompt 12d): PENCATAT = created_by/updated_by (user login; dari stasiun =
+-- user sistem 'station'). PELAKSANA = resource_id/updated_by_resource_id (opsional untuk
+-- step non-bundle). Tidak ada kolom employee di log -- karyawan pelaksana didaftarkan
+-- sebagai resource (employees.resource_id).
 -- INSERT = pekerjaan step selesai (dulu berstatus 'COMPLETED'). Penerimaan oleh divisi
 -- tujuan mengisi received_at/received_by_resource_id/received_remark pada baris yang
 -- SAMA (dulu baris terpisah berstatus 'RECEIVED') -- status kini selalu diturunkan dari
@@ -434,7 +439,6 @@ CREATE TABLE article_workflow_logs(
  qty_reject_print int not null default 0,   -- reject sablon
  qty_reject_fabric int not null default 0,  -- reject bahan
  qty_reject_sewing int not null default 0,  -- reject jahit
- qty_rework int not null default 0,
  remark varchar(500) null,
  received_at datetime2 null,
  received_by_resource_id int null           -- sebelumnya received_by, dipertegas ini FK ke resources
@@ -443,7 +447,11 @@ CREATE TABLE article_workflow_logs(
  target_division_id int null                -- sebelumnya target_division, disamakan pola _id
    constraint FK_awl_target_division foreign key references divisions(division_id),
  created_at datetime2 not null default sysdatetime(),
- created_by int not null,
+ created_by int not null,                   -- PENCATAT: user login (dari stasiun = user sistem 'station')
+ updated_at datetime2 null,                 -- Prompt 12d: trio ini hanya diisi action UPDATE (revisi
+ updated_by int null,                       -- sebelum diterima); baris terkunci begitu received_at terisi
+ updated_by_resource_id int null            -- operator sesi aktif saat revisi dari stasiun, opsional
+   constraint FK_awl_updated_by_resource foreign key references resources(resource_id),
  deleted_at datetime2 null,
  deleted_by int null,
  delete_reason varchar(255) null
@@ -626,6 +634,9 @@ CREATE TABLE stations(
    constraint FK_stations_divisions foreign key references divisions(division_id),
  station_token varchar(64) not null,        -- GUID tanpa strip, digenerate server
  is_active bit not null default 1,
+ default_resource_id int null               -- Prompt 16: 1 device = 1 resource (opsional)
+   constraint FK_stations_default_resource foreign key references resources(resource_id),
+ allow_resource_change bit not null default 1, -- 0 = terkunci ke default_resource_id
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,

@@ -120,13 +120,9 @@ else
                                     <label class="form-label">Reject Jahit</label>
                                     <input type="number" min="0" class="form-control" @bind="formQtyRejectSewing" />
                                 </div>
-                                <div class="col-6">
-                                    <label class="form-label">Rework</label>
-                                    <input type="number" min="0" class="form-control" @bind="formQtyRework" />
-                                </div>
                             </div>
                             <div class="mb-2">
-                                <label class="form-label">Resource Pencatat</label>
+                                <label class="form-label">Pelaksana (opsional)</label>
                                 <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="formResourceId"
                                                   IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
                                                   AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
@@ -182,10 +178,12 @@ else
                                                 <th>Reject Print</th>
                                                 <th>Reject Bahan</th>
                                                 <th>Reject Jahit</th>
-                                                <th>Rework</th>
                                                 <th>Tujuan</th>
                                                 <th>Status Terima</th>
                                                 <th>Catatan</th>
+                                                <th>Pencatat</th>
+                                                <th>Pelaksana</th>
+                                                <th>Direvisi</th>
                                                 @if (isAdmin)
                                                 {
                                                     <th>Aksi</th>
@@ -202,7 +200,6 @@ else
                                                     <td>@log.QtyRejectPrint</td>
                                                     <td>@log.QtyRejectFabric</td>
                                                     <td>@log.QtyRejectSewing</td>
-                                                    <td>@log.QtyRework</td>
                                                     <td>@(log.TargetDivisionName ?? "-")</td>
                                                     <td>
                                                         @if (log.TargetDivisionId is null)
@@ -219,6 +216,9 @@ else
                                                         }
                                                     </td>
                                                     <td>@(log.Remark ?? "-")</td>
+                                                    <td>@(log.CreatedByName ?? "-")</td>
+                                                    <td>@(log.ResourceName ?? "-")</td>
+                                                    <td>@(log.UpdatedAt is not null ? $"{log.UpdatedAt.Value:dd/MM HH:mm} oleh {log.UpdatedByResourceName ?? log.UpdatedByName ?? "-"}" : "-")</td>
                                                     @if (isAdmin)
                                                     {
                                                         <td>
@@ -280,7 +280,6 @@ else
     private int formQtyRejectPrint;
     private int formQtyRejectFabric;
     private int formQtyRejectSewing;
-    private int formQtyRework;
     private int formResourceId;
     private string formRemark = string.Empty;
     private bool isSaving = false;
@@ -366,7 +365,6 @@ else
         formQtyRejectPrint = 0;
         formQtyRejectFabric = 0;
         formQtyRejectSewing = 0;
-        formQtyRework = 0;
         formResourceId = 0;
         formRemark = string.Empty;
         saveError = string.Empty;
@@ -395,7 +393,6 @@ else
             QtyRejectPrint = formQtyRejectPrint,
             QtyRejectFabric = formQtyRejectFabric,
             QtyRejectSewing = formQtyRejectSewing,
-            QtyRework = formQtyRework,
             Remark = string.IsNullOrWhiteSpace(formRemark) ? null : formRemark
         });
 
@@ -413,7 +410,6 @@ else
         formQtyRejectPrint = 0;
         formQtyRejectFabric = 0;
         formQtyRejectSewing = 0;
-        formQtyRework = 0;
         formRemark = string.Empty;
         saveSuccessMessage = "Tersimpan.";
         await LoadLogs();

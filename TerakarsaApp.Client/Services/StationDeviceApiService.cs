@@ -46,6 +46,21 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<StationPendingHandoverDto>>() ?? new();
     }
 
+    public async Task<List<StationRecentReceivedDto>> GetRecentReceivedAsync()
+    {
+        var response = await _http.GetAsync("api/station/recent-received");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationRecentReceivedDto>>() ?? new();
+    }
+
+    // Prompt 14: info kuota qty step ber-bundle ("Masuk / Tercatat / Sisa") sebelum submit.
+    public async Task<WorkflowQuotaInfoDto?> GetQuotaInfoAsync(int articleWorkflowId, int bundleId)
+    {
+        var response = await _http.GetAsync($"api/station/quota-info?articleWorkflowId={articleWorkflowId}&bundleId={bundleId}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<WorkflowQuotaInfoDto>();
+    }
+
     public async Task<BundleScanInfoDto?> ScanAsync(string serial, int? resourceId)
     {
         var url = $"api/station/scan/{Uri.EscapeDataString(serial)}";
@@ -78,5 +93,13 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> UnreceiveAsync(int workflowLogId, StationUnreceiveRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/station/logs/{workflowLogId}/unreceive", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membatalkan penerimaan." : error.Trim('"'));
     }
 }

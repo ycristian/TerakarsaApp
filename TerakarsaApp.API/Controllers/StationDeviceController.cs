@@ -37,6 +37,15 @@ public class StationDeviceController : ControllerBase
 
     private StationMeDto CurrentStation => (StationMeDto)HttpContext.Items[RequireStationTokenAttribute.HttpContextItemKey]!;
 
+    // Prompt 16: stasiun terkunci (AllowResourceChange = false) memaksa resourceId dari
+    // request diabaikan dan diganti default_resource_id stasiun -- penegakan sisi server,
+    // bukan hanya UI, supaya tidak bisa dilewati lewat panggilan API langsung.
+    private int EffectiveResourceId(int requestedResourceId) =>
+        CurrentStation.AllowResourceChange ? requestedResourceId : (CurrentStation.DefaultResourceId ?? requestedResourceId);
+
+    private int? EffectiveResourceId(int? requestedResourceId) =>
+        CurrentStation.AllowResourceChange ? requestedResourceId : (CurrentStation.DefaultResourceId ?? requestedResourceId);
+
     [HttpGet("me")]
     public IActionResult Me()
     {
@@ -66,14 +75,32 @@ public class StationDeviceController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 15: 20 baris terakhir yang diterima divisi ini -- dasar tab "Baru Diterima".
+    [HttpGet("recent-received")]
+    public async Task<IActionResult> GetRecentReceived()
+    {
+        var result = await _workflowLogService.GetRecentReceivedAsync(CurrentStation.DivisionId);
+        return Ok(result);
+    }
+
     // Pintu masuk universal panel Scan Bundle di /station: @ResourceId dari operator sesi
     // (query string, sama seperti currentOperatorId dipakai di receive/complete lain),
     // @DivisionId selalu dari token perangkat.
     [HttpGet("scan/{serial}")]
     public async Task<IActionResult> Scan(string serial, [FromQuery] int? resourceId)
     {
-        var result = await _bundleService.GetScanInfoAsync(serial, CurrentStation.DivisionId, resourceId);
+        var result = await _bundleService.GetScanInfoAsync(serial, CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         if (result is null) return NotFound("Bundle tidak ditemukan.");
+        return Ok(result);
+    }
+
+    // Prompt 14: info kuota qty step ber-bundle ("Masuk / Tercatat / Sisa"), dipakai form
+    // COMPLETE/EDIT di BundleScanCard dan modal revisi "Menunggu Diserahkan" sebelum submit.
+    [HttpGet("quota-info")]
+    public async Task<IActionResult> GetQuotaInfo([FromQuery] int articleWorkflowId, [FromQuery] int bundleId)
+    {
+        var result = await _workflowLogService.GetQuotaInfoAsync(articleWorkflowId, bundleId);
+        if (result is null) return NotFound();
         return Ok(result);
     }
 
@@ -82,12 +109,13 @@ public class StationDeviceController : ControllerBase
     [HttpPost("receive")]
     public async Task<IActionResult> Receive([FromBody] StationReceiveRequest request)
     {
-        if (request.ResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
 
         var (success, error) = await _workflowLogService.ReceiveAsync(new WorkflowLogReceiveInput
         {
             WorkflowLogId = request.WorkflowLogId,
-            ReceivedByResourceId = request.ResourceId,
+            ReceivedByResourceId = resourceId,
             ReceivedRemark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId
         });
@@ -105,13 +133,14 @@ public class StationDeviceController : ControllerBase
     [HttpPost("complete")]
     public async Task<IActionResult> Complete([FromBody] StationCompleteRequest request)
     {
-        if (request.ResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
 
         if (request.BundleId is null)
             return BadRequest("Step tanpa bundle dicatat lewat menu Hasil Cutting.");
 
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0 || request.QtyRework < 0)
+            || request.QtyRejectSewing < 0)
             return BadRequest("Qty tidak boleh negatif.");
 
         var (success, error) = await _workflowLogService.CreateAsync(new WorkflowLogCreateInput
@@ -119,14 +148,15 @@ public class StationDeviceController : ControllerBase
             ArticleWorkflowId = request.ArticleWorkflowId,
             BundleId = request.BundleId,
             ArticleSizeId = request.ArticleSizeId,
-            ResourceId = request.ResourceId,
+            ResourceId = resourceId,
             QtyOk = request.QtyOk,
             QtyRejectPrint = request.QtyRejectPrint,
             QtyRejectFabric = request.QtyRejectFabric,
             QtyRejectSewing = request.QtyRejectSewing,
-            QtyRework = request.QtyRework,
             Remark = request.Remark,
-            ActingDivisionId = CurrentStation.DivisionId
+            ActingDivisionId = CurrentStation.DivisionId,
+            ConfirmExceed = request.ConfirmExceed,
+            ConfirmShort = request.ConfirmShort
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -140,8 +170,10 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> UpdateLog(int id, [FromBody] StationLogUpdateRequest request)
     {
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0 || request.QtyRework < 0)
+            || request.QtyRejectSewing < 0)
             return BadRequest("Qty tidak boleh negatif.");
+
+        var resourceId = EffectiveResourceId(request.ResourceId);
 
         var (success, error) = await _workflowLogService.UpdateAsync(new WorkflowLogUpdateInput
         {
@@ -151,10 +183,31 @@ public class StationDeviceController : ControllerBase
             QtyRejectPrint = request.QtyRejectPrint,
             QtyRejectFabric = request.QtyRejectFabric,
             QtyRejectSewing = request.QtyRejectSewing,
-            QtyRework = request.QtyRework,
             Remark = request.Remark,
-            ActingDivisionId = CurrentStation.DivisionId
-        });
+            ActingDivisionId = CurrentStation.DivisionId,
+            UpdatedByResourceId = resourceId > 0 ? resourceId : null,
+            ConfirmExceed = request.ConfirmExceed,
+            ConfirmShort = request.ConfirmShort
+        }, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 15: pembatalan penerimaan -- hanya divisi penerima, jendela sempit (belum ada
+    // hasil tercatat di step berikutnya). Teruskan pesan error SP apa adanya.
+    [HttpPost("logs/{id:int}/unreceive")]
+    public async Task<IActionResult> UnreceiveLog(int id, [FromBody] StationUnreceiveRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _workflowLogService.UnreceiveAsync(new WorkflowLogUnreceiveInput
+        {
+            Id = id,
+            ActingDivisionId = CurrentStation.DivisionId,
+            UpdatedByResourceId = resourceId
+        }, _systemUserId);
 
         if (!success) return BadRequest(error);
         return Ok();

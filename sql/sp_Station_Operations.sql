@@ -19,6 +19,12 @@
 --   diterima divisi tujuan (received_at IS NULL). Selama belum diterima, divisi pembuat
 --   masih boleh merevisi datanya (action UPDATE di SIS_WorkflowLog_Manage) -- begitu
 --   diterima (received_at terisi lewat RECEIVE), baris terkunci dan hilang dari daftar ini.
+--
+--   SIS_Station_RecentReceived (Prompt 15): 20 baris terakhir yang DITERIMA divisi ini
+--   (target_division_id = @DivisionId, received_at NOT NULL) -- dasar tab "Baru Diterima"
+--   dan tombol batal terima (action UNRECEIVE di SIS_WorkflowLog_Manage). CanUnreceive
+--   mencerminkan pemeriksaan step-berikutnya yang sama dipakai UNRECEIVE, supaya tombol
+--   bisa dinonaktifkan di UI tanpa round-trip tambahan.
 
 SET ANSI_NULLS ON;
 GO
@@ -38,7 +44,8 @@ BEGIN
            awl.qty_ok AS QtyOk, awl.created_at AS SentAt,
            d.division_name AS FromDivisionName,
            awl.bundle_id AS BundleId, b.bundle_no AS BundleNo, b.serial AS Serial,
-           spd.size_name AS SizeName
+           spd.size_name AS SizeName,
+           awl.updated_at AS UpdatedAt
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -114,10 +121,11 @@ BEGIN
            awl.article_size_id AS ArticleSizeId, spd.size_name AS SizeName,
            awl.qty_ok AS QtyOk, awl.qty_reject_print AS QtyRejectPrint,
            awl.qty_reject_fabric AS QtyRejectFabric, awl.qty_reject_sewing AS QtyRejectSewing,
-           awl.qty_rework AS QtyRework, awl.remark AS Remark,
+           awl.remark AS Remark,
            td.division_name AS TargetDivisionName,
            r.resource_name AS ResourceName,
            awl.created_at AS CreatedAt,
+           awl.updated_at AS UpdatedAt,
            CASE WHEN awl.bundle_id IS NULL THEN (
                SELECT asz2.article_size_id AS Id, spd2.size_name AS SizeName
                FROM article_sizes asz2
@@ -140,5 +148,43 @@ BEGIN
       AND awl.received_at IS NULL
       AND awl.deleted_at IS NULL
     ORDER BY awl.created_at DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SIS_Station_RecentReceived
+    @DivisionId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 20
+           awl.workflow_log_id AS WorkflowLogId,
+           b.bundle_no AS BundleNo, b.serial AS Serial,
+           a.article_name AS ArticleName,
+           spd.size_name AS SizeName,
+           aw.step_name AS StepName,
+           d.division_name AS DivisionAsalName,
+           awl.qty_ok AS QtyOk,
+           awl.received_at AS ReceivedAt,
+           r.resource_name AS ReceivedByResourceName,
+           CASE WHEN awl.bundle_id IS NOT NULL AND EXISTS (
+               SELECT 1
+               FROM article_workflow_logs awl2
+               INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl2.article_workflow_id
+               WHERE awl2.bundle_id = awl.bundle_id AND awl2.deleted_at IS NULL
+                 AND aw2.article_id = aw.article_id AND aw2.sort_order > aw.sort_order
+           ) THEN CAST(0 AS BIT) ELSE CAST(1 AS BIT) END AS CanUnreceive
+    FROM article_workflow_logs awl
+    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+    INNER JOIN articles a ON a.article_id = aw.article_id
+    INNER JOIN divisions d ON d.division_id = awl.division_id
+    LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+    LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
+    LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+    LEFT JOIN resources r ON r.resource_id = awl.received_by_resource_id
+    WHERE awl.target_division_id = @DivisionId
+      AND awl.received_at IS NOT NULL
+      AND awl.deleted_at IS NULL
+    ORDER BY awl.received_at DESC;
 END;
 GO

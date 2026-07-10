@@ -19,6 +19,9 @@ else if (notFound)
 }
 else if (hasStationToken)
 {
+    <div class="d-flex justify-content-end mb-2">
+        <a href="/station" class="btn btn-outline-secondary btn-sm" title="Pengaturan Stasiun"><i class="fe fe-settings"></i> Stasiun</a>
+    </div>
     @if (operatorId is null)
     {
         <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
@@ -148,8 +151,9 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
-            QtyRework = values.QtyRework,
-            Remark = values.Remark
+            Remark = values.Remark,
+            ConfirmExceed = values.ConfirmExceed,
+            ConfirmShort = values.ConfirmShort
         });
 
         actionBusy = false;
@@ -170,8 +174,9 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
-            QtyRework = values.QtyRework,
-            Remark = values.Remark
+            Remark = values.Remark,
+            ConfirmExceed = values.ConfirmExceed,
+            ConfirmShort = values.ConfirmShort
         });
 
         actionBusy = false;

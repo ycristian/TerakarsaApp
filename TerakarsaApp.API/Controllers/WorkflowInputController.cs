@@ -126,7 +126,7 @@ public class WorkflowInputController : ControllerBase
             return BadRequest("Size wajib dipilih.");
 
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0 || request.QtyRework < 0)
+            || request.QtyRejectSewing < 0)
             return BadRequest("Qty tidak boleh negatif.");
 
         var (success, error) = await _workflowLogService.CreateAsync(new WorkflowLogCreateInput
@@ -139,9 +139,9 @@ public class WorkflowInputController : ControllerBase
             QtyRejectPrint = request.QtyRejectPrint,
             QtyRejectFabric = request.QtyRejectFabric,
             QtyRejectSewing = request.QtyRejectSewing,
-            QtyRework = request.QtyRework,
             Remark = request.Remark,
-            ActingDivisionId = null
+            ActingDivisionId = null,
+            ConfirmExceed = request.ConfirmExceed
         }, CurrentUserId);
 
         if (!success) return BadRequest(error);

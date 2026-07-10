@@ -1,6 +1,9 @@
 @* Kartu hasil scan bundle — dipakai di panel Scan /station (aksi kontekstual aktif)
    dan halaman publik /b/{serial} (ReadOnly=true, tanpa tombol aksi). *@
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.WorkflowLogs
+@using TerakarsaApp.Client.Services
+@inject StationDeviceApiService StationApi
 
 <div class="card">
     <div class="card-body">
@@ -46,14 +49,36 @@
                             @(t.SizeName is not null ? $"({t.SizeName})" : "")
                             @(t.DivisionName is not null ? $"— {t.DivisionName}" : "")
                         </span>
-                        <span class="text-muted">Selesai @t.CreatedAt.ToString("dd/MM HH:mm") @(t.ResourceName is not null ? $"({t.ResourceName})" : "")</span>
+                        <span class="text-muted">Selesai @t.CreatedAt.ToString("dd/MM HH:mm")</span>
                     </div>
-                    @if (t.QtyOk > 0 || !string.IsNullOrEmpty(t.TargetDivisionName))
+                    @if (t.QtyOk > 0 || t.QtyRejectPrint > 0 || t.QtyRejectFabric > 0 || t.QtyRejectSewing > 0 || !string.IsNullOrEmpty(t.TargetDivisionName) || !string.IsNullOrEmpty(t.ResourceName))
                     {
-                        <small class="text-muted d-block">
-                            @(t.QtyOk > 0 ? $"Qty OK: {t.QtyOk}" : "")
-                            @(!string.IsNullOrEmpty(t.TargetDivisionName) ? $" → {t.TargetDivisionName}" : "")
-                        </small>
+                        <div class="text-muted small">
+                            @if (!string.IsNullOrEmpty(t.ResourceName))
+                            {
+                                <div>Pelaksana: @(!string.IsNullOrEmpty(t.DivisionName) ? $"{t.DivisionName} - " : "")@t.ResourceName</div>
+                            }
+                            @if (t.QtyOk > 0)
+                            {
+                                <div>Qty OK: @t.QtyOk</div>
+                            }
+                            @if (t.QtyRejectPrint > 0)
+                            {
+                                <div class="text-danger">Reject Print: @t.QtyRejectPrint</div>
+                            }
+                            @if (t.QtyRejectFabric > 0)
+                            {
+                                <div class="text-danger">Reject Bahan: @t.QtyRejectFabric</div>
+                            }
+                            @if (t.QtyRejectSewing > 0)
+                            {
+                                <div class="text-danger">Reject Jahit: @t.QtyRejectSewing</div>
+                            }
+                            @if (!string.IsNullOrEmpty(t.TargetDivisionName))
+                            {
+                                <div>Target Division: @t.TargetDivisionName</div>
+                            }
+                        </div>
                     }
                     @if (t.ReceivedAt is not null)
                     {
@@ -115,11 +140,12 @@
                         <label class="form-label">Reject Jahit</label>
                         <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectSewing" />
                     </div>
-                    <div class="col-6">
-                        <label class="form-label">Rework</label>
-                        <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRework" />
-                    </div>
                 </div>
+
+                @if (completeQuotaInfo is not null)
+                {
+                    <div class="form-text mb-2">Masuk: @completeQuotaInfo.QtyMasuk &middot; Tercatat: @completeQuotaInfo.QtySudah &middot; Sisa: @completeQuotaInfo.Sisa</div>
+                }
 
                 <div class="mb-2">
                     <label class="form-label">Divisi Tujuan</label>
@@ -130,6 +156,23 @@
 
                 <label class="form-label">Catatan (opsional)</label>
                 <textarea class="form-control mb-2" rows="2" @bind="completeRemark"></textarea>
+
+                @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
+                {
+                    <div class="alert alert-warning mb-2">
+                        <p class="mb-2">@(ActionError["QTY_EXCEED|".Length..])</p>
+                        <p class="mb-2">Yakin tetap simpan?</p>
+                        <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitCompleteExceed">Ya, tetap simpan</button>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_SHORT|"))
+                {
+                    <div class="alert alert-warning mb-2">
+                        <p class="mb-2">@(ActionError["QTY_SHORT|".Length..])</p>
+                        <p class="mb-2">Yakin tetap simpan?</p>
+                        <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitCompleteShort">Ya, tetap simpan</button>
+                    </div>
+                }
 
                 <button class="btn btn-primary btn-lg w-100" disabled="@Busy" @onclick="SubmitComplete">
                     Selesaikan
@@ -147,7 +190,7 @@
                 <div class="alert alert-warning mb-0">@(Info.Action.Message ?? "Tidak ada aksi untuk bundle ini saat ini.")</div>
             }
 
-            @if (!string.IsNullOrEmpty(ActionError))
+            @if (!string.IsNullOrEmpty(ActionError) && !ActionError.StartsWith("QTY_EXCEED|") && !ActionError.StartsWith("QTY_SHORT|"))
             {
                 <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
             }
@@ -184,16 +227,33 @@
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
                         </div>
-                        <div class="col-6">
-                            <label class="form-label">Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRework" />
-                        </div>
                     </div>
+
+                    @if (editQuotaInfo is not null)
+                    {
+                        <div class="form-text mb-2">Masuk: @editQuotaInfo.QtyMasuk &middot; Tercatat: @editQuotaInfo.QtySudah &middot; Sisa: @editQuotaInfo.Sisa</div>
+                    }
 
                     <label class="form-label">Catatan (opsional)</label>
                     <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
 
-                    @if (!string.IsNullOrEmpty(ActionError))
+                    @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
+                    {
+                        <div class="alert alert-warning mt-2 mb-0">
+                            <p class="mb-2">@(ActionError["QTY_EXCEED|".Length..])</p>
+                            <p class="mb-2">Yakin tetap simpan?</p>
+                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitEditExceed">Ya, tetap simpan</button>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_SHORT|"))
+                    {
+                        <div class="alert alert-warning mt-2 mb-0">
+                            <p class="mb-2">@(ActionError["QTY_SHORT|".Length..])</p>
+                            <p class="mb-2">Yakin tetap simpan?</p>
+                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitEditShort">Ya, tetap simpan</button>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(ActionError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
                     }
@@ -224,10 +284,21 @@
     private int completeQtyRejectPrint;
     private int completeQtyRejectFabric;
     private int completeQtyRejectSewing;
-    private int completeQtyRework;
     private string completeRemark = string.Empty;
+    private WorkflowQuotaInfoDto? completeQuotaInfo;
 
-    private Task SubmitComplete()
+    protected override async Task OnParametersSetAsync()
+    {
+        completeQuotaInfo = Info.Action.AllowedAction == "COMPLETE" && Info.Action.ActionArticleWorkflowId is not null
+            ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
+            : null;
+    }
+
+    private Task SubmitComplete() => DoSubmitComplete(false, false);
+    private Task ConfirmSubmitCompleteExceed() => DoSubmitComplete(true, false);
+    private Task ConfirmSubmitCompleteShort() => DoSubmitComplete(false, true);
+
+    private Task DoSubmitComplete(bool confirmExceed, bool confirmShort)
     {
         return OnComplete.InvokeAsync(new BundleCompleteFormValues
         {
@@ -235,8 +306,9 @@
             QtyRejectPrint = completeQtyRejectPrint,
             QtyRejectFabric = completeQtyRejectFabric,
             QtyRejectSewing = completeQtyRejectSewing,
-            QtyRework = completeQtyRework,
-            Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark
+            Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark,
+            ConfirmExceed = confirmExceed,
+            ConfirmShort = confirmShort
         });
     }
 
@@ -245,17 +317,19 @@
     private int editQtyRejectPrint;
     private int editQtyRejectFabric;
     private int editQtyRejectSewing;
-    private int editQtyRework;
     private string editRemark = string.Empty;
+    private WorkflowQuotaInfoDto? editQuotaInfo;
 
-    private void OpenEditModal()
+    private async Task OpenEditModal()
     {
         editQtyOk = Info.Action.ActionQtyOk ?? 0;
         editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
         editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
         editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
-        editQtyRework = Info.Action.ActionQtyRework ?? 0;
         editRemark = Info.Action.ActionRemark ?? string.Empty;
+        editQuotaInfo = Info.Action.ActionArticleWorkflowId is not null
+            ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
+            : null;
         showEditModal = true;
     }
 
@@ -264,7 +338,11 @@
         showEditModal = false;
     }
 
-    private async Task SubmitEdit()
+    private Task SubmitEdit() => DoSubmitEdit(false, false);
+    private Task ConfirmSubmitEditExceed() => DoSubmitEdit(true, false);
+    private Task ConfirmSubmitEditShort() => DoSubmitEdit(false, true);
+
+    private async Task DoSubmitEdit(bool confirmExceed, bool confirmShort)
     {
         await OnEdit.InvokeAsync(new BundleCompleteFormValues
         {
@@ -272,8 +350,9 @@
             QtyRejectPrint = editQtyRejectPrint,
             QtyRejectFabric = editQtyRejectFabric,
             QtyRejectSewing = editQtyRejectSewing,
-            QtyRework = editQtyRework,
-            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark
+            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark,
+            ConfirmExceed = confirmExceed,
+            ConfirmShort = confirmShort
         });
 
         if (string.IsNullOrEmpty(ActionError))
