@@ -86,6 +86,38 @@ public class StationPendingHandoverDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public List<ArticleSizeOptionDto> Sizes { get; set; } = new();
+    // Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER).
+    public List<DivisionOptionDto> TargetDivisionOptions { get; set; } = new();
+}
+
+// Prompt 12e: tab "Dikerjakan" -- bundle sudah diterima divisi ini, belum ada baris step
+// berikutnya. Lihat SIS_Station_InProgress. WorkflowLogId = baris yang diterima (dipakai
+// Batal Terima/UNRECEIVE). NextArticleWorkflowId = step yang diselesaikan saat Serahkan
+// (dikirim ke endpoint complete existing, action CREATE).
+public class StationInProgressDto
+{
+    public int WorkflowLogId { get; set; }
+    public int BundleId { get; set; }
+    public string Serial { get; set; } = string.Empty;
+    public int BundleNo { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public string ArticleName { get; set; } = string.Empty;
+    public string? SizeName { get; set; }
+    public int Qty { get; set; }
+    public string? TailorName { get; set; }
+    public DateTime ReceivedAt { get; set; }
+    public int? NextArticleWorkflowId { get; set; }
+    public string? NextStepName { get; set; }
+    public string? NextDivisionName { get; set; }
+    public bool IsLastStep { get; set; }
+}
+
+// Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) di atas /station.
+public class StationCountsDto
+{
+    public int MasukCount { get; set; }
+    public int DikerjakanCount { get; set; }
+    public int DikirimCount { get; set; }
 }
 
 public class StationLogUpdateRequest
@@ -102,6 +134,35 @@ public class StationLogUpdateRequest
     public bool ConfirmExceed { get; set; }
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini.
     public bool ConfirmShort { get; set; }
+}
+
+public class DivisionOptionDto
+{
+    public int Id { get; set; }
+    public string DivisionName { get; set; } = string.Empty;
+}
+
+// Prompt 12e: tab "Batal Serah" -- hanya operator, tanpa alasan bebas (lihat
+// SIS_WorkflowLog_Manage action CANCEL_HANDOVER).
+public class StationCancelHandoverRequest
+{
+    public int ResourceId { get; set; }
+}
+
+// Prompt 12e: tab "Revisi" di Dikirim -- superset StationLogUpdateRequest, boleh juga
+// mengubah divisi tujuan & penjahit (lihat SIS_WorkflowLog_Manage action REVISE_HANDOVER).
+// SENGAJA tanpa ConfirmExceed/ConfirmShort -- di luar cakupan Prompt 12e.
+public class StationReviseHandoverRequest
+{
+    public int QtyOk { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public string? Remark { get; set; }
+    public int NewTargetDivisionId { get; set; }
+    public int? NewResourceId { get; set; }
+    // Pelaksana (operator sesi aktif) yang melakukan revisi ini -- Prompt 12d.
+    public int ResourceId { get; set; }
 }
 
 public class StationReceiveRequest

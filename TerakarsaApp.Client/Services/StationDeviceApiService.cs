@@ -53,6 +53,26 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<StationRecentReceivedDto>>() ?? new();
     }
 
+    // Prompt 12e: tab "Dikerjakan".
+    public async Task<List<StationInProgressDto>> GetInProgressAsync()
+    {
+        var response = await _http.GetAsync("api/station/in-progress");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationInProgressDto>>() ?? new();
+    }
+
+    // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim).
+    public async Task<StationCountsDto> GetCountsAsync()
+    {
+        var response = await _http.GetAsync("api/station/counts");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<StationCountsDto>() ?? new();
+    }
+
+    // Prompt 12e: tab "Dikirim" (dulu "Menunggu Diserahkan") -- ulang pakai endpoint
+    // pending-handover yang sudah cocok dengan definisi Dikirim, hanya rename di sisi client.
+    public async Task<List<StationPendingHandoverDto>> GetOutboundAsync() => await GetPendingHandoverAsync();
+
     // Prompt 14: info kuota qty step ber-bundle ("Masuk / Tercatat / Sisa") sebelum submit.
     public async Task<WorkflowQuotaInfoDto?> GetQuotaInfoAsync(int articleWorkflowId, int bundleId)
     {
@@ -101,5 +121,23 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membatalkan penerimaan." : error.Trim('"'));
+    }
+
+    // Prompt 12e: "Batal Serah" di tab Dikirim.
+    public async Task<(bool Success, string Error)> CancelHandoverAsync(int workflowLogId, StationCancelHandoverRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/station/logs/{workflowLogId}/cancel-handover", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membatalkan serah." : error.Trim('"'));
+    }
+
+    // Prompt 12e: "Revisi" di tab Dikirim.
+    public async Task<(bool Success, string Error)> ReviseHandoverAsync(int workflowLogId, StationReviseHandoverRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/logs/{workflowLogId}/revise-handover", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan revisi." : error.Trim('"'));
     }
 }

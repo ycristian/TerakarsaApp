@@ -98,6 +98,33 @@ else
         </div>
     </div>
 
+    <div class="row g-2 mb-3">
+        <div class="col-4">
+            <div class="card bg-primary text-white h-100">
+                <div class="card-body py-2 px-3">
+                    <div class="small">Masuk</div>
+                    <div class="fs-1 fw-bold lh-1">@counts.MasukCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="card bg-warning text-dark h-100 border border-3 border-warning shadow-sm">
+                <div class="card-body py-2 px-3">
+                    <div class="small">Dikerjakan</div>
+                    <div class="fs-1 fw-bold lh-1">@counts.DikerjakanCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="card bg-light text-dark h-100">
+                <div class="card-body py-2 px-3">
+                    <div class="small text-muted">Dikirim</div>
+                    <div class="fs-1 fw-bold lh-1">@counts.DikirimCount</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <button class="btn btn-primary btn-lg w-100 mb-3" @onclick="OpenScanPanel">
         <i class="fe fe-camera"></i> Scan Bundle
     </button>
@@ -146,24 +173,24 @@ else
         <div class="card-header">
             <ul class="nav nav-tabs card-header-tabs">
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "pending" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("pending")'>
-                        Menunggu Diterima <span class="badge bg-primary ms-1">@pendingReceives.Count</span>
+                    <a class="nav-link @(activeTab == "masuk" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("masuk")'>
+                        Masuk <span class="badge bg-primary ms-1">@pendingReceives.Count</span>
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "handover" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("handover")'>
-                        Menunggu Diserahkan <span class="badge bg-primary ms-1">@pendingHandover.Count</span>
+                    <a class="nav-link @(activeTab == "kerja" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kerja")'>
+                        Dikerjakan <span class="badge bg-warning text-dark ms-1">@inProgress.Count</span>
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "recent" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("recent")'>
-                        Baru Diterima
+                    <a class="nav-link @(activeTab == "kirim" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kirim")'>
+                        Dikirim <span class="badge bg-secondary ms-1">@outbound.Count</span>
                     </a>
                 </li>
             </ul>
         </div>
         <div class="card-body">
-            @if (activeTab == "pending")
+            @if (activeTab == "masuk")
             {
                 @if (pendingReceives.Count == 0)
                 {
@@ -227,15 +254,54 @@ else
                     }
                 }
             }
-            else if (activeTab == "handover")
+            else if (activeTab == "kerja")
             {
-                @if (pendingHandover.Count == 0)
+                @if (inProgress.Count == 0)
                 {
-                    <p class="text-muted mb-0">Tidak ada data yang menunggu diserahkan.</p>
+                    <p class="text-muted mb-0">Tidak ada bundle yang sedang dikerjakan.</p>
                 }
                 else
                 {
-                    @foreach (var item in pendingHandover)
+                    @foreach (var item in inProgress)
+                    {
+                        <div class="card mb-2 border-warning">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                    <div>
+                                        <h5 class="mb-1">No. @item.BundleNo &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
+                                        <p class="text-muted mb-0">
+                                            @item.ProjectName
+                                            @if (!string.IsNullOrEmpty(item.SizeName))
+                                            {
+                                                <text> &middot; Size @item.SizeName</text>
+                                            }
+                                            &middot; Qty @item.Qty
+                                            @if (!string.IsNullOrEmpty(item.TailorName))
+                                            {
+                                                <text> &middot; Penjahit: @item.TailorName</text>
+                                            }
+                                        </p>
+                                        <p class="text-muted small mb-0">diterima @MinutesAgo(item.ReceivedAt)</p>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(item)">Batal Terima</button>
+                                        <button class="btn btn-warning" disabled="@(isBusy || item.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(item)">Serahkan</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            }
+            else
+            {
+                @if (outbound.Count == 0)
+                {
+                    <p class="text-muted mb-0">Tidak ada data yang menunggu diterima divisi tujuan.</p>
+                }
+                else
+                {
+                    @foreach (var item in outbound)
                     {
                         <div class="card mb-2">
                             <div class="card-body">
@@ -274,59 +340,14 @@ else
                                         {
                                             <div class="text-danger">@line</div>
                                         }
-                                        <div class="text-muted mt-1">Tujuan: @item.TargetDivisionName &middot; @item.CreatedAt.ToString("dd/MM HH:mm")</div>
+                                        <div class="text-muted mt-1">menunggu diterima @item.TargetDivisionName &middot; @item.CreatedAt.ToString("dd/MM HH:mm")</div>
                                     </div>
-                                    <button class="btn btn-outline-primary" disabled="@isBusy" @onclick="() => OpenEditHandoverModal(item)">Edit</button>
-                                </div>
-                            </div>
-                        </div>
-                    }
-                }
-            }
-            else
-            {
-                @if (recentReceived.Count == 0)
-                {
-                    <p class="text-muted mb-0">Belum ada yang diterima.</p>
-                }
-                else
-                {
-                    @foreach (var item in recentReceived)
-                    {
-                        <div class="card mb-2">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <h5 class="mb-1">@item.ArticleName</h5>
-                                    <div class="text-end">
-                                        @if (item.BundleNo is not null)
-                                        {
-                                            <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(item.SizeName))
-                                        {
-                                            <span class="badge bg-secondary">@item.SizeName</span>
-                                        }
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseModal(item)">Revisi</button>
+                                        <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(item)">Batal Serah</button>
                                     </div>
                                 </div>
-                                <hr class="my-2" />
-                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                    <p class="mb-0">
-                                        Step: <strong>@item.StepName</strong> &middot; Qty: <strong>@item.QtyOk</strong>
-                                        <br />
-                                        <span class="text-muted">
-                                            Dari: @item.DivisionAsalName &middot; Diterima @item.ReceivedAt.ToString("dd/MM HH:mm")
-                                            @if (!string.IsNullOrEmpty(item.ReceivedByResourceName))
-                                            {
-                                                <text> oleh @item.ReceivedByResourceName</text>
-                                            }
-                                        </span>
-                                    </p>
-                                    <button class="btn btn-outline-danger" disabled="@(!item.CanUnreceive || isBusy)"
-                                            title="@(item.CanUnreceive ? null : "Sudah ada hasil tercatat di step berikutnya.")"
-                                            @onclick="() => OpenUnreceiveModal(item)">
-                                        Batal Terima
-                                    </button>
-                                </div>
+                                <div class="text-muted small mt-2 mb-0">Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.</div>
                             </div>
                         </div>
                     }
@@ -367,120 +388,208 @@ else
     </div>
 }
 
-@if (showEditHandoverModal && editHandoverTarget is not null)
+@if (showSerahkanModal && serahkanTarget is not null)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseEditHandoverModal">
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseSerahkanModal">
         <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Revisi Data</h5>
-                    <button type="button" class="btn-close" @onclick="CloseEditHandoverModal"></button>
+                    <h5 class="modal-title">Serahkan</h5>
+                    <button type="button" class="btn-close" @onclick="CloseSerahkanModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>@editHandoverTarget.ArticleName</strong> &middot; @editHandoverTarget.StepName</p>
-
-                    @if (editHandoverTarget.BundleId is null)
-                    {
-                        <div class="mb-2">
-                            <label class="form-label">Size</label>
-                            <select class="form-select form-select-lg" @bind="editArticleSizeId">
-                                <option value="0">-- Pilih Size --</option>
-                                @foreach (var s in editHandoverTarget.Sizes)
-                                {
-                                    <option value="@s.Id">@s.SizeName</option>
-                                }
-                            </select>
-                        </div>
-                    }
+                    <p class="mb-2">
+                        <strong>No. @serahkanTarget.BundleNo &middot; @serahkanTarget.Serial</strong> &middot; @serahkanTarget.NextStepName
+                        <br />
+                        <span class="text-muted">
+                            Tujuan: @(serahkanTarget.NextDivisionName ?? "Selesai (step terakhir)")
+                        </span>
+                    </p>
 
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyOk" />
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectPrint" />
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectFabric" />
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectSewing" />
                         </div>
                     </div>
 
-                    @if (editQuotaInfo is not null)
+                    @if (serahkanQuotaInfo is not null)
                     {
-                        <div class="form-text mb-2">Masuk: @editQuotaInfo.QtyMasuk &middot; Tercatat: @editQuotaInfo.QtySudah &middot; Sisa: @editQuotaInfo.Sisa</div>
+                        <div class="form-text mb-2">Masuk: @serahkanQuotaInfo.QtyMasuk &middot; Tercatat: @serahkanQuotaInfo.QtySudah &middot; Sisa: @serahkanQuotaInfo.Sisa</div>
                     }
 
                     <label class="form-label">Catatan (opsional)</label>
-                    <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
+                    <textarea class="form-control" rows="2" @bind="serahkanRemark"></textarea>
 
-                    @if (!string.IsNullOrEmpty(editError) && editError.StartsWith("QTY_EXCEED|"))
+                    @if (!string.IsNullOrEmpty(serahkanError) && serahkanError.StartsWith("QTY_EXCEED|"))
                     {
                         <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(editError["QTY_EXCEED|".Length..])</p>
+                            <p class="mb-2">@(serahkanError["QTY_EXCEED|".Length..])</p>
                             <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmEditHandover(true, false)">Ya, tetap simpan</button>
+                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmSerahkan(true, false)">Ya, tetap simpan</button>
                         </div>
                     }
-                    else if (!string.IsNullOrEmpty(editError) && editError.StartsWith("QTY_SHORT|"))
+                    else if (!string.IsNullOrEmpty(serahkanError) && serahkanError.StartsWith("QTY_SHORT|"))
                     {
                         <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(editError["QTY_SHORT|".Length..])</p>
+                            <p class="mb-2">@(serahkanError["QTY_SHORT|".Length..])</p>
                             <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmEditHandover(false, true)">Ya, tetap simpan</button>
+                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmSerahkan(false, true)">Ya, tetap simpan</button>
                         </div>
                     }
-                    else if (!string.IsNullOrEmpty(editError))
+                    else if (!string.IsNullOrEmpty(serahkanError))
                     {
-                        <div class="alert alert-danger mt-2 mb-0">@editError</div>
+                        <div class="alert alert-danger mt-2 mb-0">@serahkanError</div>
                     }
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseEditHandoverModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@isBusy" @onclick="() => ConfirmEditHandover(false, false)">Simpan</button>
+                    <button class="btn btn-light" @onclick="CloseSerahkanModal">Batal</button>
+                    <button class="btn btn-warning" disabled="@isBusy" @onclick="() => ConfirmSerahkan(false, false)">Serahkan</button>
                 </div>
             </div>
         </div>
     </div>
 }
 
-@if (showUnreceiveModal && unreceiveTarget is not null)
+@if (showBatalTerimaModal && batalTerimaTarget is not null)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseUnreceiveModal">
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseBatalTerimaModal">
         <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Batalkan Penerimaan</h5>
-                    <button type="button" class="btn-close" @onclick="CloseUnreceiveModal"></button>
+                    <h5 class="modal-title">Batal Terima</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBatalTerimaModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-1">
-                        Batalkan penerimaan
-                        @if (unreceiveTarget.BundleNo is not null)
-                        {
-                            <text> bundle No. @unreceiveTarget.BundleNo</text>
-                        }
-                        else
-                        {
-                            <text> @unreceiveTarget.ArticleName</text>
-                        }
-                        &middot; @unreceiveTarget.StepName?
-                    </p>
-                    <p class="text-muted mb-0">Baris akan kembali ke Menunggu Diterima.</p>
-                    @if (!string.IsNullOrEmpty(unreceiveError))
+                    <p class="mb-1">Yakin batal terima bundle @batalTerimaTarget.Serial?</p>
+                    <p class="text-muted mb-0">Bundle akan kembali ke daftar Masuk.</p>
+                    @if (!string.IsNullOrEmpty(batalTerimaError))
                     {
-                        <div class="alert alert-danger mt-2 mb-0">@unreceiveError</div>
+                        <div class="alert alert-danger mt-2 mb-0">@batalTerimaError</div>
                     }
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseUnreceiveModal">Batal</button>
-                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmUnreceive">Ya, Batalkan</button>
+                    <button class="btn btn-light" @onclick="CloseBatalTerimaModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmBatalTerima">Ya, Batalkan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showReviseModal && reviseTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseReviseModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Revisi Data</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReviseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>@reviseTarget.ArticleName</strong> &middot; @reviseTarget.StepName</p>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label">Qty OK</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyOk" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Print</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectPrint" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Bahan</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectFabric" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Jahit</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectSewing" />
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">Divisi Tujuan</label>
+                        <select class="form-select form-select-lg" @bind="reviseTargetDivisionId">
+                            <option value="0">-- Pilih Divisi --</option>
+                            @foreach (var d in reviseTarget.TargetDivisionOptions)
+                            {
+                                <option value="@d.Id">@d.DivisionName</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">Penjahit</label>
+                        <select class="form-select form-select-lg" @bind="reviseResourceId">
+                            <option value="0">-- Tidak diubah --</option>
+                            @foreach (var op in operators)
+                            {
+                                <option value="@op.Id">@op.ResourceName</option>
+                            }
+                        </select>
+                    </div>
+
+                    <label class="form-label">Catatan (opsional)</label>
+                    <textarea class="form-control" rows="2" @bind="reviseRemark"></textarea>
+
+                    @if (!string.IsNullOrEmpty(reviseError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@reviseError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseReviseModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmRevise">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showBatalSerahModal && batalSerahTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseBatalSerahModal">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Batal Serah</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBatalSerahModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">
+                        Yakin batal serah
+                        @if (batalSerahTarget.BundleNo is not null)
+                        {
+                            <text> bundle No. @batalSerahTarget.BundleNo &middot; @batalSerahTarget.Serial</text>
+                        }
+                        else
+                        {
+                            <text> @batalSerahTarget.ArticleName</text>
+                        }
+                        ?
+                    </p>
+                    <p class="text-muted mb-0">Baris serah akan dihapus dan bundle kembali ke Dikerjakan.</p>
+                    @if (!string.IsNullOrEmpty(batalSerahError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@batalSerahError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseBatalSerahModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmBatalSerah">Ya, Batalkan</button>
                 </div>
             </div>
         </div>
@@ -502,10 +611,11 @@ else
     private int? currentOperatorId;
     private string? currentOperatorName;
 
-    private string activeTab = "pending";
+    private string activeTab = "kerja";
+    private StationCountsDto counts = new();
     private List<StationPendingReceiveDto> pendingReceives = new();
-    private List<StationPendingHandoverDto> pendingHandover = new();
-    private List<StationRecentReceivedDto> recentReceived = new();
+    private List<StationInProgressDto> inProgress = new();
+    private List<StationPendingHandoverDto> outbound = new();
     private bool isLoadingLists = false;
     private bool isBusy = false;
     private string actionError = string.Empty;
@@ -516,20 +626,34 @@ else
     private StationPendingReceiveDto? receiveNoteTarget;
     private string receiveNoteText = string.Empty;
 
-    private bool showEditHandoverModal = false;
-    private StationPendingHandoverDto? editHandoverTarget;
-    private int editQtyOk;
-    private int editQtyRejectPrint;
-    private int editQtyRejectFabric;
-    private int editQtyRejectSewing;
-    private int editArticleSizeId;
-    private string editRemark = string.Empty;
-    private string editError = string.Empty;
-    private WorkflowQuotaInfoDto? editQuotaInfo;
+    private bool showSerahkanModal = false;
+    private StationInProgressDto? serahkanTarget;
+    private int serahkanQtyOk;
+    private int serahkanQtyRejectPrint;
+    private int serahkanQtyRejectFabric;
+    private int serahkanQtyRejectSewing;
+    private string serahkanRemark = string.Empty;
+    private string serahkanError = string.Empty;
+    private WorkflowQuotaInfoDto? serahkanQuotaInfo;
 
-    private bool showUnreceiveModal = false;
-    private StationRecentReceivedDto? unreceiveTarget;
-    private string unreceiveError = string.Empty;
+    private bool showBatalTerimaModal = false;
+    private StationInProgressDto? batalTerimaTarget;
+    private string batalTerimaError = string.Empty;
+
+    private bool showReviseModal = false;
+    private StationPendingHandoverDto? reviseTarget;
+    private int reviseQtyOk;
+    private int reviseQtyRejectPrint;
+    private int reviseQtyRejectFabric;
+    private int reviseQtyRejectSewing;
+    private int reviseTargetDivisionId;
+    private int reviseResourceId;
+    private string reviseRemark = string.Empty;
+    private string reviseError = string.Empty;
+
+    private bool showBatalSerahModal = false;
+    private StationPendingHandoverDto? batalSerahTarget;
+    private string batalSerahError = string.Empty;
 
     private System.Threading.Timer? pollTimer;
 
@@ -688,8 +812,9 @@ else
     {
         isLoadingLists = true;
         pendingReceives = await StationApi.GetPendingReceivesAsync();
-        pendingHandover = await StationApi.GetPendingHandoverAsync();
-        recentReceived = await StationApi.GetRecentReceivedAsync();
+        inProgress = await StationApi.GetInProgressAsync();
+        outbound = await StationApi.GetOutboundAsync();
+        counts = await StationApi.GetCountsAsync();
         selectedPendingIds.RemoveWhere(id => pendingReceives.All(p => p.WorkflowLogId != id));
         isLoadingLists = false;
         StateHasChanged();
@@ -707,6 +832,15 @@ else
         if (item.QtyRejectFabric > 0) parts.Add($"Reject Bahan: {item.QtyRejectFabric}");
         if (item.QtyRejectSewing > 0) parts.Add($"Reject Jahit: {item.QtyRejectSewing}");
         return parts;
+    }
+
+    private static string MinutesAgo(DateTime at)
+    {
+        var minutes = (int)Math.Max(0, (DateTime.Now - at).TotalMinutes);
+        if (minutes < 60) return $"{minutes} menit lalu";
+        var hours = minutes / 60;
+        if (hours < 24) return $"{hours} jam lalu";
+        return $"{hours / 24} hari lalu";
     }
 
     private void ToggleSelectAllPending(ChangeEventArgs e)
@@ -793,50 +927,44 @@ else
         await RefreshLists();
     }
 
-    private async Task OpenEditHandoverModal(StationPendingHandoverDto item)
+    private async Task OpenSerahkanModal(StationInProgressDto item)
     {
-        editHandoverTarget = item;
-        editQtyOk = item.QtyOk;
-        editQtyRejectPrint = item.QtyRejectPrint;
-        editQtyRejectFabric = item.QtyRejectFabric;
-        editQtyRejectSewing = item.QtyRejectSewing;
-        editArticleSizeId = item.ArticleSizeId ?? 0;
-        editRemark = item.Remark ?? string.Empty;
-        editError = string.Empty;
-        editQuotaInfo = item.BundleId is not null
-            ? await StationApi.GetQuotaInfoAsync(item.ArticleWorkflowId, item.BundleId.Value)
-            : null;
-        showEditHandoverModal = true;
+        if (item.NextArticleWorkflowId is null) return;
+
+        serahkanTarget = item;
+        serahkanQtyOk = 0;
+        serahkanQtyRejectPrint = 0;
+        serahkanQtyRejectFabric = 0;
+        serahkanQtyRejectSewing = 0;
+        serahkanRemark = string.Empty;
+        serahkanError = string.Empty;
+        serahkanQuotaInfo = await StationApi.GetQuotaInfoAsync(item.NextArticleWorkflowId.Value, item.BundleId);
+        showSerahkanModal = true;
     }
 
-    private void CloseEditHandoverModal()
+    private void CloseSerahkanModal()
     {
-        showEditHandoverModal = false;
-        editHandoverTarget = null;
+        showSerahkanModal = false;
+        serahkanTarget = null;
     }
 
-    private async Task ConfirmEditHandover(bool confirmExceed, bool confirmShort)
+    private async Task ConfirmSerahkan(bool confirmExceed, bool confirmShort)
     {
-        if (editHandoverTarget is null) return;
-
-        if (editHandoverTarget.BundleId is null && editArticleSizeId <= 0)
-        {
-            editError = "Size wajib dipilih.";
-            return;
-        }
+        if (serahkanTarget?.NextArticleWorkflowId is null || currentOperatorId is null) return;
 
         isBusy = true;
-        editError = string.Empty;
+        serahkanError = string.Empty;
 
-        var (success, error) = await StationApi.UpdateLogAsync(editHandoverTarget.WorkflowLogId, new StationLogUpdateRequest
+        var (success, error) = await StationApi.CompleteAsync(new StationCompleteRequest
         {
-            ArticleSizeId = editHandoverTarget.BundleId is null ? editArticleSizeId : null,
-            QtyOk = editQtyOk,
-            QtyRejectPrint = editQtyRejectPrint,
-            QtyRejectFabric = editQtyRejectFabric,
-            QtyRejectSewing = editQtyRejectSewing,
-            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark,
-            ResourceId = currentOperatorId!.Value,
+            ArticleWorkflowId = serahkanTarget.NextArticleWorkflowId.Value,
+            BundleId = serahkanTarget.BundleId,
+            ResourceId = currentOperatorId.Value,
+            QtyOk = serahkanQtyOk,
+            QtyRejectPrint = serahkanQtyRejectPrint,
+            QtyRejectFabric = serahkanQtyRejectFabric,
+            QtyRejectSewing = serahkanQtyRejectSewing,
+            Remark = string.IsNullOrWhiteSpace(serahkanRemark) ? null : serahkanRemark,
             ConfirmExceed = confirmExceed,
             ConfirmShort = confirmShort
         });
@@ -845,36 +973,36 @@ else
 
         if (!success)
         {
-            editError = error;
+            serahkanError = error;
             return;
         }
 
-        CloseEditHandoverModal();
+        CloseSerahkanModal();
         await RefreshLists();
     }
 
-    private void OpenUnreceiveModal(StationRecentReceivedDto item)
+    private void OpenBatalTerimaModal(StationInProgressDto item)
     {
-        unreceiveTarget = item;
-        unreceiveError = string.Empty;
-        showUnreceiveModal = true;
+        batalTerimaTarget = item;
+        batalTerimaError = string.Empty;
+        showBatalTerimaModal = true;
     }
 
-    private void CloseUnreceiveModal()
+    private void CloseBatalTerimaModal()
     {
-        showUnreceiveModal = false;
-        unreceiveTarget = null;
-        unreceiveError = string.Empty;
+        showBatalTerimaModal = false;
+        batalTerimaTarget = null;
+        batalTerimaError = string.Empty;
     }
 
-    private async Task ConfirmUnreceive()
+    private async Task ConfirmBatalTerima()
     {
-        if (unreceiveTarget is null || currentOperatorId is null) return;
+        if (batalTerimaTarget is null || currentOperatorId is null) return;
 
         isBusy = true;
-        unreceiveError = string.Empty;
+        batalTerimaError = string.Empty;
 
-        var (success, error) = await StationApi.UnreceiveAsync(unreceiveTarget.WorkflowLogId, new StationUnreceiveRequest
+        var (success, error) = await StationApi.UnreceiveAsync(batalTerimaTarget.WorkflowLogId, new StationUnreceiveRequest
         {
             ResourceId = currentOperatorId.Value
         });
@@ -883,11 +1011,106 @@ else
 
         if (!success)
         {
-            unreceiveError = error;
+            batalTerimaError = error;
             return;
         }
 
-        CloseUnreceiveModal();
+        CloseBatalTerimaModal();
+        await RefreshLists();
+    }
+
+    private void OpenReviseModal(StationPendingHandoverDto item)
+    {
+        reviseTarget = item;
+        reviseQtyOk = item.QtyOk;
+        reviseQtyRejectPrint = item.QtyRejectPrint;
+        reviseQtyRejectFabric = item.QtyRejectFabric;
+        reviseQtyRejectSewing = item.QtyRejectSewing;
+        reviseTargetDivisionId = item.TargetDivisionOptions.Count == 1 ? item.TargetDivisionOptions[0].Id : 0;
+        reviseResourceId = 0;
+        reviseRemark = item.Remark ?? string.Empty;
+        reviseError = string.Empty;
+        showReviseModal = true;
+    }
+
+    private void CloseReviseModal()
+    {
+        showReviseModal = false;
+        reviseTarget = null;
+    }
+
+    private async Task ConfirmRevise()
+    {
+        if (reviseTarget is null || currentOperatorId is null) return;
+
+        if (reviseTargetDivisionId <= 0)
+        {
+            reviseError = "Divisi tujuan wajib dipilih.";
+            return;
+        }
+
+        isBusy = true;
+        reviseError = string.Empty;
+
+        var (success, error) = await StationApi.ReviseHandoverAsync(reviseTarget.WorkflowLogId, new StationReviseHandoverRequest
+        {
+            QtyOk = reviseQtyOk,
+            QtyRejectPrint = reviseQtyRejectPrint,
+            QtyRejectFabric = reviseQtyRejectFabric,
+            QtyRejectSewing = reviseQtyRejectSewing,
+            Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
+            NewTargetDivisionId = reviseTargetDivisionId,
+            NewResourceId = reviseResourceId > 0 ? reviseResourceId : null,
+            ResourceId = currentOperatorId.Value
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            reviseError = error;
+            return;
+        }
+
+        CloseReviseModal();
+        await RefreshLists();
+    }
+
+    private void OpenBatalSerahModal(StationPendingHandoverDto item)
+    {
+        batalSerahTarget = item;
+        batalSerahError = string.Empty;
+        showBatalSerahModal = true;
+    }
+
+    private void CloseBatalSerahModal()
+    {
+        showBatalSerahModal = false;
+        batalSerahTarget = null;
+        batalSerahError = string.Empty;
+    }
+
+    private async Task ConfirmBatalSerah()
+    {
+        if (batalSerahTarget is null || currentOperatorId is null) return;
+
+        isBusy = true;
+        batalSerahError = string.Empty;
+
+        var (success, error) = await StationApi.CancelHandoverAsync(batalSerahTarget.WorkflowLogId, new StationCancelHandoverRequest
+        {
+            ResourceId = currentOperatorId.Value
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            batalSerahError = error;
+            return;
+        }
+
+        CloseBatalSerahModal();
         await RefreshLists();
     }
 

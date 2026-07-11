@@ -25,6 +25,27 @@
 --   dan tombol batal terima (action UNRECEIVE di SIS_WorkflowLog_Manage). CanUnreceive
 --   mencerminkan pemeriksaan step-berikutnya yang sama dipakai UNRECEIVE, supaya tombol
 --   bisa dinonaktifkan di UI tanpa round-trip tambahan.
+--
+-- Prompt 12e -- redesign kiosk /station jadi 3 status (Masuk/Dikerjakan/Dikirim):
+--   SIS_Station_InProgress: bundle status "Dikerjakan" di divisi ini -- definisi identik
+--   dengan status DIKERJAKAN di sp_Report_Bundle.sql (baris log TERAKHIR hidup bundle:
+--   received_at IS NOT NULL DAN target_division_id = @DivisionId, artinya belum ada baris
+--   step berikutnya). TANPA TOP -- ini queue kerja utama operator, bukan riwayat.
+--   WorkflowLogId di sini = baris yang DITERIMA (dipakai utk Batal Terima/UNRECEIVE).
+--   NextArticleWorkflowId/NextStepName = step ber-bundle berikutnya yang harus diselesaikan
+--   (dipakai sebagai @ArticleWorkflowId saat submit Serahkan lewat endpoint complete existing,
+--   action CREATE di SIS_WorkflowLog_Manage -- TIDAK ada endpoint/SP baru utk Serahkan itu
+--   sendiri). NextDivisionName = tujuan serah berikutnya (murni informasi, dikunci ulang
+--   oleh server saat submit, sama seperti SIS_Bundle_ScanInfo).
+--
+--   SIS_Station_Counts: 3 angka (Masuk/Dikerjakan/Dikirim) utk strip kartu angka besar di
+--   atas /station. Masuk & Dikirim pakai definisi yang sama dengan SIS_Station_PendingReceives
+--   & SIS_Station_PendingHandover (level baris log, boleh bundle atau non-bundle); Dikerjakan
+--   pakai definisi yang sama dengan SIS_Station_InProgress (level bundle).
+--
+--   Tab "Dikirim" (dulu "Diserahkan") memakai ULANG SIS_Station_PendingHandover tanpa
+--   perubahan definisi -- sudah persis cocok (baris dibuat divisi ini, ada tujuan, belum
+--   diterima). Tidak dibuat SP SIS_Station_Outbound terpisah supaya tidak duplikasi logika.
 
 SET ANSI_NULLS ON;
 GO
@@ -133,7 +154,16 @@ BEGIN
                WHERE asz2.article_id = aw.article_id AND asz2.deleted_at IS NULL
                ORDER BY spd2.sort_order
                FOR JSON PATH
-           ) ELSE NULL END AS SizesJson
+           ) ELSE NULL END AS SizesJson,
+           -- Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER) -- daftar
+           -- distinct divisi yang dipakai step manapun di workflow artikel ini.
+           (
+               SELECT DISTINCT aw3.division_id AS Id, d3.division_name AS DivisionName
+               FROM article_workflows aw3
+               INNER JOIN divisions d3 ON d3.division_id = aw3.division_id
+               WHERE aw3.article_id = a.article_id AND aw3.deleted_at IS NULL
+               FOR JSON PATH
+           ) AS TargetDivisionOptionsJson
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -186,5 +216,115 @@ BEGIN
       AND awl.received_at IS NOT NULL
       AND awl.deleted_at IS NULL
     ORDER BY awl.received_at DESC;
+END;
+GO
+
+-- Prompt 12e: tab "Dikerjakan" -- lihat komentar definisi di atas file. Base = baris log
+-- bundle TERAKHIR (hidup) per bundle (pola sama dengan sp_Report_Bundle.sql Base CTE, tanpa
+-- kolom yang tidak dipakai di sini).
+CREATE OR ALTER PROCEDURE SIS_Station_InProgress
+    @DivisionId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH Base AS (
+        SELECT
+            b.bundle_id, b.serial, b.bundle_no, b.qty,
+            a.article_id, a.article_name,
+            p.project_name,
+            spd.size_name,
+            ISNULL(b.resource_person_name, rr.resource_name) AS tailor_name,
+            ll.workflow_log_id AS last_log_id,
+            ll.received_at AS last_received_at,
+            ll.target_division_id AS last_target_division_id,
+            law.sort_order AS last_sort_order
+        FROM bundles b
+        INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
+        INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
+        INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+        INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+        LEFT JOIN resources rr ON rr.resource_id = b.resource_id
+        OUTER APPLY (
+            SELECT TOP 1 awl.workflow_log_id, awl.article_workflow_id, awl.received_at, awl.target_division_id
+            FROM article_workflow_logs awl
+            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+            WHERE awl.bundle_id = b.bundle_id AND awl.deleted_at IS NULL
+            ORDER BY aw.sort_order DESC, awl.created_at DESC
+        ) ll
+        LEFT JOIN article_workflows law ON law.article_workflow_id = ll.article_workflow_id
+        WHERE b.deleted_at IS NULL
+          AND ll.received_at IS NOT NULL
+          AND ll.target_division_id = @DivisionId
+    )
+    SELECT
+        bs.last_log_id AS WorkflowLogId,
+        bs.bundle_id AS BundleId,
+        bs.serial AS Serial,
+        bs.bundle_no AS BundleNo,
+        bs.project_name AS ProjectName,
+        bs.article_name AS ArticleName,
+        bs.size_name AS SizeName,
+        bs.qty AS Qty,
+        bs.tailor_name AS TailorName,
+        bs.last_received_at AS ReceivedAt,
+        nxt.article_workflow_id AS NextArticleWorkflowId,
+        nxt.step_name AS NextStepName,
+        nd.division_name AS NextDivisionName,
+        CASE WHEN nxt.sort_order = (
+            SELECT MAX(sort_order) FROM article_workflows WHERE article_id = bs.article_id AND deleted_at IS NULL
+        ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep
+    FROM Base bs
+    OUTER APPLY (
+        SELECT TOP 1 aw.article_workflow_id, aw.step_name, aw.sort_order
+        FROM article_workflows aw
+        WHERE aw.article_id = bs.article_id AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+          AND aw.sort_order > bs.last_sort_order
+        ORDER BY aw.sort_order ASC
+    ) nxt
+    OUTER APPLY (
+        SELECT TOP 1 aw2.division_id
+        FROM article_workflows aw2
+        WHERE aw2.article_id = bs.article_id AND aw2.deleted_at IS NULL AND aw2.sort_order > nxt.sort_order
+        ORDER BY aw2.sort_order ASC
+    ) nd2
+    LEFT JOIN divisions nd ON nd.division_id = nd2.division_id
+    ORDER BY bs.project_name ASC, bs.article_name ASC, bs.bundle_no ASC;
+END;
+GO
+
+-- Prompt 12e: strip 3 angka (Masuk/Dikerjakan/Dikirim) di atas /station. Masuk & Dikirim
+-- pakai definisi baris yang sama dengan SIS_Station_PendingReceives/PendingHandover;
+-- Dikerjakan pakai definisi bundle yang sama dengan SIS_Station_InProgress di atas.
+CREATE OR ALTER PROCEDURE SIS_Station_Counts
+    @DivisionId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        (
+            SELECT COUNT(*) FROM article_workflow_logs
+            WHERE target_division_id = @DivisionId AND received_at IS NULL AND deleted_at IS NULL
+        ) AS MasukCount,
+        (
+            SELECT COUNT(*) FROM (
+                SELECT b.bundle_id
+                FROM bundles b
+                OUTER APPLY (
+                    SELECT TOP 1 awl.received_at, awl.target_division_id
+                    FROM article_workflow_logs awl
+                    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                    WHERE awl.bundle_id = b.bundle_id AND awl.deleted_at IS NULL
+                    ORDER BY aw.sort_order DESC, awl.created_at DESC
+                ) ll
+                WHERE b.deleted_at IS NULL AND ll.received_at IS NOT NULL AND ll.target_division_id = @DivisionId
+            ) x
+        ) AS DikerjakanCount,
+        (
+            SELECT COUNT(*) FROM article_workflow_logs
+            WHERE division_id = @DivisionId AND target_division_id IS NOT NULL
+              AND received_at IS NULL AND deleted_at IS NULL
+        ) AS DikirimCount;
 END;
 GO

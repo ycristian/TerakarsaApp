@@ -66,6 +66,22 @@
 -- @Action = 'DELETE': soft delete + alasan wajib. Tambahan (Prompt 12b): tolak kalau
 -- baris ber-bundle ini sudah dipakai sebagai dasar step berikutnya -- ada baris hidup
 -- di step sesudahnya (sort_order lebih besar, artikel sama) untuk bundle yang sama.
+--
+-- Prompt 12e -- tab "Dikirim" di /station (dulu "Menunggu Diserahkan"):
+--   @Action = 'CANCEL_HANDOVER' ("Batal Serah"): soft delete baris serah yang salah,
+--   guard received_at IS NULL (begitu diterima, harus lewat UNRECEIVE di divisi penerima,
+--   bukan ini). @ActingDivisionId (bila diisi) harus = division_id baris (divisi pembuat).
+--   delete_reason diisi tetap ('Batal serah (stasiun)') -- UI tidak menyediakan input alasan
+--   bebas untuk aksi ini, beda dengan DELETE biasa.
+--
+--   @Action = 'REVISE_HANDOVER' ("Revisi" di tab Dikirim): superset dari UPDATE khusus baris
+--   serah -- selain qty_*/remark, boleh juga mengubah target_division_id (@NewTargetDivisionId,
+--   wajib, harus divisi yang dipakai step manapun di workflow artikel ini) dan resource_id
+--   (@ResourceId, penjahit/pelaksana baris ini, opsional, harus resource hidup milik divisi
+--   baris ini). Guard received_at IS NULL, sama dengan UPDATE. SENGAJA tidak menjalankan
+--   validasi kuota QTY_EXCEED/QTY_SHORT (di luar cakupan Prompt 12e) -- nilai disimpan apa
+--   adanya, murni koreksi data sebelum diterima. Mengisi trio updated_at/updated_by/
+--   updated_by_resource_id (Prompt 12d) seperti UPDATE.
 
 SET ANSI_NULLS ON;
 GO
@@ -91,7 +107,8 @@ CREATE OR ALTER PROCEDURE SIS_WorkflowLog_Manage
     @ReceivedRemark      VARCHAR(500) = NULL,
     @UpdatedByResourceId INT = NULL,
     @ConfirmExceed       BIT = 0,
-    @ConfirmShort        BIT = 0
+    @ConfirmShort        BIT = 0,
+    @NewTargetDivisionId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -483,6 +500,128 @@ BEGIN
         SET received_at = NULL,
             received_by_resource_id = NULL,
             received_remark = NULL,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId,
+            updated_by_resource_id = @UpdatedByResourceId
+        WHERE workflow_log_id = @Id;
+    END
+
+    ELSE IF @Action = 'CANCEL_HANDOVER'
+    BEGIN
+        DECLARE @CancelDivisionId INT, @CancelReceivedAt DATETIME2, @CancelTargetDivisionId INT;
+        SELECT @CancelDivisionId = division_id, @CancelReceivedAt = received_at,
+               @CancelTargetDivisionId = target_division_id
+        FROM article_workflow_logs
+        WHERE workflow_log_id = @Id AND deleted_at IS NULL;
+
+        IF @CancelDivisionId IS NULL
+        BEGIN
+            RAISERROR('Baris serah tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @CancelTargetDivisionId IS NULL
+        BEGIN
+            RAISERROR('Baris ini bukan baris serah.', 16, 1);
+            RETURN;
+        END
+
+        IF @CancelReceivedAt IS NOT NULL
+        BEGIN
+            RAISERROR('Baris ini sudah diterima, tidak bisa dibatalkan lewat Batal Serah.', 16, 1);
+            RETURN;
+        END
+
+        IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @CancelDivisionId
+        BEGIN
+            RAISERROR('Baris serah ini bukan milik divisi Anda.', 16, 1);
+            RETURN;
+        END
+
+        UPDATE article_workflow_logs
+        SET deleted_at = SYSDATETIME(),
+            deleted_by = @UserId,
+            delete_reason = 'Batal serah (stasiun)'
+        WHERE workflow_log_id = @Id;
+    END
+
+    ELSE IF @Action = 'REVISE_HANDOVER'
+    BEGIN
+        DECLARE @RevDivisionId INT, @RevReceivedAt DATETIME2, @RevArticleId INT;
+        SELECT @RevDivisionId = awl.division_id, @RevReceivedAt = awl.received_at, @RevArticleId = aw.article_id
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
+
+        IF @RevDivisionId IS NULL
+        BEGIN
+            RAISERROR('Baris serah tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @RevReceivedAt IS NOT NULL
+        BEGIN
+            RAISERROR('Baris ini sudah diterima, tidak bisa direvisi.', 16, 1);
+            RETURN;
+        END
+
+        IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @RevDivisionId
+        BEGIN
+            RAISERROR('Baris serah ini bukan milik divisi Anda.', 16, 1);
+            RETURN;
+        END
+
+        IF @UserId IS NULL
+        BEGIN
+            RAISERROR('User pengubah tidak dikenal.', 16, 1);
+            RETURN;
+        END
+
+        IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+        BEGIN
+            RAISERROR('Qty tidak boleh negatif.', 16, 1);
+            RETURN;
+        END
+
+        IF @NewTargetDivisionId IS NULL
+        BEGIN
+            RAISERROR('Divisi tujuan wajib diisi.', 16, 1);
+            RETURN;
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM article_workflows
+            WHERE article_id = @RevArticleId AND division_id = @NewTargetDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Divisi tujuan tidak valid untuk artikel ini.', 16, 1);
+            RETURN;
+        END
+
+        IF @ResourceId IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @ResourceId AND division_id = @RevDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Penjahit bukan milik divisi ini.', 16, 1);
+            RETURN;
+        END
+
+        IF @UpdatedByResourceId IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @UpdatedByResourceId AND division_id = @RevDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Operator bukan milik divisi ini.', 16, 1);
+            RETURN;
+        END
+
+        UPDATE article_workflow_logs
+        SET qty_ok = @QtyOk,
+            qty_reject_print = @QtyRejectPrint,
+            qty_reject_fabric = @QtyRejectFabric,
+            qty_reject_sewing = @QtyRejectSewing,
+            remark = @Remark,
+            target_division_id = @NewTargetDivisionId,
+            resource_id = ISNULL(@ResourceId, resource_id),
             updated_at = SYSDATETIME(),
             updated_by = @UserId,
             updated_by_resource_id = @UpdatedByResourceId

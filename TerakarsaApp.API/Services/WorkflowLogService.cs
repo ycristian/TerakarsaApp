@@ -104,6 +104,7 @@ public class WorkflowLogService
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public string? SizesJson { get; set; }
+        public string? TargetDivisionOptionsJson { get; set; }
     }
 
     public async Task<List<WorkflowLogDto>> ListByArticleAsync(int articleId)
@@ -172,8 +173,84 @@ public class WorkflowLogService
             UpdatedAt = row.UpdatedAt,
             Sizes = string.IsNullOrEmpty(row.SizesJson)
                 ? new()
-                : JsonSerializer.Deserialize<List<ArticleSizeOptionDto>>(row.SizesJson) ?? new()
+                : JsonSerializer.Deserialize<List<ArticleSizeOptionDto>>(row.SizesJson) ?? new(),
+            TargetDivisionOptions = string.IsNullOrEmpty(row.TargetDivisionOptionsJson)
+                ? new()
+                : JsonSerializer.Deserialize<List<DivisionOptionDto>>(row.TargetDivisionOptionsJson) ?? new()
         }).ToList();
+    }
+
+    // Prompt 12e: tab "Dikerjakan" -- lihat SIS_Station_InProgress.
+    public async Task<List<StationInProgressDto>> GetInProgressAsync(int divisionId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+
+        return await _db.Database
+            .SqlQueryRaw<StationInProgressDto>("EXEC SIS_Station_InProgress @DivisionId = @DivisionId", divisionIdParam)
+            .ToListAsync();
+    }
+
+    // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) -- lihat SIS_Station_Counts.
+    public async Task<StationCountsDto> GetCountsAsync(int divisionId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+
+        var rows = await _db.Database
+            .SqlQueryRaw<StationCountsDto>("EXEC SIS_Station_Counts @DivisionId = @DivisionId", divisionIdParam)
+            .ToListAsync();
+
+        return rows.FirstOrDefault() ?? new StationCountsDto();
+    }
+
+    // Prompt 12e: "Batal Serah" -- lihat SIS_WorkflowLog_Manage action CANCEL_HANDOVER.
+    public async Task<(bool Success, string Error)> CancelHandoverAsync(int id, int? actingDivisionId, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "CANCEL_HANDOVER");
+        var idParam = new SqlParameter("@Id", id);
+        var userIdParam = new SqlParameter("@UserId", userId);
+        var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)actingDivisionId ?? DBNull.Value);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId",
+                actionParam, idParam, userIdParam, actingDivisionIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    // Prompt 12e: "Revisi" di tab Dikirim -- lihat SIS_WorkflowLog_Manage action REVISE_HANDOVER.
+    public async Task<(bool Success, string Error)> ReviseHandoverAsync(int id, StationReviseHandoverRequest request, int? actingDivisionId, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "REVISE_HANDOVER");
+        var idParam = new SqlParameter("@Id", id);
+        var qtyOkParam = new SqlParameter("@QtyOk", request.QtyOk);
+        var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", request.QtyRejectPrint);
+        var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", request.QtyRejectFabric);
+        var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", request.QtyRejectSewing);
+        var remarkParam = new SqlParameter("@Remark", (object?)request.Remark ?? DBNull.Value);
+        var newTargetDivisionIdParam = new SqlParameter("@NewTargetDivisionId", request.NewTargetDivisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.NewResourceId ?? DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
+        var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)actingDivisionId ?? DBNull.Value);
+        var updatedByResourceIdParam = new SqlParameter("@UpdatedByResourceId", request.ResourceId);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @NewTargetDivisionId = @NewTargetDivisionId, @ResourceId = @ResourceId, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @UpdatedByResourceId = @UpdatedByResourceId",
+                actionParam, idParam, qtyOkParam, qtyRejectPrintParam, qtyRejectFabricParam, qtyRejectSewingParam,
+                remarkParam, newTargetDivisionIdParam, resourceIdParam, userIdParam, actingDivisionIdParam, updatedByResourceIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
     }
 
     public async Task<(bool Success, string Error)> CreateAsync(WorkflowLogCreateInput input, int userId)

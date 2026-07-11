@@ -67,7 +67,8 @@ public class StationDeviceController : ControllerBase
     }
 
     // Baris yang dibuat divisi ini sendiri, sudah punya tujuan serah, tapi belum diterima
-    // (received_at IS NULL) -- masih boleh direvisi lewat PUT logs/{id} di bawah.
+    // (received_at IS NULL) -- masih boleh direvisi lewat PUT logs/{id}/revise-handover di
+    // bawah. Prompt 12e: ini sumber data tab "Dikirim" (dulu "Menunggu Diserahkan").
     [HttpGet("pending-handover")]
     public async Task<IActionResult> GetPendingHandover()
     {
@@ -80,6 +81,23 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> GetRecentReceived()
     {
         var result = await _workflowLogService.GetRecentReceivedAsync(CurrentStation.DivisionId);
+        return Ok(result);
+    }
+
+    // Prompt 12e: tab "Dikerjakan" -- bundle sudah diterima divisi ini, belum ada baris
+    // step berikutnya. TANPA batasan TOP (beda dengan recent-received di atas).
+    [HttpGet("in-progress")]
+    public async Task<IActionResult> GetInProgress()
+    {
+        var result = await _workflowLogService.GetInProgressAsync(CurrentStation.DivisionId);
+        return Ok(result);
+    }
+
+    // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) di atas /station.
+    [HttpGet("counts")]
+    public async Task<IActionResult> GetCounts()
+    {
+        var result = await _workflowLogService.GetCountsAsync(CurrentStation.DivisionId);
         return Ok(result);
     }
 
@@ -208,6 +226,42 @@ public class StationDeviceController : ControllerBase
             ActingDivisionId = CurrentStation.DivisionId,
             UpdatedByResourceId = resourceId
         }, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 12e: "Batal Serah" di tab Dikirim -- soft delete baris serah yang salah,
+    // hanya selama divisi tujuan belum menerima.
+    [HttpPost("logs/{id:int}/cancel-handover")]
+    public async Task<IActionResult> CancelHandover(int id, [FromBody] StationCancelHandoverRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _workflowLogService.CancelHandoverAsync(id, CurrentStation.DivisionId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 12e: "Revisi" di tab Dikirim -- boleh ubah qty, divisi tujuan, dan penjahit
+    // selama divisi tujuan belum menerima.
+    [HttpPut("logs/{id:int}/revise-handover")]
+    public async Task<IActionResult> ReviseHandover(int id, [FromBody] StationReviseHandoverRequest request)
+    {
+        if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
+            || request.QtyRejectSewing < 0)
+            return BadRequest("Qty tidak boleh negatif.");
+
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        request.ResourceId = resourceId;
+        if (request.NewResourceId.HasValue)
+            request.NewResourceId = EffectiveResourceId(request.NewResourceId);
+
+        var (success, error) = await _workflowLogService.ReviseHandoverAsync(id, request, CurrentStation.DivisionId, _systemUserId);
 
         if (!success) return BadRequest(error);
         return Ok();
