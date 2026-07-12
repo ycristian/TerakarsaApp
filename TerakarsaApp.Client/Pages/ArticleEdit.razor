@@ -275,26 +275,55 @@ else
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @for (var i = 0; i < workflowRows.Count; i++)
+                                    @{
+                                        var displayItems = GetWorkflowDisplayItems();
+                                    }
+                                    @for (var i = 0; i < displayItems.Count; i++)
                                     {
-                                        var row = workflowRows[i];
+                                        var item = displayItems[i];
                                         var idx = i + 1;
-                                        <tr>
-                                            <td class="align-middle">@idx</td>
-                                            <td><input class="form-control" maxlength="150" @bind="row.StepName" /></td>
-                                            <td>
-                                                <SearchableSelect TItem="DivisionDto" Items="divisionOptions" @bind-Value="row.DivisionId"
-                                                                  IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
-                                                                  Placeholder="Cari divisi..." />
-                                            </td>
-                                            <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
-                                            <td class="text-center">
-                                                <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
-                                            </td>
-                                            <td class="text-center">
-                                                <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
-                                            </td>
-                                        </tr>
+                                        if (item.IsBundling)
+                                        {
+                                            <tr style="background-color: #f1f3f5;">
+                                                <td class="align-middle">@idx</td>
+                                                <td>
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <input class="form-control" value="@item.BundlingStep!.StepName" disabled />
+                                                        <span class="badge text-nowrap" style="background-color: #dee2e6; color: #495057;">Otomatis</span>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <SearchableSelect TItem="DivisionDto" Items="divisionOptions" Value="item.BundlingStep!.DivisionId"
+                                                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                                                      Disabled="true" />
+                                                </td>
+                                                <td><input type="number" class="form-control" value="@item.BundlingStep!.SortOrder" disabled /></td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" checked disabled title="Butuh bundle" />
+                                                </td>
+                                                <td></td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            var row = item.Row!;
+                                            <tr>
+                                                <td class="align-middle">@idx</td>
+                                                <td><input class="form-control" maxlength="150" @bind="row.StepName" /></td>
+                                                <td>
+                                                    <SearchableSelect TItem="DivisionDto" Items="divisionOptions" @bind-Value="row.DivisionId"
+                                                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                                                      Placeholder="Cari divisi..." />
+                                                </td>
+                                                <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                                </td>
+                                                <td class="text-center">
+                                                    <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
+                                                </td>
+                                            </tr>
+                                        }
                                     }
                                 </tbody>
                             </table>
@@ -463,6 +492,7 @@ else
     private int selectedTemplateId;
     private bool isApplyingTemplate = false;
     private List<WorkflowStepRowModel> workflowRows = new();
+    private List<ArticleWorkflowStepDto> bundlingSteps = new();
     private bool isSavingWorkflow = false;
     private string workflowError = string.Empty;
     private string workflowSuccessMessage = string.Empty;
@@ -477,7 +507,14 @@ else
     private string deleteLogReason = string.Empty;
     private string deleteLogError = string.Empty;
 
-    protected override async Task OnInitializedAsync()
+    // Prompt fix: kedua route ("create" dan "edit") memetakan ke komponen yang sama, jadi
+    // saat HandleSubmit menavigasi dari create -> edit, Blazor menggunakan ulang instance
+    // komponen ini (bukan membuat baru) dan OnInitializedAsync tidak terpanggil lagi --
+    // hanya OnParametersSetAsync. loadedKey menjaga agar data (termasuk templateOptions)
+    // tetap dimuat ulang setiap kali ArticleId efektif berubah, tapi tidak berulang tanpa perlu.
+    private int loadedKey = int.MinValue;
+
+    protected override async Task OnParametersSetAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
@@ -489,6 +526,13 @@ else
             isLoading = false;
             return;
         }
+
+        var currentKey = ArticleId ?? -1;
+        if (currentKey == loadedKey)
+        {
+            return;
+        }
+        loadedKey = currentKey;
 
         isLoading = true;
         project = await ProjectApi.GetByIdAsync(ProjectId);
@@ -806,7 +850,7 @@ else
         }
         else
         {
-            workflowRows = workflow.Steps.Select(s => new WorkflowStepRowModel
+            workflowRows = workflow.Steps.Where(s => !s.IsBundling).Select(s => new WorkflowStepRowModel
             {
                 Id = s.Id,
                 StepName = s.StepName,
@@ -814,12 +858,26 @@ else
                 SortOrder = s.SortOrder,
                 RequiresBundle = s.RequiresBundle
             }).ToList();
+            bundlingSteps = workflow.Steps.Where(s => s.IsBundling).ToList();
         }
 
         if (divisionOptions.Count == 0)
             divisionOptions = await DivisionApi.GetActiveAsync();
 
         isLoadingWorkflow = false;
+    }
+
+    // Prompt 17: step Bundling implisit (is_bundling = 1) tidak ikut workflowRows (payload
+    // SAVE tidak boleh memuatnya) tapi tetap perlu tampil read-only di posisi urutannya --
+    // gabungkan di sini murni untuk render, diurutkan ulang tiap kali dipanggil supaya
+    // konsisten dengan SortOrder yang sedang diedit user.
+    private List<WorkflowDisplayItem> GetWorkflowDisplayItems()
+    {
+        var items = workflowRows.Select(r => new WorkflowDisplayItem { Row = r })
+            .Concat(bundlingSteps.Select(b => new WorkflowDisplayItem { BundlingStep = b }))
+            .OrderBy(i => i.SortOrder)
+            .ToList();
+        return items;
     }
 
     private async Task HandleApplyTemplate()
@@ -937,5 +995,13 @@ else
         public int DivisionId { get; set; }
         public int SortOrder { get; set; }
         public bool RequiresBundle { get; set; } = true;
+    }
+
+    private class WorkflowDisplayItem
+    {
+        public WorkflowStepRowModel? Row { get; set; }
+        public ArticleWorkflowStepDto? BundlingStep { get; set; }
+        public bool IsBundling => BundlingStep is not null;
+        public int SortOrder => BundlingStep?.SortOrder ?? Row!.SortOrder;
     }
 }

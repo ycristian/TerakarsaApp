@@ -8,12 +8,17 @@
 --   Step ber-bundle (requires_bundle = 1, @BundleId wajib, milik artikel yang sama):
 --     - Boleh berkali-kali per (step, bundle) -- baris susulan (Prompt 14b), lihat kuota
 --       di bawah.
---     - Step ber-bundle PERTAMA (MIN sort_order hidup di antara requires_bundle = 1):
---       tanpa prasyarat baris sebelumnya; kalau bundles.resource_id diisi, @ResourceId
---       wajib sama (bundle ditugaskan ke line tertentu).
---     - Step ber-bundle SELANJUTNYA: baris step ber-bundle tepat sebelumnya (bundle
---       sama) harus ada, received_at sudah terisi, dan target_division_id-nya = divisi
---       step ini (baru diserahkan & diterima ke divisi ini).
+--     - is_bundling = 1 (step Bundling implisit, Prompt 17): baris log-nya TIDAK PERNAH
+--       dibuat lewat @Action = 'CREATE' -- ditolak, hanya lahir lewat SIS_Bundle_Manage
+--       CREATE (lihat sql/sp_Bundle_Manage.sql).
+--     - SETIAP step ber-bundle is_bundling = 0 (termasuk step station PERTAMA, mis.
+--       Sewing): baris step ber-bundle tepat sebelumnya (bundle sama -- untuk step station
+--       pertama, ini SELALU step Bundling) harus ada, received_at sudah terisi, dan
+--       target_division_id-nya = divisi step ini (baru diserahkan & diterima ke divisi
+--       ini). Step ber-bundle pertama TIDAK LAGI bebas prasyarat sejak Prompt 17.
+--     - Khusus step station PERTAMA (MIN sort_order di antara requires_bundle = 1 AND
+--       is_bundling = 0): kalau bundles.resource_id diisi, @ResourceId wajib sama (bundle
+--       ditugaskan ke line tertentu).
 --     - @ArticleSizeId harus NULL (size sudah melekat di bundle).
 --   Umum: qty tidak boleh negatif; @ActingDivisionId (diisi dari token stasiun bila ada)
 --   harus sama dengan divisi step, kalau tidak ditolak. target_division_id TIDAK LAGI
@@ -82,6 +87,10 @@
 --   validasi kuota QTY_EXCEED/QTY_SHORT (di luar cakupan Prompt 12e) -- nilai disimpan apa
 --   adanya, murni koreksi data sebelum diterima. Mengisi trio updated_at/updated_by/
 --   updated_by_resource_id (Prompt 12d) seperti UPDATE.
+--
+-- Prompt 18 -- penguncian project: CREATE/UPDATE/RECEIVE/UNRECEIVE ditolak kalau project
+-- artikel bersangkutan berstatus manual (ON_HOLD/COMPLETED/CANCELLED) -- pesan RAISERROR
+-- menyertakan alasan bila ada. DELETE TIDAK dikunci (koreksi data oleh admin tetap boleh).
 
 SET ANSI_NULLS ON;
 GO
@@ -115,16 +124,43 @@ BEGIN
 
     IF @Action = 'CREATE'
     BEGIN
-        DECLARE @DivisionId INT, @RequiresBundle BIT, @ArticleId INT, @SortOrder INT;
+        DECLARE @DivisionId INT, @RequiresBundle BIT, @ArticleId INT, @SortOrder INT, @IsBundling BIT;
 
         SELECT @DivisionId = division_id, @RequiresBundle = requires_bundle,
-               @ArticleId = article_id, @SortOrder = sort_order
+               @ArticleId = article_id, @SortOrder = sort_order, @IsBundling = is_bundling
         FROM article_workflows
         WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL;
 
         IF @DivisionId IS NULL
         BEGIN
             RAISERROR('Step workflow tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 18: project terkunci (manual_status) menolak pencatatan log workflow.
+        DECLARE @LockStatus_Create VARCHAR(20), @LockReason_Create VARCHAR(255);
+        SELECT @LockStatus_Create = p.manual_status, @LockReason_Create = p.status_reason
+        FROM projects p
+        INNER JOIN articles a ON a.project_id = p.project_id
+        WHERE a.article_id = @ArticleId;
+
+        IF @LockStatus_Create IS NOT NULL
+        BEGIN
+            DECLARE @LockLabel_Create VARCHAR(30) = CASE @LockStatus_Create
+                WHEN 'ON_HOLD' THEN 'sedang ditahan'
+                WHEN 'COMPLETED' THEN 'sudah ditandai selesai'
+                WHEN 'CANCELLED' THEN 'sudah dibatalkan'
+                ELSE @LockStatus_Create END;
+            DECLARE @LockSuffix_Create VARCHAR(300) = CASE WHEN @LockReason_Create IS NOT NULL AND LTRIM(RTRIM(@LockReason_Create)) <> ''
+                THEN ' (Alasan: ' + @LockReason_Create + ')' ELSE '' END;
+            RAISERROR('Project %s%s. Hubungi supervisor untuk melanjutkan.', 16, 1, @LockLabel_Create, @LockSuffix_Create);
+            RETURN;
+        END
+
+        -- Prompt 17: baris step Bundling implisit hanya lahir lewat SIS_Bundle_Manage CREATE.
+        IF @IsBundling = 1
+        BEGIN
+            RAISERROR('Log step Bundling hanya dibuat lewat pembuatan bundle.', 16, 1);
             RETURN;
         END
 
@@ -196,12 +232,34 @@ BEGIN
                 RETURN;
             END
 
-            DECLARE @FirstBundleSort INT;
-            SELECT @FirstBundleSort = MIN(sort_order)
+            -- Prompt 17: step ber-bundle pertama TIDAK LAGI bebas prasyarat -- Bundling
+            -- (disisipkan otomatis, sort_order lebih kecil dari semua step station) selalu
+            -- jadi "step sebelumnya" untuk step station pertama, jadi aturan generik di bawah
+            -- berlaku ke SEMUA step ber-bundle is_bundling = 0 tanpa pengecualian.
+            DECLARE @FirstStationBundleSort INT;
+            SELECT @FirstStationBundleSort = MIN(sort_order)
             FROM article_workflows
-            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1;
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND is_bundling = 0;
 
-            IF @SortOrder = @FirstBundleSort
+            DECLARE @PrevArticleWorkflowId INT;
+            SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
+            FROM article_workflows
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
+            ORDER BY sort_order DESC;
+
+            IF @PrevArticleWorkflowId IS NULL OR NOT EXISTS (
+                SELECT 1 FROM article_workflow_logs
+                WHERE article_workflow_id = @PrevArticleWorkflowId AND bundle_id = @BundleId
+                  AND received_at IS NOT NULL AND target_division_id = @DivisionId AND deleted_at IS NULL
+            )
+            BEGIN
+                RAISERROR('Bundle belum diterima divisi ini.', 16, 1);
+                RETURN;
+            END
+
+            -- Validasi "bundle ditugaskan ke line lain" hanya berlaku di step station PERTAMA
+            -- (bukan lagi step ber-bundle pertama overall -- itu sekarang Bundling).
+            IF @SortOrder = @FirstStationBundleSort
             BEGIN
                 DECLARE @BundleResourceId INT;
                 SELECT @BundleResourceId = resource_id FROM bundles WHERE bundle_id = @BundleId;
@@ -212,33 +270,14 @@ BEGIN
                     RETURN;
                 END
             END
-            ELSE
-            BEGIN
-                DECLARE @PrevArticleWorkflowId INT;
-                SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
-                FROM article_workflows
-                WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
-                ORDER BY sort_order DESC;
 
-                IF @PrevArticleWorkflowId IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM article_workflow_logs
-                    WHERE article_workflow_id = @PrevArticleWorkflowId AND bundle_id = @BundleId
-                      AND received_at IS NOT NULL AND target_division_id = @DivisionId AND deleted_at IS NULL
-                )
-                BEGIN
-                    RAISERROR('Bundle belum diterima divisi ini.', 16, 1);
-                    RETURN;
-                END
-            END
-
-            -- Prompt 14: validasi kuota qty (boleh lewat lewat @ConfirmExceed = 1).
+            -- Prompt 14: validasi kuota qty (boleh lewat lewat @ConfirmExceed = 1). Prompt 17:
+            -- tidak perlu lagi cabang khusus bundles.qty -- qty masuk step station pertama
+            -- otomatis = SUM qty_ok baris step Bundling (nilainya memang qty bundle).
             DECLARE @QtyMasuk INT;
-            IF @SortOrder = @FirstBundleSort
-                SELECT @QtyMasuk = qty FROM bundles WHERE bundle_id = @BundleId;
-            ELSE
-                SELECT @QtyMasuk = ISNULL(SUM(qty_ok), 0)
-                FROM article_workflow_logs
-                WHERE article_workflow_id = @PrevArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
+            SELECT @QtyMasuk = ISNULL(SUM(qty_ok), 0)
+            FROM article_workflow_logs
+            WHERE article_workflow_id = @PrevArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
 
             SET @QtyMasuk = ISNULL(@QtyMasuk, 0);
 
@@ -291,6 +330,26 @@ BEGIN
         IF @UpdDivisionId IS NULL
         BEGIN
             RAISERROR('Log tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 18: project terkunci (manual_status) menolak revisi log workflow.
+        DECLARE @LockStatus_Update VARCHAR(20), @LockReason_Update VARCHAR(255);
+        SELECT @LockStatus_Update = p.manual_status, @LockReason_Update = p.status_reason
+        FROM projects p
+        INNER JOIN articles a ON a.project_id = p.project_id
+        WHERE a.article_id = @UpdArticleId;
+
+        IF @LockStatus_Update IS NOT NULL
+        BEGIN
+            DECLARE @LockLabel_Update VARCHAR(30) = CASE @LockStatus_Update
+                WHEN 'ON_HOLD' THEN 'sedang ditahan'
+                WHEN 'COMPLETED' THEN 'sudah ditandai selesai'
+                WHEN 'CANCELLED' THEN 'sudah dibatalkan'
+                ELSE @LockStatus_Update END;
+            DECLARE @LockSuffix_Update VARCHAR(300) = CASE WHEN @LockReason_Update IS NOT NULL AND LTRIM(RTRIM(@LockReason_Update)) <> ''
+                THEN ' (Alasan: ' + @LockReason_Update + ')' ELSE '' END;
+            RAISERROR('Project %s%s. Hubungi supervisor untuk melanjutkan.', 16, 1, @LockLabel_Update, @LockSuffix_Update);
             RETURN;
         END
 
@@ -418,10 +477,31 @@ BEGIN
             RETURN;
         END
 
-        DECLARE @RecTargetDivisionId INT, @RecReceivedAt DATETIME2;
-        SELECT @RecTargetDivisionId = target_division_id, @RecReceivedAt = received_at
-        FROM article_workflow_logs
-        WHERE workflow_log_id = @Id;
+        DECLARE @RecTargetDivisionId INT, @RecReceivedAt DATETIME2, @RecArticleId INT;
+        SELECT @RecTargetDivisionId = awl.target_division_id, @RecReceivedAt = awl.received_at, @RecArticleId = aw.article_id
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        WHERE awl.workflow_log_id = @Id;
+
+        -- Prompt 18: project terkunci (manual_status) menolak penerimaan log workflow.
+        DECLARE @LockStatus_Receive VARCHAR(20), @LockReason_Receive VARCHAR(255);
+        SELECT @LockStatus_Receive = p.manual_status, @LockReason_Receive = p.status_reason
+        FROM projects p
+        INNER JOIN articles a ON a.project_id = p.project_id
+        WHERE a.article_id = @RecArticleId;
+
+        IF @LockStatus_Receive IS NOT NULL
+        BEGIN
+            DECLARE @LockLabel_Receive VARCHAR(30) = CASE @LockStatus_Receive
+                WHEN 'ON_HOLD' THEN 'sedang ditahan'
+                WHEN 'COMPLETED' THEN 'sudah ditandai selesai'
+                WHEN 'CANCELLED' THEN 'sudah dibatalkan'
+                ELSE @LockStatus_Receive END;
+            DECLARE @LockSuffix_Receive VARCHAR(300) = CASE WHEN @LockReason_Receive IS NOT NULL AND LTRIM(RTRIM(@LockReason_Receive)) <> ''
+                THEN ' (Alasan: ' + @LockReason_Receive + ')' ELSE '' END;
+            RAISERROR('Project %s%s. Hubungi supervisor untuk melanjutkan.', 16, 1, @LockLabel_Receive, @LockSuffix_Receive);
+            RETURN;
+        END
 
         IF @RecTargetDivisionId IS NULL
         BEGIN
@@ -460,6 +540,26 @@ BEGIN
         IF @UnrTargetDivisionId IS NULL
         BEGIN
             RAISERROR('Baris ini belum diterima.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 18: project terkunci (manual_status) menolak pembatalan penerimaan.
+        DECLARE @LockStatus_Unreceive VARCHAR(20), @LockReason_Unreceive VARCHAR(255);
+        SELECT @LockStatus_Unreceive = p.manual_status, @LockReason_Unreceive = p.status_reason
+        FROM projects p
+        INNER JOIN articles a ON a.project_id = p.project_id
+        WHERE a.article_id = @UnrArticleId;
+
+        IF @LockStatus_Unreceive IS NOT NULL
+        BEGIN
+            DECLARE @LockLabel_Unreceive VARCHAR(30) = CASE @LockStatus_Unreceive
+                WHEN 'ON_HOLD' THEN 'sedang ditahan'
+                WHEN 'COMPLETED' THEN 'sudah ditandai selesai'
+                WHEN 'CANCELLED' THEN 'sudah dibatalkan'
+                ELSE @LockStatus_Unreceive END;
+            DECLARE @LockSuffix_Unreceive VARCHAR(300) = CASE WHEN @LockReason_Unreceive IS NOT NULL AND LTRIM(RTRIM(@LockReason_Unreceive)) <> ''
+                THEN ' (Alasan: ' + @LockReason_Unreceive + ')' ELSE '' END;
+            RAISERROR('Project %s%s. Hubungi supervisor untuk melanjutkan.', 16, 1, @LockLabel_Unreceive, @LockSuffix_Unreceive);
             RETURN;
         END
 

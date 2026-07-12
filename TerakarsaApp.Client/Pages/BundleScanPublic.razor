@@ -17,60 +17,82 @@ else if (notFound)
 {
     <div class="alert alert-danger mt-5">Bundle dengan serial <strong>@Serial</strong> tidak ditemukan.</div>
 }
-else if (hasStationToken)
-{
-    <div class="d-flex justify-content-end mb-2">
-        <a href="/station" class="btn btn-outline-secondary btn-sm" title="Pengaturan Stasiun"><i class="fe fe-settings"></i> Stasiun</a>
-    </div>
-    @if (operatorId is null)
-    {
-        <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
-    }
-    <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
-                    OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" />
-}
 else
 {
-    <BundleScanCard Info="scanInfo!" ReadOnly="true" />
+    <div class="d-flex justify-content-between mb-2">
+        <CloseButton />
+        <a href="/station" class="btn btn-outline-secondary btn-sm" title="Pengaturan Stasiun">
+            <i class="fe fe-settings"></i> @(hasStationToken ? "Stasiun" : "Atur Perangkat sebagai Stasiun")
+        </a>
+    </div>
+
+    @if (hasStationToken)
+    {
+        @if (operatorId is null)
+        {
+            <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
+        }
+        <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
+                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" />
+    }
+    else
+    {
+        <BundleScanCard Info="scanInfo!" ReadOnly="true" />
+    }
 
     @if (wip.Count > 0)
     {
         <h5 class="mt-4">Progres Artikel</h5>
-        <div class="table-responsive">
-            <table class="table table-sm table-bordered">
-                <thead>
-                    <tr>
-                        <th>Step</th>
-                        <th>Divisi</th>
-                        <th>Bundle Diterima</th>
-                        <th>Bundle Selesai</th>
-                        <th>Total Bundle</th>
-                        <th>Rincian / Qty OK</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var w in wip)
-                    {
-                        <tr>
-                            <td>@w.StepName</td>
-                            <td>@w.DivisionName</td>
-                            <td>@(w.RequiresBundle ? $"{w.ReceivedBundleCount}/{w.TotalBundleCount}" : "-")</td>
-                            <td>@(w.RequiresBundle ? $"{w.CompletedBundleCount}/{w.TotalBundleCount}" : $"{w.EntryCount}x input")</td>
-                            <td>@w.TotalBundleCount</td>
-                            <td>
-                                @if (w.RequiresBundle)
-                                {
-                                    @w.TotalQtyOkCompleted
-                                }
-                                else
-                                {
-                                    @string.Join(", ", w.SizeBreakdown.Select(s => $"{s.SizeName}: {s.QtyOk}"))
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+        <div class="row g-2">
+            @foreach (var w in wip)
+            {
+                <div class="col-12 col-md-6" @key="w.ArticleWorkflowId">
+                    <div class="card h-100 mb-0">
+                        <div class="card-body">
+                            <h6 class="mb-2">@w.SortOrder - @w.StepName</h6>
+
+                            @if (w.RequiresBundle)
+                            {
+                                <div class="mb-2">
+                                    <div class="small text-muted">Diterima</div>
+                                    <div class="row g-1 text-center">
+                                        <div class="col-4 small">@w.ReceivedPcs/@w.TotalBundlePcs pcs</div>
+                                        <div class="col-4 small">@w.ReceivedBundleCount/@w.TotalBundleCount bundles</div>
+                                        <div class="col-4 small">@(QtyPercent(w.ReceivedPcs, w.QtyOrder))%</div>
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    <div class="small text-muted">Selesai</div>
+                                    <div class="row g-1 text-center">
+                                        <div class="col-4 small">@w.CompletedPcs/@w.TotalBundlePcs pcs</div>
+                                        <div class="col-4 small">@w.CompletedBundleCount/@w.TotalBundleCount bundles</div>
+                                        <div class="col-4 small">@(QtyPercent(w.CompletedPcs, w.QtyOrder))%</div>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="mb-2 small">Diterima: - &middot; Selesai: -</p>
+                            }
+
+                            <div class="row text-center border-top pt-2">
+                                <div class="col-4">
+                                    <div class="small text-muted">Qty OK</div>
+                                    <div class="fw-bold text-success">@(w.QtyOk == 0 ? "-" : w.QtyOk.ToString())</div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="small text-muted">Qty Reject</div>
+                                    <div class="fw-bold text-danger">@(w.QtyReject == 0 ? "-" : w.QtyReject.ToString())</div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="small text-muted">Qty Order</div>
+                                    <div class="fw-bold">@(w.QtyOrder == 0 ? "-" : w.QtyOrder.ToString())</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
         </div>
     }
 }
@@ -98,6 +120,8 @@ else
             if (int.TryParse(savedOperatorId, out var opId)) operatorId = opId;
 
             scanInfo = await StationApi.ScanAsync(Serial, operatorId);
+            var publicDetail = await PublicApi.GetBundleAsync(Serial);
+            wip = publicDetail?.Wip ?? new();
         }
         else
         {
@@ -113,8 +137,13 @@ else
     private async Task Rescan()
     {
         scanInfo = await StationApi.ScanAsync(Serial, operatorId);
+        var publicDetail = await PublicApi.GetBundleAsync(Serial);
+        wip = publicDetail?.Wip ?? new();
         notFound = scanInfo is null;
     }
+
+    private static int QtyPercent(int value, int total) =>
+        total > 0 ? Math.Min(100, (int)Math.Round(100.0 * value / total)) : 0;
 
     private async Task HandleReceive(string? remark)
     {

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -50,7 +49,8 @@ public class BundleService
         {
             ArticleId = articleId,
             Summary = summary,
-            Bundles = bundles
+            Bundles = bundles,
+            PublicBaseUrl = _publicBaseUrl
         };
     }
 
@@ -63,14 +63,15 @@ public class BundleService
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
         var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
+        var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<BundleCreateResultRow>(
-                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
-                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, resourcePersonNameParam, publicBaseUrlParam, userIdParam)
+                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
+                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, resourcePersonNameParam, publicBaseUrlParam, bundlingResourceIdParam, userIdParam)
                 .ToListAsync();
 
             var row = result.First();
@@ -89,13 +90,14 @@ public class BundleService
         var qtyParam = new SqlParameter("@Qty", request.Qty);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
         var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
+        var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @UserId = @UserId",
-                actionParam, idParam, qtyParam, resourceIdParam, resourcePersonNameParam, userIdParam);
+                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
+                actionParam, idParam, qtyParam, resourceIdParam, resourcePersonNameParam, bundlingResourceIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -228,14 +230,16 @@ public class BundleService
         public int ArticleWorkflowId { get; set; }
         public string StepName { get; set; } = string.Empty;
         public int SortOrder { get; set; }
-        public string? DivisionName { get; set; }
         public bool RequiresBundle { get; set; }
+        public int ReceivedPcs { get; set; }
         public int ReceivedBundleCount { get; set; }
+        public int CompletedPcs { get; set; }
         public int CompletedBundleCount { get; set; }
+        public int TotalBundlePcs { get; set; }
         public int TotalBundleCount { get; set; }
-        public int TotalQtyOkCompleted { get; set; }
-        public int EntryCount { get; set; }
-        public string? SizeBreakdownJson { get; set; }
+        public int QtyOrder { get; set; }
+        public int QtyOk { get; set; }
+        public int QtyReject { get; set; }
     }
 
     public async Task<List<ArticleWipStepDto>> GetArticleWipAsync(int articleId)
@@ -251,16 +255,16 @@ public class BundleService
             ArticleWorkflowId = row.ArticleWorkflowId,
             StepName = row.StepName,
             SortOrder = row.SortOrder,
-            DivisionName = row.DivisionName,
             RequiresBundle = row.RequiresBundle,
+            ReceivedPcs = row.ReceivedPcs,
             ReceivedBundleCount = row.ReceivedBundleCount,
+            CompletedPcs = row.CompletedPcs,
             CompletedBundleCount = row.CompletedBundleCount,
+            TotalBundlePcs = row.TotalBundlePcs,
             TotalBundleCount = row.TotalBundleCount,
-            TotalQtyOkCompleted = row.TotalQtyOkCompleted,
-            EntryCount = row.EntryCount,
-            SizeBreakdown = string.IsNullOrEmpty(row.SizeBreakdownJson)
-                ? new()
-                : JsonSerializer.Deserialize<List<ArticleWipSizeBreakdownDto>>(row.SizeBreakdownJson) ?? new()
+            QtyOrder = row.QtyOrder,
+            QtyOk = row.QtyOk,
+            QtyReject = row.QtyReject
         }).ToList();
     }
 

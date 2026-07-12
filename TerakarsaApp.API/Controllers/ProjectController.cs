@@ -71,4 +71,12 @@ public class ProjectController : ControllerBase
         await _projectService.DeleteAsync(id, CurrentUserId);
         return Ok();
     }
+
+    [HttpPut("set-status")]
+    public async Task<IActionResult> SetStatus([FromBody] ProjectSetStatusRequest request)
+    {
+        var (success, error) = await _projectService.SetStatusAsync(request, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
 }

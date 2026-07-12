@@ -11,10 +11,15 @@ public class ProjectDto
     public string? ProjectPicName { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    public string? MaterialName { get; set; }
     public DateTime? OrderDate { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
     public DateTime? DeliveryDate { get; set; }
+    public string DerivedStatus { get; set; } = string.Empty;
+    public string? StatusReason { get; set; }
+    public DateTime? StatusChangedAt { get; set; }
+    public string? StatusChangedByName { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -28,6 +33,7 @@ public class ProjectCreateRequest
     public int? ProjectPic { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    public string? MaterialName { get; set; }
     public DateTime? OrderDate { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
@@ -42,6 +48,7 @@ public class ProjectUpdateRequest
     public int? ProjectPic { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    public string? MaterialName { get; set; }
     public DateTime? OrderDate { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
@@ -56,10 +63,18 @@ public class ProjectCreateResult
 public class ProjectPagedRequest
 {
     public string? Search { get; set; }
+    public string? Status { get; set; }
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 10;
     public string? SortColumn { get; set; }
     public string SortDirection { get; set; } = "asc";
+}
+
+public class ProjectSetStatusRequest
+{
+    public int Id { get; set; }
+    public string? ManualStatus { get; set; }
+    public string? StatusReason { get; set; }
 }
 
 public class ProjectPagedResult

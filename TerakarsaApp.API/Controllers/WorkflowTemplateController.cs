@@ -10,7 +10,6 @@ namespace TerakarsaApp.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-[RequireModule("MASTER_WORKFLOW")]
 public class WorkflowTemplateController : ControllerBase
 {
     private readonly WorkflowTemplateService _workflowTemplateService;
@@ -23,13 +22,17 @@ public class WorkflowTemplateController : ControllerBase
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
     [HttpPost("paged")]
+    [RequireModule("MASTER_WORKFLOW")]
     public async Task<IActionResult> GetPaged([FromBody] WorkflowTemplatePagedRequest request)
     {
         var result = await _workflowTemplateService.GetPagedAsync(request);
         return Ok(result);
     }
 
+    // ORDER_PROJECT juga boleh -- dipakai ArticleEdit.razor untuk dropdown "Terapkan Template"
+    // saat menyusun workflow artikel, tanpa perlu privilege MASTER_WORKFLOW penuh.
     [HttpGet("active")]
+    [RequireModule("MASTER_WORKFLOW", "ORDER_PROJECT")]
     public async Task<IActionResult> GetActive()
     {
         var result = await _workflowTemplateService.GetActiveAsync();
@@ -37,6 +40,7 @@ public class WorkflowTemplateController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [RequireModule("MASTER_WORKFLOW")]
     public async Task<IActionResult> GetById(int id)
     {
         var workflowTemplate = await _workflowTemplateService.GetByIdAsync(id);
@@ -45,6 +49,7 @@ public class WorkflowTemplateController : ControllerBase
     }
 
     [HttpPost]
+    [RequireModule("MASTER_WORKFLOW")]
     public async Task<IActionResult> Create([FromBody] WorkflowTemplateCreateRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.WorkflowCode))
@@ -65,6 +70,7 @@ public class WorkflowTemplateController : ControllerBase
     }
 
     [HttpPut]
+    [RequireModule("MASTER_WORKFLOW")]
     public async Task<IActionResult> Update([FromBody] WorkflowTemplateUpdateRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.WorkflowCode))
@@ -85,6 +91,7 @@ public class WorkflowTemplateController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [RequireModule("MASTER_WORKFLOW")]
     public async Task<IActionResult> Delete(int id)
     {
         await _workflowTemplateService.DeleteAsync(id, CurrentUserId);

@@ -14,8 +14,8 @@
             <div class="card-body">
                 <label class="form-label">Project</label>
                 <SearchableSelect TItem="ProjectDto" Items="projects" Value="selectedProjectId" ValueChanged="HandleProjectChanged"
-                                  IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
-                                  Placeholder="Cari project..." />
+                                  IdSelector="@(p => p.Id)" TextSelector="@(p => $"{p.ProjectName} / {p.BuyerName} / {p.NoPo ?? "-"}")"
+                                  Placeholder="Cari project / buyer / no PO..." />
 
                 @if (isLoadingArticles)
                 {

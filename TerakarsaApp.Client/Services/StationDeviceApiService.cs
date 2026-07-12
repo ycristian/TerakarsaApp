@@ -25,6 +25,28 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<StationMeDto>();
     }
 
+    // Prompt 20: tukar kode pairing dengan station_token baru. Endpoint anonim di sisi
+    // server -- StationTokenHandler cukup tidak mengirim header saat belum ada token tersimpan.
+    public async Task<(bool Success, string Error, StationTokenResult? Result)> ClaimAsync(string code)
+    {
+        var response = await _http.PostAsJsonAsync("api/station-device/claim", new StationClaimRequest { Code = code });
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<StationTokenResult>();
+            return (true, string.Empty, result);
+        }
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : error.Trim('"'), null);
+    }
+
+    // Prompt 20: logout perangkat -- hanguskan token di server (UNPAIR), localStorage
+    // dibersihkan di sisi Razor setelah panggilan ini.
+    public async Task<bool> LogoutAsync()
+    {
+        var response = await _http.PostAsync("api/station-device/logout", null);
+        return response.IsSuccessStatusCode;
+    }
+
     public async Task<List<ResourceLookupDto>> GetResourcesAsync()
     {
         var response = await _http.GetAsync("api/station/resources");

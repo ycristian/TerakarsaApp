@@ -147,4 +147,41 @@ public class WorkflowInputController : ControllerBase
         if (!success) return BadRequest(error);
         return Ok();
     }
+
+    // Prompt 19: grid input cutting -- semua ukuran sekaligus, satu transaksi (lihat
+    // WorkflowLogService.CreateBatchAsync). Pelaksana/Catatan berlaku untuk seluruh baris.
+    [HttpPost("workflow-input/logs/batch")]
+    public async Task<IActionResult> CreateLogBatch([FromBody] WorkflowInputBatchCreateRequest request)
+    {
+        if (request.Entries.Count == 0)
+            return BadRequest("Minimal satu baris harus diisi.");
+
+        foreach (var entry in request.Entries)
+        {
+            if (entry.ArticleSizeId <= 0)
+                return BadRequest("Size wajib dipilih.");
+
+            if (entry.QtyOk < 0 || entry.QtyRejectPrint < 0 || entry.QtyRejectFabric < 0 || entry.QtyRejectSewing < 0)
+                return BadRequest("Qty tidak boleh negatif.");
+        }
+
+        var inputs = request.Entries.Select(entry => new WorkflowLogCreateInput
+        {
+            ArticleWorkflowId = request.ArticleWorkflowId,
+            BundleId = null,
+            ArticleSizeId = entry.ArticleSizeId,
+            ResourceId = request.ResourceId,
+            QtyOk = entry.QtyOk,
+            QtyRejectPrint = entry.QtyRejectPrint,
+            QtyRejectFabric = entry.QtyRejectFabric,
+            QtyRejectSewing = entry.QtyRejectSewing,
+            Remark = request.Remark,
+            ActingDivisionId = null,
+            ConfirmExceed = false
+        }).ToList();
+
+        var (success, error, failedArticleSizeId) = await _workflowLogService.CreateBatchAsync(inputs, CurrentUserId);
+        if (!success) return BadRequest(new WorkflowInputBatchResult { Error = error, ArticleSizeId = failedArticleSizeId });
+        return Ok();
+    }
 }

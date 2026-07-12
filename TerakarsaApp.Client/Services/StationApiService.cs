@@ -45,15 +45,23 @@ public class StationApiService
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<(bool Success, string Error, StationTokenResult? Result)> RegenerateTokenAsync(int id)
+    public async Task<(bool Success, string Error, StationPairingResult? Result)> GeneratePairingCodeAsync(int id)
     {
-        var response = await _http.PostAsync($"api/station/{id}/regenerate-token", null);
+        var response = await _http.PostAsync($"api/station/{id}/pairing-code", null);
         if (response.IsSuccessStatusCode)
         {
-            var result = await response.Content.ReadFromJsonAsync<StationTokenResult>();
+            var result = await response.Content.ReadFromJsonAsync<StationPairingResult>();
             return (true, string.Empty, result);
         }
         var error = await response.Content.ReadAsStringAsync();
-        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat ulang token." : error.Trim('"'), null);
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat kode pairing." : error.Trim('"'), null);
+    }
+
+    public async Task<(bool Success, string Error)> UnpairAsync(int id)
+    {
+        var response = await _http.PostAsync($"api/station/{id}/unpair", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal memutuskan perangkat." : error.Trim('"'));
     }
 }

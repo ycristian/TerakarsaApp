@@ -73,7 +73,7 @@ else
                             <SortableHeader Label="Nama Stasiun" Column="StationName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Status</th>
-                            <th>Token</th>
+                            <th>Status Perangkat</th>
                             <th>Resource Bawaan</th>
                             <th>Aksi</th>
                         </tr>
@@ -90,7 +90,7 @@ else
                                         @(s.IsActive ? "Aktif" : "Nonaktif")
                                     </span>
                                 </td>
-                                <td><code>@s.TokenPreview</code></td>
+                                <td>@DeviceStatus(s)</td>
                                 <td>
                                     @(string.IsNullOrEmpty(s.DefaultResourceName) ? "-" : s.DefaultResourceName)
                                     @if (!s.AllowResourceChange && !string.IsNullOrEmpty(s.DefaultResourceName))
@@ -100,7 +100,8 @@ else
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(s)"><i class="fe fe-edit"></i></button>
-                                    <button class="btn btn-sm btn-warning me-1" title="Generate Ulang Token" disabled="@isRegenerating" @onclick="() => RegenerateToken(s)"><i class="fe fe-refresh-cw"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" title="Buat Kode Pairing" disabled="@isGeneratingPairing" @onclick="() => GeneratePairing(s)"><i class="fe fe-link"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger me-1" title="Putuskan Perangkat" disabled="@(s.PairedAt is null)" @onclick="() => HandleUnpair(s)"><i class="fe fe-unlock"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(s)"><i class="fe fe-trash-2"></i></button>
                                 </td>
                             </tr>
@@ -181,25 +182,28 @@ else
     </div>
 }
 
-@if (showTokenModal)
+@if (showPairingModal && pairingResult is not null)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Token Stasiun</h5>
+                    <h5 class="modal-title">Kode Pairing</h5>
                 </div>
-                <div class="modal-body">
-                    <div class="alert alert-warning">Token lama langsung tidak berlaku. Simpan/salin token ini sekarang — token penuh tidak akan ditampilkan lagi setelah modal ini ditutup.</div>
-                    <div class="input-group">
-                        <input class="form-control" readonly value="@revealedToken" />
-                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyToken">
-                            @(copied ? "Tersalin!" : "Salin")
+                <div class="modal-body text-center">
+                    <p class="text-muted">Scan QR ini langsung dari kamera tablet/HP, buka link-nya, atau ketik kodenya manual di layar aktivasi perangkat.</p>
+                    <div id="pairingQrCode" class="d-flex justify-content-center mb-3"></div>
+                    <div class="display-4 fw-bold mb-3">@pairingResult.Code</div>
+                    <div class="input-group mb-2">
+                        <input class="form-control" readonly value="@pairingResult.Link" />
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyPairingLink">
+                            @(copied ? "Tersalin!" : "Salin Link")
                         </button>
                     </div>
+                    <div class="text-muted small">Berlaku sampai @pairingResult.ExpiresAt.ToString("HH:mm") &middot; 15 menit, sekali pakai.</div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" @onclick="CloseTokenModal">Selesai</button>
+                    <button type="button" class="btn btn-primary" @onclick="ClosePairingModal">Selesai</button>
                 </div>
             </div>
         </div>
@@ -208,6 +212,12 @@ else
 
 <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
     <Message>Yakin ingin menghapus stasiun "@stationPendingDelete?.StationName"?</Message>
+</ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="showUnpairConfirm" IsBusy="isUnpairing" Title="Putuskan Perangkat"
+                     ConfirmText="Ya, Putuskan" BusyText="Memutuskan..." ConfirmButtonClass="btn-warning"
+                     OnConfirm="ConfirmUnpair" OnCancel="CancelUnpair">
+    <Message>Yakin ingin memutuskan perangkat stasiun "@unpairTarget?.StationName"? Perangkat yang sedang aktif akan tertendang dan harus minta kode pairing baru untuk masuk lagi.</Message>
 </ConfirmDeleteModal>
 }
 
@@ -225,10 +235,14 @@ else
     private StationDto? stationPendingDelete;
     private List<DivisionDto> divisionOptions = new();
     private List<ResourceLookupDto> resourceOptions = new();
-    private bool isRegenerating = false;
-    private bool showTokenModal = false;
-    private string revealedToken = string.Empty;
+    private bool isGeneratingPairing = false;
+    private bool showPairingModal = false;
+    private bool pendingQrRender = false;
+    private StationPairingResult? pairingResult;
     private bool copied = false;
+    private bool showUnpairConfirm = false;
+    private bool isUnpairing = false;
+    private StationDto? unpairTarget;
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -404,7 +418,6 @@ else
             {
                 showForm = false;
                 await LoadStations();
-                RevealToken(result.Result?.Token ?? string.Empty);
             }
             else
             {
@@ -413,16 +426,19 @@ else
         }
     }
 
-    private async Task RegenerateToken(StationDto station)
+    private async Task GeneratePairing(StationDto station)
     {
-        isRegenerating = true;
-        var result = await StationApi.RegenerateTokenAsync(station.Id);
-        isRegenerating = false;
+        isGeneratingPairing = true;
+        var result = await StationApi.GeneratePairingCodeAsync(station.Id);
+        isGeneratingPairing = false;
 
         if (result.Success)
         {
             await LoadStations();
-            RevealToken(result.Result?.Token ?? string.Empty);
+            pairingResult = result.Result;
+            copied = false;
+            showPairingModal = true;
+            pendingQrRender = true;
         }
         else
         {
@@ -430,24 +446,61 @@ else
         }
     }
 
-    private void RevealToken(string token)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        revealedToken = token;
-        copied = false;
-        showTokenModal = true;
+        if (pendingQrRender && pairingResult is not null)
+        {
+            pendingQrRender = false;
+            await JS.InvokeVoidAsync("qrCodeRenderer.render", "pairingQrCode", pairingResult.Link);
+        }
     }
 
-    private async Task CopyToken()
+    private async Task CopyPairingLink()
     {
-        await JS.InvokeVoidAsync("copyToClipboard", revealedToken);
+        await JS.InvokeVoidAsync("copyToClipboard", pairingResult?.Link ?? string.Empty);
         copied = true;
     }
 
-    private void CloseTokenModal()
+    private async Task ClosePairingModal()
     {
-        showTokenModal = false;
-        revealedToken = string.Empty;
-        copied = false;
+        showPairingModal = false;
+        pairingResult = null;
+        await JS.InvokeVoidAsync("qrCodeRenderer.clear", "pairingQrCode");
+    }
+
+    private void HandleUnpair(StationDto station)
+    {
+        unpairTarget = station;
+        showUnpairConfirm = true;
+    }
+
+    private void CancelUnpair()
+    {
+        showUnpairConfirm = false;
+        unpairTarget = null;
+    }
+
+    private async Task ConfirmUnpair()
+    {
+        if (unpairTarget is null) return;
+
+        isUnpairing = true;
+        var result = await StationApi.UnpairAsync(unpairTarget.Id);
+        isUnpairing = false;
+        showUnpairConfirm = false;
+        unpairTarget = null;
+
+        if (result.Success)
+            await LoadStations();
+        else
+            errorMessage = result.Error;
+    }
+
+    private static string DeviceStatus(StationDto s)
+    {
+        if (s.PairedAt is not null) return $"Terhubung sejak {s.PairedAt:dd/MM/yyyy HH:mm}";
+        if (s.PairingCodeExpiresAt is not null) return $"Kode aktif s.d. {s.PairingCodeExpiresAt:HH:mm}";
+        return "Belum terhubung";
     }
 
     private void HandleDelete(StationDto station)

@@ -215,6 +215,11 @@ CREATE TABLE materials(
 
 -- ============ 3. ORDER INTAKE ============
 
+-- Status project (Prompt 18): OTOMATIS (Not Started/On Going) diturunkan di SP select
+-- dari ada/tidaknya log workflow hidup -- TIDAK disimpan sebagai data. manual_status hanya
+-- terisi untuk status MANUAL (ON_HOLD/COMPLETED/CANCELLED), keputusan bisnis lewat tombol
+-- aksi (bukan input teks bebas). manual_status IS NOT NULL mengunci aksi produksi (bundle,
+-- log workflow) -- lihat sp_Bundle_Manage.sql / sp_WorkflowLog_Manage.sql.
 CREATE TABLE projects(
  project_id int primary key identity(1,1),
  customer_id int not null
@@ -225,10 +230,15 @@ CREATE TABLE projects(
    constraint FK_projects_pic foreign key references employees(employee_id),
  project_name varchar(150) not null,
  no_po varchar(50) null,
+ material_name varchar(150) null,           -- nama bahan / fabric type
  order_date date null,
  [start_date] date null,
  deadline date null,
  delivery_date date null,
+ manual_status varchar(20) null,            -- NULL = otomatis (Not Started/On Going); ON_HOLD / COMPLETED / CANCELLED
+ status_reason varchar(255) null,           -- wajib utk ON_HOLD & CANCELLED (komunikasi lintas divisi)
+ status_changed_at datetime2 null,
+ status_changed_by int null,
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -282,6 +292,8 @@ CREATE TABLE articles(
  deleted_by int null
 );
 
+-- Prompt 19: hanya berisi baris untuk size ber-qty order > 0 (dijaga di SIS_Article_Manage,
+-- lihat sql/sp_Article_Manage.sql) -- size ber-qty 0 tidak punya baris di sini.
 CREATE TABLE article_sizes(
  article_size_id int primary key identity(1,1),
  article_id int not null
@@ -362,6 +374,13 @@ CREATE TABLE workflow_template_steps(
 
 -- Salinan step per artikel. Referensi template hanya untuk info asal;
 -- perubahan template tidak mempengaruhi artikel yang sudah dibuat.
+-- Prompt 17: step "Bundling" (is_bundling = 1) adalah step implisit yang disisipkan
+-- OTOMATIS oleh sistem (SIS_ArticleWorkflow_Manage APPLY/SAVE) tepat di antara step
+-- non-bundle terakhir dan step ber-bundle pertama -- bukan bagian dari template
+-- (workflow_template_steps tidak punya kolom ini) dan tidak dikelola user di editor step.
+-- Baris log-nya (article_workflow_logs) hanya lahir lewat SIS_Bundle_Manage CREATE (lihat
+-- komentar di tabel article_workflow_logs) -- entitas ini menerima hasil cutting (auto-
+-- receive log non-bundle pending) dan mencatat pembuatan bundle.
 CREATE TABLE article_workflows(
  article_workflow_id int primary key identity(1,1),
  article_id int not null
@@ -373,6 +392,7 @@ CREATE TABLE article_workflows(
    constraint FK_aw_divisions foreign key references divisions(division_id),
  sort_order int not null default 0,
  requires_bundle bit not null default 1,     -- salinan dari template step
+ is_bundling bit not null default 0,         -- step Bundling implisit (disisipkan sistem saat APPLY, bukan dari template)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -421,6 +441,12 @@ CREATE TABLE bundles(
 -- diisi untuk baris ini (input qty per ukuran). Untuk step requires_bundle = 1, bundle_id
 -- wajib diisi (article_size_id NULL, size sudah melekat di bundle) dan maksimal satu
 -- baris hidup per (step, bundle). Validasi lengkap di sp_WorkflowLog_Manage.
+-- Prompt 17: baris untuk step Bundling (article_workflows.is_bundling = 1) TIDAK dibuat
+-- lewat @Action = 'CREATE' biasa (ditolak) -- hanya lahir otomatis di SIS_Bundle_Manage
+-- CREATE (bundle_id = bundle baru, resource_id = pelaksana bundling opsional, qty_ok = qty
+-- bundle, received_at NULL sampai divisi berikutnya RECEIVE). RECEIVE/UNRECEIVE/DELETE baris
+-- ini tetap lewat jalur generik di sp_WorkflowLog_Manage; UPDATE praktis hanya lewat
+-- SIS_Bundle_Manage UPDATE (sinkron qty_ok/resource_id dengan bundle).
 CREATE TABLE article_workflow_logs(
  workflow_log_id int primary key identity(1,1),
  article_workflow_id int not null
@@ -637,6 +663,9 @@ CREATE TABLE stations(
  default_resource_id int null               -- Prompt 16: 1 device = 1 resource (opsional)
    constraint FK_stations_default_resource foreign key references resources(resource_id),
  allow_resource_change bit not null default 1, -- 0 = terkunci ke default_resource_id
+ pairing_code varchar(10) null,             -- Prompt 20: kode pairing aktif; NULL = tidak ada
+ pairing_code_expires_at datetime2 null,
+ paired_at datetime2 null,                  -- kapan terakhir perangkat berhasil klaim
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -668,6 +697,7 @@ CREATE UNIQUE INDEX UX_stocks_serial          ON material_stocks(serial)        
 CREATE UNIQUE INDEX UX_adjustments_no         ON material_adjustments(adjustment_no) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stations_code          ON stations(station_code)             WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stations_token         ON stations(station_token)            WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_stations_pairing_code  ON stations(pairing_code)             WHERE pairing_code IS NOT NULL AND deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============

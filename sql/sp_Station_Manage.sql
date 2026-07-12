@@ -16,6 +16,8 @@ CREATE OR ALTER PROCEDURE SIS_Station_Manage
     @IsActive             BIT = 1,
     @DefaultResourceId    INT = NULL,
     @AllowResourceChange  BIT = 1,
+    @PairingCode          VARCHAR(10) = NULL,
+    @NewToken             VARCHAR(64) = NULL,
     @UserId               INT = NULL
 AS
 BEGIN
@@ -104,17 +106,69 @@ BEGIN
         WHERE station_id = @Id AND deleted_at IS NULL;
     END
 
-    ELSE IF @Action = 'REGENERATE_TOKEN'
+    -- Prompt 20: admin membuat kode pairing baru (menimpa kode lama bila ada -- kode
+    -- lama otomatis hangus). Kode digenerate di API, SP hanya menyimpan + set expiry 15 menit.
+    ELSE IF @Action = 'GENERATE_PAIRING'
     BEGIN
-        DECLARE @RegeneratedToken VARCHAR(64) = LOWER(REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', ''));
+        IF NOT EXISTS (SELECT 1 FROM stations WHERE station_id = @Id AND deleted_at IS NULL AND is_active = 1)
+        BEGIN
+            RAISERROR('Stasiun tidak ditemukan atau nonaktif.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @ExpiresAt DATETIME2 = DATEADD(MINUTE, 15, SYSDATETIME());
 
         UPDATE stations
-        SET station_token = @RegeneratedToken,
+        SET pairing_code = @PairingCode,
+            pairing_code_expires_at = @ExpiresAt,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE station_id = @Id AND deleted_at IS NULL;
 
-        SELECT @RegeneratedToken AS NewToken;
+        SELECT @PairingCode AS PairingCode, @ExpiresAt AS ExpiresAt;
+    END
+
+    -- Prompt 20: perangkat menukar kode pairing dengan station_token baru (rotate --
+    -- token lama langsung mati, satu perangkat aktif per station). Kode sekali pakai:
+    -- UPDATE tunggal ini sekaligus memvalidasi & menghanguskan kode (atomik).
+    ELSE IF @Action = 'CLAIM_PAIRING'
+    BEGIN
+        DECLARE @ClaimedStation TABLE (StationId INT);
+
+        UPDATE stations
+        SET station_token = @NewToken,
+            pairing_code = NULL,
+            pairing_code_expires_at = NULL,
+            paired_at = SYSDATETIME(),
+            updated_at = SYSDATETIME()
+        OUTPUT INSERTED.station_id INTO @ClaimedStation
+        WHERE pairing_code = @PairingCode
+          AND pairing_code_expires_at > SYSDATETIME()
+          AND is_active = 1 AND deleted_at IS NULL;
+
+        IF NOT EXISTS (SELECT 1 FROM @ClaimedStation)
+        BEGIN
+            RAISERROR('Kode pairing tidak valid atau sudah kedaluwarsa.', 16, 1);
+            RETURN;
+        END
+
+        SELECT StationId FROM @ClaimedStation;
+    END
+
+    -- Prompt 20: putuskan perangkat -- station_token diganti GUID baru (token lama mati)
+    -- baik dipicu admin ("Putuskan Perangkat") maupun perangkat sendiri (logout).
+    ELSE IF @Action = 'UNPAIR'
+    BEGIN
+        DECLARE @UnpairedToken VARCHAR(64) = LOWER(REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', ''));
+
+        UPDATE stations
+        SET station_token = @UnpairedToken,
+            paired_at = NULL,
+            pairing_code = NULL,
+            pairing_code_expires_at = NULL,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
+        WHERE station_id = @Id AND deleted_at IS NULL;
     END
 END;
 GO

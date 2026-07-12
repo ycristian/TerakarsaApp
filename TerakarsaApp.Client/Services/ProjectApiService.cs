@@ -51,4 +51,12 @@ public class ProjectApiService
         var response = await _http.DeleteAsync($"api/project/{id}");
         return response.IsSuccessStatusCode;
     }
+
+    public async Task<(bool Success, string Error)> SetStatusAsync(ProjectSetStatusRequest request)
+    {
+        var response = await _http.PutAsJsonAsync("api/project/set-status", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengubah status." : error.Trim('"'));
+    }
 }

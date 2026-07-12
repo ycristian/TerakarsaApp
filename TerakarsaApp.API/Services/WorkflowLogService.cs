@@ -253,35 +253,63 @@ public class WorkflowLogService
         }
     }
 
+    private const string CreateLogSql =
+        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort";
+
+    private static SqlParameter[] BuildCreateLogParams(WorkflowLogCreateInput input, int userId) => new[]
+    {
+        new SqlParameter("@Action", "CREATE"),
+        new SqlParameter("@ArticleWorkflowId", input.ArticleWorkflowId),
+        new SqlParameter("@BundleId", (object?)input.BundleId ?? DBNull.Value),
+        new SqlParameter("@ArticleSizeId", (object?)input.ArticleSizeId ?? DBNull.Value),
+        new SqlParameter("@ResourceId", (object?)input.ResourceId ?? DBNull.Value),
+        new SqlParameter("@QtyOk", input.QtyOk),
+        new SqlParameter("@QtyRejectPrint", input.QtyRejectPrint),
+        new SqlParameter("@QtyRejectFabric", input.QtyRejectFabric),
+        new SqlParameter("@QtyRejectSewing", input.QtyRejectSewing),
+        new SqlParameter("@Remark", (object?)input.Remark ?? DBNull.Value),
+        new SqlParameter("@UserId", userId),
+        new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value),
+        new SqlParameter("@ConfirmExceed", input.ConfirmExceed),
+        new SqlParameter("@ConfirmShort", input.ConfirmShort)
+    };
+
     public async Task<(bool Success, string Error)> CreateAsync(WorkflowLogCreateInput input, int userId)
     {
-        var actionParam = new SqlParameter("@Action", "CREATE");
-        var articleWorkflowIdParam = new SqlParameter("@ArticleWorkflowId", input.ArticleWorkflowId);
-        var bundleIdParam = new SqlParameter("@BundleId", (object?)input.BundleId ?? DBNull.Value);
-        var articleSizeIdParam = new SqlParameter("@ArticleSizeId", (object?)input.ArticleSizeId ?? DBNull.Value);
-        var resourceIdParam = new SqlParameter("@ResourceId", (object?)input.ResourceId ?? DBNull.Value);
-        var qtyOkParam = new SqlParameter("@QtyOk", input.QtyOk);
-        var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", input.QtyRejectPrint);
-        var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", input.QtyRejectFabric);
-        var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", input.QtyRejectSewing);
-        var remarkParam = new SqlParameter("@Remark", (object?)input.Remark ?? DBNull.Value);
-        var userIdParam = new SqlParameter("@UserId", userId);
-        var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value);
-        var confirmExceedParam = new SqlParameter("@ConfirmExceed", input.ConfirmExceed);
-        var confirmShortParam = new SqlParameter("@ConfirmShort", input.ConfirmShort);
-
         try
         {
-            await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort",
-                actionParam, articleWorkflowIdParam, bundleIdParam, articleSizeIdParam, resourceIdParam, qtyOkParam,
-                qtyRejectPrintParam, qtyRejectFabricParam, qtyRejectSewingParam, remarkParam,
-                userIdParam, actingDivisionIdParam, confirmExceedParam, confirmShortParam);
+            await _db.Database.ExecuteSqlRawAsync(CreateLogSql, BuildCreateLogParams(input, userId));
             return (true, string.Empty);
         }
         catch (SqlException ex)
         {
             return (false, ex.Message);
+        }
+    }
+
+    // Prompt 19: grid input cutting -- satu baris article_workflow_logs per ukuran, semua
+    // atau tidak sama sekali (satu transaksi C#, sama seperti EXEC tunggal di CreateAsync
+    // hanya diulang). SP tidak diubah -- tetap satu EXEC per baris.
+    public async Task<(bool Success, string Error, int? FailedArticleSizeId)> CreateBatchAsync(List<WorkflowLogCreateInput> inputs, int userId)
+    {
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+        int? currentArticleSizeId = null;
+
+        try
+        {
+            foreach (var input in inputs)
+            {
+                currentArticleSizeId = input.ArticleSizeId;
+                await _db.Database.ExecuteSqlRawAsync(CreateLogSql, BuildCreateLogParams(input, userId));
+            }
+
+            await transaction.CommitAsync();
+            return (true, string.Empty, null);
+        }
+        catch (SqlException ex)
+        {
+            await transaction.RollbackAsync();
+            return (false, ex.Message, currentArticleSizeId);
         }
     }
 

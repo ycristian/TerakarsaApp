@@ -1,7 +1,8 @@
 -- Pengambilan data stations (SELECT saja, tidak menyentuh data).
--- Mutasi (create/update/delete/regenerate token) ada di sp_Station_Manage.sql (SIS_Station_Manage).
--- Token penuh TIDAK pernah dikembalikan lewat SP di file ini (hanya preview 8 karakter);
--- token penuh hanya dikembalikan oleh SIS_Station_Manage saat CREATE/REGENERATE_TOKEN.
+-- Mutasi (create/update/delete/pairing/unpair) ada di sp_Station_Manage.sql (SIS_Station_Manage).
+-- Token penuh TIDAK pernah dikembalikan lewat SP di file ini -- admin hanya melihat status
+-- pairing (paired_at/pairing_code_expires_at); station_token hanya dikembalikan oleh
+-- SIS_Station_Manage saat CREATE/CLAIM_PAIRING.
 
 SET ANSI_NULLS ON;
 GO
@@ -47,9 +48,10 @@ BEGIN
             SELECT s.station_id AS Id, s.station_code AS StationCode, s.station_name AS StationName,
                    s.division_id AS DivisionId, d.division_name AS DivisionName,
                    s.is_active AS IsActive,
-                   LEFT(s.station_token, 8) + ''...'' AS TokenPreview,
                    s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
                    s.allow_resource_change AS AllowResourceChange,
+                   s.paired_at AS PairedAt,
+                   CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
                    s.created_at AS CreatedAt, s.created_by AS CreatedBy,
                    s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
             FROM stations s
@@ -80,9 +82,10 @@ BEGIN
     SELECT s.station_id AS Id, s.station_code AS StationCode, s.station_name AS StationName,
            s.division_id AS DivisionId, d.division_name AS DivisionName,
            s.is_active AS IsActive,
-           LEFT(s.station_token, 8) + '...' AS TokenPreview,
            s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
            s.allow_resource_change AS AllowResourceChange,
+           s.paired_at AS PairedAt,
+           CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
            s.created_at AS CreatedAt, s.created_by AS CreatedBy,
            s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
     FROM stations s

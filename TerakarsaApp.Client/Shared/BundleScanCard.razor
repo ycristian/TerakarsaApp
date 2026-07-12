@@ -292,6 +292,10 @@
         completeQuotaInfo = Info.Action.AllowedAction == "COMPLETE" && Info.Action.ActionArticleWorkflowId is not null
             ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
             : null;
+
+        // Autofill Qty OK dari sisa kuota (biasanya = qty step sebelumnya) supaya operator
+        // tinggal koreksi kalau ada reject, tidak perlu ketik ulang dari 0 tiap scan.
+        completeQtyOk = Math.Max(0, completeQuotaInfo?.Sisa ?? 0);
     }
 
     private Task SubmitComplete() => DoSubmitComplete(false, false);

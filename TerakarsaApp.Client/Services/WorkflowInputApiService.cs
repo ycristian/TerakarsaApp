@@ -82,4 +82,13 @@ public class WorkflowInputApiService
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan data." : error.Trim('"'));
     }
+
+    public async Task<(bool Success, string Error, int? ArticleSizeId)> CreateLogBatchAsync(WorkflowInputBatchCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/workflow-input/logs/batch", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty, null);
+
+        var result = await response.Content.ReadFromJsonAsync<WorkflowInputBatchResult>();
+        return (false, string.IsNullOrWhiteSpace(result?.Error) ? "Gagal menyimpan data." : result.Error, result?.ArticleSizeId);
+    }
 }

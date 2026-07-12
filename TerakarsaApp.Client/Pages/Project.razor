@@ -6,6 +6,8 @@
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.Buyers
 @using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Reports
+@using TerakarsaApp.Shared.Bundles
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
 @inject ProjectApiService ProjectApi
@@ -14,6 +16,8 @@
 @inject EmployeeApiService EmployeeApi
 @inject ArticleApiService ArticleApi
 @inject ArticlePhotoApiService ArticlePhotoApi
+@inject ReportBundleApiService ReportApi
+@inject BundleApiService BundleApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 
@@ -45,6 +49,14 @@ else
             + Tambah Project
         </button>
         <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+        <select class="form-select" style="width: 180px;" @bind="statusFilter" @bind:after="HandleStatusFilterChange">
+            <option value="">Semua</option>
+            <option value="NOT_STARTED">Belum Dimulai</option>
+            <option value="ON_GOING">Berjalan</option>
+            <option value="ON_HOLD">Ditahan</option>
+            <option value="COMPLETED">Selesai</option>
+            <option value="CANCELLED">Dibatalkan</option>
+        </select>
     </div>
 
     <div style="width: 300px;">
@@ -54,7 +66,7 @@ else
 </div>
 
 <div class="row">
-    <div class="col-lg-8 mb-4 mb-lg-0">
+    <div class="col-12">
         @if (isLoading)
         {
             <p>Memuat data...</p>
@@ -78,10 +90,12 @@ else
                                     <SortableHeader Label="Nama Project" Column="ProjectName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                                     <SortableHeader Label="Buyer" Column="BuyerName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                                     <SortableHeader Label="No PO" Column="NoPo" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                    <th>Nama Bahan</th>
                                     <SortableHeader Label="Tgl Order" Column="OrderDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                                     <SortableHeader Label="Deadline" Column="Deadline" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                                     <th>MD</th>
                                     <th>PIC</th>
+                                    <th>Status</th>
                                     <th>Aksi</th>
                                 </tr>
                             </thead>
@@ -102,10 +116,18 @@ else
                                         <td>@p.ProjectName</td>
                                         <td>@p.BuyerName</td>
                                         <td>@(p.NoPo ?? "-")</td>
+                                        <td>@(p.MaterialName ?? "-")</td>
                                         <td>@(p.OrderDate?.ToString("dd/MM/yyyy") ?? "-")</td>
                                         <td>@(p.Deadline?.ToString("dd/MM/yyyy") ?? "-")</td>
                                         <td>@(p.ProjectMdName ?? "-")</td>
                                         <td>@(p.ProjectPicName ?? "-")</td>
+                                        <td>
+                                            <span class="badge @StatusBadgeClass(p.DerivedStatus)" title="@(p.DerivedStatus == "ON_HOLD" ? p.StatusReason : null)">@StatusLabel(p.DerivedStatus)</span>
+                                            @if (p.DerivedStatus == "ON_HOLD" && !string.IsNullOrWhiteSpace(p.StatusReason))
+                                            {
+                                                <div class="small text-muted">@p.StatusReason</div>
+                                            }
+                                        </td>
                                         <td @onclick:stopPropagation="true">
                                             <a class="btn btn-sm btn-primary me-1" title="Edit" href="@($"/projects/edit/{p.Id}")" target="_blank"><i class="fe fe-edit"></i></a>
                                             <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
@@ -121,9 +143,11 @@ else
             </div>
         }
     </div>
+</div>
 
-    <div class="col-lg-4">
-        <div class="card">
+<div class="row">
+    <div class="col-lg-4 mb-4 mb-lg-0">
+        <div class="card h-100 mb-0">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h3 class="card-title mb-0">Artikel</h3>
                 <a class="btn btn-sm btn-primary @(selectedProjectId is null ? "disabled" : "")" href="@($"/projects/{selectedProjectId}/articles/create")" target="_blank">+ Tambah Artikel</a>
@@ -181,6 +205,127 @@ else
             </div>
         </div>
     </div>
+
+    <div class="col-lg-4 mb-4 mb-lg-0">
+        <div class="card h-100 mb-0">
+            <div class="card-header">
+                <h3 class="card-title mb-0">Bundle</h3>
+            </div>
+            <div class="card-body">
+                @if (!hasBundleAccess)
+                {
+                    <p class="text-muted mb-0">Anda tidak memiliki akses ke rekap bundle.</p>
+                }
+                else if (selectedProjectId is null)
+                {
+                    <p class="text-muted mb-0">Pilih project untuk melihat rekap bundle.</p>
+                }
+                else if (isLoadingBundleSummaries)
+                {
+                    <p class="mb-0">Memuat rekap bundle...</p>
+                }
+                else if (selectedProjectArticles.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada artikel untuk project ini.</p>
+                }
+                else
+                {
+                    @foreach (var a in selectedProjectArticles)
+                    {
+                        var summaries = articleBundleSummaries.TryGetValue(a.Id, out var s) ? s : new();
+                        <div class="border-bottom pb-2 mb-2">
+                            <div class="fw-bold">@a.ArticleName</div>
+                            @if (summaries.Count == 0)
+                            {
+                                <div class="small text-muted">Belum ada bundle.</div>
+                            }
+                            else
+                            {
+                                <table class="table table-sm table-borderless mb-0" style="table-layout: fixed;">
+                                    <tbody>
+                                        @foreach (var b in summaries)
+                                        {
+                                            var pct = a.TotalQty > 0 ? Math.Round(100.0 * b.TotalBundleQty / a.TotalQty) : 0;
+                                            <tr class="small">
+                                                <td class="ps-0">@b.SizeName</td>
+                                                <td>@b.BundleCount bundle</td>
+                                                <td>@b.TotalBundleQty pcs</td>
+                                                <td class="text-end pe-0">@pct %</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card h-100 mb-0">
+            <div class="card-header">
+                <h3 class="card-title mb-0">Work Progress</h3>
+            </div>
+            <div class="card-body">
+                @if (!hasProgressAccess)
+                {
+                    <p class="text-muted mb-0">Anda tidak memiliki akses ke work progress.</p>
+                }
+                else if (selectedProjectId is null)
+                {
+                    <p class="text-muted mb-0">Pilih project untuk melihat work progress.</p>
+                }
+                else if (isLoadingProgress)
+                {
+                    <p class="mb-0">Memuat work progress...</p>
+                }
+                else if (selectedProjectArticles.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada artikel untuk project ini.</p>
+                }
+                else
+                {
+                    @foreach (var a in selectedProjectArticles)
+                    {
+                        var steps = ProgressStepsFor(a.Id);
+                        <div class="border-bottom pb-2 mb-2">
+                            <div class="fw-bold">@a.ArticleName</div>
+                            @if (steps.Count == 0)
+                            {
+                                <div class="small text-muted">Belum ada workflow.</div>
+                            }
+                            else
+                            {
+                                <table class="table table-sm table-borderless mb-0" style="table-layout: fixed;">
+                                    <colgroup>
+                                        <col style="width: 20px;" />
+                                        <col />
+                                        <col />
+                                        <col />
+                                    </colgroup>
+                                    <tbody>
+                                        @for (var i = 0; i < steps.Count; i++)
+                                        {
+                                            var step = steps[i];
+                                            var pct = a.TotalQty > 0 ? Math.Round(100.0 * step.QtyOk / a.TotalQty) : 0;
+                                            <tr class="small">
+                                                <td class="ps-0">@(i + 1)</td>
+                                                <td>@step.StepName</td>
+                                                <td>@step.QtyOk pcs</td>
+                                                <td class="text-end pe-0">@pct %</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
 </div>
 
 @if (showForm)
@@ -225,6 +370,11 @@ else
                             <label class="form-label">No PO</label>
                             <InputText class="form-control" @bind-Value="formModel.NoPo" />
                             <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Bahan</label>
+                            <InputText class="form-control" @bind-Value="formModel.MaterialName" />
+                            <ValidationMessage For="@(() => formModel.MaterialName)" class="text-danger" />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Tanggal Order</label>
@@ -289,7 +439,33 @@ else
     private bool isDeletingArticle = false;
     private ArticleListItemDto? articlePendingDelete;
 
+    private bool hasProgressAccess = false;
+    private bool isLoadingProgress = false;
+    private ArticleProgressResultDto progressResult = new();
+
+    private bool hasBundleAccess = false;
+    private bool isLoadingBundleSummaries = false;
+    private Dictionary<int, List<BundleSizeSummaryDto>> articleBundleSummaries = new();
+
+    private class ProgressStepRow
+    {
+        public string StepName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public int QtyOk { get; set; }
+    }
+
+    private List<ProgressStepRow> ProgressStepsFor(int articleId)
+    {
+        var bundleRows = progressResult.BundleSteps.Where(s => s.ArticleId == articleId)
+            .Select(s => new ProgressStepRow { StepName = s.StepName, SortOrder = s.SortOrder, QtyOk = s.QtyOk });
+        var nonBundleRows = progressResult.NonBundleSteps.Where(s => s.ArticleId == articleId)
+            .Select(s => new ProgressStepRow { StepName = s.StepName, SortOrder = s.SortOrder, QtyOk = s.QtyOk });
+
+        return bundleRows.Concat(nonBundleRows).OrderBy(r => r.SortOrder).ToList();
+    }
+
     private string searchTerm = string.Empty;
+    private string statusFilter = string.Empty;
     private int currentPage = 1;
     private int pageSize = 10;
     private string? sortColumn;
@@ -300,6 +476,8 @@ else
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
+        hasProgressAccess = state.User.HasClaim("module", "REPORT_BUNDLE");
+        hasBundleAccess = state.User.HasClaim("module", "BUNDLE_MANAGE");
 
         if (hasAccess == true)
         {
@@ -315,6 +493,7 @@ else
         pagedResult = await ProjectApi.GetPagedAsync(new ProjectPagedRequest
         {
             Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            Status = string.IsNullOrWhiteSpace(statusFilter) ? null : statusFilter,
             PageNumber = currentPage,
             PageSize = pageSize,
             SortColumn = sortColumn,
@@ -323,6 +502,32 @@ else
         isLoading = false;
         await LoadThumbnails();
     }
+
+    private async Task HandleStatusFilterChange()
+    {
+        currentPage = 1;
+        await LoadProjects();
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "NOT_STARTED" => "Belum Dimulai",
+        "ON_GOING" => "Berjalan",
+        "ON_HOLD" => "Ditahan",
+        "COMPLETED" => "Selesai",
+        "CANCELLED" => "Dibatalkan",
+        _ => status
+    };
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        "NOT_STARTED" => "bg-secondary",
+        "ON_GOING" => "bg-primary",
+        "ON_HOLD" => "bg-warning",
+        "COMPLETED" => "bg-success",
+        "CANCELLED" => "bg-danger",
+        _ => "bg-secondary"
+    };
 
     private async Task LoadThumbnails()
     {
@@ -404,6 +609,7 @@ else
             ProjectMd = formModel.ProjectMd > 0 ? formModel.ProjectMd : null,
             ProjectPic = formModel.ProjectPic > 0 ? formModel.ProjectPic : null,
             NoPo = string.IsNullOrWhiteSpace(formModel.NoPo) ? null : formModel.NoPo,
+            MaterialName = string.IsNullOrWhiteSpace(formModel.MaterialName) ? null : formModel.MaterialName,
             OrderDate = formModel.OrderDate,
             StartDate = formModel.StartDate,
             Deadline = formModel.Deadline,
@@ -458,6 +664,32 @@ else
         isLoadingArticles = false;
         await LoadArticleThumbnails();
         await LoadArticleSizes(projectId);
+        await LoadProgress(projectId);
+        await LoadBundleSummaries();
+    }
+
+    private async Task LoadProgress(int projectId)
+    {
+        if (!hasProgressAccess) return;
+
+        isLoadingProgress = true;
+        progressResult = await ReportApi.GetProgressAsync(projectId);
+        isLoadingProgress = false;
+    }
+
+    private async Task LoadBundleSummaries()
+    {
+        if (!hasBundleAccess) return;
+
+        isLoadingBundleSummaries = true;
+        var tasks = selectedProjectArticles.Select(async a =>
+        {
+            var result = await BundleApi.GetByArticleAsync(a.Id);
+            return (a.Id, result.Summary);
+        });
+        var results = await Task.WhenAll(tasks);
+        articleBundleSummaries = results.ToDictionary(r => r.Id, r => r.Summary);
+        isLoadingBundleSummaries = false;
     }
 
     private async Task LoadArticleSizes(int projectId)
@@ -523,6 +755,9 @@ else
 
         [StringLength(50, ErrorMessage = "No PO maksimal 50 karakter.")]
         public string? NoPo { get; set; }
+
+        [StringLength(150, ErrorMessage = "Nama bahan maksimal 150 karakter.")]
+        public string? MaterialName { get; set; }
 
         public DateTime? OrderDate { get; set; }
         public DateTime? StartDate { get; set; }

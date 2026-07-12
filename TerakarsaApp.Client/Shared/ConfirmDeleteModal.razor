@@ -12,8 +12,8 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" @onclick="Cancel" disabled="@IsBusy">Tidak</button>
-                    <button type="button" class="btn btn-danger" @onclick="Confirm" disabled="@IsBusy">
-                        @(IsBusy ? "Menghapus..." : "Ya, Hapus")
+                    <button type="button" class="btn @ConfirmButtonClass" @onclick="Confirm" disabled="@IsBusy">
+                        @(IsBusy ? BusyText : ConfirmText)
                     </button>
                 </div>
             </div>
@@ -26,6 +26,9 @@
     [Parameter] public string Title { get; set; } = "Konfirmasi Hapus";
     [Parameter] public RenderFragment? Message { get; set; }
     [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public string ConfirmText { get; set; } = "Ya, Hapus";
+    [Parameter] public string BusyText { get; set; } = "Menghapus...";
+    [Parameter] public string ConfirmButtonClass { get; set; } = "btn-danger";
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 

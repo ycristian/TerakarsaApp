@@ -53,4 +53,10 @@ public class BundleLabelPayload
 
     [JsonPropertyName("qty")]
     public int Qty { get; set; }
+
+    [JsonPropertyName("resource_name")]
+    public string? ResourceName { get; set; }
+
+    [JsonPropertyName("resource_person_name")]
+    public string? ResourcePersonName { get; set; }
 }

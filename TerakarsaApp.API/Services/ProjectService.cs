@@ -18,6 +18,7 @@ public class ProjectService
     {
         var listActionParam = new SqlParameter("@Action", "LIST");
         var searchParam = new SqlParameter("@SearchTerm", request.Search ?? (object)DBNull.Value);
+        var statusParam = new SqlParameter("@Status", request.Status ?? (object)DBNull.Value);
         var pageNumberParam = new SqlParameter("@PageNumber", request.PageNumber);
         var pageSizeParam = new SqlParameter("@PageSize", request.PageSize);
         var sortColumnParam = new SqlParameter("@SortColumn", request.SortColumn ?? (object)DBNull.Value);
@@ -25,17 +26,18 @@ public class ProjectService
 
         var items = await _db.Database
             .SqlQueryRaw<ProjectDto>(
-                "EXEC SIS_Project_GetAll @Action = @Action, @SearchTerm = @SearchTerm, @PageNumber = @PageNumber, @PageSize = @PageSize, @SortColumn = @SortColumn, @SortDirection = @SortDirection",
-                listActionParam, searchParam, pageNumberParam, pageSizeParam, sortColumnParam, sortDirectionParam)
+                "EXEC SIS_Project_GetAll @Action = @Action, @SearchTerm = @SearchTerm, @Status = @Status, @PageNumber = @PageNumber, @PageSize = @PageSize, @SortColumn = @SortColumn, @SortDirection = @SortDirection",
+                listActionParam, searchParam, statusParam, pageNumberParam, pageSizeParam, sortColumnParam, sortDirectionParam)
             .ToListAsync();
 
         var countActionParam = new SqlParameter("@Action", "COUNT");
         var countSearchParam = new SqlParameter("@SearchTerm", request.Search ?? (object)DBNull.Value);
+        var countStatusParam = new SqlParameter("@Status", request.Status ?? (object)DBNull.Value);
 
         var countResult = await _db.Database
             .SqlQueryRaw<int>(
-                "EXEC SIS_Project_GetAll @Action = @Action, @SearchTerm = @SearchTerm",
-                countActionParam, countSearchParam)
+                "EXEC SIS_Project_GetAll @Action = @Action, @SearchTerm = @SearchTerm, @Status = @Status",
+                countActionParam, countSearchParam, countStatusParam)
             .ToListAsync();
 
         return new ProjectPagedResult
@@ -66,6 +68,7 @@ public class ProjectService
         var picParam = new SqlParameter("@ProjectPic", request.ProjectPic ?? (object)DBNull.Value);
         var nameParam = new SqlParameter("@ProjectName", request.ProjectName);
         var noPoParam = new SqlParameter("@NoPo", request.NoPo ?? (object)DBNull.Value);
+        var materialNameParam = new SqlParameter("@MaterialName", request.MaterialName ?? (object)DBNull.Value);
         var orderDateParam = new SqlParameter("@OrderDate", request.OrderDate ?? (object)DBNull.Value);
         var startDateParam = new SqlParameter("@StartDate", request.StartDate ?? (object)DBNull.Value);
         var deadlineParam = new SqlParameter("@Deadline", request.Deadline ?? (object)DBNull.Value);
@@ -76,8 +79,8 @@ public class ProjectService
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Project_Manage @Action = @Action, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
-                    actionParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam)
+                    "EXEC SIS_Project_Manage @Action = @Action, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
+                    actionParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }
@@ -96,6 +99,7 @@ public class ProjectService
         var picParam = new SqlParameter("@ProjectPic", request.ProjectPic ?? (object)DBNull.Value);
         var nameParam = new SqlParameter("@ProjectName", request.ProjectName);
         var noPoParam = new SqlParameter("@NoPo", request.NoPo ?? (object)DBNull.Value);
+        var materialNameParam = new SqlParameter("@MaterialName", request.MaterialName ?? (object)DBNull.Value);
         var orderDateParam = new SqlParameter("@OrderDate", request.OrderDate ?? (object)DBNull.Value);
         var startDateParam = new SqlParameter("@StartDate", request.StartDate ?? (object)DBNull.Value);
         var deadlineParam = new SqlParameter("@Deadline", request.Deadline ?? (object)DBNull.Value);
@@ -105,8 +109,8 @@ public class ProjectService
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
-                actionParam, idParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam);
+                "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
+                actionParam, idParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -124,5 +128,26 @@ public class ProjectService
         await _db.Database.ExecuteSqlRawAsync(
             "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @UserId = @UserId",
             actionParam, idParam, userIdParam);
+    }
+
+    public async Task<(bool Success, string Error)> SetStatusAsync(ProjectSetStatusRequest request, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "SET_STATUS");
+        var idParam = new SqlParameter("@Id", request.Id);
+        var manualStatusParam = new SqlParameter("@ManualStatus", request.ManualStatus ?? (object)DBNull.Value);
+        var statusReasonParam = new SqlParameter("@StatusReason", request.StatusReason ?? (object)DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @ManualStatus = @ManualStatus, @StatusReason = @StatusReason, @UserId = @UserId",
+                actionParam, idParam, manualStatusParam, statusReasonParam, userIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
     }
 }

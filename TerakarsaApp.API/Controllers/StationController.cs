@@ -80,11 +80,23 @@ public class StationController : ControllerBase
         return Ok();
     }
 
-    [HttpPost("{id:int}/regenerate-token")]
-    public async Task<IActionResult> RegenerateToken(int id)
+    // Prompt 20: menggantikan "regenerate-token" lama -- admin membuat kode pairing baru
+    // (5 karakter, 15 menit, sekali pakai) alih-alih melihat token mentah.
+    [HttpPost("{id:int}/pairing-code")]
+    public async Task<IActionResult> GeneratePairingCode(int id)
     {
-        var (success, error, result) = await _stationService.RegenerateTokenAsync(id, CurrentUserId);
+        var (success, error, result) = await _stationService.GeneratePairingCodeAsync(id, CurrentUserId);
         if (!success) return BadRequest(error);
         return Ok(result);
+    }
+
+    // Prompt 20: "Putuskan Perangkat" -- rotasi station_token, perangkat lama tertendang.
+    // Token baru TIDAK dikembalikan ke admin (perangkat harus klaim ulang lewat kode pairing).
+    [HttpPost("{id:int}/unpair")]
+    public async Task<IActionResult> Unpair(int id)
+    {
+        var (success, error) = await _stationService.UnpairAsync(id, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
     }
 }

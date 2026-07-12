@@ -235,3 +235,30 @@ public class WorkflowQuotaInfoDto
     public int QtySudah { get; set; }
     public int Sisa { get; set; }
 }
+
+// Prompt 19: satu baris grid input cutting per ukuran. ResourceId/Remark berlaku untuk
+// SELURUH baris batch (satu Pelaksana/Catatan per submit, bukan per baris).
+public class WorkflowInputBatchEntryRequest
+{
+    public int ArticleSizeId { get; set; }
+    public int QtyOk { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+}
+
+public class WorkflowInputBatchCreateRequest
+{
+    public int ArticleWorkflowId { get; set; }
+    public int? ResourceId { get; set; }
+    public string? Remark { get; set; }
+    public List<WorkflowInputBatchEntryRequest> Entries { get; set; } = new();
+}
+
+// Dikembalikan saat batch gagal di tengah jalan (satu transaksi, semua di-rollback) --
+// ArticleSizeId menunjuk baris grid yang menyebabkan SP menolak, supaya UI bisa menandainya.
+public class WorkflowInputBatchResult
+{
+    public string Error { get; set; } = string.Empty;
+    public int? ArticleSizeId { get; set; }
+}

@@ -51,6 +51,42 @@ else
         <CloseButton />
     </div>
 
+    <div class="card mb-4">
+        <div class="card-body d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div>
+                <span class="badge fs-6 @StatusBadgeClass(project.DerivedStatus)">@StatusLabel(project.DerivedStatus)</span>
+                @if (!string.IsNullOrWhiteSpace(project.StatusReason))
+                {
+                    <div class="mt-1">Alasan: @project.StatusReason</div>
+                }
+                @if (project.StatusChangedAt is not null)
+                {
+                    <div class="small text-muted mt-1">
+                        Diubah @project.StatusChangedAt.Value.ToString("dd/MM/yyyy HH:mm") oleh @(project.StatusChangedByName ?? "-")
+                    </div>
+                }
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                @if (project.DerivedStatus is "NOT_STARTED" or "ON_GOING")
+                {
+                    <button class="btn btn-success btn-sm" @onclick='() => OpenStatusConfirm("COMPLETED", "Tandai Selesai", "Ya, Tandai Selesai", "btn-success", false, "Yakin ingin menandai project ini selesai?")'>Tandai Selesai</button>
+                    <button class="btn btn-warning btn-sm" @onclick='() => OpenStatusConfirm("ON_HOLD", "Tahan Project", "Ya, Tahan", "btn-warning", true, null)'>Tahan</button>
+                    <button class="btn btn-danger btn-sm" @onclick='() => OpenStatusConfirm("CANCELLED", "Batalkan Project", "Ya, Batalkan", "btn-danger", true, null)'>Batalkan</button>
+                }
+                else if (project.DerivedStatus == "ON_HOLD")
+                {
+                    <button class="btn btn-primary btn-sm" @onclick='() => OpenStatusConfirm(null, "Lanjutkan Project", "Ya, Lanjutkan", "btn-primary", false, "Yakin ingin melanjutkan project ini? Status akan kembali otomatis.")'>Lanjutkan</button>
+                    <button class="btn btn-success btn-sm" @onclick='() => OpenStatusConfirm("COMPLETED", "Tandai Selesai", "Ya, Tandai Selesai", "btn-success", false, "Yakin ingin menandai project ini selesai?")'>Tandai Selesai</button>
+                    <button class="btn btn-danger btn-sm" @onclick='() => OpenStatusConfirm("CANCELLED", "Batalkan Project", "Ya, Batalkan", "btn-danger", true, null)'>Batalkan</button>
+                }
+                else
+                {
+                    <button class="btn btn-primary btn-sm" @onclick='() => OpenStatusConfirm(null, "Buka Kembali Project", "Ya, Buka Kembali", "btn-primary", false, "Yakin ingin membuka kembali project ini? Status akan kembali otomatis.")'>Buka Kembali</button>
+                }
+            </div>
+        </div>
+    </div>
+
     <div class="row mb-4">
         <div class="col-lg-4 mb-4 mb-lg-0">
             <div class="card h-100">
@@ -90,6 +126,11 @@ else
                             <label class="form-label">No PO</label>
                             <InputText class="form-control" @bind-Value="formModel.NoPo" />
                             <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nama Bahan</label>
+                            <InputText class="form-control" @bind-Value="formModel.MaterialName" />
+                            <ValidationMessage For="@(() => formModel.MaterialName)" class="text-danger" />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Tanggal Order</label>
@@ -366,6 +407,26 @@ else
     <ConfirmDeleteModal Show="showDeleteArticleConfirm" IsBusy="isDeletingArticle" OnConfirm="ConfirmDeleteArticle" OnCancel="CancelDeleteArticle">
         <Message>Yakin ingin menghapus artikel "@articlePendingDelete?.ArticleName"?</Message>
     </ConfirmDeleteModal>
+
+    <ConfirmDeleteModal Show="showStatusConfirm" Title="@statusModalTitle" IsBusy="isChangingStatus"
+                        ConfirmText="@statusModalConfirmText" BusyText="Menyimpan..." ConfirmButtonClass="@statusModalConfirmClass"
+                        OnConfirm="ConfirmStatusChange" OnCancel="CancelStatusConfirm">
+        <Message>
+            @if (statusModalRequireReason)
+            {
+                <label class="form-label">Alasan (wajib, akan tampil ke divisi lain)</label>
+                <textarea class="form-control" rows="3" @bind="statusReasonInput"></textarea>
+            }
+            else
+            {
+                <p class="mb-0">@statusModalSimpleMessage</p>
+            }
+            @if (!string.IsNullOrEmpty(statusActionError))
+            {
+                <div class="text-danger mt-2">@statusActionError</div>
+            }
+        </Message>
+    </ConfirmDeleteModal>
 }
 
 @code {
@@ -403,6 +464,17 @@ else
     private bool isDeletingArticle = false;
     private ArticleListItemDto? articlePendingDelete;
 
+    private bool showStatusConfirm = false;
+    private bool isChangingStatus = false;
+    private string? pendingManualStatus;
+    private string statusModalTitle = string.Empty;
+    private string statusModalConfirmText = string.Empty;
+    private string statusModalConfirmClass = string.Empty;
+    private bool statusModalRequireReason = false;
+    private string? statusModalSimpleMessage;
+    private string statusReasonInput = string.Empty;
+    private string statusActionError = string.Empty;
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -431,6 +503,7 @@ else
                 ProjectMd = project.ProjectMd ?? 0,
                 ProjectPic = project.ProjectPic ?? 0,
                 NoPo = project.NoPo,
+                MaterialName = project.MaterialName,
                 OrderDate = project.OrderDate,
                 StartDate = project.StartDate,
                 Deadline = project.Deadline,
@@ -481,6 +554,7 @@ else
             ProjectMd = formModel.ProjectMd > 0 ? formModel.ProjectMd : null,
             ProjectPic = formModel.ProjectPic > 0 ? formModel.ProjectPic : null,
             NoPo = string.IsNullOrWhiteSpace(formModel.NoPo) ? null : formModel.NoPo,
+            MaterialName = string.IsNullOrWhiteSpace(formModel.MaterialName) ? null : formModel.MaterialName,
             OrderDate = formModel.OrderDate,
             StartDate = formModel.StartDate,
             Deadline = formModel.Deadline,
@@ -639,6 +713,72 @@ else
             await LoadArticles();
     }
 
+    private void OpenStatusConfirm(string? manualStatus, string title, string confirmText, string confirmClass, bool requireReason, string? simpleMessage)
+    {
+        pendingManualStatus = manualStatus;
+        statusModalTitle = title;
+        statusModalConfirmText = confirmText;
+        statusModalConfirmClass = confirmClass;
+        statusModalRequireReason = requireReason;
+        statusModalSimpleMessage = simpleMessage;
+        statusReasonInput = string.Empty;
+        statusActionError = string.Empty;
+        showStatusConfirm = true;
+    }
+
+    private void CancelStatusConfirm()
+    {
+        showStatusConfirm = false;
+    }
+
+    private async Task ConfirmStatusChange()
+    {
+        if (statusModalRequireReason && string.IsNullOrWhiteSpace(statusReasonInput))
+        {
+            statusActionError = "Alasan wajib diisi.";
+            return;
+        }
+
+        isChangingStatus = true;
+        var result = await ProjectApi.SetStatusAsync(new ProjectSetStatusRequest
+        {
+            Id = Id,
+            ManualStatus = pendingManualStatus,
+            StatusReason = string.IsNullOrWhiteSpace(statusReasonInput) ? null : statusReasonInput
+        });
+        isChangingStatus = false;
+
+        if (result.Success)
+        {
+            showStatusConfirm = false;
+            await LoadProject();
+        }
+        else
+        {
+            statusActionError = result.Error;
+        }
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "NOT_STARTED" => "Belum Dimulai",
+        "ON_GOING" => "Berjalan",
+        "ON_HOLD" => "Ditahan",
+        "COMPLETED" => "Selesai",
+        "CANCELLED" => "Dibatalkan",
+        _ => status
+    };
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        "NOT_STARTED" => "bg-secondary",
+        "ON_GOING" => "bg-primary",
+        "ON_HOLD" => "bg-warning",
+        "COMPLETED" => "bg-success",
+        "CANCELLED" => "bg-danger",
+        _ => "bg-secondary"
+    };
+
     public class ProjectFormModel
     {
         [Required(ErrorMessage = "Nama project wajib diisi.")]
@@ -654,6 +794,9 @@ else
 
         [StringLength(50, ErrorMessage = "No PO maksimal 50 karakter.")]
         public string? NoPo { get; set; }
+
+        [StringLength(150, ErrorMessage = "Nama bahan maksimal 150 karakter.")]
+        public string? MaterialName { get; set; }
 
         public DateTime? OrderDate { get; set; }
         public DateTime? StartDate { get; set; }

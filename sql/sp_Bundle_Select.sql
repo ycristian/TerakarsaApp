@@ -48,16 +48,23 @@ GO
 
 -- Ringkasan per size: qty order, saran bundle_qty, jumlah bundle, total qty bundle.
 -- Plus flag: apakah step ber-bundle pertama artikel ini (requires_bundle = 1, sort_order
--- terkecil) sudah punya log RECEIVED hidup -- dipakai untuk banner peringatan cutting
--- belum dikonfirmasi diterima (tidak memblokir pembuatan bundle).
+-- terkecil -- sejak Prompt 17 ini SELALU step Bundling implisit) sudah punya log RECEIVED
+-- hidup -- dipakai untuk banner peringatan cutting belum dikonfirmasi diterima (tidak
+-- memblokir pembuatan bundle). Bundling-lah penerima hasil cutting sekarang (auto-receive
+-- di SIS_Bundle_Manage CREATE), jadi flag ini pada dasarnya sudah menjawab pertanyaan yang
+-- sama seperti sebelum Prompt 17, tanpa perlu logika tambahan.
+-- Prompt 17: FirstBundleStepDivisionId TIDAK LAGI berarti divisi step Bundling -- field ini
+-- dipakai client untuk dropdown "Penjahit (resource)" di BundleManager.razor, yaitu resource
+-- divisi STATION ber-bundle pertama (mis. Sewing, is_bundling = 0), bukan divisi Bundling.
+-- BundlingDivisionId (baru) dipakai untuk dropdown terpisah "Pelaksana Bundling".
 CREATE OR ALTER PROCEDURE SIS_Article_BundleSummary
     @ArticleId INT
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @FirstBundleStepId INT, @FirstBundleStepDivisionId INT;
-    SELECT TOP 1 @FirstBundleStepId = article_workflow_id, @FirstBundleStepDivisionId = division_id
+    DECLARE @FirstBundleStepId INT;
+    SELECT TOP 1 @FirstBundleStepId = article_workflow_id
     FROM article_workflows
     WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1
     ORDER BY sort_order ASC;
@@ -67,6 +74,17 @@ BEGIN
         SELECT 1 FROM article_workflow_logs
         WHERE article_workflow_id = @FirstBundleStepId AND received_at IS NOT NULL AND deleted_at IS NULL
     ) THEN 1 ELSE 0 END;
+
+    DECLARE @FirstStationBundleDivisionId INT;
+    SELECT TOP 1 @FirstStationBundleDivisionId = division_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND is_bundling = 0
+    ORDER BY sort_order ASC;
+
+    DECLARE @BundlingDivisionId INT;
+    SELECT @BundlingDivisionId = division_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND is_bundling = 1;
 
     SELECT
         asz.article_size_id AS ArticleSizeId,
@@ -78,7 +96,8 @@ BEGIN
         ISNULL(SUM(b.qty), 0) AS TotalBundleQty,
         @HasFirstBundleStep AS HasFirstBundleStep,
         @IsFirstBundleStepReceived AS IsFirstBundleStepReceived,
-        @FirstBundleStepDivisionId AS FirstBundleStepDivisionId
+        @FirstStationBundleDivisionId AS FirstBundleStepDivisionId,
+        @BundlingDivisionId AS BundlingDivisionId
     FROM article_sizes asz
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN bundles b ON b.article_size_id = asz.article_size_id AND b.deleted_at IS NULL

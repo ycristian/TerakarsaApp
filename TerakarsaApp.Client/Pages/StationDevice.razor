@@ -1,17 +1,24 @@
 @page "/station"
+@page "/station/{PairingCode}"
 @layout TerakarsaApp.Client.Layout.BlankLayout
 @using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
 @using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.Stations
 @using TerakarsaApp.Shared.WorkflowLogs
 @inject StationDeviceApiService StationApi
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 @implements IDisposable
 
 <PageTitle>Stasiun</PageTitle>
 
 <div style="font-size: 1.1rem;">
+
+<div class="mb-3">
+    <CloseButton />
+</div>
 
 @if (isLoadingSetup)
 {
@@ -22,9 +29,9 @@ else if (station is null)
     <div class="card mt-5">
         <div class="card-body">
             <h3 class="card-title mb-3">Setup Perangkat Stasiun</h3>
-            <p class="text-muted">Tempelkan token stasiun yang diberikan admin untuk mengaktifkan perangkat ini.</p>
+            <p class="text-muted">Masukkan kode pairing 5 karakter yang diberikan admin untuk mengaktifkan perangkat ini.</p>
             <div class="mb-3">
-                <input class="form-control form-control-lg" placeholder="Token stasiun..." @bind="tokenInput" @bind:event="oninput" />
+                <input class="form-control form-control-lg text-uppercase" maxlength="5" placeholder="Kode pairing..." @bind="tokenInput" @bind:event="oninput" />
             </div>
             @if (!string.IsNullOrEmpty(setupError))
             {
@@ -42,7 +49,7 @@ else if (currentOperatorId is null)
         <div class="card-body text-center">
             <h3 class="mb-0">@station.StationName</h3>
             <p class="text-muted mb-2">@station.DivisionName</p>
-            <button class="btn btn-outline-danger btn-sm" @onclick="ReleaseToken">Lepas Token</button>
+            <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
         </div>
     </div>
 
@@ -93,7 +100,7 @@ else
                 {
                     <button class="btn btn-outline-danger btn-sm" @onclick="ChangeOperator">Ganti Operator</button>
                 }
-                <button class="btn btn-outline-danger btn-sm" @onclick="ReleaseToken">Lepas Token</button>
+                <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
             </div>
         </div>
     </div>
@@ -596,16 +603,27 @@ else
     </div>
 }
 
+<ConfirmDeleteModal Show="showLogoutConfirm" IsBusy="isLoggingOut" Title="Keluar dari Perangkat"
+                     ConfirmText="Ya, Keluar" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
+                     OnConfirm="ConfirmLogout" OnCancel="() => showLogoutConfirm = false">
+    <Message>Perangkat akan keluar dan token saat ini tidak berlaku lagi. Untuk masuk kembali, minta kode pairing baru ke admin.</Message>
+</ConfirmDeleteModal>
+
 @code {
     private const string TokenKey = "stationToken";
     private const string OperatorIdKey = "stationOperatorId";
     private const string OperatorNameKey = "stationOperatorName";
+
+    [Parameter] public string? PairingCode { get; set; }
 
     private bool isLoadingSetup = true;
     private StationMeDto? station;
     private string tokenInput = string.Empty;
     private string setupError = string.Empty;
     private bool isValidatingToken = false;
+
+    private bool showLogoutConfirm = false;
+    private bool isLoggingOut = false;
 
     private List<ResourceLookupDto> operators = new();
     private int? currentOperatorId;
@@ -673,11 +691,26 @@ else
         isLoadingSetup = true;
 
         var existingToken = await JS.InvokeAsync<string?>("localStorage.getItem", TokenKey);
-        if (!string.IsNullOrWhiteSpace(existingToken))
+        if (!string.IsNullOrWhiteSpace(existingToken) && !string.IsNullOrWhiteSpace(PairingCode))
+        {
+            // Sudah punya token aktif tapi scan kode pairing baru -- logout otomatis dari
+            // stasiun lama, lalu login ke stasiun hasil scan terakhir.
+            await StationApi.LogoutAsync();
+            await ReleaseToken();
+            await ClaimAsync(PairingCode.Trim());
+        }
+        else if (!string.IsNullOrWhiteSpace(existingToken))
         {
             station = await StationApi.GetMeAsync();
             if (station is null)
+            {
                 await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+                setupError = "Token perangkat sudah tidak berlaku. Minta kode pairing baru ke admin.";
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(PairingCode))
+        {
+            await ClaimAsync(PairingCode.Trim());
         }
 
         isLoadingSetup = false;
@@ -686,30 +719,60 @@ else
             await LoadOperatorSessionAsync();
     }
 
-    private async Task HandleSetupSubmit()
+    // Prompt 20: tukar kode pairing (dari URL /station/{kode} atau input manual) dengan
+    // station_token baru, simpan ke localStorage, lalu muat info stasiun.
+    private async Task ClaimAsync(string code)
     {
-        if (string.IsNullOrWhiteSpace(tokenInput))
+        isValidatingToken = true;
+        setupError = string.Empty;
+
+        var claim = await StationApi.ClaimAsync(code);
+        if (!claim.Success || claim.Result is null)
         {
-            setupError = "Token wajib diisi.";
+            setupError = string.IsNullOrEmpty(claim.Error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : claim.Error;
+            isValidatingToken = false;
             return;
         }
 
-        isValidatingToken = true;
-        setupError = string.Empty;
-        await JS.InvokeVoidAsync("localStorage.setItem", TokenKey, tokenInput.Trim());
+        await JS.InvokeVoidAsync("localStorage.setItem", TokenKey, claim.Result.Token);
 
         station = await StationApi.GetMeAsync();
         isValidatingToken = false;
 
         if (station is null)
         {
-            setupError = "Token tidak valid atau perangkat nonaktif.";
+            setupError = "Gagal mengaktifkan perangkat. Minta kode pairing baru ke admin.";
             await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(PairingCode))
+            Nav.NavigateTo("/station", replace: true);
+    }
+
+    private async Task HandleSetupSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(tokenInput))
+        {
+            setupError = "Kode pairing wajib diisi.";
+            return;
+        }
+
+        var code = tokenInput.Trim();
         tokenInput = string.Empty;
-        await LoadOperatorSessionAsync();
+        await ClaimAsync(code);
+
+        if (station is not null)
+            await LoadOperatorSessionAsync();
+    }
+
+    private async Task ConfirmLogout()
+    {
+        isLoggingOut = true;
+        await StationApi.LogoutAsync();
+        isLoggingOut = false;
+        showLogoutConfirm = false;
+        await ReleaseToken();
     }
 
     private bool IsLocked => station is not null && !station.AllowResourceChange && station.DefaultResourceId is not null;

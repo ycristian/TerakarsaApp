@@ -31,6 +31,7 @@ public class BundleSizeSummaryDto
     public bool HasFirstBundleStep { get; set; }
     public bool IsFirstBundleStepReceived { get; set; }
     public int? FirstBundleStepDivisionId { get; set; }
+    public int? BundlingDivisionId { get; set; }
 }
 
 public class ArticleBundlesDto
@@ -38,6 +39,7 @@ public class ArticleBundlesDto
     public int ArticleId { get; set; }
     public List<BundleSizeSummaryDto> Summary { get; set; } = new();
     public List<BundleDto> Bundles { get; set; } = new();
+    public string PublicBaseUrl { get; set; } = string.Empty;
 }
 
 public class BundleCreateRequest
@@ -47,6 +49,7 @@ public class BundleCreateRequest
     public int Qty { get; set; }
     public int? ResourceId { get; set; }
     public string? ResourcePersonName { get; set; }
+    public int? BundlingResourceId { get; set; }
 }
 
 public class BundleUpdateRequest
@@ -55,6 +58,7 @@ public class BundleUpdateRequest
     public int Qty { get; set; }
     public int? ResourceId { get; set; }
     public string? ResourcePersonName { get; set; }
+    public int? BundlingResourceId { get; set; }
 }
 
 public class BundleCreateResult
@@ -129,25 +133,21 @@ public class BundleScanInfoDto
     public BundleScanActionDto Action { get; set; } = new();
 }
 
-public class ArticleWipSizeBreakdownDto
-{
-    public string SizeName { get; set; } = string.Empty;
-    public int QtyOk { get; set; }
-}
-
 public class ArticleWipStepDto
 {
     public int ArticleWorkflowId { get; set; }
     public string StepName { get; set; } = string.Empty;
     public int SortOrder { get; set; }
-    public string? DivisionName { get; set; }
     public bool RequiresBundle { get; set; }
+    public int ReceivedPcs { get; set; }
     public int ReceivedBundleCount { get; set; }
+    public int CompletedPcs { get; set; }
     public int CompletedBundleCount { get; set; }
+    public int TotalBundlePcs { get; set; }
     public int TotalBundleCount { get; set; }
-    public int TotalQtyOkCompleted { get; set; }
-    public int EntryCount { get; set; }
-    public List<ArticleWipSizeBreakdownDto> SizeBreakdown { get; set; } = new();
+    public int QtyOrder { get; set; }
+    public int QtyOk { get; set; }
+    public int QtyReject { get; set; }
 }
 
 public class PublicBundleDetailDto
