@@ -137,8 +137,8 @@ else
 
     @if (showAddForm)
     {
-        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseAddForm">
-            <div class="modal-dialog" @onclick:stopPropagation="true">
+        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+            <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Tambah Bundle</h5>
@@ -194,8 +194,8 @@ else
 
     @if (showEditForm)
     {
-        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseEditForm">
-            <div class="modal-dialog" @onclick:stopPropagation="true">
+        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+            <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit Bundle @editForm.Serial</h5>

@@ -91,7 +91,7 @@ else
                                 <td>@u.CreatedAt.ToString("dd/MM/yyyy")</td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(u)"><i class="fe fe-edit"></i></button>
-                                    <button class="btn btn-sm btn-warning me-1" title="Reset Password" @onclick="() => OpenResetPasswordForm(u)"><i class="fe fe-key"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" title="Reset Password" @onclick="() => OpenResetPasswordForm(u)"><i class="fe fe-lock"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(u)"><i class="fe fe-trash-2"></i></button>
                                 </td>
                             </tr>
@@ -107,8 +107,8 @@ else
 
 @if (showForm)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
-        <div class="modal-dialog" @onclick:stopPropagation="true">
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(isEditMode ? "Edit User" : "Tambah User")</h5>
@@ -169,8 +169,8 @@ else
 
 @if (showResetPasswordForm)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="@(() => showResetPasswordForm = false)">
-        <div class="modal-dialog" @onclick:stopPropagation="true">
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Reset Password — @resetPasswordModel.Username</h5>

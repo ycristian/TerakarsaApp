@@ -171,15 +171,20 @@ BEGIN
                     @NewBundleNo AS bundle_no,
                     @QrContent AS qr_content,
                     p.project_name AS project_name,
+                    p.no_po AS no_po,
+                    p.material_name AS material_name,
                     a.article_name AS article_name,
                     a.style AS style,
                     a.color AS color,
+                    spk.size_pack_name AS size_pack_name,
                     spd.size_name AS size_name,
                     @Qty AS qty,
                     res.resource_name AS resource_name,
-                    @ResourcePersonName AS resource_person_name
+                    @ResourcePersonName AS resource_person_name,
+                    (SELECT created_at FROM bundles WHERE bundle_id = @NewBundleId) AS started_at
                 FROM articles a
                 INNER JOIN projects p ON p.project_id = a.project_id
+                INNER JOIN size_packs spk ON spk.size_pack_id = a.size_pack_id
                 INNER JOIN article_sizes asz ON asz.article_size_id = @ArticleSizeId
                 INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
                 LEFT JOIN resources res ON res.resource_id = @ResourceId
@@ -388,16 +393,21 @@ BEGIN
             b.bundle_no AS bundle_no,
             @QrContent AS qr_content,
             p.project_name AS project_name,
+            p.no_po AS no_po,
+            p.material_name AS material_name,
             a.article_name AS article_name,
             a.style AS style,
             a.color AS color,
+            spk.size_pack_name AS size_pack_name,
             spd.size_name AS size_name,
             b.qty AS qty,
             res.resource_name AS resource_name,
-            b.resource_person_name AS resource_person_name
+            b.resource_person_name AS resource_person_name,
+            b.created_at AS started_at
         FROM bundles b
         INNER JOIN articles a ON a.article_id = b.article_id
         INNER JOIN projects p ON p.project_id = a.project_id
+        INNER JOIN size_packs spk ON spk.size_pack_id = a.size_pack_id
         INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
         INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
         LEFT JOIN resources res ON res.resource_id = b.resource_id

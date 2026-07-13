@@ -81,12 +81,18 @@ public class StationPendingHandoverDto
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
     public string? Remark { get; set; }
-    public string TargetDivisionName { get; set; } = string.Empty;
+    public string? TargetDivisionName { get; set; }
+    // Prompt 23: true kalau baris ini step TERAKHIR artikel (tidak ada tujuan serah, tidak
+    // pernah "diterima" -- tampil di sini selama jendela revisi H+1). Client harus sembunyikan
+    // field Divisi Tujuan/Penjahit & tombol Batal Serah, dan revisi lewat UPDATE biasa
+    // (bukan REVISE_HANDOVER) untuk baris ini.
+    public bool IsLastStep { get; set; }
     public string? ResourceName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public List<ArticleSizeOptionDto> Sizes { get; set; } = new();
-    // Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER).
+    // Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER). Tidak dipakai untuk
+    // baris IsLastStep.
     public List<DivisionOptionDto> TargetDivisionOptions { get; set; } = new();
 }
 

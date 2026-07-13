@@ -25,19 +25,17 @@ public class AuthService
 
     public async Task<LoginResponse?> LoginAsync(LoginRequest request)
     {
-        var hashedPassword = HashPassword(request.Password);
-
         var usernameParam = new SqlParameter("@Username", request.Username);
-        var passwordParam = new SqlParameter("@Password", hashedPassword);
 
         var result = await _db.Database
             .SqlQueryRaw<UserResult>(
-                "EXEC SIS_Login @Username, @Password",
-                usernameParam, passwordParam)
+                "EXEC SIS_User_GetByUsername @Username = @Username",
+                usernameParam)
             .ToListAsync();
 
         var user = result.FirstOrDefault();
         if (user is null) return null;
+        if (!PasswordHasher.Verify(request.Password, user.Password)) return null;
 
         return await IssueTokensAsync(user);
     }
@@ -67,7 +65,8 @@ public class AuthService
             Username = stored.Username,
             FullName = stored.FullName,
             Role = stored.Role,
-            IsActive = stored.IsActive
+            IsActive = stored.IsActive,
+            Password = string.Empty
         });
     }
 
@@ -103,12 +102,6 @@ public class AuthService
             Expires = DateTime.UtcNow.AddMinutes(accessExpireMinutes),
             RefreshToken = refreshToken
         };
-    }
-
-    private string HashPassword(string password)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-        return Convert.ToHexString(bytes).ToLower();
     }
 
     private static string GenerateRefreshToken()
@@ -148,6 +141,7 @@ public class UserResult
 {
     public int Id { get; set; }
     public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }

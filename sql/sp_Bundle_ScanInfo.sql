@@ -20,6 +20,12 @@
 --          ber-bundle PERTAMA tanpa prasyarat (kecuali cocok resource bila bundle
 --          ditugaskan ke line tertentu); untuk step SELANJUTNYA disyaratkan step
 --          sebelumnya (bundle sama) sudah received_at + target_division_id = divisi ini.
+--        - 'EDIT' (Prompt 23) kalau baris log TERAKHIR bundle ini adalah step terakhir
+--          artikel (target_division_id NULL, tidak ada serah lanjutan sehingga tidak pernah
+--          "diterima"), dibuat oleh @DivisionId sendiri, DAN masih dalam jendela H+1 (hari
+--          dibuat + 1 hari kalender) -- dipakai supaya divisi terakhir (mis. Packing) bisa
+--          membetulkan salah input tanpa lewat supervisor. IsLastStep = 1 menandai kasus ini
+--          (beda pesan di client dari EDIT baris pending-handover biasa).
 --        - Selain itu 'NONE' + pesan posisi (kalau @DivisionId NULL/pengunjung publik,
 --          selalu NONE tanpa pesan negatif).
 --      Aksi juga membawa NextDivisionId/NextDivisionName -- divisi tujuan yang akan
@@ -197,6 +203,74 @@ BEGIN
             END
             ELSE
             BEGIN
+                -- Fix: kalau baris log TERAKHIR (hidup) bundle ini sudah diterima di divisi
+                -- ini -- definisi WIP yang SAMA dipakai SIS_Station_InProgress -- bundle ini
+                -- nyata-nyata sedang dikerjakan di sini, TERLEPAS dari step SEBELUMNYA masih
+                -- ada sisa kuota atau tidak (mis. sisa qty short/susulan yang belum
+                -- diselesaikan pengirim). Tanpa ini, frontier @StepQuota di bawah bisa nyasar
+                -- balik ke step sebelumnya (lihat komentar Prompt 14b) dan bilang "menunggu
+                -- di step X" padahal bundle sudah WIP di divisi ini -- membingungkan karena
+                -- /station (tab WIP) sudah benar menampilkannya di sini.
+                DECLARE @LastLogId INT, @LastLogArticleWorkflowId INT, @LastLogSort INT,
+                        @LastLogReceivedAt DATETIME2, @LastLogTargetDivisionId INT,
+                        @LastLogDivisionId INT, @LastLogCreatedAt DATETIME2;
+                SELECT TOP 1 @LastLogId = awl.workflow_log_id, @LastLogArticleWorkflowId = awl.article_workflow_id,
+                             @LastLogSort = aw.sort_order, @LastLogReceivedAt = awl.received_at,
+                             @LastLogTargetDivisionId = awl.target_division_id,
+                             @LastLogDivisionId = awl.division_id, @LastLogCreatedAt = awl.created_at
+                FROM article_workflow_logs awl
+                INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
+                ORDER BY aw.sort_order DESC, awl.created_at DESC;
+
+                IF @LastLogReceivedAt IS NOT NULL AND @LastLogTargetDivisionId = @DivisionId
+                BEGIN
+                    DECLARE @WipStepId INT, @WipStepSort INT;
+                    SELECT TOP 1 @WipStepId = aw.article_workflow_id, @WipStepSort = aw.sort_order
+                    FROM article_workflows aw
+                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                      AND aw.sort_order > @LastLogSort
+                    ORDER BY aw.sort_order ASC;
+
+                    IF @WipStepId IS NULL
+                    BEGIN
+                        SET @Message = 'Seluruh proses per-bundle untuk bundle ini sudah selesai.';
+                    END
+                    ELSE
+                    BEGIN
+                        SET @AllowedAction = 'COMPLETE';
+                        SET @ActionArticleWorkflowId = @WipStepId;
+                        SET @IsLastStep = CASE WHEN @WipStepSort = @MaxArticleSort THEN 1 ELSE 0 END;
+
+                        SELECT TOP 1 @NextDivisionId = division_id
+                        FROM article_workflows
+                        WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @WipStepSort
+                        ORDER BY sort_order ASC;
+                        SELECT @NextDivisionName = division_name FROM divisions WHERE division_id = @NextDivisionId;
+                    END
+                END
+                -- Prompt 23: step terakhir (target_division_id NULL, mis. Packing) tidak
+                -- pernah "diterima" -- tanpa ini baris ini terkunci permanen begitu dibuat.
+                -- Beri jendela revisi H+1 (hari dibuat + 1 hari kalender) ke divisi pembuatnya
+                -- sendiri supaya salah input bisa diperbaiki tanpa lewat supervisor. Guard
+                -- waktu yang sama ditegakkan ulang di SIS_WorkflowLog_Manage (Action UPDATE)
+                -- supaya tidak bisa dilewati lewat panggilan API langsung.
+                ELSE IF @LastLogTargetDivisionId IS NULL AND @LastLogDivisionId = @DivisionId
+                     AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, @LastLogCreatedAt) AS DATE)
+                BEGIN
+                    SET @AllowedAction = 'EDIT';
+                    SET @ActionArticleWorkflowId = @LastLogArticleWorkflowId;
+                    SET @ActionWorkflowLogId = @LastLogId;
+                    SET @IsLastStep = 1;
+
+                    SELECT @ActionQtyOk = qty_ok, @ActionQtyRejectPrint = qty_reject_print,
+                           @ActionQtyRejectFabric = qty_reject_fabric, @ActionQtyRejectSewing = qty_reject_sewing,
+                           @ActionRemark = remark
+                    FROM article_workflow_logs
+                    WHERE workflow_log_id = @LastLogId;
+                END
+                ELSE
+                BEGIN
                 -- Prompt 14b: "step berikutnya yang harus dikerjakan" (frontier) tidak lagi
                 -- sekadar "step tanpa baris sama sekali" -- satu step ber-bundle boleh sudah
                 -- punya baris (susulan) selama kuotanya belum habis. Hitung QtyMasuk/QtySudah
@@ -308,6 +382,7 @@ BEGIN
                             SET @Message = 'Bundle belum diterima di divisi ini untuk step ' + @CurStepName + '.';
                         END
                     END
+                END
                 END
             END
         END

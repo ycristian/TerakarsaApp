@@ -29,12 +29,15 @@ public class ProjectAttachmentService
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly ImageCompressionService _imageCompression;
+    private readonly ProjectService _projectService;
 
-    public ProjectAttachmentService(AppDbContext db, IFileStorageService fileStorage, ImageCompressionService imageCompression)
+    public ProjectAttachmentService(AppDbContext db, IFileStorageService fileStorage, ImageCompressionService imageCompression,
+        ProjectService projectService)
     {
         _db = db;
         _fileStorage = fileStorage;
         _imageCompression = imageCompression;
+        _projectService = projectService;
     }
 
     public async Task<List<ProjectAttachmentDto>> GetByProjectAsync(int projectId)
@@ -55,15 +58,24 @@ public class ProjectAttachmentService
 
     public async Task<List<ProjectAttachmentUploadResultDto>> UploadManyAsync(int projectId, IReadOnlyList<IFormFile> files, string? description, int userId)
     {
+        var project = await _projectService.GetByIdAsync(projectId);
+        var photoNamePrefix = FileNamingHelper.Sanitize(project?.ProjectName ?? "project");
+        var photoSequence = (await GetRowsByProjectAsync(projectId)).Count(r => PhotoExtensions.Contains(r.FileType.ToLowerInvariant())) + 1;
+
         var results = new List<ProjectAttachmentUploadResultDto>();
         foreach (var file in files)
         {
-            results.Add(await UploadOneAsync(projectId, file, description, userId));
+            var isPhoto = PhotoExtensions.Contains(Path.GetExtension(file.FileName).TrimStart('.').ToLowerInvariant());
+            var result = await UploadOneAsync(projectId, file, description, userId, isPhoto ? photoNamePrefix : null, photoSequence);
+            if (result.Success && isPhoto) photoSequence++;
+            results.Add(result);
         }
         return results;
     }
 
-    private async Task<ProjectAttachmentUploadResultDto> UploadOneAsync(int projectId, IFormFile file, string? description, int userId)
+    // Lampiran bertipe foto (jpg/png) diberi nama "NamaProject (n)" supaya tidak ambigu antar
+    // project bernama sama; lampiran dokumen (pdf/xlsx) tetap pakai nama file asli.
+    private async Task<ProjectAttachmentUploadResultDto> UploadOneAsync(int projectId, IFormFile file, string? description, int userId, string? photoNamePrefix, int photoSequence)
     {
         var result = new ProjectAttachmentUploadResultDto { FileName = file.FileName };
 
@@ -101,8 +113,9 @@ public class ProjectAttachmentService
         using (compressed.Stream)
         {
             var fileType = compressed.FileExtension;
-            var baseName = Path.GetFileNameWithoutExtension(file.FileName);
-            var finalFileName = $"{baseName}.{fileType}";
+            var finalFileName = photoNamePrefix is not null
+                ? $"{photoNamePrefix} ({photoSequence}).{fileType}"
+                : $"{Path.GetFileNameWithoutExtension(file.FileName)}.{fileType}";
 
             var relativePath = await _fileStorage.SaveAsync(compressed.Stream, finalFileName, $"projects/{projectId}");
 

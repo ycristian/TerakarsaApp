@@ -54,46 +54,51 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
     }
 
-    public async Task<List<StationPendingReceiveDto>> GetPendingReceivesAsync()
+    // Prompt 22b: resourceId = operator sesi saat ini, dipakai server untuk filter antrian
+    // ke Line operator ini (lihat EffectiveResourceId di StationDeviceController).
+    public async Task<List<StationPendingReceiveDto>> GetPendingReceivesAsync(int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/pending-receives");
+        var response = await _http.GetAsync($"api/station/pending-receives{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationPendingReceiveDto>>() ?? new();
     }
 
-    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync()
+    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/pending-handover");
+        var response = await _http.GetAsync($"api/station/pending-handover{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationPendingHandoverDto>>() ?? new();
     }
 
-    public async Task<List<StationRecentReceivedDto>> GetRecentReceivedAsync()
+    public async Task<List<StationRecentReceivedDto>> GetRecentReceivedAsync(int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/recent-received");
+        var response = await _http.GetAsync($"api/station/recent-received{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationRecentReceivedDto>>() ?? new();
     }
 
     // Prompt 12e: tab "Dikerjakan".
-    public async Task<List<StationInProgressDto>> GetInProgressAsync()
+    public async Task<List<StationInProgressDto>> GetInProgressAsync(int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/in-progress");
+        var response = await _http.GetAsync($"api/station/in-progress{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationInProgressDto>>() ?? new();
     }
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim).
-    public async Task<StationCountsDto> GetCountsAsync()
+    public async Task<StationCountsDto> GetCountsAsync(int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/counts");
+        var response = await _http.GetAsync($"api/station/counts{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<StationCountsDto>() ?? new();
     }
 
     // Prompt 12e: tab "Dikirim" (dulu "Menunggu Diserahkan") -- ulang pakai endpoint
     // pending-handover yang sudah cocok dengan definisi Dikirim, hanya rename di sisi client.
-    public async Task<List<StationPendingHandoverDto>> GetOutboundAsync() => await GetPendingHandoverAsync();
+    public async Task<List<StationPendingHandoverDto>> GetOutboundAsync(int? resourceId) => await GetPendingHandoverAsync(resourceId);
+
+    private static string ResourceIdQuery(int? resourceId) =>
+        resourceId.HasValue ? $"?resourceId={resourceId.Value}" : string.Empty;
 
     // Prompt 14: info kuota qty step ber-bundle ("Masuk / Tercatat / Sisa") sebelum submit.
     public async Task<WorkflowQuotaInfoDto?> GetQuotaInfoAsync(int articleWorkflowId, int bundleId)

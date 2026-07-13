@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Threading.RateLimiting;
 using TerakarsaApp.API.Data;
 using TerakarsaApp.API.Services;
 
@@ -12,7 +14,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // JWT
+// Key produksi/Azure WAJIB datang dari App Settings/environment variable
+// (JwtSettings__Key), bukan dari appsettings.json -- ini perilaku bawaan ASP.NET
+// Core configuration (env var dengan "__" menimpa section:key di appsettings).
 var jwt = builder.Configuration.GetSection("JwtSettings");
+var jwtKey = jwt["Key"];
+if (string.IsNullOrEmpty(jwtKey) || jwtKey.Length < 32)
+    throw new InvalidOperationException(
+        "JwtSettings:Key wajib diisi minimal 32 karakter (set lewat App Settings/env var JwtSettings__Key untuk produksi).");
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -24,10 +34,31 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = jwt["Issuer"],
             ValidAudience = jwt["Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwt["Key"]!))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew = TimeSpan.FromMinutes(1)
         };
     });
+
+// Rate limit endpoint auth (login/refresh) -- bukan endpoint station.
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 5,
+            QueueLimit = 0
+        }));
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "text/plain";
+        await context.HttpContext.Response.WriteAsync(
+            "Terlalu banyak percobaan. Coba lagi sebentar lagi.", cancellationToken);
+    };
+});
 
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
@@ -53,6 +84,7 @@ builder.Services.AddScoped<WorkflowLogService>();
 builder.Services.AddScoped<BundleService>();
 builder.Services.AddScoped<PrintJobService>();
 builder.Services.AddScoped<ReportBundleService>();
+builder.Services.AddScoped<ReportWipService>();
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
 builder.Services.Configure<PrintServiceOptions>(builder.Configuration.GetSection("PrintService"));
@@ -76,5 +108,6 @@ var app = builder.Build();
 app.UseCors("AllowBlazor");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
 app.Run();

@@ -59,10 +59,14 @@ public class StationDeviceController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 22b: @ResourceId dari operator sesi (query string, sama pola dengan Scan di
+    // bawah) -- filter antrian Masuk/Dikerjakan/Dikirim/Counts ke Line operator ini saja.
+    // EffectiveResourceId tetap menang kalau stasiun terkunci (memaksa default_resource_id
+    // stasiun, mengabaikan resourceId yang dikirim client).
     [HttpGet("pending-receives")]
-    public async Task<IActionResult> GetPendingReceives()
+    public async Task<IActionResult> GetPendingReceives([FromQuery] int? resourceId)
     {
-        var result = await _workflowLogService.GetPendingReceivesAsync(CurrentStation.DivisionId);
+        var result = await _workflowLogService.GetPendingReceivesAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         return Ok(result);
     }
 
@@ -70,34 +74,34 @@ public class StationDeviceController : ControllerBase
     // (received_at IS NULL) -- masih boleh direvisi lewat PUT logs/{id}/revise-handover di
     // bawah. Prompt 12e: ini sumber data tab "Dikirim" (dulu "Menunggu Diserahkan").
     [HttpGet("pending-handover")]
-    public async Task<IActionResult> GetPendingHandover()
+    public async Task<IActionResult> GetPendingHandover([FromQuery] int? resourceId)
     {
-        var result = await _workflowLogService.GetPendingHandoverAsync(CurrentStation.DivisionId);
+        var result = await _workflowLogService.GetPendingHandoverAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         return Ok(result);
     }
 
     // Prompt 15: 20 baris terakhir yang diterima divisi ini -- dasar tab "Baru Diterima".
     [HttpGet("recent-received")]
-    public async Task<IActionResult> GetRecentReceived()
+    public async Task<IActionResult> GetRecentReceived([FromQuery] int? resourceId)
     {
-        var result = await _workflowLogService.GetRecentReceivedAsync(CurrentStation.DivisionId);
+        var result = await _workflowLogService.GetRecentReceivedAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         return Ok(result);
     }
 
     // Prompt 12e: tab "Dikerjakan" -- bundle sudah diterima divisi ini, belum ada baris
     // step berikutnya. TANPA batasan TOP (beda dengan recent-received di atas).
     [HttpGet("in-progress")]
-    public async Task<IActionResult> GetInProgress()
+    public async Task<IActionResult> GetInProgress([FromQuery] int? resourceId)
     {
-        var result = await _workflowLogService.GetInProgressAsync(CurrentStation.DivisionId);
+        var result = await _workflowLogService.GetInProgressAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         return Ok(result);
     }
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) di atas /station.
     [HttpGet("counts")]
-    public async Task<IActionResult> GetCounts()
+    public async Task<IActionResult> GetCounts([FromQuery] int? resourceId)
     {
-        var result = await _workflowLogService.GetCountsAsync(CurrentStation.DivisionId);
+        var result = await _workflowLogService.GetCountsAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
         return Ok(result);
     }
 

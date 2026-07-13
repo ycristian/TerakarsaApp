@@ -92,8 +92,8 @@ else
 
 @if (showForm)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseForm">
-        <div class="modal-dialog" @onclick:stopPropagation="true">
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(isEditMode ? "Edit Divisi" : "Tambah Divisi")</h5>

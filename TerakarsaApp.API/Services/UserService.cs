@@ -1,7 +1,5 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
-using System.Text;
 using TerakarsaApp.API.Data;
 using TerakarsaApp.Shared.Users;
 
@@ -50,7 +48,7 @@ public class UserService
     public async Task<bool> CreateAsync(UserCreateRequest request)
     {
         var usernameParam = new SqlParameter("@Username", request.Username);
-        var passwordParam = new SqlParameter("@Password", HashPassword(request.Password));
+        var passwordParam = new SqlParameter("@Password", PasswordHasher.Hash(request.Password));
         var fullNameParam = new SqlParameter("@FullName", request.FullName);
         var roleParam = new SqlParameter("@Role", request.Role);
 
@@ -76,7 +74,7 @@ public class UserService
     public async Task ResetPasswordAsync(UserResetPasswordRequest request)
     {
         var idParam = new SqlParameter("@Id", request.Id);
-        var passwordParam = new SqlParameter("@Password", HashPassword(request.NewPassword));
+        var passwordParam = new SqlParameter("@Password", PasswordHasher.Hash(request.NewPassword));
 
         await _db.Database.ExecuteSqlRawAsync(
             "EXEC SIS_User_Manage @Action = 'RESET_PASSWORD', @Id = @Id, @Password = @Password",
@@ -89,11 +87,5 @@ public class UserService
         await _db.Database.ExecuteSqlRawAsync(
             "EXEC SIS_User_Manage @Action = 'DELETE', @Id = @Id",
             idParam);
-    }
-
-    private static string HashPassword(string password)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-        return Convert.ToHexString(bytes).ToLower();
     }
 }

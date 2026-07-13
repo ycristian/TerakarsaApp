@@ -1,0 +1,292 @@
+@page "/wip-dashboard"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Reports
+@inject ReportWipApiService WipApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Dashboard WIP</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Dashboard WIP per Divisi & Resource</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Dashboard WIP</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="d-flex justify-content-end mb-3">
+        <button class="btn btn-outline-primary" disabled="@isLoading" @onclick="LoadSummary">
+            <i class="fe fe-refresh-cw me-1"></i> Refresh
+        </button>
+    </div>
+
+    @if (isLoading)
+    {
+        <p class="mb-0">Memuat data...</p>
+    }
+    else if (divisionIds.Count == 0)
+    {
+        <div class="alert alert-secondary">Tidak ada bundle on progress saat ini.</div>
+    }
+    else
+    {
+        @foreach (var divisionId in divisionIds)
+        {
+            var working = WorkingFor(divisionId);
+            var pending = PendingFor(divisionId);
+            var totalBundle = working.Sum(w => w.BundleCount);
+            var totalPcs = working.Sum(w => w.TotalPcs);
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">@DivisionName(divisionId)</h3>
+                    <span class="text-muted ms-2">@totalBundle bundle · @totalPcs pcs dikerjakan</span>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        @foreach (var w in working)
+                        {
+                            <div class="col-md-4">
+                                <div class="card h-100">
+                                    <div class="card-body">
+                                        <h5 class="mb-1">@(w.ResourceName ?? "(Tanpa penerima)")</h5>
+                                        <div class="mb-2">
+                                            <span class="fs-2 fw-bold">@w.BundleCount</span> <span class="text-muted">bundle</span>
+                                            · <span class="fs-2 fw-bold">@w.TotalPcs</span> <span class="text-muted">pcs</span>
+                                        </div>
+                                        @if (w.Articles.Count > 0)
+                                        {
+                                            <p class="small mb-2">
+                                                Sedang dikerjakan: @string.Join(", ", w.Articles.Select(a => $"{a.ProjectName} — {a.ArticleName} ({a.BundleCount})"))
+                                            </p>
+                                        }
+                                        <p class="text-muted small mb-3">
+                                            Terlama diterima @FormatDateTime(w.OldestReceivedAt) (@Umur(w.OldestReceivedAt))
+                                        </p>
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenWorkingModal(divisionId, w)">Lihat</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        @if (pending is not null)
+                        {
+                            <div class="col-md-4">
+                                <div class="card h-100 border-warning">
+                                    <div class="card-body">
+                                        <h5 class="mb-1 text-warning-emphasis">Belum diterima</h5>
+                                        <div class="mb-2">
+                                            <span class="fs-2 fw-bold">@pending.BundleCount</span> <span class="text-muted">bundle</span>
+                                            · <span class="fs-2 fw-bold">@pending.TotalPcs</span> <span class="text-muted">pcs</span>
+                                        </div>
+                                        @if (pending.Articles.Count > 0)
+                                        {
+                                            <p class="small mb-2">
+                                                @string.Join(", ", pending.Articles.Select(a => $"{a.ProjectName} — {a.ArticleName} ({a.BundleCount})"))
+                                            </p>
+                                        }
+                                        <p class="text-muted small mb-3">
+                                            Terkirim sejak @FormatDateTime(pending.OldestSentAt) (@Umur(pending.OldestSentAt))
+                                        </p>
+                                        <button class="btn btn-sm btn-outline-warning" @onclick="() => OpenPendingModal(divisionId, pending)">Lihat</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+}
+
+@if (showModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@modalTitle</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    @if (isLoadingModal)
+                    {
+                        <p class="mb-0">Memuat data...</p>
+                    }
+                    else if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger mb-0">@modalError</div>
+                    }
+                    else if (modalBundles.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Tidak ada bundle.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border text-nowrap mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Bundle No</th>
+                                        <th>Serial</th>
+                                        <th>Project</th>
+                                        <th>Artikel</th>
+                                        <th>Size</th>
+                                        <th>Pcs</th>
+                                        <th>Penjahit</th>
+                                        <th>Step Asal</th>
+                                        <th>@(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var b in modalBundles)
+                                    {
+                                        <tr>
+                                            <td>@b.BundleNo</td>
+                                            <td>@b.Serial</td>
+                                            <td>@b.ProjectName</td>
+                                            <td>@b.ArticleName</td>
+                                            <td>@b.SizeName</td>
+                                            <td>@b.QtyOk</td>
+                                            <td>@(b.TailorName ?? "-")</td>
+                                            <td>@(b.StepName ?? "-")</td>
+                                            <td>@FormatDateTime(b.EventAt) (@Umur(b.EventAt))</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool? hasAccess = null;
+    private bool isLoading = false;
+
+    private DivisionWipSummaryDto summary = new();
+    private Dictionary<int, string> divisionNames = new();
+    private List<int> divisionIds = new();
+
+    // --- Modal ---
+    private bool showModal = false;
+    private bool isLoadingModal = false;
+    private string modalTitle = string.Empty;
+    private string modalMode = string.Empty;
+    private string modalError = string.Empty;
+    private List<DivisionWipBundleDto> modalBundles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "REPORT_WIP");
+
+        if (hasAccess != true) return;
+
+        await LoadSummary();
+    }
+
+    private async Task LoadSummary()
+    {
+        isLoading = true;
+        summary = await WipApi.GetSummaryAsync();
+
+        divisionNames = summary.Working
+            .Select(w => (w.DivisionId, w.DivisionName))
+            .Concat(summary.Pending.Select(p => (p.DivisionId, p.DivisionName)))
+            .GroupBy(d => d.DivisionId)
+            .ToDictionary(g => g.Key, g => g.First().DivisionName);
+
+        divisionIds = divisionNames.Keys.OrderBy(id => divisionNames[id]).ToList();
+
+        isLoading = false;
+    }
+
+    private string DivisionName(int divisionId) => divisionNames.TryGetValue(divisionId, out var name) ? name : $"Divisi #{divisionId}";
+
+    private List<DivisionWipWorkingDto> WorkingFor(int divisionId) =>
+        summary.Working.Where(w => w.DivisionId == divisionId).ToList();
+
+    private DivisionWipPendingDto? PendingFor(int divisionId) =>
+        summary.Pending.FirstOrDefault(p => p.DivisionId == divisionId);
+
+    private static string FormatDateTime(DateTime? t) => t?.ToString("dd/MM/yyyy HH:mm") ?? "-";
+
+    private static string Umur(DateTime? t)
+    {
+        if (t is null) return "-";
+        var span = DateTime.Now - t.Value;
+        if (span.TotalSeconds < 0) return "0 jam";
+        return span.TotalHours < 24
+            ? $"{(int)Math.Floor(span.TotalHours)} jam"
+            : $"{(int)Math.Floor(span.TotalDays)} hari";
+    }
+
+    private async Task OpenWorkingModal(int divisionId, DivisionWipWorkingDto w)
+    {
+        modalTitle = $"{DivisionName(divisionId)} — {(w.ResourceName ?? "(Tanpa penerima)")}";
+        modalMode = "DIKERJAKAN";
+        showModal = true;
+        isLoadingModal = true;
+        modalError = string.Empty;
+        modalBundles = new();
+        StateHasChanged();
+
+        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "DIKERJAKAN", w.ResourceId, filterResource: true);
+        if (!success)
+        {
+            modalError = error;
+        }
+        else
+        {
+            modalBundles = result;
+        }
+        isLoadingModal = false;
+    }
+
+    private async Task OpenPendingModal(int divisionId, DivisionWipPendingDto p)
+    {
+        modalTitle = $"{DivisionName(divisionId)} — Belum diterima";
+        modalMode = "PENDING";
+        showModal = true;
+        isLoadingModal = true;
+        modalError = string.Empty;
+        modalBundles = new();
+        StateHasChanged();
+
+        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "PENDING", null, filterResource: false);
+        if (!success)
+        {
+            modalError = error;
+        }
+        else
+        {
+            modalBundles = result;
+        }
+        isLoadingModal = false;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+    }
+}

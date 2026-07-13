@@ -27,12 +27,17 @@ public class ArticlePhotoService
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly ImageCompressionService _imageCompression;
+    private readonly ArticleService _articleService;
+    private readonly ProjectService _projectService;
 
-    public ArticlePhotoService(AppDbContext db, IFileStorageService fileStorage, ImageCompressionService imageCompression)
+    public ArticlePhotoService(AppDbContext db, IFileStorageService fileStorage, ImageCompressionService imageCompression,
+        ArticleService articleService, ProjectService projectService)
     {
         _db = db;
         _fileStorage = fileStorage;
         _imageCompression = imageCompression;
+        _articleService = articleService;
+        _projectService = projectService;
     }
 
     public async Task<List<ArticlePhotoDto>> GetByArticleAsync(int articleId)
@@ -52,15 +57,32 @@ public class ArticlePhotoService
 
     public async Task<List<ArticlePhotoUploadResultDto>> UploadManyAsync(int articleId, IReadOnlyList<IFormFile> files, int userId)
     {
+        var namePrefix = await BuildFileNamePrefixAsync(articleId);
+        var sequence = (await GetRowsByArticleAsync(articleId)).Count + 1;
+
         var results = new List<ArticlePhotoUploadResultDto>();
         foreach (var file in files)
         {
-            results.Add(await UploadOneAsync(articleId, file, userId));
+            var result = await UploadOneAsync(articleId, file, userId, namePrefix, sequence);
+            if (result.Success) sequence++;
+            results.Add(result);
         }
         return results;
     }
 
-    private async Task<ArticlePhotoUploadResultDto> UploadOneAsync(int articleId, IFormFile file, int userId)
+    // Nama file foto disamakan dengan "NamaProject - NamaArtikel (n)" supaya tidak
+    // ambigu ketika ada artikel dengan nama sama di project berbeda (Prompt: foto preview + naming).
+    private async Task<string> BuildFileNamePrefixAsync(int articleId)
+    {
+        var article = await _articleService.GetByIdAsync(articleId);
+        if (article is null) return "artikel";
+
+        var project = await _projectService.GetByIdAsync(article.ProjectId);
+        var prefix = project is not null ? $"{project.ProjectName} - {article.ArticleName}" : article.ArticleName;
+        return FileNamingHelper.Sanitize(prefix);
+    }
+
+    private async Task<ArticlePhotoUploadResultDto> UploadOneAsync(int articleId, IFormFile file, int userId, string namePrefix, int sequence)
     {
         var result = new ArticlePhotoUploadResultDto { FileName = file.FileName };
 
@@ -97,8 +119,7 @@ public class ArticlePhotoService
 
         using (compressed.Stream)
         {
-            var baseName = Path.GetFileNameWithoutExtension(file.FileName);
-            var finalFileName = $"{baseName}.{compressed.FileExtension}";
+            var finalFileName = $"{namePrefix} ({sequence}).{compressed.FileExtension}";
 
             var relativePath = await _fileStorage.SaveAsync(compressed.Stream, finalFileName, $"articles/{articleId}");
 

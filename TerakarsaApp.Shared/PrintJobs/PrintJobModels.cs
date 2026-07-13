@@ -39,6 +39,12 @@ public class BundleLabelPayload
     [JsonPropertyName("project_name")]
     public string ProjectName { get; set; } = string.Empty;
 
+    [JsonPropertyName("no_po")]
+    public string? NoPo { get; set; }
+
+    [JsonPropertyName("material_name")]
+    public string? MaterialName { get; set; }
+
     [JsonPropertyName("article_name")]
     public string ArticleName { get; set; } = string.Empty;
 
@@ -47,6 +53,9 @@ public class BundleLabelPayload
 
     [JsonPropertyName("color")]
     public string? Color { get; set; }
+
+    [JsonPropertyName("size_pack_name")]
+    public string? SizePackName { get; set; }
 
     [JsonPropertyName("size_name")]
     public string SizeName { get; set; } = string.Empty;
@@ -59,4 +68,7 @@ public class BundleLabelPayload
 
     [JsonPropertyName("resource_person_name")]
     public string? ResourcePersonName { get; set; }
+
+    [JsonPropertyName("started_at")]
+    public DateTime StartedAt { get; set; }
 }

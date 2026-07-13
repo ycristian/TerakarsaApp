@@ -47,6 +47,12 @@
 -- hidup DAN received_at masih NULL (belum diserahkan/diterima). @ActingDivisionId (bila
 -- diisi) harus = division_id baris ini (divisi yang membuatnya), bukan target_division_id.
 -- Begitu received_at terisi (lewat RECEIVE), baris terkunci -- UPDATE ditolak.
+-- Prompt 23: baris step TERAKHIR artikel (target_division_id NULL) tidak pernah punya
+-- received_at (tidak ada divisi tujuan yang "menerima"), jadi tanpa batas lain baris ini
+-- bisa direvisi selamanya -- dibatasi jendela H+1 (hari dibuat + 1 hari kalender) alih-alih.
+-- Baris dengan target_division_id NOT NULL tidak kena batas ini (tetap dikunci oleh RECEIVE
+-- seperti biasa). Guard sama juga ditegakkan di SIS_Bundle_ScanInfo supaya UI tidak
+-- menawarkan tombol Edit di luar jendela ini.
 -- Prompt 12d: @UserId WAJIB (pengganti pencatat -- user login yang merevisi; API stasiun
 -- mengirim user sistem 'station', halaman login mengirim user JWT). @UpdatedByResourceId
 -- opsional (pelaksana/operator sesi aktif saat revisi dari stasiun) -- kalau diisi, resource
@@ -78,6 +84,11 @@
 --   bukan ini). @ActingDivisionId (bila diisi) harus = division_id baris (divisi pembuat).
 --   delete_reason diisi tetap ('Batal serah (stasiun)') -- UI tidak menyediakan input alasan
 --   bebas untuk aksi ini, beda dengan DELETE biasa.
+--   Prompt 23: baris step TERAKHIR (target_division_id NULL) juga boleh dibatalkan lewat
+--   aksi yang sama selama masih dalam jendela H+1 (received_at selalu NULL utk baris ini,
+--   jadi guard itu otomatis lolos) -- delete_reason jadi 'Batal step terakhir (stasiun)'
+--   untuk kasus ini. Baris target_division_id NOT NULL yang sudah lewat H+1 tapi belum
+--   diterima TETAP bisa dibatalkan kapan saja (tidak kena guard H+1, beda dengan UPDATE).
 --
 --   @Action = 'REVISE_HANDOVER' ("Revisi" di tab Dikirim): superset dari UPDATE khusus baris
 --   serah -- selain qty_*/remark, boleh juga mengubah target_division_id (@NewTargetDivisionId,
@@ -319,10 +330,11 @@ BEGIN
     ELSE IF @Action = 'UPDATE'
     BEGIN
         DECLARE @UpdDivisionId INT, @UpdBundleId INT, @UpdReceivedAt DATETIME2, @UpdArticleId INT,
-                @UpdArticleWorkflowId INT, @UpdSortOrder INT;
+                @UpdArticleWorkflowId INT, @UpdSortOrder INT, @UpdTargetDivisionId INT, @UpdCreatedAt DATETIME2;
         SELECT @UpdDivisionId = awl.division_id, @UpdBundleId = awl.bundle_id,
                @UpdReceivedAt = awl.received_at, @UpdArticleId = aw.article_id,
-               @UpdArticleWorkflowId = awl.article_workflow_id, @UpdSortOrder = aw.sort_order
+               @UpdArticleWorkflowId = awl.article_workflow_id, @UpdSortOrder = aw.sort_order,
+               @UpdTargetDivisionId = awl.target_division_id, @UpdCreatedAt = awl.created_at
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
@@ -356,6 +368,13 @@ BEGIN
         IF @UpdReceivedAt IS NOT NULL
         BEGIN
             RAISERROR('Log ini sudah diterima, tidak bisa diubah lagi.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 23: step terakhir artikel (tidak ada serah lanjutan) -- jendela revisi H+1.
+        IF @UpdTargetDivisionId IS NULL AND CAST(SYSDATETIME() AS DATE) > CAST(DATEADD(DAY, 1, @UpdCreatedAt) AS DATE)
+        BEGIN
+            RAISERROR('Batas waktu revisi (H+1) untuk step terakhir ini sudah lewat.', 16, 1);
             RETURN;
         END
 
@@ -608,9 +627,9 @@ BEGIN
 
     ELSE IF @Action = 'CANCEL_HANDOVER'
     BEGIN
-        DECLARE @CancelDivisionId INT, @CancelReceivedAt DATETIME2, @CancelTargetDivisionId INT;
+        DECLARE @CancelDivisionId INT, @CancelReceivedAt DATETIME2, @CancelTargetDivisionId INT, @CancelCreatedAt DATETIME2;
         SELECT @CancelDivisionId = division_id, @CancelReceivedAt = received_at,
-               @CancelTargetDivisionId = target_division_id
+               @CancelTargetDivisionId = target_division_id, @CancelCreatedAt = created_at
         FROM article_workflow_logs
         WHERE workflow_log_id = @Id AND deleted_at IS NULL;
 
@@ -620,13 +639,17 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 23: baris step terakhir (tanpa tujuan serah) -- jendela H+1 alih-alih guard
+        -- received_at (baris ini tidak pernah "diterima").
         IF @CancelTargetDivisionId IS NULL
         BEGIN
-            RAISERROR('Baris ini bukan baris serah.', 16, 1);
-            RETURN;
+            IF CAST(SYSDATETIME() AS DATE) > CAST(DATEADD(DAY, 1, @CancelCreatedAt) AS DATE)
+            BEGIN
+                RAISERROR('Batas waktu pembatalan (H+1) untuk step terakhir ini sudah lewat.', 16, 1);
+                RETURN;
+            END
         END
-
-        IF @CancelReceivedAt IS NOT NULL
+        ELSE IF @CancelReceivedAt IS NOT NULL
         BEGIN
             RAISERROR('Baris ini sudah diterima, tidak bisa dibatalkan lewat Batal Serah.', 16, 1);
             RETURN;
@@ -641,7 +664,8 @@ BEGIN
         UPDATE article_workflow_logs
         SET deleted_at = SYSDATETIME(),
             deleted_by = @UserId,
-            delete_reason = 'Batal serah (stasiun)'
+            delete_reason = CASE WHEN @CancelTargetDivisionId IS NULL
+                THEN 'Batal step terakhir (stasiun)' ELSE 'Batal serah (stasiun)' END
         WHERE workflow_log_id = @Id;
     END
 

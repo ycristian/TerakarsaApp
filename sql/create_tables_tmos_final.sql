@@ -16,6 +16,14 @@
       setelah migrasi tabel auth (Fase 0)
    ============================================================= */
 
+-- Catatan (Prompt 21): tabel Users dan SP SIS_Login/SIS_User_Manage dibuat langsung
+-- di database sebelum Fase 0 di atas, jadi tidak ikut di-CREATE lewat file ini (tidak
+-- pakai konvensi snake_case/soft-delete di atas). Didokumentasikan di sini sebagai
+-- referensi kolom, BUKAN untuk dieksekusi ulang:
+--   Users(Id, Username, Password, FullName, Role, IsActive, CreatedAt)
+--   Password varchar(500) sejak Prompt 21 -- format simpanan: PBKDF2$<iterasi>$<saltBase64>$<hashBase64>
+--   (lihat sql/alter_21_password_pbkdf2.sql, TerakarsaApp.API/Services/PasswordHasher.cs)
+
 -- ============ 1. MASTER TANPA DEPENDENSI ============
 
 CREATE TABLE buyers (

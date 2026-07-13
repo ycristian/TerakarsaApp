@@ -19,6 +19,13 @@
 --   diterima divisi tujuan (received_at IS NULL). Selama belum diterima, divisi pembuat
 --   masih boleh merevisi datanya (action UPDATE di SIS_WorkflowLog_Manage) -- begitu
 --   diterima (received_at terisi lewat RECEIVE), baris terkunci dan hilang dari daftar ini.
+--   Prompt 23: SEKARANG juga menyertakan baris step TERAKHIR artikel milik divisi ini
+--   (target_division_id NULL, tidak ada tujuan serah -- lihat SIS_Bundle_ScanInfo) selama
+--   masih dalam jendela revisi H+1 (hari dibuat + 1 hari kalender), supaya operator bisa
+--   menemukan & membetulkan baris itu dari tab OUT tanpa perlu scan ulang QR bundle.
+--   IsLastStep membedakan kasus ini di hasil -- baris IsLastStep = 1 TIDAK punya tujuan
+--   serah untuk direvisi (client harus sembunyikan field Divisi Tujuan/Penjahit & tombol
+--   Batal Serah, pakai UPDATE biasa bukan REVISE_HANDOVER).
 --
 --   SIS_Station_RecentReceived (Prompt 15): 20 baris terakhir yang DITERIMA divisi ini
 --   (target_division_id = @DivisionId, received_at NOT NULL) -- dasar tab "Baru Diterima"
@@ -43,9 +50,10 @@
 --   & SIS_Station_PendingHandover (level baris log, boleh bundle atau non-bundle); Dikerjakan
 --   pakai definisi yang sama dengan SIS_Station_InProgress (level bundle).
 --
---   Tab "Dikirim" (dulu "Diserahkan") memakai ULANG SIS_Station_PendingHandover tanpa
---   perubahan definisi -- sudah persis cocok (baris dibuat divisi ini, ada tujuan, belum
---   diterima). Tidak dibuat SP SIS_Station_Outbound terpisah supaya tidak duplikasi logika.
+--   Tab "Dikirim" (dulu "Diserahkan") memakai ULANG SIS_Station_PendingHandover -- sejak
+--   Prompt 23 juga menampilkan baris step terakhir (H+1, lihat komentar di atas), bukan
+--   lagi cuma baris yang ada tujuan serah. Tidak dibuat SP SIS_Station_Outbound terpisah
+--   supaya tidak duplikasi logika.
 
 SET ANSI_NULLS ON;
 GO
@@ -53,7 +61,9 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_Station_PendingReceives
-    @DivisionId INT
+    @DivisionId INT,
+    @ResourceId INT = NULL     -- Prompt 22b: default_resource_id stasiun (NULL = stasiun
+                                -- tidak terkunci ke Line manapun, lihat SIS_Station_Counts)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -73,11 +83,23 @@ BEGIN
     INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN divisions d ON d.division_id = awl.division_id
     LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+    LEFT JOIN resources br ON br.resource_id = b.resource_id
     LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
     LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     WHERE awl.target_division_id = @DivisionId
       AND awl.received_at IS NULL
       AND awl.deleted_at IS NULL
+      -- Prompt 22b: stasiun terkunci ke satu Line (resource) hanya melihat bundle yang
+      -- ditugaskan ke Line itu; item non-bundle atau bundle tanpa Line, dan stasiun yang
+      -- tidak terkunci (@ResourceId NULL), tetap tampil seperti sebelumnya.
+      -- Fix: Line hanya relevan kalau resource Line itu SATU DIVISI dengan stasiun ini
+      -- (mis. Line A1/A2 sama-sama di Sew+Trim+QC) -- di situ splitting antar Line
+      -- memang dimaksudkan. Kalau Line bundle beda divisi dari stasiun ini (mis. bundle
+      -- ditugaskan ke Line A1 tapi sedang menuju stasiun DTF/Packing yang dikunci ke
+      -- resource "Team"-nya sendiri, bukan Line), filter Line tidak relevan -- jangan
+      -- disembunyikan, karena resource stasiun tujuan memang tidak akan pernah sama
+      -- dengan Line pengirim.
+      AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
     ORDER BY awl.created_at ASC;
 END;
 GO
@@ -129,7 +151,12 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_Station_PendingHandover
-    @DivisionId INT
+    @DivisionId INT,
+    @ResourceId INT = NULL     -- Prompt 22b: default_resource_id stasiun -- baris ini DIBUAT
+                                -- oleh divisi ini sendiri, jadi awl.resource_id = pelaksana
+                                -- (dipaksa = resource stasiun saat stasiun terkunci, lihat
+                                -- EffectiveResourceId), bukan bundles.resource_id seperti di
+                                -- PendingReceives/InProgress (itu Line TUJUAN, ini Line PENGIRIM).
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -144,6 +171,9 @@ BEGIN
            awl.qty_reject_fabric AS QtyRejectFabric, awl.qty_reject_sewing AS QtyRejectSewing,
            awl.remark AS Remark,
            td.division_name AS TargetDivisionName,
+           -- Prompt 23: baris step terakhir (target_division_id NULL, jendela H+1) -- lihat
+           -- komentar besar di atas file.
+           CASE WHEN awl.target_division_id IS NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep,
            r.resource_name AS ResourceName,
            awl.created_at AS CreatedAt,
            awl.updated_at AS UpdatedAt,
@@ -168,21 +198,29 @@ BEGIN
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
-    INNER JOIN divisions td ON td.division_id = awl.target_division_id
+    LEFT JOIN divisions td ON td.division_id = awl.target_division_id
     LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
     LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
     LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = awl.resource_id
     WHERE awl.division_id = @DivisionId
-      AND awl.target_division_id IS NOT NULL
-      AND awl.received_at IS NULL
       AND awl.deleted_at IS NULL
+      AND (
+            (awl.target_division_id IS NOT NULL AND awl.received_at IS NULL)
+            OR (awl.target_division_id IS NULL
+                AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl.created_at) AS DATE))
+          )
+      AND (@ResourceId IS NULL OR awl.resource_id IS NULL OR awl.resource_id = @ResourceId)
     ORDER BY awl.created_at DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_Station_RecentReceived
-    @DivisionId INT
+    @DivisionId INT,
+    @ResourceId INT = NULL     -- Prompt 22b: filter ke received_by_resource_id (siapa yang
+                                -- menerima), dipaksa = resource stasiun saat terkunci --
+                                -- konsisten dengan tombol Batal Terima yang cuma masuk akal
+                                -- untuk baris yang diterima Line ini sendiri.
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -215,6 +253,7 @@ BEGIN
     WHERE awl.target_division_id = @DivisionId
       AND awl.received_at IS NOT NULL
       AND awl.deleted_at IS NULL
+      AND (@ResourceId IS NULL OR awl.received_by_resource_id IS NULL OR awl.received_by_resource_id = @ResourceId)
     ORDER BY awl.received_at DESC;
 END;
 GO
@@ -223,7 +262,8 @@ GO
 -- bundle TERAKHIR (hidup) per bundle (pola sama dengan sp_Report_Bundle.sql Base CTE, tanpa
 -- kolom yang tidak dipakai di sini).
 CREATE OR ALTER PROCEDURE SIS_Station_InProgress
-    @DivisionId INT
+    @DivisionId INT,
+    @ResourceId INT = NULL     -- Prompt 22b: lihat komentar SIS_Station_PendingReceives
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -256,6 +296,8 @@ BEGIN
         WHERE b.deleted_at IS NULL
           AND ll.received_at IS NOT NULL
           AND ll.target_division_id = @DivisionId
+          -- Fix: lihat komentar Line vs divisi di SIS_Station_PendingReceives.
+          AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR rr.division_id <> @DivisionId)
     )
     SELECT
         bs.last_log_id AS WorkflowLogId,
@@ -297,20 +339,27 @@ GO
 -- pakai definisi baris yang sama dengan SIS_Station_PendingReceives/PendingHandover;
 -- Dikerjakan pakai definisi bundle yang sama dengan SIS_Station_InProgress di atas.
 CREATE OR ALTER PROCEDURE SIS_Station_Counts
-    @DivisionId INT
+    @DivisionId INT,
+    @ResourceId INT = NULL     -- Prompt 22b: lihat komentar SIS_Station_PendingReceives
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT
         (
-            SELECT COUNT(*) FROM article_workflow_logs
-            WHERE target_division_id = @DivisionId AND received_at IS NULL AND deleted_at IS NULL
+            SELECT COUNT(*)
+            FROM article_workflow_logs awl
+            LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+            LEFT JOIN resources br ON br.resource_id = b.resource_id
+            WHERE awl.target_division_id = @DivisionId AND awl.received_at IS NULL AND awl.deleted_at IS NULL
+              -- Fix: lihat komentar Line vs divisi di SIS_Station_PendingReceives.
+              AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
         ) AS MasukCount,
         (
             SELECT COUNT(*) FROM (
                 SELECT b.bundle_id
                 FROM bundles b
+                LEFT JOIN resources br ON br.resource_id = b.resource_id
                 OUTER APPLY (
                     SELECT TOP 1 awl.received_at, awl.target_division_id
                     FROM article_workflow_logs awl
@@ -319,12 +368,20 @@ BEGIN
                     ORDER BY aw.sort_order DESC, awl.created_at DESC
                 ) ll
                 WHERE b.deleted_at IS NULL AND ll.received_at IS NOT NULL AND ll.target_division_id = @DivisionId
+                  AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
             ) x
         ) AS DikerjakanCount,
         (
+            -- Prompt 23: selaraskan dengan SIS_Station_PendingHandover -- ikut hitung baris
+            -- step terakhir (H+1) supaya angka OUT cocok dengan isi tabnya.
             SELECT COUNT(*) FROM article_workflow_logs
-            WHERE division_id = @DivisionId AND target_division_id IS NOT NULL
-              AND received_at IS NULL AND deleted_at IS NULL
+            WHERE division_id = @DivisionId AND deleted_at IS NULL
+              AND (
+                    (target_division_id IS NOT NULL AND received_at IS NULL)
+                    OR (target_division_id IS NULL
+                        AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, created_at) AS DATE))
+                  )
+              AND (@ResourceId IS NULL OR resource_id IS NULL OR resource_id = @ResourceId)
         ) AS DikirimCount;
 END;
 GO

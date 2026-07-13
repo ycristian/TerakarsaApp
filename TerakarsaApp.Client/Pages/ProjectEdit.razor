@@ -337,7 +337,25 @@ else
                             <InputFile class="form-control" multiple OnChange="HandleFilesSelected" />
                             @if (selectedFiles.Count > 0)
                             {
-                                <div class="form-text">@selectedFiles.Count file dipilih: @string.Join(", ", selectedFiles.Select(f => f.Name))</div>
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    @for (var i = 0; i < selectedFiles.Count; i++)
+                                    {
+                                        var idx = i;
+                                        <div class="text-center" style="width: 90px;">
+                                            @if (selectedFilePreviews.Count > idx && selectedFilePreviews[idx] is string previewSrc)
+                                            {
+                                                <img src="@previewSrc" alt="@selectedFiles[idx].Name" style="width: 90px; height: 90px; object-fit: cover; border-radius: 4px;" class="mb-1" />
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex align-items-center justify-content-center bg-light mb-1" style="width: 90px; height: 90px; border-radius: 4px;">
+                                                    <i class="fe fe-file text-muted"></i>
+                                                </div>
+                                            }
+                                            <div class="small text-truncate" title="@selectedFiles[idx].Name">@selectedFiles[idx].Name</div>
+                                        </div>
+                                    }
+                                </div>
                             }
                         </div>
                         <div class="col-12">
@@ -445,6 +463,7 @@ else
     private List<ProjectAttachmentDto> attachments = new();
     private bool isLoadingAttachments = true;
     private List<IBrowserFile> selectedFiles = new();
+    private List<string?> selectedFilePreviews = new();
     private string? uploadDescription;
     private bool isUploading = false;
     private string uploadError = string.Empty;
@@ -574,10 +593,40 @@ else
         }
     }
 
-    private void HandleFilesSelected(InputFileChangeEventArgs e)
+    private async Task HandleFilesSelected(InputFileChangeEventArgs e)
     {
         selectedFiles = e.GetMultipleFiles(20).ToList();
         uploadError = string.Empty;
+        selectedFilePreviews = await LoadSelectedFilePreviews(selectedFiles);
+    }
+
+    private static async Task<List<string?>> LoadSelectedFilePreviews(List<IBrowserFile> files)
+    {
+        const long maxPreviewBytes = 10 * 1024 * 1024;
+        var previews = new List<string?>();
+
+        foreach (var file in files)
+        {
+            if (!file.ContentType.StartsWith("image/") || file.Size > maxPreviewBytes)
+            {
+                previews.Add(null);
+                continue;
+            }
+
+            try
+            {
+                using var stream = file.OpenReadStream(maxPreviewBytes);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                previews.Add($"data:{file.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}");
+            }
+            catch
+            {
+                previews.Add(null);
+            }
+        }
+
+        return previews;
     }
 
     private async Task HandleUpload()
@@ -603,6 +652,7 @@ else
             : string.Empty;
 
         selectedFiles = new();
+        selectedFilePreviews = new();
         uploadDescription = null;
         await LoadAttachments();
     }

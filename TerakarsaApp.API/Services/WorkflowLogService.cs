@@ -99,7 +99,8 @@ public class WorkflowLogService
         public int QtyRejectFabric { get; set; }
         public int QtyRejectSewing { get; set; }
         public string? Remark { get; set; }
-        public string TargetDivisionName { get; set; } = string.Empty;
+        public string? TargetDivisionName { get; set; }
+        public bool IsLastStep { get; set; }
         public string? ResourceName { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
@@ -131,21 +132,32 @@ public class WorkflowLogService
         return rows.FirstOrDefault();
     }
 
-    public async Task<List<StationPendingReceiveDto>> GetPendingReceivesAsync(int divisionId)
+    // Prompt 22b: lineResourceId = EffectiveResourceId(operator sesi) dari
+    // StationDeviceController -- resource stasiun kalau terkunci, else operator yang
+    // sedang login di perangkat (NULL kalau belum ada operator terpilih).
+    public async Task<List<StationPendingReceiveDto>> GetPendingReceivesAsync(int divisionId, int? lineResourceId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
 
         return await _db.Database
-            .SqlQueryRaw<StationPendingReceiveDto>("EXEC SIS_Station_PendingReceives @DivisionId = @DivisionId", divisionIdParam)
+            .SqlQueryRaw<StationPendingReceiveDto>(
+                "EXEC SIS_Station_PendingReceives @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
             .ToListAsync();
     }
 
-    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int divisionId)
+    // Prompt 22b: lineResourceId, lihat komentar GetPendingReceivesAsync (di sini dicocokkan
+    // ke awl.resource_id -- Line PENGIRIM, bukan bundles.resource_id).
+    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int divisionId, int? lineResourceId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
 
         var rows = await _db.Database
-            .SqlQueryRaw<StationPendingHandoverRow>("EXEC SIS_Station_PendingHandover @DivisionId = @DivisionId", divisionIdParam)
+            .SqlQueryRaw<StationPendingHandoverRow>(
+                "EXEC SIS_Station_PendingHandover @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
             .ToListAsync();
 
         return rows.Select(row => new StationPendingHandoverDto
@@ -168,6 +180,7 @@ public class WorkflowLogService
             QtyRejectSewing = row.QtyRejectSewing,
             Remark = row.Remark,
             TargetDivisionName = row.TargetDivisionName,
+            IsLastStep = row.IsLastStep,
             ResourceName = row.ResourceName,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt,
@@ -180,23 +193,31 @@ public class WorkflowLogService
         }).ToList();
     }
 
-    // Prompt 12e: tab "Dikerjakan" -- lihat SIS_Station_InProgress.
-    public async Task<List<StationInProgressDto>> GetInProgressAsync(int divisionId)
+    // Prompt 12e: tab "Dikerjakan" -- lihat SIS_Station_InProgress. Prompt 22b: lineResourceId,
+    // lihat komentar GetPendingReceivesAsync.
+    public async Task<List<StationInProgressDto>> GetInProgressAsync(int divisionId, int? lineResourceId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
 
         return await _db.Database
-            .SqlQueryRaw<StationInProgressDto>("EXEC SIS_Station_InProgress @DivisionId = @DivisionId", divisionIdParam)
+            .SqlQueryRaw<StationInProgressDto>(
+                "EXEC SIS_Station_InProgress @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
             .ToListAsync();
     }
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) -- lihat SIS_Station_Counts.
-    public async Task<StationCountsDto> GetCountsAsync(int divisionId)
+    // Prompt 22b: lineResourceId, lihat komentar GetPendingReceivesAsync.
+    public async Task<StationCountsDto> GetCountsAsync(int divisionId, int? lineResourceId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
 
         var rows = await _db.Database
-            .SqlQueryRaw<StationCountsDto>("EXEC SIS_Station_Counts @DivisionId = @DivisionId", divisionIdParam)
+            .SqlQueryRaw<StationCountsDto>(
+                "EXEC SIS_Station_Counts @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
             .ToListAsync();
 
         return rows.FirstOrDefault() ?? new StationCountsDto();
@@ -365,12 +386,16 @@ public class WorkflowLogService
         }
     }
 
-    public async Task<List<StationRecentReceivedDto>> GetRecentReceivedAsync(int divisionId)
+    // Prompt 22b: lineResourceId dicocokkan ke received_by_resource_id (siapa yang menerima).
+    public async Task<List<StationRecentReceivedDto>> GetRecentReceivedAsync(int divisionId, int? lineResourceId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
 
         return await _db.Database
-            .SqlQueryRaw<StationRecentReceivedDto>("EXEC SIS_Station_RecentReceived @DivisionId = @DivisionId", divisionIdParam)
+            .SqlQueryRaw<StationRecentReceivedDto>(
+                "EXEC SIS_Station_RecentReceived @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
             .ToListAsync();
     }
 
