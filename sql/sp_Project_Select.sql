@@ -5,12 +5,15 @@
 -- Prompt 18 -- derived_status: manual_status TIDAK PERNAH disimpan untuk status otomatis --
 -- diturunkan di sini setiap kali dibaca lewat CROSS APPLY (satu sumber kebenaran, tidak bisa
 -- basi). Kalau manual_status terisi (ON_HOLD/COMPLETED/CANCELLED), itulah derived_status.
--- Kalau NULL: ON_GOING bila artikel project ini punya log workflow hidup, selain itu
--- NOT_STARTED. @Status (opsional) memfilter berdasarkan derived_status ini, bukan kolom
--- mentah. @Status NULL ("Semua" -- juga default awal halaman) TIDAK berarti tanpa filter --
--- tetap menyembunyikan COMPLETED/CANCELLED (hanya NOT_STARTED/ON_GOING/ON_HOLD) supaya
--- project selesai/batal tidak membanjiri daftar; harus pilih status itu secara eksplisit
--- lewat dropdown utk melihatnya.
+-- Kalau NULL: ON_GOING bila artikel project ini punya log workflow hidup; kalau belum
+-- ada log tapi start_date sudah tiba/lewat (<= hari ini), STARTED (Dimulai -- project sudah
+-- boleh jalan, kartu input non-bundle & Buat Bundle di station mulai muncul, lihat
+-- SIS_Station_ActiveWork di sp_Station_Operations.sql); selain itu NOT_STARTED.
+-- @Status (opsional) memfilter berdasarkan derived_status ini, bukan kolom mentah. @Status
+-- NULL ("Semua" -- juga default awal halaman) TIDAK berarti tanpa filter -- tetap
+-- menyembunyikan COMPLETED/CANCELLED (hanya NOT_STARTED/STARTED/ON_GOING/ON_HOLD)
+-- supaya project selesai/batal tidak membanjiri daftar; harus pilih status itu secara
+-- eksplisit lewat dropdown utk melihatnya.
 
 SET ANSI_NULLS ON;
 GO
@@ -20,7 +23,7 @@ GO
 CREATE OR ALTER PROCEDURE SIS_Project_GetAll
     @Action        VARCHAR(10) = 'LIST',  -- LIST atau COUNT
     @SearchTerm    VARCHAR(150) = NULL,
-    @Status        VARCHAR(20) = NULL,    -- filter derived_status: NOT_STARTED/ON_GOING/ON_HOLD/COMPLETED/CANCELLED
+    @Status        VARCHAR(20) = NULL,    -- filter derived_status: NOT_STARTED/STARTED/ON_GOING/ON_HOLD/COMPLETED/CANCELLED
     @PageNumber    INT = 1,
     @PageSize      INT = 10,
     @SortColumn    VARCHAR(50) = NULL,
@@ -41,7 +44,9 @@ BEGIN
                                      INNER JOIN articles a ON a.article_id = aw.article_id
                                      WHERE a.project_id = p.project_id
                                        AND awl.deleted_at IS NULL AND aw.deleted_at IS NULL AND a.deleted_at IS NULL)
-                        THEN 'ON_GOING' ELSE 'NOT_STARTED' END AS DerivedStatus
+                        THEN 'ON_GOING'
+                        WHEN p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE)
+                        THEN 'STARTED' ELSE 'NOT_STARTED' END AS DerivedStatus
         ) ds
         WHERE p.deleted_at IS NULL
           AND (@SearchTerm IS NULL
@@ -50,7 +55,7 @@ BEGIN
                OR b.buyer_name LIKE '%' + @SearchTerm + '%')
           AND (
                 (@Status IS NOT NULL AND ds.DerivedStatus = @Status)
-                OR (@Status IS NULL AND ds.DerivedStatus IN ('NOT_STARTED', 'ON_GOING', 'ON_HOLD'))
+                OR (@Status IS NULL AND ds.DerivedStatus IN ('NOT_STARTED', 'STARTED', 'ON_GOING', 'ON_HOLD'))
               );
     END
     ELSE
@@ -76,6 +81,7 @@ BEGIN
                    p.material_name AS MaterialName,
                    p.order_date AS OrderDate, p.[start_date] AS StartDate,
                    p.deadline AS Deadline, p.delivery_date AS DeliveryDate,
+                   p.remarks AS Remarks, p.is_urgent AS IsUrgent,
                    ds.DerivedStatus AS DerivedStatus,
                    p.status_reason AS StatusReason, p.status_changed_at AS StatusChangedAt,
                    su.FullName AS StatusChangedByName,
@@ -93,7 +99,9 @@ BEGIN
                                          INNER JOIN articles a ON a.article_id = aw.article_id
                                          WHERE a.project_id = p.project_id
                                            AND awl.deleted_at IS NULL AND aw.deleted_at IS NULL AND a.deleted_at IS NULL)
-                            THEN ''ON_GOING'' ELSE ''NOT_STARTED'' END AS DerivedStatus
+                            THEN ''ON_GOING''
+                            WHEN p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE)
+                            THEN ''STARTED'' ELSE ''NOT_STARTED'' END AS DerivedStatus
             ) ds
             WHERE p.deleted_at IS NULL
               AND (@SearchTerm IS NULL
@@ -102,7 +110,7 @@ BEGIN
                    OR b.buyer_name LIKE ''%'' + @SearchTerm + ''%'')
               AND (
                     (@Status IS NOT NULL AND ds.DerivedStatus = @Status)
-                    OR (@Status IS NULL AND ds.DerivedStatus IN (''NOT_STARTED'', ''ON_GOING'', ''ON_HOLD''))
+                    OR (@Status IS NULL AND ds.DerivedStatus IN (''NOT_STARTED'', ''STARTED'', ''ON_GOING'', ''ON_HOLD''))
                   )
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
@@ -129,13 +137,16 @@ BEGIN
            p.material_name AS MaterialName,
            p.order_date AS OrderDate, p.[start_date] AS StartDate,
            p.deadline AS Deadline, p.delivery_date AS DeliveryDate,
+           p.remarks AS Remarks, p.is_urgent AS IsUrgent,
            CASE WHEN p.manual_status IS NOT NULL THEN p.manual_status
                 WHEN EXISTS (SELECT 1 FROM article_workflow_logs awl
                              INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
                              INNER JOIN articles a ON a.article_id = aw.article_id
                              WHERE a.project_id = p.project_id
                                AND awl.deleted_at IS NULL AND aw.deleted_at IS NULL AND a.deleted_at IS NULL)
-                THEN 'ON_GOING' ELSE 'NOT_STARTED' END AS DerivedStatus,
+                THEN 'ON_GOING'
+                WHEN p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE)
+                THEN 'STARTED' ELSE 'NOT_STARTED' END AS DerivedStatus,
            p.status_reason AS StatusReason, p.status_changed_at AS StatusChangedAt,
            su.FullName AS StatusChangedByName,
            p.created_at AS CreatedAt, p.created_by AS CreatedBy,

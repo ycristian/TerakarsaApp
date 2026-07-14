@@ -55,6 +55,10 @@ else
         <div class="card-body d-flex justify-content-between align-items-start flex-wrap gap-3">
             <div>
                 <span class="badge fs-6 @StatusBadgeClass(project.DerivedStatus)">@StatusLabel(project.DerivedStatus)</span>
+                @if (project.IsUrgent)
+                {
+                    <span class="badge fs-6 bg-danger ms-1">Urgent</span>
+                }
                 @if (!string.IsNullOrWhiteSpace(project.StatusReason))
                 {
                     <div class="mt-1">Alasan: @project.StatusReason</div>
@@ -67,7 +71,7 @@ else
                 }
             </div>
             <div class="d-flex gap-2 flex-wrap">
-                @if (project.DerivedStatus is "NOT_STARTED" or "ON_GOING")
+                @if (project.DerivedStatus is "NOT_STARTED" or "STARTED" or "ON_GOING")
                 {
                     <button class="btn btn-success btn-sm" @onclick='() => OpenStatusConfirm("COMPLETED", "Tandai Selesai", "Ya, Tandai Selesai", "btn-success", false, "Yakin ingin menandai project ini selesai?")'>Tandai Selesai</button>
                     <button class="btn btn-warning btn-sm" @onclick='() => OpenStatusConfirm("ON_HOLD", "Tahan Project", "Ya, Tahan", "btn-warning", true, null)'>Tahan</button>
@@ -147,6 +151,15 @@ else
                         <div class="mb-3">
                             <label class="form-label">Tanggal Kirim</label>
                             <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Catatan</label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="formModel.Remarks" />
+                            <ValidationMessage For="@(() => formModel.Remarks)" class="text-danger" />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.IsUrgent" />
+                            <label class="form-check-label">Urgent</label>
                         </div>
 
                         @if (!string.IsNullOrEmpty(errorMessage))
@@ -526,7 +539,9 @@ else
                 OrderDate = project.OrderDate,
                 StartDate = project.StartDate,
                 Deadline = project.Deadline,
-                DeliveryDate = project.DeliveryDate
+                DeliveryDate = project.DeliveryDate,
+                Remarks = project.Remarks,
+                IsUrgent = project.IsUrgent
             };
         }
         isLoading = false;
@@ -577,7 +592,9 @@ else
             OrderDate = formModel.OrderDate,
             StartDate = formModel.StartDate,
             Deadline = formModel.Deadline,
-            DeliveryDate = formModel.DeliveryDate
+            DeliveryDate = formModel.DeliveryDate,
+            Remarks = string.IsNullOrWhiteSpace(formModel.Remarks) ? null : formModel.Remarks,
+            IsUrgent = formModel.IsUrgent
         });
 
         isSaving = false;
@@ -812,6 +829,7 @@ else
     private static string StatusLabel(string status) => status switch
     {
         "NOT_STARTED" => "Belum Dimulai",
+        "STARTED" => "Dimulai",
         "ON_GOING" => "Berjalan",
         "ON_HOLD" => "Ditahan",
         "COMPLETED" => "Selesai",
@@ -822,6 +840,7 @@ else
     private static string StatusBadgeClass(string status) => status switch
     {
         "NOT_STARTED" => "bg-secondary",
+        "STARTED" => "bg-info",
         "ON_GOING" => "bg-primary",
         "ON_HOLD" => "bg-warning",
         "COMPLETED" => "bg-success",
@@ -852,5 +871,10 @@ else
         public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public DateTime? DeliveryDate { get; set; }
+
+        [StringLength(500, ErrorMessage = "Catatan maksimal 500 karakter.")]
+        public string? Remarks { get; set; }
+
+        public bool IsUrgent { get; set; }
     }
 }

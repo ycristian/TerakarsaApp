@@ -164,6 +164,23 @@ public class ArticlePhotoService
         return OpenForDownload(row);
     }
 
+    public async Task<(Stream Stream, string ContentType, string FileName)?> GetFirstPhotoForProjectForDownloadAsync(int projectId)
+    {
+        var actionParam = new SqlParameter("@Action", "GETFIRSTFORPROJECT");
+        var projectIdParam = new SqlParameter("@ProjectId", projectId);
+
+        var rows = await _db.Database
+            .SqlQueryRaw<ArticlePhotoRow>(
+                "EXEC SIS_ArticlePhoto_Manage @Action = @Action, @ProjectId = @ProjectId",
+                actionParam, projectIdParam)
+            .ToListAsync();
+
+        var row = rows.FirstOrDefault();
+        if (row is null) return null;
+
+        return OpenForDownload(row);
+    }
+
     private (Stream Stream, string ContentType, string FileName) OpenForDownload(ArticlePhotoRow row)
     {
         if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))

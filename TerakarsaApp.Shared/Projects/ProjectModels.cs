@@ -16,6 +16,8 @@ public class ProjectDto
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
     public DateTime? DeliveryDate { get; set; }
+    public string? Remarks { get; set; }
+    public bool IsUrgent { get; set; }
     public string DerivedStatus { get; set; } = string.Empty;
     public string? StatusReason { get; set; }
     public DateTime? StatusChangedAt { get; set; }
@@ -38,6 +40,8 @@ public class ProjectCreateRequest
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
     public DateTime? DeliveryDate { get; set; }
+    public string? Remarks { get; set; }
+    public bool IsUrgent { get; set; }
 }
 
 public class ProjectUpdateRequest
@@ -53,6 +57,8 @@ public class ProjectUpdateRequest
     public DateTime? StartDate { get; set; }
     public DateTime? Deadline { get; set; }
     public DateTime? DeliveryDate { get; set; }
+    public string? Remarks { get; set; }
+    public bool IsUrgent { get; set; }
 }
 
 public class ProjectCreateResult

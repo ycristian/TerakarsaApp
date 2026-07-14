@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using QRCoder;
 using TerakarsaApp.Shared.PrintJobs;
 
 namespace TerakarsaApp.PrintService;
@@ -30,86 +31,125 @@ public static class TsplBuilder
             ?? throw new InvalidDataException("Payload BUNDLE_LABEL kosong atau tidak valid.");
     }
 
-    public static string BuildBundleLabel(BundleLabelPayload data)
+    public static byte[] BuildBundleLabel(BundleLabelPayload data)
     {
-        var sb = new StringBuilder();
-        sb.Append("SIZE 60 mm, 40 mm\r\n");
-        sb.Append("GAP 3 mm, 0\r\n");
-        sb.Append("DIRECTION 1\r\n");
-        sb.Append("CLS\r\n");
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
 
-        // QR: cell 5 dot, versi ~3 (29x29 modul) untuk qr_content sepanjang PublicBaseUrl +
-        // "/b/" + serial -> ~145 dot (~18 mm). Quiet zone wajib ISO/IEC 18004 >= 4 modul
-        // (4*5=20 dot) polos di semua sisi -- sebelumnya cuma 8 dot kiri & 16 dot atas/bawah,
-        // cukup untuk scanner Android (ZXing/ML Kit, toleran) tapi Camera iPhone (Apple
-        // Vision, ketat soal quiet zone) gagal baca. Margin dinaikkan ke 24 dot (~3 mm) di
-        // semua sisi supaya konsisten kebaca di kedua platform.
-        const int qrX = 24, qrY = 118, qrCell = 5, qrModulesEstimate = 29, qrQuietGap = 24;
-        var qrSize = qrCell * qrModulesEstimate;
-        var qrCenterX = qrX + qrSize / 2;
-        // Model wajib di-set eksplisit ke 2. Command TSPL QRCODE punya parameter opsional
-        // "Model" (1 = versi asli 1994, 2 = enhanced/current) sebelum content -- kalau tidak
-        // diisi, firmware TSC defaultnya Model 1. Semua generator QR modern (termasuk yang
-        // dipakai preview di layar) selalu pakai Model 2, dan AVFoundation/Vision di iOS
-        // TIDAK mendukung decode Model 1 sama sekali (beda struktur alignment pattern),
-        // sementara ZXing/ML Kit di Android lebih permisif -- ini yang bikin qr_content
-        // identik tetap kebaca dari layar & Android tapi gagal dari label cetak di iPhone.
-        sb.Append($"QRCODE {qrX},{qrY},M,{qrCell},A,0,2,\"{Sanitize(data.QrContent)}\"\r\n");
+        Write("SIZE 60 mm, 40 mm\r\n");
+        Write("GAP 3 mm, 0\r\n");
+        Write("DIRECTION 1\r\n");
+        Write("CLS\r\n");
 
+        // QR digenerate sendiri lewat QRCoder (Model 2 standar, sama seperti qrcodejs yang
+        // dipakai untuk preview QR di halaman Bundles) lalu dicetak sebagai BITMAP mentah --
+        // BUKAN command QRCODE bawaan printer. Firmware TSC TTP-244 Pro di lapangan menolak/
+        // skip seluruh baris QRCODE begitu parameter Model eksplisit ditambahkan (riwayat git),
+        // dan tanpa parameter itu printer selalu jatuh ke Model 1 (pola modul beda dari
+        // preview layar). Generate sendiri = kontrol penuh atas Model + quiet zone, dan
+        // hasilnya identik dengan yang dilihat user di layar sebelum label dicetak.
+        // Quiet zone bawaan QRCoder SENGAJA dipertahankan sebagian (tidak dilepas total) dan
+        // ikut digambar ke bitmap -- supaya marginnya jadi bagian dari data gambar itu
+        // sendiri, bukan cuma jarak kosong lewat penempatan X/Y. Percobaan sebelumnya (margin
+        // lewat X/Y saja, quiet zone dilepas total) hasilnya border atas & kiri hilang di
+        // cetakan fisik -- indikasi command BITMAP printer ini tidak selalu menghormati
+        // offset X/Y persis seperti command QRCODE/TEXT, jadi margin dipaksa masuk ke bitmap
+        // supaya tidak tergantung itu. QRCoder selalu kasih 4 modul quiet zone; qrQuietModules
+        // di bawah memangkas itu ke 2 modul (~10 dot/1,25mm per sisi) -- lebih tipis dari 4
+        // modul standar ISO tapi masih dalam toleransi mayoritas scanner (feedback: border 4
+        // modul kelihatan ketebalan di label fisik).
+        const int qrX = 24, qrY = 108, qrCell = 5, qrQuietModules = 2;
+        var qrGenerator = new QRCodeGenerator();
+        var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.QrContent), QRCodeGenerator.ECCLevel.M);
+        var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
+        var qrBitmap = BuildQrBitmap(modules, qrCell, out var qrWidthDots, out var qrHeightDots, out var qrWidthBytes);
+
+        Write($"BITMAP {qrX},{qrY},{qrWidthBytes},{qrHeightDots},0,");
+        stream.Write(qrBitmap, 0, qrBitmap.Length);
+        Write("\r\n");
+
+        var qrCenterX = qrX + qrWidthDots / 2;
         var serial = Sanitize(data.Serial);
-        sb.Append(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrSize + qrQuietGap, "1", 1, 1, serial));
-    
-        sb.Append(Text(qrX, 20, "3", 1, 1, data.ProjectName?.ToUpperInvariant() ?? string.Empty));
-        sb.Append(Text(qrX, 50, "1", 1, 1, "#"+data.NoPo?.ToUpperInvariant() ?? string.Empty));
-        sb.Append(Text(qrX, 70, "3", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrHeightDots + 4, "1", 1, 1, serial));
 
-
-        // // Kolom kanan (rata kiri semua)
-        // var projectLine = Truncate(Join(" ", data.ProjectName?.ToUpperInvariant(), data.NoPo), 26);
-        // sb.Append(Text(RightColX, 8, "3", 1, 1, projectLine));
+        Write(Text(qrX, 20, "3", 1, 1, data.ProjectName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(qrX, 50, "1", 1, 1, "#"+data.NoPo?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(qrX, 70, "3", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
 
         var bundleNoText = $"{data.BundleNo}";
-        // sb.Append(Text(RightColX, 300, "3", 1, 1, "000010000100001000010000100001"));
-        sb.Append(Text(RightAlignX(RightEdge, "3", 3, bundleNoText), 26, "3", 3, 3, bundleNoText));
+        Write(Text(RightAlignX(RightEdge, "3", 3, bundleNoText), 26, "3", 3, 3, bundleNoText));
 
-        sb.Append($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");
+        Write($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");
 
         var sizeName = Sanitize(data.SizeName);
-        sb.Append(Text(RightColX, 128, "3", 1, 1, sizeName));
+        Write(Text(RightColX, 128, "3", 1, 1, sizeName));
         // size_name rata kiri, qty rata kanan (kolom kanan).
         var qtyText = $"{data.Qty} pcs";
-        sb.Append(Text(RightAlignX(RightEdge, "2", 1, qtyText + "  "), 132, "2", 1, 1, qtyText));
+        Write(Text(RightAlignX(RightEdge, "2", 1, qtyText + "  "), 132, "2", 1, 1, qtyText));
 
-        sb.Append($"BAR {RightColX},162,{RightEdge - RightColX},3\r\n");
+        Write($"BAR {RightColX},162,{RightEdge - RightColX},3\r\n");
 
-        // article_name + style/color digabung 1 baris (bukan 2) supaya sisa baris info
-        // di bawah bisa pakai font lebih besar & tidak numpuk (feedback: terlalu padat
-        // untuk dibaca sekilas di lantai produksi).
-        // var styleColor = Join(" - ", data.Style, data.Color);
-        // var articleLine = styleColor.Length > 0 ? $"{data.ArticleName} ({styleColor})" : data.ArticleName;
-        // articleLine = TruncateToFit(Sanitize(articleLine), 28, "2", 1, RightEdge - RightColX);
-        sb.Append(Text(RightColX-100, 174, "2", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
-        sb.Append(Text(RightColX, 200, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
-        sb.Append(Text(RightColX, 226, "2", 1, 1, "> " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
-        sb.Append(Text(RightColX, 252, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
-        
+        Write(Text(RightColX, 174, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 200, "2", 1, 1, "> " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 226, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 252, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
+
         var mulaiText = data.StartedAt.ToString("dd/MM HH:mm");
-        sb.Append(Text(RightAlignX(RightEdge, "2", 1, mulaiText + "   "), 290, "2", 1, 1, mulaiText));
+        Write(Text(RightAlignX(RightEdge, "2", 1, mulaiText + "   "), 290, "2", 1, 1, mulaiText));
 
-        // // Line (penjahit) + waktu mulai digabung 1 baris -- paling relevan operasional,
-        // // jadi tetap dapat font "2".
-        // var lineInfo = Join(" / ", data.ResourceName, data.ResourcePersonName);
-        // var lineDimulai = Join(" - ", lineInfo, data.StartedAt.ToString("dd/MM HH:mm"));
-        // lineDimulai = TruncateToFit(Sanitize(lineDimulai), 28, "2", 1, RightEdge - RightColX);
-        // sb.Append(Text(RightColX, 200, "2", 1, 1, lineDimulai));
+        Write("PRINT 1,1\r\n");
+        return stream.ToArray();
+    }
 
-        // // Bahan + Size Pack -- info referensi, prioritas lebih rendah, cukup font "1".
-        // var bahanSizePack = Join(" - ", data.MaterialName, data.SizePackName);
-        // bahanSizePack = TruncateToFit(Sanitize(bahanSizePack), 40, "1", 1, RightEdge - RightColX);
-        // sb.Append(Text(RightColX, 226, "1", 1, 1, bahanSizePack));
+    // QRCoder selalu menyertakan quiet zone 4 modul; trimModules memangkas dari 4 itu turun
+    // ke ukuran yang diinginkan (mis. 2 => 2 modul terluar dari quiet zone bawaan dibuang).
+    private static bool[,] ToModuleArray(List<System.Collections.BitArray> rawMatrix, int quietModules)
+    {
+        const int qrCoderQuietModules = 4;
+        var trim = qrCoderQuietModules - quietModules;
+        var size = rawMatrix.Count - trim * 2;
+        var modules = new bool[size, size];
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+                modules[y, x] = rawMatrix[y + trim][x + trim];
+        return modules;
+    }
 
-        sb.Append("PRINT 1,1\r\n");
-        return sb.ToString();
+    // TSPL BITMAP: data biner mentah (bukan teks), 1 bit = 1 dot, MSB dulu, tiap baris
+    // dibulatkan ke kelipatan byte (widthBytes). Bit 1 = dot dicetak (hitam).
+    private static byte[] BuildQrBitmap(bool[,] modules, int cellDots, out int widthDots, out int heightDots, out int widthBytes)
+    {
+        var moduleCount = modules.GetLength(0);
+        widthDots = moduleCount * cellDots;
+        heightDots = moduleCount * cellDots;
+        widthBytes = (widthDots + 7) / 8;
+        var bytes = new byte[widthBytes * heightDots];
+
+        for (var my = 0; my < moduleCount; my++)
+        {
+            for (var mx = 0; mx < moduleCount; mx++)
+            {
+                if (!modules[my, mx]) continue;
+                for (var dy = 0; dy < cellDots; dy++)
+                {
+                    var py = my * cellDots + dy;
+                    var rowOffset = py * widthBytes;
+                    for (var dx = 0; dx < cellDots; dx++)
+                    {
+                        var px = mx * cellDots + dx;
+                        var byteIndex = rowOffset + px / 8;
+                        var bitIndex = 7 - px % 8;
+                        bytes[byteIndex] |= (byte)(1 << bitIndex);
+                    }
+                }
+            }
+        }
+
+        return bytes;
     }
 
     private static string Text(int x, int y, string font, int xMult, int yMult, string content) =>

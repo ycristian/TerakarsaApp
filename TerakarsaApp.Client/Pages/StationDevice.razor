@@ -142,7 +142,7 @@ else
                 </li>
                 <li class="nav-item">
                     <a class="nav-link @(activeTab == "kerja" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kerja")'>
-                        WIP <span class="badge bg-warning text-dark ms-1">@inProgress.Count</span>
+                        WIP <span class="badge bg-warning text-dark ms-1">@(inProgress.Count + activeWork.Count)</span>
                     </a>
                 </li>
                 <li class="nav-item">
@@ -161,99 +161,172 @@ else
                 }
                 else
                 {
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="selectAllPending" @onchange="ToggleSelectAllPending" checked="@(selectedPendingIds.Count > 0 && selectedPendingIds.Count == pendingReceives.Count)" />
-                            <label class="form-check-label" for="selectAllPending">Pilih Semua</label>
-                        </div>
-                        <button class="btn btn-success" disabled="@(selectedPendingIds.Count == 0 || isBusy)" @onclick="ReceiveSelected">
-                            Terima Terpilih (@selectedPendingIds.Count)
-                        </button>
-                    </div>
-
-                    @foreach (var item in pendingReceives)
+                    @foreach (var card in InCards)
                     {
-                        <div class="card mb-2">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <div class="d-flex align-items-start gap-2">
-                                        <input class="form-check-input mt-1" type="checkbox" style="width: 1.4em; height: 1.4em; position: static; margin: 0;"
-                                               checked="@selectedPendingIds.Contains(item.WorkflowLogId)"
-                                               @onchange="e => TogglePendingSelect(item, e.Value)" />
+                        @if (card.Bundle is { } item)
+                        {
+                            <div class="card mb-2">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
                                             <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
                                             <p class="text-muted mb-0">@item.Style @item.Color</p>
                                         </div>
-                                    </div>
-                                    <div class="text-end">
-                                        @if (item.BundleId is not null)
-                                        {
+                                        <div class="text-end">
                                             <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(item.SizeName))
-                                        {
-                                            <span class="badge bg-secondary">@item.SizeName</span>
-                                        }
+                                            @if (!string.IsNullOrEmpty(item.SizeName))
+                                            {
+                                                <span class="badge bg-secondary">@item.SizeName</span>
+                                            }
+                                        </div>
                                     </div>
-                                </div>
-                                <hr class="my-2" />
-                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                    <p class="mb-0">
-                                        Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong>
-                                        @if (item.UpdatedAt is not null)
-                                        {
-                                            <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
-                                        }
-                                        <br />
-                                        <span class="text-muted">Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</span>
-                                    </p>
-                                    <div class="d-flex gap-2">
-                                        <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModal(item)">Dengan Catatan</button>
-                                        <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveOne(item)">Terima</button>
+                                    <hr class="my-2" />
+                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <p class="mb-0">
+                                            Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong>
+                                            @if (item.UpdatedAt is not null)
+                                            {
+                                                <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                            }
+                                            <br />
+                                            <span class="text-muted">Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</span>
+                                        </p>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => HandleReprint(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
+                                            <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModal(item)">Dengan Catatan</button>
+                                            <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveOne(item)">Terima</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        }
+                        else if (card.NonBundleGroup is { } grp)
+                        {
+                            <div class="card mb-2">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <div>
+                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@grp.ProjectName)</span></h5>
+                                            <p class="text-muted mb-0">@grp.Style @grp.Color</p>
+                                        </div>
+                                        <span class="badge bg-secondary">@grp.Items.Count ukuran</span>
+                                    </div>
+                                    <hr class="my-2" />
+                                    <p class="mb-2">Step: <strong>@grp.StepName</strong></p>
+                                    <ul class="list-group list-group-flush mb-2">
+                                        @foreach (var row in grp.Items)
+                                        {
+                                            <li class="list-group-item px-0 py-1 d-flex justify-content-between">
+                                                <span>@row.SizeName</span>
+                                                <strong>@row.QtyOk</strong>
+                                            </li>
+                                        }
+                                    </ul>
+                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <span class="text-muted">Dari: @grp.FromDivisionName &middot; @grp.GroupTime.ToString("dd/MM HH:mm")</span>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModalGroup(grp)">Dengan Catatan</button>
+                                            <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveGroup(grp)">Terima</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
                     }
                 }
             }
             else if (activeTab == "kerja")
             {
-                @if (inProgress.Count == 0)
+                <div class="mb-3">
+                    <input class="form-control" placeholder="Cari project, artikel, step, atau serial" @bind="wipSearchText" @bind:event="oninput" />
+                </div>
+
+                @if (FilteredWipGroups.Count == 0)
                 {
-                    <p class="text-muted mb-0">Tidak ada bundle yang sedang dikerjakan.</p>
+                    <p class="text-muted mb-0">Tidak ada pekerjaan yang cocok.</p>
                 }
                 else
                 {
-                    @foreach (var item in inProgress)
+                    @foreach (var group in FilteredWipGroups)
                     {
-                        <div class="card mb-2 border-warning">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                    <div>
-                                        <h5 class="mb-1">No. @item.BundleNo &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
-                                        <p class="text-muted mb-0">
-                                            @item.ProjectName
-                                            @if (!string.IsNullOrEmpty(item.SizeName))
-                                            {
-                                                <text> &middot; Size @item.SizeName</text>
-                                            }
-                                            &middot; Qty @item.Qty
-                                            @if (!string.IsNullOrEmpty(item.TailorName))
-                                            {
-                                                <text> &middot; Penjahit: @item.TailorName</text>
-                                            }
-                                        </p>
-                                        <p class="text-muted mb-0">Next Step: @(item.IsLastStep ? "Step terakhir" : (item.NextStepName ?? "-"))</p>
-                                        <p class="text-muted small mb-0">diterima @MinutesAgo(item.ReceivedAt)</p>
-                                    </div>
-                                    <div class="d-flex gap-2">
-                                        <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(item)">Batal Terima</button>
-                                        <button class="btn btn-success" disabled="@(isBusy || item.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(item)">Kirim Hasil</button>
+                        <h6 class="text-muted mt-3 mb-2">@group.Key</h6>
+                        @foreach (var card in group)
+                        {
+                            @if (card.NonBundle is { IsBundling: true } bl)
+                            {
+                                <div class="card mb-2 border-primary">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h5 class="mb-1">@bl.ArticleName</h5>
+                                                <p class="text-muted mb-0">
+                                                    @bl.Style @bl.Color &middot; @(bl.BundleCount ?? 0) bundle &middot; total @(bl.TotalBundleQty ?? 0) dari @(bl.TotalOrderQty ?? 0)
+                                                </p>
+                                            </div>
+                                            <span class="badge bg-primary text-light">Bundling</span>
+                                        </div>
+                                        <hr class="my-2" />
+                                        <div class="d-flex justify-content-end">
+                                            <button class="btn btn-primary" disabled="@isBusy" @onclick="() => OpenBuatBundleModal(bl)">Buat Bundle</button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+                            }
+                            else if (card.NonBundle is { } nb)
+                            {
+                                <div class="card mb-2">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h5 class="mb-1">@nb.ArticleName</h5>
+                                                <p class="text-muted mb-0">
+                                                    @nb.Style @nb.Color &middot; Tujuan berikutnya: @(nb.IsLastStep ? "Step terakhir" : (nb.NextDivisionName ?? "-"))
+                                                </p>
+                                            </div>
+                                            <span class="badge bg-info text-light"><i class="fe fe-clipboard"></i> Step: @nb.StepName</span>
+                                        </div>
+                                        <hr class="my-2" />
+                                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                            <p class="mb-0 text-muted">
+                                                Tercatat <strong>@(nb.Sizes.Sum(s => s.QtyRecorded))</strong> dari @(nb.Sizes.Sum(s => s.QtyOrder)) &middot; input bisa nyicil
+                                            </p>
+                                            <button class="btn btn-primary" disabled="@isBusy" @onclick="() => OpenNonBundleModal(nb)">Kirim Hasil</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                            else if (card.Bundle is { } item)
+                            {
+                                <div class="card mb-2 border-warning">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                            <div>
+                                                <h5 class="mb-1">No. @item.BundleNo &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
+                                                <p class="text-muted mb-0">
+                                                    @item.ProjectName
+                                                    @if (!string.IsNullOrEmpty(item.SizeName))
+                                                    {
+                                                        <text> &middot; Size @item.SizeName</text>
+                                                    }
+                                                    &middot; Qty @item.Qty
+                                                    @if (!string.IsNullOrEmpty(item.TailorName))
+                                                    {
+                                                        <text> &middot; Penjahit: @item.TailorName</text>
+                                                    }
+                                                </p>
+                                                <p class="text-muted mb-0">Next Step: @(item.IsLastStep ? "Step terakhir" : (item.NextStepName ?? "-"))</p>
+                                                <p class="text-muted small mb-0">diterima @MinutesAgo(item.ReceivedAt)</p>
+                                            </div>
+                                            <div class="d-flex gap-2">
+                                                <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => HandleReprint(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
+                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(item)">Batal Terima</button>
+                                                <button class="btn btn-success" disabled="@(isBusy || item.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(item)">Kirim Hasil</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        }
                     }
                 }
             }
@@ -265,69 +338,144 @@ else
                 }
                 else
                 {
-                    @foreach (var item in outbound)
+                    @foreach (var card in OutCards)
                     {
-                        <div class="card mb-2">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <div>
-                                        <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
-                                        <p class="text-muted mb-0">@item.Style @item.Color</p>
-                                    </div>
-                                    <div class="text-end">
-                                        @if (item.BundleId is not null)
-                                        {
-                                            <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(item.SizeName))
-                                        {
-                                            <span class="badge bg-secondary">@item.SizeName</span>
-                                        }
-                                    </div>
-                                </div>
-                                <hr class="my-2" />
-                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                    <div>
-                                        <p class="mb-1">
-                                            Step: <strong>@item.StepName</strong>
-                                            @if (!string.IsNullOrEmpty(item.ResourceName))
+                        @if (card.Single is { } item)
+                        {
+                            <div class="card mb-2">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <div>
+                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
+                                            <p class="text-muted mb-0">@item.Style @item.Color</p>
+                                        </div>
+                                        <div class="text-end">
+                                            @if (item.BundleId is not null)
                                             {
-                                                <text> &middot; Oleh: <strong>@item.ResourceName</strong></text>
+                                                <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
                                             }
-                                            @if (item.UpdatedAt is not null)
+                                            @if (!string.IsNullOrEmpty(item.SizeName))
                                             {
-                                                <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                                <span class="badge bg-secondary">@item.SizeName</span>
                                             }
-                                        </p>
-                                        <div>Qty OK: <strong>@item.QtyOk</strong></div>
-                                        @foreach (var line in RejectLines(item))
-                                        {
-                                            <div class="text-danger">@line</div>
-                                        }
-                                        <div class="text-muted mt-1">
-                                            @if (item.IsLastStep)
+                                        </div>
+                                    </div>
+                                    <hr class="my-2" />
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                        <div>
+                                            <p class="mb-1">
+                                                Step: <strong>@item.StepName</strong>
+                                                @if (!string.IsNullOrEmpty(item.ResourceName))
+                                                {
+                                                    <text> &middot; Oleh: <strong>@item.ResourceName</strong></text>
+                                                }
+                                                @if (item.UpdatedAt is not null)
+                                                {
+                                                    <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                                }
+                                            </p>
+                                            <div>Qty OK: <strong>@item.QtyOk</strong></div>
+                                            @foreach (var line in RejectLines(item))
                                             {
-                                                <text>step terakhir — selesai</text>
+                                                <div class="text-danger">@line</div>
+                                            }
+                                            <div class="text-muted mt-1">
+                                                @if (item.IsLastStep)
+                                                {
+                                                    <text>step terakhir — selesai</text>
+                                                }
+                                                else
+                                                {
+                                                    <text>menunggu diterima @item.TargetDivisionName</text>
+                                                }
+                                                &middot; @item.CreatedAt.ToString("dd/MM HH:mm")
+                                            </div>
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            @if (item.BundleId is not null)
+                                            {
+                                                <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => HandleReprint(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
+                                            }
+                                            @if (item.IsBundling)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenEditBundleModal(item)">Edit</button>
                                             }
                                             else
                                             {
-                                                <text>menunggu diterima @item.TargetDivisionName</text>
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseModal(item)">Revisi</button>
+                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(item)">Batal Serah</button>
                                             }
-                                            &middot; @item.CreatedAt.ToString("dd/MM HH:mm")
                                         </div>
                                     </div>
-                                    <div class="d-flex gap-2">
-                                        <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseModal(item)">Revisi</button>
-                                        <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(item)">Batal Serah</button>
+                                    <div class="text-muted small mt-2 mb-0">
+                                        @if (item.IsBundling)
+                                        {
+                                            <text>Bisa diedit selama divisi berikutnya belum menekan Terima.</text>
+                                        }
+                                        else if (item.IsLastStep)
+                                        {
+                                            <text>Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari).</text>
+                                        }
+                                        else
+                                        {
+                                            <text>Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.</text>
+                                        }
                                     </div>
                                 </div>
-                                <div class="text-muted small mt-2 mb-0">
-                                    @(item.IsLastStep
-                                        ? "Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari)."
-                                        : "Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.")
+                            </div>
+                        }
+                        else if (card.NonBundleGroup is { } grp)
+                        {
+                            <div class="card mb-2">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <div>
+                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@grp.ProjectName)</span></h5>
+                                            <p class="text-muted mb-0">@grp.Style @grp.Color</p>
+                                        </div>
+                                        <span class="badge bg-secondary">@grp.Items.Count ukuran</span>
+                                    </div>
+                                    <hr class="my-2" />
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                        <div class="flex-grow-1">
+                                            <p class="mb-1">
+                                                Step: <strong>@grp.StepName</strong>
+                                                @if (grp.UpdatedAt is not null)
+                                                {
+                                                    <span class="badge bg-info ms-1">Direvisi @grp.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
+                                                }
+                                            </p>
+                                            <ul class="list-group list-group-flush mb-2">
+                                                @foreach (var row in grp.Items)
+                                                {
+                                                    <li class="list-group-item px-0 py-1">
+                                                        <div class="d-flex justify-content-between">
+                                                            <span>@row.SizeName</span>
+                                                            <strong>Qty OK: @row.QtyOk</strong>
+                                                        </div>
+                                                        @foreach (var line in RejectLines(row))
+                                                        {
+                                                            <div class="text-danger small">@line</div>
+                                                        }
+                                                    </li>
+                                                }
+                                            </ul>
+                                            <div class="text-muted">
+                                                @(grp.IsLastStep ? "step terakhir — selesai" : $"menunggu diterima {grp.TargetDivisionName}")
+                                                &middot; @grp.GroupTime.ToString("dd/MM HH:mm")
+                                            </div>
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseGroupModal(grp)">Revisi</button>
+                                            <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahGroupModal(grp)">Batal Serah</button>
+                                        </div>
+                                    </div>
+                                    <div class="text-muted small mt-2 mb-0">
+                                        Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        }
                     }
                 }
             }
@@ -336,13 +484,17 @@ else
             {
                 <div class="alert alert-danger mt-3 mb-0">@actionError</div>
             }
+            @if (!string.IsNullOrEmpty(reprintFeedback))
+            {
+                <div class="alert alert-success mt-3 mb-0">@reprintFeedback</div>
+            }
         </div>
     </div>
 }
 
 </div>
 
-@if (showReceiveNoteModal && receiveNoteTarget is not null)
+@if (showReceiveNoteModal && (receiveNoteTarget is not null || receiveNoteGroupTarget is not null))
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -352,7 +504,7 @@ else
                     <button type="button" class="btn-close" @onclick="CloseReceiveNoteModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>@receiveNoteTarget.ArticleName</strong> &middot; @receiveNoteTarget.StepName</p>
+                    <p><strong>@(receiveNoteTarget?.ArticleName ?? receiveNoteGroupTarget?.ArticleName)</strong> &middot; @(receiveNoteTarget?.StepName ?? receiveNoteGroupTarget?.StepName)</p>
                     <label class="form-label">Catatan (wajib)</label>
                     <textarea class="form-control" rows="3" @bind="receiveNoteText"></textarea>
                 </div>
@@ -445,6 +597,98 @@ else
     </div>
 }
 
+@if (showNonBundleModal && nonBundleTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Kirim Hasil &middot; @nonBundleTarget.StepName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseNonBundleModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted mb-2">
+                        @nonBundleTarget.ArticleName &middot; Tujuan: @(nonBundleTarget.IsLastStep ? "Step terakhir" : (nonBundleTarget.NextDivisionName ?? "-")) &middot; Pelaksana: @currentOperatorName
+                    </p>
+                    <div class="d-flex flex-wrap gap-3 mb-2">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="nbShowRejectPrint" @bind="nonBundleShowRejectPrint" @bind:after="OnNonBundleShowRejectPrintChanged" />
+                            <label class="form-check-label" for="nbShowRejectPrint">Reject Print</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="nbShowRejectFabric" @bind="nonBundleShowRejectFabric" @bind:after="OnNonBundleShowRejectFabricChanged" />
+                            <label class="form-check-label" for="nbShowRejectFabric">Reject Bahan</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="nbShowRejectSewing" @bind="nonBundleShowRejectSewing" @bind:after="OnNonBundleShowRejectSewingChanged" />
+                            <label class="form-check-label" for="nbShowRejectSewing">Reject Jahit</label>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered border mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Ukuran</th>
+                                    <th>Order</th>
+                                    <th>Total OK</th>
+                                    <th>Qty OK</th>
+                                    @if (nonBundleShowRejectPrint)
+                                    {
+                                        <th>Reject Print</th>
+                                    }
+                                    @if (nonBundleShowRejectFabric)
+                                    {
+                                        <th>Reject Bahan</th>
+                                    }
+                                    @if (nonBundleShowRejectSewing)
+                                    {
+                                        <th>Reject Jahit</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in nonBundleRows)
+                                {
+                                    <tr>
+                                        <td class="align-middle">@row.SizeName</td>
+                                        <td class="align-middle">@row.QtyOrder</td>
+                                        <td class="align-middle">@row.QtyRecorded</td>
+                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" /></td>
+                                        @if (nonBundleShowRejectPrint)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" /></td>
+                                        }
+                                        @if (nonBundleShowRejectFabric)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" /></td>
+                                        }
+                                        @if (nonBundleShowRejectSewing)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <label class="form-label mt-2">Catatan (opsional, berlaku untuk seluruh batch)</label>
+                    <textarea class="form-control" rows="2" @bind="nonBundleRemark"></textarea>
+
+                    @if (!string.IsNullOrEmpty(nonBundleError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@nonBundleError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseNonBundleModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmNonBundleSave">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (showBatalTerimaModal && batalTerimaTarget is not null)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
@@ -522,24 +766,9 @@ else
                     {
                         <div class="mb-2">
                             <label class="form-label">Divisi Tujuan</label>
-                            <select class="form-select form-select-lg" @bind="reviseTargetDivisionId">
-                                <option value="0">-- Pilih Divisi --</option>
-                                @foreach (var d in reviseTarget.TargetDivisionOptions)
-                                {
-                                    <option value="@d.Id">@d.DivisionName</option>
-                                }
-                            </select>
-                        </div>
-
-                        <div class="mb-2">
-                            <label class="form-label">Penjahit</label>
-                            <select class="form-select form-select-lg" @bind="reviseResourceId">
-                                <option value="0">-- Tidak diubah --</option>
-                                @foreach (var op in operators)
-                                {
-                                    <option value="@op.Id">@op.ResourceName</option>
-                                }
-                            </select>
+                            <div class="form-control form-control-lg bg-light">
+                                @(reviseTarget.TargetDivisionName ?? "-")
+                            </div>
                         </div>
                     }
 
@@ -570,23 +799,23 @@ else
                     <button type="button" class="btn-close" @onclick="CloseBatalSerahModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-1">
-                        Yakin batal@(batalSerahTarget.IsLastStep ? "" : " serah")
-                        @if (batalSerahTarget.BundleNo is not null)
-                        {
-                            <text> bundle No. @batalSerahTarget.BundleNo &middot; @batalSerahTarget.Serial</text>
-                        }
-                        else
-                        {
-                            <text> @batalSerahTarget.ArticleName</text>
-                        }
-                        ?
-                    </p>
-                    <p class="text-muted mb-0">
-                        @(batalSerahTarget.IsLastStep
-                            ? "Baris step terakhir akan dihapus dan bundle kembali ke WIP."
-                            : "Baris serah akan dihapus dan bundle kembali ke WIP.")
-                    </p>
+                    @if (batalSerahTarget.BundleId is not null)
+                    {
+                        <p class="mb-1">
+                            Yakin batal@(batalSerahTarget.IsLastStep ? "" : " serah") bundle No. @batalSerahTarget.BundleNo &middot; @batalSerahTarget.Serial?
+                        </p>
+                        <p class="text-muted mb-0">
+                            @(batalSerahTarget.IsLastStep
+                                ? "Baris step terakhir akan dihapus dan bundle kembali ke WIP."
+                                : "Baris serah akan dihapus dan bundle kembali ke WIP.")
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="mb-1">
+                            Yakin batal kirim hasil @batalSerahTarget.StepName @batalSerahTarget.SizeName? Baris input akan dihapus.
+                        </p>
+                    }
                     @if (!string.IsNullOrEmpty(batalSerahError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@batalSerahError</div>
@@ -595,6 +824,242 @@ else
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseBatalSerahModal">Batal</button>
                     <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmBatalSerah">Ya, Batalkan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showReviseGroupModal && reviseGroupTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Revisi Gabungan &middot; @reviseGroupTarget.StepName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReviseGroupModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted mb-2">@reviseGroupTarget.ArticleName</p>
+                    <div class="d-flex flex-wrap gap-3 mb-2">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="rgShowRejectPrint" @bind="reviseGroupShowRejectPrint" @bind:after="OnReviseGroupShowRejectPrintChanged" />
+                            <label class="form-check-label" for="rgShowRejectPrint">Reject Print</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="rgShowRejectFabric" @bind="reviseGroupShowRejectFabric" @bind:after="OnReviseGroupShowRejectFabricChanged" />
+                            <label class="form-check-label" for="rgShowRejectFabric">Reject Bahan</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="rgShowRejectSewing" @bind="reviseGroupShowRejectSewing" @bind:after="OnReviseGroupShowRejectSewingChanged" />
+                            <label class="form-check-label" for="rgShowRejectSewing">Reject Jahit</label>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered border mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Size</th>
+                                    <th>Qty OK</th>
+                                    @if (reviseGroupShowRejectPrint)
+                                    {
+                                        <th>Reject Print</th>
+                                    }
+                                    @if (reviseGroupShowRejectFabric)
+                                    {
+                                        <th>Reject Bahan</th>
+                                    }
+                                    @if (reviseGroupShowRejectSewing)
+                                    {
+                                        <th>Reject Jahit</th>
+                                    }
+                                    <th>Catatan</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in reviseGroupRows)
+                                {
+                                    <tr>
+                                        <td class="align-middle">@row.SizeName</td>
+                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" /></td>
+                                        @if (reviseGroupShowRejectPrint)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" /></td>
+                                        }
+                                        @if (reviseGroupShowRejectFabric)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" /></td>
+                                        }
+                                        @if (reviseGroupShowRejectSewing)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                        }
+                                        <td><input class="form-control" @bind="row.Remark" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(reviseGroupError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@reviseGroupError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseReviseGroupModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmReviseGroup">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showBatalSerahGroupModal && batalSerahGroupTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Batal Serah</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBatalSerahGroupModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">
+                        Yakin batal kirim hasil @batalSerahGroupTarget.StepName untuk @batalSerahGroupTarget.Items.Count ukuran (@string.Join(", ", batalSerahGroupTarget.Items.Select(i => i.SizeName)))?
+                    </p>
+                    <p class="text-muted mb-0">Semua baris ukuran pada kartu ini akan dihapus.</p>
+                    @if (!string.IsNullOrEmpty(batalSerahGroupError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@batalSerahGroupError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseBatalSerahGroupModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmBatalSerahGroup">Ya, Batalkan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showBuatBundleModal && buatBundleTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Buat Bundle &middot; @buatBundleTarget.ArticleName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBuatBundleModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive mb-3">
+                        <table class="table table-bordered border mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Ukuran</th>
+                                    <th>Qty Order</th>
+                                    <th>Saran Bundle Qty</th>
+                                    <th>Jumlah Bundle</th>
+                                    <th>Total Qty Bundle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var s in buatBundleSummary)
+                                {
+                                    <tr class="@(s.TotalBundleQty != s.QtyOrder ? "table-warning" : "")">
+                                        <td>@s.SizeName</td>
+                                        <td>@s.QtyOrder</td>
+                                        <td>@s.BundleQty</td>
+                                        <td>@s.BundleCount</td>
+                                        <td>@s.TotalBundleQty</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(buatBundleFeedback))
+                    {
+                        <div class="alert alert-success">@buatBundleFeedback</div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">Ukuran</label>
+                        <SearchableSelect TItem="BundleSizeSummaryDto" Items="buatBundleSummary" Value="buatBundleArticleSizeId" ValueChanged="HandleBuatBundleSizeChanged"
+                                          IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => s.SizeName)"
+                                          Placeholder="Cari ukuran..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Qty</label>
+                        <input type="number" min="1" class="form-control form-control-lg" @bind="buatBundleQty" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Penjahit (resource, opsional)</label>
+                        <SearchableSelect TItem="ResourceLookupDto" Items="buatBundleTailorOptions" @bind-Value="buatBundleTailorResourceId"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nama Penjahit (bebas, opsional)</label>
+                        <input class="form-control" maxlength="150" @bind="buatBundleTailorPersonName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Pelaksana Bundling</label>
+                        <div class="form-control form-control-lg bg-light">@currentOperatorName</div>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="buatBundleAutoPrint" @bind="buatBundleAutoPrint" />
+                        <label class="form-check-label" for="buatBundleAutoPrint">Cetak label otomatis</label>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(buatBundleError))
+                    {
+                        <div class="alert alert-danger mb-0">@buatBundleError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseBuatBundleModal">Tutup</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmBuatBundle">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showEditBundleModal && editBundleTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Bundle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditBundleModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>No. @editBundleTarget.BundleNo &middot; @editBundleTarget.SizeName</strong> &middot; @editBundleTarget.Serial</p>
+                    <div class="mb-3">
+                        <label class="form-label">Qty</label>
+                        <input type="number" min="1" class="form-control form-control-lg" @bind="editBundleQty" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Penjahit (resource, opsional)</label>
+                        <SearchableSelect TItem="ResourceLookupDto" Items="editBundleTailorOptions" @bind-Value="editBundleTailorResourceId"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nama Penjahit (bebas, opsional)</label>
+                        <input class="form-control" maxlength="150" @bind="editBundleTailorPersonName" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(editBundleError))
+                    {
+                        <div class="alert alert-danger mb-0">@editBundleError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseEditBundleModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmEditBundle">Simpan</button>
                 </div>
             </div>
         </div>
@@ -631,15 +1096,17 @@ else
     private StationCountsDto counts = new();
     private List<StationPendingReceiveDto> pendingReceives = new();
     private List<StationInProgressDto> inProgress = new();
+    private List<StationActiveWorkDto> activeWork = new();
     private List<StationPendingHandoverDto> outbound = new();
     private bool isLoadingLists = false;
     private bool isBusy = false;
     private string actionError = string.Empty;
+    private string wipSearchText = string.Empty;
 
-    private HashSet<int> selectedPendingIds = new();
 
     private bool showReceiveNoteModal = false;
     private StationPendingReceiveDto? receiveNoteTarget;
+    private NonBundleReceiveGroup? receiveNoteGroupTarget;
     private string receiveNoteText = string.Empty;
 
     private bool showSerahkanModal = false;
@@ -652,6 +1119,164 @@ else
     private string serahkanError = string.Empty;
     private WorkflowQuotaInfoDto? serahkanQuotaInfo;
 
+    private bool showNonBundleModal = false;
+    private StationActiveWorkDto? nonBundleTarget;
+    private List<NonBundleGridRow> nonBundleRows = new();
+    private string nonBundleRemark = string.Empty;
+    private string nonBundleError = string.Empty;
+    private bool nonBundleShowRejectPrint = false;
+    private bool nonBundleShowRejectFabric = false;
+    private bool nonBundleShowRejectSewing = false;
+
+    private class NonBundleGridRow
+    {
+        public int ArticleSizeId;
+        public string SizeName = string.Empty;
+        public int QtyOrder;
+        public int QtyRecorded;
+        public int QtyOk;
+        public int QtyRejectPrint;
+        public int QtyRejectFabric;
+        public int QtyRejectSewing;
+    }
+
+    private class WipCard
+    {
+        public string ProjectName = string.Empty;
+        public StationInProgressDto? Bundle;
+        public StationActiveWorkDto? NonBundle;
+    }
+
+    // Gabungan kartu non-bundle di tab IN/OUT: baris log per size (BundleId = null) yang
+    // dibuat dalam batch yang sama (artikel sama + waktu dibuat sama, dibulatkan ke menit --
+    // beda hanya di detik tetap dianggap satu batch) digabung jadi 1 kartu; aksi (Terima/
+    // Revisi/Batal Serah) berlaku ke semua baris ukuran sekaligus. Baris bundle (BundleId
+    // terisi) TIDAK digabung -- tetap 1 kartu per bundle seperti sebelumnya.
+    private static DateTime TruncateToMinute(DateTime dt) => new(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, 0, dt.Kind);
+
+    private class InCard
+    {
+        public DateTime SortTime;
+        public StationPendingReceiveDto? Bundle;
+        public NonBundleReceiveGroup? NonBundleGroup;
+    }
+
+    private class NonBundleReceiveGroup
+    {
+        public int ArticleWorkflowId;
+        public string ArticleName = string.Empty;
+        public string ProjectName = string.Empty;
+        public string? Style;
+        public string? Color;
+        public string StepName = string.Empty;
+        public string FromDivisionName = string.Empty;
+        public DateTime GroupTime;
+        public List<StationPendingReceiveDto> Items = new();
+    }
+
+    private List<InCard> InCards =>
+        pendingReceives.Where(i => i.BundleId is not null)
+            .Select(i => new InCard { SortTime = i.SentAt, Bundle = i })
+        .Concat(
+            pendingReceives.Where(i => i.BundleId is null)
+                .GroupBy(i => (i.ArticleWorkflowId, Minute: TruncateToMinute(i.SentAt)))
+                .Select(g => new InCard
+                {
+                    SortTime = g.Min(x => x.SentAt),
+                    NonBundleGroup = new NonBundleReceiveGroup
+                    {
+                        ArticleWorkflowId = g.Key.ArticleWorkflowId,
+                        ArticleName = g.First().ArticleName,
+                        ProjectName = g.First().ProjectName,
+                        Style = g.First().Style,
+                        Color = g.First().Color,
+                        StepName = g.First().StepName,
+                        FromDivisionName = g.First().FromDivisionName,
+                        GroupTime = g.Min(x => x.SentAt),
+                        Items = g.OrderBy(x => x.SizeName).ToList()
+                    }
+                })
+        )
+        .OrderBy(c => c.SortTime)
+        .ToList();
+
+    private class OutCard
+    {
+        public DateTime SortTime;
+        public StationPendingHandoverDto? Single;
+        public NonBundleHandoverGroup? NonBundleGroup;
+    }
+
+    private class NonBundleHandoverGroup
+    {
+        public int ArticleWorkflowId;
+        public int ArticleId;
+        public string ArticleName = string.Empty;
+        public string ProjectName = string.Empty;
+        public string? Style;
+        public string? Color;
+        public string StepName = string.Empty;
+        public bool IsLastStep;
+        public string? TargetDivisionName;
+        public DateTime GroupTime;
+        public DateTime? UpdatedAt;
+        public List<StationPendingHandoverDto> Items = new();
+    }
+
+    private List<OutCard> OutCards =>
+        outbound.Where(i => i.BundleId is not null)
+            .Select(i => new OutCard { SortTime = i.CreatedAt, Single = i })
+        .Concat(
+            outbound.Where(i => i.BundleId is null)
+                .GroupBy(i => (i.ArticleWorkflowId, Minute: TruncateToMinute(i.CreatedAt)))
+                .Select(g => new OutCard
+                {
+                    SortTime = g.Min(x => x.CreatedAt),
+                    NonBundleGroup = new NonBundleHandoverGroup
+                    {
+                        ArticleWorkflowId = g.Key.ArticleWorkflowId,
+                        ArticleId = g.First().ArticleId,
+                        ArticleName = g.First().ArticleName,
+                        ProjectName = g.First().ProjectName,
+                        Style = g.First().Style,
+                        Color = g.First().Color,
+                        StepName = g.First().StepName,
+                        IsLastStep = g.First().IsLastStep,
+                        TargetDivisionName = g.First().TargetDivisionName,
+                        GroupTime = g.Min(x => x.CreatedAt),
+                        UpdatedAt = g.Any(x => x.UpdatedAt is not null) ? g.Max(x => x.UpdatedAt) : null,
+                        Items = g.OrderBy(x => x.SizeName).ToList()
+                    }
+                })
+        )
+        .OrderByDescending(c => c.SortTime)
+        .ToList();
+
+    // Prompt 24: modal "Buat Bundle" -- kartu WIP station Bundling.
+    private bool showBuatBundleModal = false;
+    private StationActiveWorkDto? buatBundleTarget;
+    private List<BundleSizeSummaryDto> buatBundleSummary = new();
+    private List<ResourceLookupDto> buatBundleTailorOptions = new();
+    private int buatBundleArticleSizeId;
+    private int buatBundleQty;
+    private int buatBundleTailorResourceId;
+    private string buatBundleTailorPersonName = string.Empty;
+    private bool buatBundleAutoPrint = true;
+    private string buatBundleError = string.Empty;
+    private string buatBundleFeedback = string.Empty;
+
+    // Prompt 24: modal "Edit Bundle" -- tab OUT baris is_bundling.
+    private bool showEditBundleModal = false;
+    private StationPendingHandoverDto? editBundleTarget;
+    private List<ResourceLookupDto> editBundleTailorOptions = new();
+    private int editBundleQty;
+    private int editBundleTailorResourceId;
+    private string editBundleTailorPersonName = string.Empty;
+    private string editBundleError = string.Empty;
+
+    // Prompt 24: Cetak Ulang label -- dipakai kartu bundle di IN/WIP/OUT.
+    private string reprintFeedback = string.Empty;
+
     private bool showBatalTerimaModal = false;
     private StationInProgressDto? batalTerimaTarget;
     private string batalTerimaError = string.Empty;
@@ -663,7 +1288,6 @@ else
     private int reviseQtyRejectFabric;
     private int reviseQtyRejectSewing;
     private int reviseTargetDivisionId;
-    private int reviseResourceId;
     private string reviseRemark = string.Empty;
     private string reviseError = string.Empty;
     private WorkflowQuotaInfoDto? reviseQuotaInfo;
@@ -671,6 +1295,31 @@ else
     private bool showBatalSerahModal = false;
     private StationPendingHandoverDto? batalSerahTarget;
     private string batalSerahError = string.Empty;
+
+    // Prompt: Revisi/Batal Serah untuk kartu gabungan non-bundle (semua size sekaligus).
+    private bool showReviseGroupModal = false;
+    private NonBundleHandoverGroup? reviseGroupTarget;
+    private List<ReviseGroupRow> reviseGroupRows = new();
+    private string reviseGroupError = string.Empty;
+    private bool reviseGroupShowRejectPrint = false;
+    private bool reviseGroupShowRejectFabric = false;
+    private bool reviseGroupShowRejectSewing = false;
+
+    private class ReviseGroupRow
+    {
+        public int WorkflowLogId;
+        public int? ArticleSizeId;
+        public string SizeName = string.Empty;
+        public int QtyOk;
+        public int QtyRejectPrint;
+        public int QtyRejectFabric;
+        public int QtyRejectSewing;
+        public string Remark = string.Empty;
+    }
+
+    private bool showBatalSerahGroupModal = false;
+    private NonBundleHandoverGroup? batalSerahGroupTarget;
+    private string batalSerahGroupError = string.Empty;
 
     private System.Threading.Timer? pollTimer;
 
@@ -810,7 +1459,6 @@ else
         StopPolling();
         currentOperatorId = null;
         currentOperatorName = null;
-        selectedPendingIds.Clear();
         await JS.InvokeVoidAsync("localStorage.removeItem", OperatorIdKey);
         await JS.InvokeVoidAsync("localStorage.removeItem", OperatorNameKey);
     }
@@ -826,7 +1474,6 @@ else
         station = null;
         currentOperatorId = null;
         currentOperatorName = null;
-        selectedPendingIds.Clear();
         tokenInput = string.Empty;
         setupError = string.Empty;
     }
@@ -861,9 +1508,9 @@ else
         isLoadingLists = true;
         pendingReceives = await StationApi.GetPendingReceivesAsync(currentOperatorId);
         inProgress = await StationApi.GetInProgressAsync(currentOperatorId);
+        activeWork = await StationApi.GetActiveWorkAsync();
         outbound = await StationApi.GetOutboundAsync(currentOperatorId);
         counts = await StationApi.GetCountsAsync(currentOperatorId);
-        selectedPendingIds.RemoveWhere(id => pendingReceives.All(p => p.WorkflowLogId != id));
         isLoadingLists = false;
         StateHasChanged();
     }
@@ -871,6 +1518,127 @@ else
     private void SetTab(string tab)
     {
         activeTab = tab;
+    }
+
+    // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
+    // satu daftar WIP, dikelompokkan per project supaya tetap terbaca saat jumlahnya banyak.
+    private IEnumerable<WipCard> AllWipCards =>
+        activeWork.Select(a => new WipCard { ProjectName = a.ProjectName, NonBundle = a })
+            .Concat(inProgress.Select(b => new WipCard { ProjectName = b.ProjectName, Bundle = b }));
+
+    private static bool ContainsSearch(string? haystack, string needle) =>
+        !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    private bool MatchesWipSearch(WipCard card)
+    {
+        if (string.IsNullOrWhiteSpace(wipSearchText)) return true;
+        var q = wipSearchText.Trim();
+
+        if (card.NonBundle is { } nb)
+            return ContainsSearch(nb.ProjectName, q) || ContainsSearch(nb.ArticleName, q)
+                || ContainsSearch(nb.Style, q) || ContainsSearch(nb.Color, q) || ContainsSearch(nb.StepName, q);
+
+        if (card.Bundle is { } b)
+            return ContainsSearch(b.ProjectName, q) || ContainsSearch(b.ArticleName, q)
+                || ContainsSearch(b.Style, q) || ContainsSearch(b.Color, q) || ContainsSearch(b.NextStepName, q)
+                || ContainsSearch(b.Serial, q) || ContainsSearch(b.BundleNo.ToString(), q);
+
+        return false;
+    }
+
+    private List<IGrouping<string, WipCard>> FilteredWipGroups =>
+        AllWipCards.Where(MatchesWipSearch)
+            .GroupBy(c => c.ProjectName)
+            .OrderBy(g => g.Key)
+            .ToList();
+
+    private void OpenNonBundleModal(StationActiveWorkDto item)
+    {
+        nonBundleTarget = item;
+        nonBundleRows = item.Sizes.Where(s => s.QtyOrder > 0).Select(s => new NonBundleGridRow
+        {
+            ArticleSizeId = s.Id,
+            SizeName = s.SizeName,
+            QtyOrder = s.QtyOrder,
+            QtyRecorded = s.QtyRecorded
+        }).ToList();
+        nonBundleRemark = string.Empty;
+        nonBundleError = string.Empty;
+        nonBundleShowRejectPrint = false;
+        nonBundleShowRejectFabric = false;
+        nonBundleShowRejectSewing = false;
+        showNonBundleModal = true;
+    }
+
+    private void CloseNonBundleModal()
+    {
+        showNonBundleModal = false;
+        nonBundleTarget = null;
+    }
+
+    private void OnNonBundleShowRejectPrintChanged()
+    {
+        if (!nonBundleShowRejectPrint)
+            foreach (var row in nonBundleRows) row.QtyRejectPrint = 0;
+    }
+
+    private void OnNonBundleShowRejectFabricChanged()
+    {
+        if (!nonBundleShowRejectFabric)
+            foreach (var row in nonBundleRows) row.QtyRejectFabric = 0;
+    }
+
+    private void OnNonBundleShowRejectSewingChanged()
+    {
+        if (!nonBundleShowRejectSewing)
+            foreach (var row in nonBundleRows) row.QtyRejectSewing = 0;
+    }
+
+    private async Task ConfirmNonBundleSave()
+    {
+        if (nonBundleTarget is null || currentOperatorId is null) return;
+
+        var entries = nonBundleRows
+            .Where(r => r.QtyOk > 0 || r.QtyRejectPrint > 0 || r.QtyRejectFabric > 0 || r.QtyRejectSewing > 0)
+            .Select(r => new StationNonBundleBatchEntryRequest
+            {
+                ArticleSizeId = r.ArticleSizeId,
+                QtyOk = r.QtyOk,
+                QtyRejectPrint = r.QtyRejectPrint,
+                QtyRejectFabric = r.QtyRejectFabric,
+                QtyRejectSewing = r.QtyRejectSewing
+            }).ToList();
+
+        if (entries.Count == 0)
+        {
+            nonBundleError = "Isi minimal satu ukuran dengan qty lebih dari 0.";
+            return;
+        }
+
+        isBusy = true;
+        nonBundleError = string.Empty;
+
+        var (success, error, failedSizeId) = await StationApi.CreateNonBundleLogBatchAsync(new StationNonBundleBatchCreateRequest
+        {
+            ArticleWorkflowId = nonBundleTarget.ArticleWorkflowId,
+            ResourceId = currentOperatorId.Value,
+            Remark = string.IsNullOrWhiteSpace(nonBundleRemark) ? null : nonBundleRemark,
+            Entries = entries
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            var sizeName = failedSizeId is int sizeId
+                ? nonBundleRows.FirstOrDefault(r => r.ArticleSizeId == sizeId)?.SizeName
+                : null;
+            nonBundleError = sizeName is null ? error : $"Ukuran {sizeName}: {error}";
+            return;
+        }
+
+        CloseNonBundleModal();
+        await RefreshLists();
     }
 
     private static List<string> RejectLines(StationPendingHandoverDto item)
@@ -891,52 +1659,23 @@ else
         return $"{hours / 24} hari lalu";
     }
 
-    private void ToggleSelectAllPending(ChangeEventArgs e)
-    {
-        var check = e.Value is bool b && b;
-        selectedPendingIds = check ? pendingReceives.Select(p => p.WorkflowLogId).ToHashSet() : new();
-    }
-
-    private void TogglePendingSelect(StationPendingReceiveDto item, object? value)
-    {
-        var check = value is bool b && b;
-        if (check) selectedPendingIds.Add(item.WorkflowLogId);
-        else selectedPendingIds.Remove(item.WorkflowLogId);
-    }
-
     private async Task ReceiveOne(StationPendingReceiveDto item)
     {
         await DoReceiveAsync(item.WorkflowLogId, null);
     }
 
-    private async Task ReceiveSelected()
-    {
-        isBusy = true;
-        actionError = string.Empty;
-
-        foreach (var workflowLogId in selectedPendingIds.ToList())
-        {
-            var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
-            {
-                WorkflowLogId = workflowLogId,
-                ResourceId = currentOperatorId!.Value
-            });
-
-            if (!success)
-            {
-                actionError = error;
-                break;
-            }
-        }
-
-        selectedPendingIds.Clear();
-        isBusy = false;
-        await RefreshLists();
-    }
-
     private void OpenReceiveNoteModal(StationPendingReceiveDto item)
     {
         receiveNoteTarget = item;
+        receiveNoteGroupTarget = null;
+        receiveNoteText = string.Empty;
+        showReceiveNoteModal = true;
+    }
+
+    private void OpenReceiveNoteModalGroup(NonBundleReceiveGroup group)
+    {
+        receiveNoteGroupTarget = group;
+        receiveNoteTarget = null;
         receiveNoteText = string.Empty;
         showReceiveNoteModal = true;
     }
@@ -945,12 +1684,23 @@ else
     {
         showReceiveNoteModal = false;
         receiveNoteTarget = null;
+        receiveNoteGroupTarget = null;
         receiveNoteText = string.Empty;
     }
 
     private async Task ConfirmReceiveWithNote()
     {
-        if (receiveNoteTarget is null || string.IsNullOrWhiteSpace(receiveNoteText)) return;
+        if (string.IsNullOrWhiteSpace(receiveNoteText)) return;
+
+        if (receiveNoteGroupTarget is { } group)
+        {
+            var groupRemark = receiveNoteText;
+            CloseReceiveNoteModal();
+            await ReceiveGroup(group, groupRemark);
+            return;
+        }
+
+        if (receiveNoteTarget is null) return;
 
         var workflowLogId = receiveNoteTarget.WorkflowLogId;
         var remark = receiveNoteText;
@@ -972,6 +1722,32 @@ else
 
         isBusy = false;
         if (!success) actionError = error;
+        await RefreshLists();
+    }
+
+    // Gabungan: "Terima" berlaku ke semua baris ukuran dalam kartu sekaligus.
+    private async Task ReceiveGroup(NonBundleReceiveGroup group, string? remark = null)
+    {
+        isBusy = true;
+        actionError = string.Empty;
+
+        foreach (var item in group.Items)
+        {
+            var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
+            {
+                WorkflowLogId = item.WorkflowLogId,
+                ResourceId = currentOperatorId!.Value,
+                Remark = remark
+            });
+
+            if (!success)
+            {
+                actionError = $"{item.SizeName}: {error}";
+                break;
+            }
+        }
+
+        isBusy = false;
         await RefreshLists();
     }
 
@@ -1082,8 +1858,8 @@ else
         reviseQtyRejectPrint = item.QtyRejectPrint;
         reviseQtyRejectFabric = item.QtyRejectFabric;
         reviseQtyRejectSewing = item.QtyRejectSewing;
-        reviseTargetDivisionId = item.TargetDivisionOptions.Count == 1 ? item.TargetDivisionOptions[0].Id : 0;
-        reviseResourceId = 0;
+        reviseTargetDivisionId = item.TargetDivisionOptions.FirstOrDefault(d => d.DivisionName == item.TargetDivisionName)?.Id
+            ?? (item.TargetDivisionOptions.Count == 1 ? item.TargetDivisionOptions[0].Id : 0);
         reviseRemark = item.Remark ?? string.Empty;
         reviseError = string.Empty;
         reviseQuotaInfo = item.BundleId is not null
@@ -1159,7 +1935,6 @@ else
             QtyRejectSewing = reviseQtyRejectSewing,
             Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
             NewTargetDivisionId = reviseTargetDivisionId,
-            NewResourceId = reviseResourceId > 0 ? reviseResourceId : null,
             ResourceId = currentOperatorId.Value
         });
 
@@ -1211,6 +1986,302 @@ else
 
         CloseBatalSerahModal();
         await RefreshLists();
+    }
+
+    // Gabungan: "Revisi" -- grid semua ukuran dalam kartu, simpan sekaligus per baris
+    // (ConfirmExceed/ConfirmShort selalu false -- kuota bundle tidak relevan utk non-bundle).
+    private void OpenReviseGroupModal(NonBundleHandoverGroup group)
+    {
+        reviseGroupTarget = group;
+        reviseGroupRows = group.Items.Select(i => new ReviseGroupRow
+        {
+            WorkflowLogId = i.WorkflowLogId,
+            ArticleSizeId = i.ArticleSizeId,
+            SizeName = i.SizeName ?? string.Empty,
+            QtyOk = i.QtyOk,
+            QtyRejectPrint = i.QtyRejectPrint,
+            QtyRejectFabric = i.QtyRejectFabric,
+            QtyRejectSewing = i.QtyRejectSewing,
+            Remark = i.Remark ?? string.Empty
+        }).ToList();
+        reviseGroupError = string.Empty;
+        // Prompt: kolom reject hanya tampil kalau sudah dipakai -- default checklist
+        // mengikuti data yang sudah tersimpan, bukan selalu unchecked seperti modal input baru.
+        reviseGroupShowRejectPrint = reviseGroupRows.Any(r => r.QtyRejectPrint > 0);
+        reviseGroupShowRejectFabric = reviseGroupRows.Any(r => r.QtyRejectFabric > 0);
+        reviseGroupShowRejectSewing = reviseGroupRows.Any(r => r.QtyRejectSewing > 0);
+        showReviseGroupModal = true;
+    }
+
+    private void CloseReviseGroupModal()
+    {
+        showReviseGroupModal = false;
+        reviseGroupTarget = null;
+    }
+
+    private void OnReviseGroupShowRejectPrintChanged()
+    {
+        if (!reviseGroupShowRejectPrint)
+            foreach (var row in reviseGroupRows) row.QtyRejectPrint = 0;
+    }
+
+    private void OnReviseGroupShowRejectFabricChanged()
+    {
+        if (!reviseGroupShowRejectFabric)
+            foreach (var row in reviseGroupRows) row.QtyRejectFabric = 0;
+    }
+
+    private void OnReviseGroupShowRejectSewingChanged()
+    {
+        if (!reviseGroupShowRejectSewing)
+            foreach (var row in reviseGroupRows) row.QtyRejectSewing = 0;
+    }
+
+    private async Task ConfirmReviseGroup()
+    {
+        if (reviseGroupTarget is null || currentOperatorId is null) return;
+
+        isBusy = true;
+        reviseGroupError = string.Empty;
+
+        foreach (var row in reviseGroupRows)
+        {
+            var (success, error) = await StationApi.UpdateLogAsync(row.WorkflowLogId, new StationLogUpdateRequest
+            {
+                ArticleSizeId = row.ArticleSizeId,
+                QtyOk = row.QtyOk,
+                QtyRejectPrint = row.QtyRejectPrint,
+                QtyRejectFabric = row.QtyRejectFabric,
+                QtyRejectSewing = row.QtyRejectSewing,
+                Remark = string.IsNullOrWhiteSpace(row.Remark) ? null : row.Remark,
+                ResourceId = currentOperatorId.Value
+            });
+
+            if (!success)
+            {
+                reviseGroupError = $"{row.SizeName}: {error}";
+                isBusy = false;
+                return;
+            }
+        }
+
+        isBusy = false;
+        CloseReviseGroupModal();
+        await RefreshLists();
+    }
+
+    // Gabungan: "Batal Serah" berlaku ke semua baris ukuran dalam kartu sekaligus.
+    private void OpenBatalSerahGroupModal(NonBundleHandoverGroup group)
+    {
+        batalSerahGroupTarget = group;
+        batalSerahGroupError = string.Empty;
+        showBatalSerahGroupModal = true;
+    }
+
+    private void CloseBatalSerahGroupModal()
+    {
+        showBatalSerahGroupModal = false;
+        batalSerahGroupTarget = null;
+        batalSerahGroupError = string.Empty;
+    }
+
+    private async Task ConfirmBatalSerahGroup()
+    {
+        if (batalSerahGroupTarget is null || currentOperatorId is null) return;
+
+        isBusy = true;
+        batalSerahGroupError = string.Empty;
+
+        foreach (var item in batalSerahGroupTarget.Items)
+        {
+            var (success, error) = await StationApi.CancelHandoverAsync(item.WorkflowLogId, new StationCancelHandoverRequest
+            {
+                ResourceId = currentOperatorId.Value
+            });
+
+            if (!success)
+            {
+                batalSerahGroupError = $"{item.SizeName}: {error}";
+                isBusy = false;
+                return;
+            }
+        }
+
+        isBusy = false;
+        CloseBatalSerahGroupModal();
+        await RefreshLists();
+    }
+
+    // Prompt 24: "Buat Bundle" -- kartu WIP station Bundling. Modal TETAP terbuka setelah
+    // simpan supaya bisa input beruntun (size/qty/checkbox dipertahankan).
+    private async Task OpenBuatBundleModal(StationActiveWorkDto item)
+    {
+        buatBundleTarget = item;
+        buatBundleError = string.Empty;
+        buatBundleFeedback = string.Empty;
+        buatBundleAutoPrint = true;
+        buatBundleTailorResourceId = 0;
+        buatBundleTailorPersonName = string.Empty;
+
+        buatBundleSummary = await StationApi.GetBundlingSummaryAsync(item.ArticleId);
+
+        var tailorDivisionId = buatBundleSummary.FirstOrDefault()?.FirstBundleStepDivisionId;
+        buatBundleTailorOptions = tailorDivisionId is int divisionId
+            ? await StationApi.GetResourcesByDivisionAsync(divisionId)
+            : new();
+
+        var firstSize = buatBundleSummary.FirstOrDefault(s => s.QtyOrder > 0) ?? buatBundleSummary.FirstOrDefault();
+        if (firstSize is not null)
+        {
+            buatBundleArticleSizeId = firstSize.ArticleSizeId;
+            buatBundleQty = firstSize.BundleQty;
+        }
+
+        showBuatBundleModal = true;
+    }
+
+    private void CloseBuatBundleModal()
+    {
+        showBuatBundleModal = false;
+        buatBundleTarget = null;
+    }
+
+    private void HandleBuatBundleSizeChanged(int articleSizeId)
+    {
+        buatBundleArticleSizeId = articleSizeId;
+        var sizeInfo = buatBundleSummary.FirstOrDefault(s => s.ArticleSizeId == articleSizeId);
+        if (sizeInfo is not null) buatBundleQty = sizeInfo.BundleQty;
+    }
+
+    private async Task ConfirmBuatBundle()
+    {
+        if (buatBundleTarget is null || currentOperatorId is null) return;
+
+        buatBundleError = string.Empty;
+        buatBundleFeedback = string.Empty;
+
+        if (buatBundleArticleSizeId <= 0)
+        {
+            buatBundleError = "Ukuran wajib dipilih.";
+            return;
+        }
+
+        if (buatBundleQty <= 0)
+        {
+            buatBundleError = "Qty bundle harus lebih dari 0.";
+            return;
+        }
+
+        isBusy = true;
+
+        var (success, error, result) = await StationApi.CreateBundleAsync(new StationBundleCreateRequest
+        {
+            ArticleId = buatBundleTarget.ArticleId,
+            ArticleSizeId = buatBundleArticleSizeId,
+            Qty = buatBundleQty,
+            ResourceId = currentOperatorId.Value,
+            TailorResourceId = buatBundleTailorResourceId > 0 ? buatBundleTailorResourceId : null,
+            TailorPersonName = string.IsNullOrWhiteSpace(buatBundleTailorPersonName) ? null : buatBundleTailorPersonName,
+            AutoPrint = buatBundleAutoPrint
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            buatBundleError = error;
+            return;
+        }
+
+        buatBundleFeedback = $"Bundle {result?.Serial} dibuat" + (result?.PrintJobId is not null ? " · label masuk antrian cetak" : "");
+
+        // Modal tetap terbuka (input beruntun) -- refresh ringkasan + daftar kartu WIP di
+        // belakang layar supaya jumlah bundle/total qty ikut ter-update.
+        buatBundleSummary = await StationApi.GetBundlingSummaryAsync(buatBundleTarget.ArticleId);
+        await RefreshLists();
+    }
+
+    // Prompt 24: "Edit Bundle" -- tab OUT baris is_bundling (menggantikan Revisi generik).
+    private async Task OpenEditBundleModal(StationPendingHandoverDto item)
+    {
+        editBundleTarget = item;
+        editBundleQty = item.QtyOk;
+        editBundleTailorResourceId = item.BundleResourceId ?? 0;
+        editBundleTailorPersonName = item.BundleResourcePersonName ?? string.Empty;
+        editBundleError = string.Empty;
+
+        var summary = await StationApi.GetBundlingSummaryAsync(item.ArticleId);
+        var tailorDivisionId = summary.FirstOrDefault()?.FirstBundleStepDivisionId;
+        editBundleTailorOptions = tailorDivisionId is int divisionId
+            ? await StationApi.GetResourcesByDivisionAsync(divisionId)
+            : new();
+
+        showEditBundleModal = true;
+    }
+
+    private void CloseEditBundleModal()
+    {
+        showEditBundleModal = false;
+        editBundleTarget = null;
+    }
+
+    private async Task ConfirmEditBundle()
+    {
+        if (editBundleTarget?.BundleId is null || currentOperatorId is null) return;
+
+        editBundleError = string.Empty;
+
+        if (editBundleQty <= 0)
+        {
+            editBundleError = "Qty bundle harus lebih dari 0.";
+            return;
+        }
+
+        isBusy = true;
+
+        var (success, error) = await StationApi.UpdateBundleAsync(editBundleTarget.BundleId.Value, new StationBundleUpdateRequest
+        {
+            Qty = editBundleQty,
+            ResourceId = currentOperatorId.Value,
+            TailorResourceId = editBundleTailorResourceId > 0 ? editBundleTailorResourceId : null,
+            TailorPersonName = string.IsNullOrWhiteSpace(editBundleTailorPersonName) ? null : editBundleTailorPersonName
+        });
+
+        isBusy = false;
+
+        if (!success)
+        {
+            editBundleError = error;
+            return;
+        }
+
+        CloseEditBundleModal();
+        await RefreshLists();
+    }
+
+    // Prompt 24: Cetak Ulang label -- dipakai kartu bundle di IN/WIP/OUT.
+    private async Task HandleReprint(int? bundleId, string? serial)
+    {
+        if (bundleId is null) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Cetak ulang label {serial}?");
+        if (!confirmed) return;
+
+        isBusy = true;
+        actionError = string.Empty;
+        reprintFeedback = string.Empty;
+
+        var (success, error) = await StationApi.ReprintBundleAsync(bundleId.Value);
+
+        isBusy = false;
+
+        if (!success)
+        {
+            actionError = error;
+            return;
+        }
+
+        reprintFeedback = "Label masuk antrian cetak.";
     }
 
     public void Dispose()

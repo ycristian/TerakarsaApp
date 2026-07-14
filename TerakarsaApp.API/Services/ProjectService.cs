@@ -73,14 +73,16 @@ public class ProjectService
         var startDateParam = new SqlParameter("@StartDate", request.StartDate ?? (object)DBNull.Value);
         var deadlineParam = new SqlParameter("@Deadline", request.Deadline ?? (object)DBNull.Value);
         var deliveryDateParam = new SqlParameter("@DeliveryDate", request.DeliveryDate ?? (object)DBNull.Value);
+        var remarksParam = new SqlParameter("@Remarks", request.Remarks ?? (object)DBNull.Value);
+        var isUrgentParam = new SqlParameter("@IsUrgent", request.IsUrgent);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Project_Manage @Action = @Action, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
-                    actionParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam)
+                    "EXEC SIS_Project_Manage @Action = @Action, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @Remarks = @Remarks, @IsUrgent = @IsUrgent, @UserId = @UserId",
+                    actionParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, remarksParam, isUrgentParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }
@@ -104,13 +106,15 @@ public class ProjectService
         var startDateParam = new SqlParameter("@StartDate", request.StartDate ?? (object)DBNull.Value);
         var deadlineParam = new SqlParameter("@Deadline", request.Deadline ?? (object)DBNull.Value);
         var deliveryDateParam = new SqlParameter("@DeliveryDate", request.DeliveryDate ?? (object)DBNull.Value);
+        var remarksParam = new SqlParameter("@Remarks", request.Remarks ?? (object)DBNull.Value);
+        var isUrgentParam = new SqlParameter("@IsUrgent", request.IsUrgent);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @UserId = @UserId",
-                actionParam, idParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, userIdParam);
+                "EXEC SIS_Project_Manage @Action = @Action, @Id = @Id, @CustomerId = @CustomerId, @ProjectMd = @ProjectMd, @ProjectPic = @ProjectPic, @ProjectName = @ProjectName, @NoPo = @NoPo, @MaterialName = @MaterialName, @OrderDate = @OrderDate, @StartDate = @StartDate, @Deadline = @Deadline, @DeliveryDate = @DeliveryDate, @Remarks = @Remarks, @IsUrgent = @IsUrgent, @UserId = @UserId",
+                actionParam, idParam, customerIdParam, mdParam, picParam, nameParam, noPoParam, materialNameParam, orderDateParam, startDateParam, deadlineParam, deliveryDateParam, remarksParam, isUrgentParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

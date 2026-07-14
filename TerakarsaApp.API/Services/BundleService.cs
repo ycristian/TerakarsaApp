@@ -28,18 +28,28 @@ public class BundleService
     private class BundleCreateResultRow
     {
         public int NewId { get; set; }
-        public int NewPrintJobId { get; set; }
+        // Prompt 24: nullable -- NULL kalau @SkipPrintJob = 1.
+        public int? NewPrintJobId { get; set; }
         public int NewBundleNo { get; set; }
+        public string NewSerial { get; set; } = string.Empty;
+    }
+
+    // Prompt 24: dipisah dari GetByArticleAsync supaya bisa dipakai sendiri oleh station
+    // (ringkasan modal Buat Bundle + validasi divisi Bundling), tanpa perlu Bundles/PublicBaseUrl.
+    public async Task<List<BundleSizeSummaryDto>> GetSummaryAsync(int articleId)
+    {
+        var articleIdParam = new SqlParameter("@ArticleId", articleId);
+
+        return await _db.Database
+            .SqlQueryRaw<BundleSizeSummaryDto>("EXEC SIS_Article_BundleSummary @ArticleId = @ArticleId", articleIdParam)
+            .ToListAsync();
     }
 
     public async Task<ArticleBundlesDto> GetByArticleAsync(int articleId)
     {
-        var articleIdParam1 = new SqlParameter("@ArticleId", articleId);
         var articleIdParam2 = new SqlParameter("@ArticleId", articleId);
 
-        var summary = await _db.Database
-            .SqlQueryRaw<BundleSizeSummaryDto>("EXEC SIS_Article_BundleSummary @ArticleId = @ArticleId", articleIdParam1)
-            .ToListAsync();
+        var summary = await GetSummaryAsync(articleId);
 
         var bundles = await _db.Database
             .SqlQueryRaw<BundleDto>("EXEC SIS_Bundle_ListByArticle @ArticleId = @ArticleId", articleIdParam2)
@@ -64,18 +74,19 @@ public class BundleService
         var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
         var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
+        var skipPrintJobParam = new SqlParameter("@SkipPrintJob", !request.AutoPrint);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<BundleCreateResultRow>(
-                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
-                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, resourcePersonNameParam, publicBaseUrlParam, bundlingResourceIdParam, userIdParam)
+                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @SkipPrintJob = @SkipPrintJob, @UserId = @UserId",
+                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, resourcePersonNameParam, publicBaseUrlParam, bundlingResourceIdParam, skipPrintJobParam, userIdParam)
                 .ToListAsync();
 
             var row = result.First();
-            return (true, string.Empty, new BundleCreateResult { Id = row.NewId, PrintJobId = row.NewPrintJobId, BundleNo = row.NewBundleNo });
+            return (true, string.Empty, new BundleCreateResult { Id = row.NewId, PrintJobId = row.NewPrintJobId, BundleNo = row.NewBundleNo, Serial = row.NewSerial });
         }
         catch (SqlException ex)
         {

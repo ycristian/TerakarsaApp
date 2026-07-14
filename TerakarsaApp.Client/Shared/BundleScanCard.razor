@@ -4,6 +4,7 @@
 @using TerakarsaApp.Shared.WorkflowLogs
 @using TerakarsaApp.Client.Services
 @inject StationDeviceApiService StationApi
+@inject IJSRuntime JS
 
 <div class="card">
     <div class="card-body">
@@ -17,7 +18,16 @@
                     @Info.Bundle.Qty <small class="text-muted">pcs</small>
                     <span class="badge bg-secondary fl-6">@Info.Bundle.SizeName</span>
                 </h4>
-                
+                @if (AllowReprint)
+                {
+                    <button class="btn btn-outline-secondary btn-sm mt-2" disabled="@reprintBusy" @onclick="HandleReprintClick">
+                        <i class="fe fe-printer"></i> Cetak Ulang
+                    </button>
+                    @if (!string.IsNullOrEmpty(reprintFeedback))
+                    {
+                        <div class="small mt-1 @(reprintFeedback == "Label masuk antrian cetak." ? "text-success" : "text-danger")">@reprintFeedback</div>
+                    }
+                }
             </div>
         </div>
 
@@ -323,10 +333,29 @@
     [Parameter] public EventCallback<string?> OnReceive { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnComplete { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnEdit { get; set; }
+    // Prompt 24: Cetak Ulang -- hanya masuk akal saat ada token stasiun (endpoint reprint
+    // butuh header X-Station-Token); halaman publik /b/{serial} tanpa token mengirim false.
+    [Parameter] public bool AllowReprint { get; set; }
 
     private bool showFullTimeline = false;
     private bool showReceiveNote = false;
     private string receiveNoteText = string.Empty;
+    private bool reprintBusy = false;
+    private string reprintFeedback = string.Empty;
+
+    private async Task HandleReprintClick()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Cetak ulang label {Info.Bundle.Serial}?");
+        if (!confirmed) return;
+
+        reprintBusy = true;
+        reprintFeedback = string.Empty;
+
+        var (success, error) = await StationApi.ReprintBundleAsync(Info.Bundle.BundleId);
+
+        reprintBusy = false;
+        reprintFeedback = success ? "Label masuk antrian cetak." : error;
+    }
 
     private BundleScanTimelineDto? PendingReceive => Info.Timeline.LastOrDefault(t => t.ReceivedAt is null);
 

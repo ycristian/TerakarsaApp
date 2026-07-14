@@ -27,6 +27,8 @@ CREATE OR ALTER PROCEDURE SIS_Project_Manage
     @StartDate    DATE = NULL,
     @Deadline     DATE = NULL,
     @DeliveryDate DATE = NULL,
+    @Remarks      VARCHAR(500) = NULL,
+    @IsUrgent     BIT = 0,
     @ManualStatus VARCHAR(20) = NULL,
     @StatusReason VARCHAR(255) = NULL,
     @UserId       INT = NULL
@@ -36,8 +38,8 @@ BEGIN
 
     IF @Action = 'CREATE'
     BEGIN
-        INSERT INTO projects (customer_id, project_md, project_pic, project_name, no_po, material_name, order_date, [start_date], deadline, delivery_date, created_at, created_by)
-        VALUES (@CustomerId, @ProjectMd, @ProjectPic, @ProjectName, @NoPo, @MaterialName, @OrderDate, @StartDate, @Deadline, @DeliveryDate, SYSDATETIME(), @UserId);
+        INSERT INTO projects (customer_id, project_md, project_pic, project_name, no_po, material_name, order_date, [start_date], deadline, delivery_date, remarks, is_urgent, created_at, created_by)
+        VALUES (@CustomerId, @ProjectMd, @ProjectPic, @ProjectName, @NoPo, @MaterialName, @OrderDate, @StartDate, @Deadline, @DeliveryDate, @Remarks, @IsUrgent, SYSDATETIME(), @UserId);
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
     END
@@ -55,6 +57,8 @@ BEGIN
             [start_date] = @StartDate,
             deadline = @Deadline,
             delivery_date = @DeliveryDate,
+            remarks = @Remarks,
+            is_urgent = @IsUrgent,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE project_id = @Id AND deleted_at IS NULL;

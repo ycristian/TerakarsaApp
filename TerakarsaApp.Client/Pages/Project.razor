@@ -11,7 +11,6 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
 @inject ProjectApiService ProjectApi
-@inject ProjectAttachmentApiService AttachmentApi
 @inject BuyerApiService BuyerApi
 @inject EmployeeApiService EmployeeApi
 @inject ArticleApiService ArticleApi
@@ -52,6 +51,7 @@ else
         <select class="form-select" style="width: 180px;" @bind="statusFilter" @bind:after="HandleStatusFilterChange">
             <option value="">Semua</option>
             <option value="NOT_STARTED">Belum Dimulai</option>
+            <option value="STARTED">Dimulai</option>
             <option value="ON_GOING">Berjalan</option>
             <option value="ON_HOLD">Ditahan</option>
             <option value="COMPLETED">Selesai</option>
@@ -95,6 +95,7 @@ else
                                     <SortableHeader Label="Deadline" Column="Deadline" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                                     <th>MD</th>
                                     <th>PIC</th>
+                                    <th>Catatan</th>
                                     <th>Status</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -113,7 +114,13 @@ else
                                                 <span class="text-muted">-</span>
                                             }
                                         </td>
-                                        <td>@p.ProjectName</td>
+                                        <td>
+                                            @p.ProjectName
+                                            @if (p.IsUrgent)
+                                            {
+                                                <span class="badge bg-danger ms-1">Urgent</span>
+                                            }
+                                        </td>
                                         <td>@p.BuyerName</td>
                                         <td>@(p.NoPo ?? "-")</td>
                                         <td>@(p.MaterialName ?? "-")</td>
@@ -121,6 +128,7 @@ else
                                         <td>@(p.Deadline?.ToString("dd/MM/yyyy") ?? "-")</td>
                                         <td>@(p.ProjectMdName ?? "-")</td>
                                         <td>@(p.ProjectPicName ?? "-")</td>
+                                        <td>@(p.Remarks ?? "-")</td>
                                         <td>
                                             <span class="badge @StatusBadgeClass(p.DerivedStatus)" title="@(p.DerivedStatus == "ON_HOLD" ? p.StatusReason : null)">@StatusLabel(p.DerivedStatus)</span>
                                             @if (p.DerivedStatus == "ON_HOLD" && !string.IsNullOrWhiteSpace(p.StatusReason))
@@ -392,6 +400,15 @@ else
                             <label class="form-label">Tanggal Kirim</label>
                             <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Catatan</label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="formModel.Remarks" />
+                            <ValidationMessage For="@(() => formModel.Remarks)" class="text-danger" />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.IsUrgent" />
+                            <label class="form-check-label">Urgent</label>
+                        </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
                             <div class="alert alert-danger">@errorMessage</div>
@@ -512,6 +529,7 @@ else
     private static string StatusLabel(string status) => status switch
     {
         "NOT_STARTED" => "Belum Dimulai",
+        "STARTED" => "Dimulai",
         "ON_GOING" => "Berjalan",
         "ON_HOLD" => "Ditahan",
         "COMPLETED" => "Selesai",
@@ -522,6 +540,7 @@ else
     private static string StatusBadgeClass(string status) => status switch
     {
         "NOT_STARTED" => "bg-secondary",
+        "STARTED" => "bg-info",
         "ON_GOING" => "bg-primary",
         "ON_HOLD" => "bg-warning",
         "COMPLETED" => "bg-success",
@@ -533,7 +552,7 @@ else
     {
         var tasks = pagedResult.Items.Select(async p =>
         {
-            var result = await AttachmentApi.GetFirstPhotoAsync(p.Id);
+            var result = await ArticlePhotoApi.GetFirstPhotoForProjectAsync(p.Id);
             if (result is null) return (p.Id, Url: (string?)null);
 
             var base64 = Convert.ToBase64String(result.Value.Bytes);
@@ -613,7 +632,9 @@ else
             OrderDate = formModel.OrderDate,
             StartDate = formModel.StartDate,
             Deadline = formModel.Deadline,
-            DeliveryDate = formModel.DeliveryDate
+            DeliveryDate = formModel.DeliveryDate,
+            Remarks = string.IsNullOrWhiteSpace(formModel.Remarks) ? null : formModel.Remarks,
+            IsUrgent = formModel.IsUrgent
         });
 
         isSaving = false;
@@ -763,5 +784,10 @@ else
         public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public DateTime? DeliveryDate { get; set; }
+
+        [StringLength(500, ErrorMessage = "Catatan maksimal 500 karakter.")]
+        public string? Remarks { get; set; }
+
+        public bool IsUrgent { get; set; }
     }
 }

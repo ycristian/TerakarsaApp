@@ -59,6 +59,90 @@ public class StationDeviceController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 24: dropdown "Penjahit" di modal Buat Bundle/Edit Bundle -- divisi station
+    // pertama ber-bundle (mis. Sewing), BUKAN divisi Bundling stasiun ini sendiri (lihat
+    // FirstBundleStepDivisionId di SIS_Article_BundleSummary / bundling-summary di bawah).
+    [HttpGet("resources/{divisionId:int}")]
+    public async Task<IActionResult> GetResourcesByDivision(int divisionId)
+    {
+        var result = await _resourceService.GetActiveByDivisionAsync(divisionId);
+        return Ok(result);
+    }
+
+    // Prompt 24: ringkasan per size untuk modal "Buat Bundle" -- juga dipakai memvalidasi
+    // divisi token = divisi Bundling artikel ini (BundlingDivisionId).
+    [HttpGet("bundling/articles/{articleId:int}/summary")]
+    public async Task<IActionResult> GetBundlingSummary(int articleId)
+    {
+        var summary = await _bundleService.GetSummaryAsync(articleId);
+        if (summary.Count == 0) return NotFound();
+        if (summary[0].BundlingDivisionId != CurrentStation.DivisionId)
+            return BadRequest("Divisi ini tidak memiliki step Bundling untuk artikel ini.");
+
+        return Ok(summary);
+    }
+
+    // Prompt 24: "Buat Bundle" dari kartu WIP station Bundling -- @BundlingResourceId =
+    // operator sesi (WAJIB), penjahit (TailorResourceId/TailorPersonName) opsional.
+    [HttpPost("bundles")]
+    public async Task<IActionResult> CreateBundle([FromBody] StationBundleCreateRequest request)
+    {
+        var operatorResourceId = EffectiveResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (request.ArticleSizeId <= 0) return BadRequest("Ukuran wajib dipilih.");
+        if (request.Qty <= 0) return BadRequest("Qty bundle harus lebih dari 0.");
+
+        var summary = await _bundleService.GetSummaryAsync(request.ArticleId);
+        if (summary.Count == 0 || summary[0].BundlingDivisionId != CurrentStation.DivisionId)
+            return BadRequest("Divisi ini tidak memiliki step Bundling untuk artikel ini.");
+
+        var (success, error, result) = await _bundleService.CreateAsync(new BundleCreateRequest
+        {
+            ArticleId = request.ArticleId,
+            ArticleSizeId = request.ArticleSizeId,
+            Qty = request.Qty,
+            ResourceId = request.TailorResourceId,
+            ResourcePersonName = request.TailorPersonName,
+            BundlingResourceId = operatorResourceId,
+            AutoPrint = request.AutoPrint
+        }, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok(result);
+    }
+
+    // Prompt 24: Edit bundle dari tab OUT station Bundling -- qty tersinkron ke log Bundling
+    // lewat SIS_Bundle_Manage (bukan REVISE_HANDOVER generik yang dipakai baris lain).
+    [HttpPut("bundles/{id:int}")]
+    public async Task<IActionResult> UpdateBundle(int id, [FromBody] StationBundleUpdateRequest request)
+    {
+        var operatorResourceId = EffectiveResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (request.Qty <= 0) return BadRequest("Qty bundle harus lebih dari 0.");
+
+        var (success, error) = await _bundleService.UpdateAsync(new BundleUpdateRequest
+        {
+            Id = id,
+            Qty = request.Qty,
+            ResourceId = request.TailorResourceId,
+            ResourcePersonName = request.TailorPersonName,
+            BundlingResourceId = operatorResourceId
+        }, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 24: cetak ulang label bundle -- semua station boleh, tanpa batasan divisi, cukup
+    // token perangkat valid.
+    [HttpPost("bundles/{id:int}/reprint")]
+    public async Task<IActionResult> ReprintBundle(int id)
+    {
+        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
     // Prompt 22b: @ResourceId dari operator sesi (query string, sama pola dengan Scan di
     // bawah) -- filter antrian Masuk/Dikerjakan/Dikirim/Counts ke Line operator ini saja.
     // EffectiveResourceId tetap menang kalau stasiun terkunci (memaksa default_resource_id
@@ -94,6 +178,15 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> GetInProgress([FromQuery] int? resourceId)
     {
         var result = await _workflowLogService.GetInProgressAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
+        return Ok(result);
+    }
+
+    // Prompt 23: kartu permanen (artikel x step non-bundle) di tab WIP, tampil berdampingan
+    // dengan kartu bundle di atas. Tanpa resourceId (kartu ini tidak terikat Line).
+    [HttpGet("active-work")]
+    public async Task<IActionResult> GetActiveWork()
+    {
+        var result = await _workflowLogService.GetActiveWorkAsync(CurrentStation.DivisionId);
         return Ok(result);
     }
 
@@ -147,11 +240,10 @@ public class StationDeviceController : ControllerBase
     }
 
     // Pekerjaan step ber-bundle selesai lewat alur scan (dulu berstatus 'COMPLETED', kini
-    // satu-satunya arti INSERT di model log baru). Sejak Prompt 12c, step non-bundle (mis.
-    // Cutting) tidak lagi dicatat lewat stasiun -- panel "Dikerjakan" dihapus, pencatatannya
-    // pindah ke halaman /workflow-input (WorkflowInputController, login biasa). BundleId
-    // karena itu wajib di sini; SP sendiri sebenarnya masih izinkan BundleId kosong (dipakai
-    // dulu oleh panel yang sudah dihapus), jadi pesan ini murni penjaga tambahan di API.
+    // satu-satunya arti INSERT di model log baru). Step non-bundle (mis. Cutting) TIDAK lewat
+    // endpoint ini -- lihat POST nonbundle-logs/batch di bawah (kartu WIP terpisah, Prompt 23).
+    // BundleId karena itu wajib di sini; SP sendiri sebenarnya masih izinkan BundleId kosong,
+    // jadi pesan ini murni penjaga tambahan di API supaya kedua jalur tidak tertukar.
     [HttpPost("complete")]
     public async Task<IActionResult> Complete([FromBody] StationCompleteRequest request)
     {
@@ -182,6 +274,50 @@ public class StationDeviceController : ControllerBase
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 23: grid "Kirim Hasil" untuk step non-bundle (mis. Cutting/DTF Print) dari kartu
+    // WIP -- pindahan dari WorkflowInputController (dihapus). Satu transaksi (lihat
+    // WorkflowLogService.CreateBatchAsync), ResourceId = operator sesi WAJIB (beda dengan
+    // /workflow-input dulu yang opsional). Validasi divisi/requires_bundle diserahkan ke
+    // SIS_WorkflowLog_Manage lewat ActingDivisionId + BundleId = null (SP menolak kalau step
+    // bukan milik divisi token atau butuh bundle) -- lihat sp_WorkflowLog_Manage.sql.
+    [HttpPost("nonbundle-logs/batch")]
+    public async Task<IActionResult> CreateNonBundleLogBatch([FromBody] StationNonBundleBatchCreateRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.Entries.Count == 0)
+            return BadRequest("Minimal satu baris harus diisi.");
+
+        foreach (var entry in request.Entries)
+        {
+            if (entry.ArticleSizeId <= 0)
+                return BadRequest("Size wajib dipilih.");
+
+            if (entry.QtyOk < 0 || entry.QtyRejectPrint < 0 || entry.QtyRejectFabric < 0 || entry.QtyRejectSewing < 0)
+                return BadRequest("Qty tidak boleh negatif.");
+        }
+
+        var inputs = request.Entries.Select(entry => new WorkflowLogCreateInput
+        {
+            ArticleWorkflowId = request.ArticleWorkflowId,
+            BundleId = null,
+            ArticleSizeId = entry.ArticleSizeId,
+            ResourceId = resourceId,
+            QtyOk = entry.QtyOk,
+            QtyRejectPrint = entry.QtyRejectPrint,
+            QtyRejectFabric = entry.QtyRejectFabric,
+            QtyRejectSewing = entry.QtyRejectSewing,
+            Remark = request.Remark,
+            ActingDivisionId = CurrentStation.DivisionId,
+            ConfirmExceed = false
+        }).ToList();
+
+        var (success, error, failedArticleSizeId) = await _workflowLogService.CreateBatchAsync(inputs, _systemUserId);
+        if (!success) return BadRequest(new StationNonBundleBatchResult { Error = error, ArticleSizeId = failedArticleSizeId });
         return Ok();
     }
 

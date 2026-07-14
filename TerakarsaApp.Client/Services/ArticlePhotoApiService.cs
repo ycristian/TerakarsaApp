@@ -70,6 +70,16 @@ public class ArticlePhotoApiService
         return (bytes, contentType);
     }
 
+    public async Task<(byte[] Bytes, string ContentType)?> GetFirstPhotoForProjectAsync(int projectId)
+    {
+        var response = await _http.GetAsync($"api/article-photos/by-project/{projectId}/first-photo");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        return (bytes, contentType);
+    }
+
     public async Task<(byte[] Bytes, string ContentType, string FileName)?> DownloadAsync(int articleId, int photoId)
     {
         var response = await _http.GetAsync($"api/article-photos/{articleId}/{photoId}/download");

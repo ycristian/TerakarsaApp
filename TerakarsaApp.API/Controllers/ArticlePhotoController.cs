@@ -48,6 +48,16 @@ public class ArticlePhotoController : ControllerBase
         return File(stream, contentType, fileName);
     }
 
+    [HttpGet("by-project/{projectId}/first-photo")]
+    public async Task<IActionResult> GetFirstForProject(int projectId)
+    {
+        var result = await _photoService.GetFirstPhotoForProjectForDownloadAsync(projectId);
+        if (result is null) return NotFound();
+
+        var (stream, contentType, fileName) = result.Value;
+        return File(stream, contentType, fileName);
+    }
+
     [HttpGet("{articleId}/{photoId}/download")]
     public async Task<IActionResult> Download(int articleId, int photoId)
     {

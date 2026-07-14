@@ -243,6 +243,8 @@ CREATE TABLE projects(
  [start_date] date null,
  deadline date null,
  delivery_date date null,
+ remarks varchar(500) null,                 -- catatan bebas
+ is_urgent bit not null default 0,          -- penanda urgent
  manual_status varchar(20) null,            -- NULL = otomatis (Not Started/On Going); ON_HOLD / COMPLETED / CANCELLED
  status_reason varchar(255) null,           -- wajib utk ON_HOLD & CANCELLED (komunikasi lintas divisi)
  status_changed_at datetime2 null,

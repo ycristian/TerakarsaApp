@@ -34,39 +34,6 @@ public class ArticleWorkflowService
         };
     }
 
-    // Prompt 12c: step requires_bundle = 0 milik artikel + divisi tujuan (divisi step hidup
-    // berikutnya dalam urutan sort_order, bundle atau non-bundle -- aturan 12b menjamin semua
-    // step non-bundle berada sebelum step ber-bundle, jadi "berikutnya" selalu valid untuk
-    // prefill tampilan). Dipakai halaman /workflow-input (WorkflowInputController), tidak
-    // menyentuh SIS_ArticleWorkflow_ListByArticle -- reuse GetByArticleAsync di atas.
-    public async Task<List<ArticleNonBundleStepDto>> GetNonBundleStepsAsync(int articleId)
-    {
-        var full = await GetByArticleAsync(articleId);
-        var steps = full.Steps.OrderBy(s => s.SortOrder).ToList();
-        var result = new List<ArticleNonBundleStepDto>();
-
-        for (var i = 0; i < steps.Count; i++)
-        {
-            var step = steps[i];
-            if (step.RequiresBundle) continue;
-
-            var next = i + 1 < steps.Count ? steps[i + 1] : null;
-            result.Add(new ArticleNonBundleStepDto
-            {
-                ArticleWorkflowId = step.Id,
-                StepName = step.StepName,
-                SortOrder = step.SortOrder,
-                DivisionId = step.DivisionId,
-                DivisionName = step.DivisionName,
-                IsLastStep = next is null,
-                NextDivisionId = next?.DivisionId,
-                NextDivisionName = next?.DivisionName
-            });
-        }
-
-        return result;
-    }
-
     public async Task<(bool Success, string Error)> ApplyAsync(ArticleWorkflowApplyRequest request, int userId)
     {
         var actionParam = new SqlParameter("@Action", "APPLY");

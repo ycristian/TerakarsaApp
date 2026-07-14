@@ -80,15 +80,39 @@ public class WorkflowLogService
         _db = db;
     }
 
-    private class StationPendingHandoverRow
+    private class StationActiveWorkRow
     {
-        public int WorkflowLogId { get; set; }
         public int ArticleWorkflowId { get; set; }
+        public int ArticleId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
         public string ArticleName { get; set; } = string.Empty;
         public string? Style { get; set; }
         public string? Color { get; set; }
         public string StepName { get; set; } = string.Empty;
+        public bool IsBundling { get; set; }
+        public bool IsLastStep { get; set; }
+        public int? NextDivisionId { get; set; }
+        public string? NextDivisionName { get; set; }
+        public string? SizesJson { get; set; }
+        public int? BundleCount { get; set; }
+        public int? TotalBundleQty { get; set; }
+        public int? TotalOrderQty { get; set; }
+        // Dipakai hanya utk ORDER BY di SQL (UNION ActiveWork + kartu Buat Bundle) -- tidak
+        // diteruskan ke StationActiveWorkDto.
+        public int SortOrder { get; set; }
+    }
+
+    private class StationPendingHandoverRow
+    {
+        public int WorkflowLogId { get; set; }
+        public int ArticleWorkflowId { get; set; }
+        public int ArticleId { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string ArticleName { get; set; } = string.Empty;
+        public string? Style { get; set; }
+        public string? Color { get; set; }
+        public string StepName { get; set; } = string.Empty;
+        public bool IsBundling { get; set; }
         public int? BundleId { get; set; }
         public int? BundleNo { get; set; }
         public string? Serial { get; set; }
@@ -106,6 +130,9 @@ public class WorkflowLogService
         public DateTime? UpdatedAt { get; set; }
         public string? SizesJson { get; set; }
         public string? TargetDivisionOptionsJson { get; set; }
+        public int? BundleResourceId { get; set; }
+        public string? BundleResourceName { get; set; }
+        public string? BundleResourcePersonName { get; set; }
     }
 
     public async Task<List<WorkflowLogDto>> ListByArticleAsync(int articleId)
@@ -164,11 +191,13 @@ public class WorkflowLogService
         {
             WorkflowLogId = row.WorkflowLogId,
             ArticleWorkflowId = row.ArticleWorkflowId,
+            ArticleId = row.ArticleId,
             ProjectName = row.ProjectName,
             ArticleName = row.ArticleName,
             Style = row.Style,
             Color = row.Color,
             StepName = row.StepName,
+            IsBundling = row.IsBundling,
             BundleId = row.BundleId,
             BundleNo = row.BundleNo,
             Serial = row.Serial,
@@ -189,7 +218,42 @@ public class WorkflowLogService
                 : JsonSerializer.Deserialize<List<ArticleSizeOptionDto>>(row.SizesJson) ?? new(),
             TargetDivisionOptions = string.IsNullOrEmpty(row.TargetDivisionOptionsJson)
                 ? new()
-                : JsonSerializer.Deserialize<List<DivisionOptionDto>>(row.TargetDivisionOptionsJson) ?? new()
+                : JsonSerializer.Deserialize<List<DivisionOptionDto>>(row.TargetDivisionOptionsJson) ?? new(),
+            BundleResourceId = row.BundleResourceId,
+            BundleResourceName = row.BundleResourceName,
+            BundleResourcePersonName = row.BundleResourcePersonName
+        }).ToList();
+    }
+
+    // Prompt 23: kartu permanen (artikel x step non-bundle) di tab WIP -- lihat
+    // SIS_Station_ActiveWork. Tanpa filter Line (kartu ini tidak terikat bundle/Line).
+    public async Task<List<StationActiveWorkDto>> GetActiveWorkAsync(int divisionId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+
+        var rows = await _db.Database
+            .SqlQueryRaw<StationActiveWorkRow>("EXEC SIS_Station_ActiveWork @DivisionId = @DivisionId", divisionIdParam)
+            .ToListAsync();
+
+        return rows.Select(row => new StationActiveWorkDto
+        {
+            ArticleWorkflowId = row.ArticleWorkflowId,
+            ArticleId = row.ArticleId,
+            ProjectName = row.ProjectName,
+            ArticleName = row.ArticleName,
+            Style = row.Style,
+            Color = row.Color,
+            StepName = row.StepName,
+            IsBundling = row.IsBundling,
+            IsLastStep = row.IsLastStep,
+            NextDivisionId = row.NextDivisionId,
+            NextDivisionName = row.NextDivisionName,
+            Sizes = string.IsNullOrEmpty(row.SizesJson)
+                ? new()
+                : JsonSerializer.Deserialize<List<StationActiveWorkSizeDto>>(row.SizesJson) ?? new(),
+            BundleCount = row.BundleCount,
+            TotalBundleQty = row.TotalBundleQty,
+            TotalOrderQty = row.TotalOrderQty
         }).ToList();
     }
 

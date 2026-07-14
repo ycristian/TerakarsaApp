@@ -59,11 +59,11 @@ else
             <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
         }
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
-                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" />
+                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" AllowReprint="true" />
     }
     else
     {
-        <BundleScanCard Info="scanInfo!" ReadOnly="true" />
+        <BundleScanCard Info="scanInfo!" ReadOnly="true" AllowReprint="false" />
     }
 
     @if (wip.Count > 0)

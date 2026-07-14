@@ -24,12 +24,28 @@
 --      sendiri, jadi cukup satu lock global untuk keduanya.
 --   7. Prompt 17: CREATE membuat juga baris article_workflow_logs untuk step Bunding implisit
 --      artikel ini (bundle_id = bundle baru, qty_ok = qty bundle, received_at NULL) dan
---      auto-receive semua log non-bundle (mis. Cutting) yang masih pending -- lihat detail di
+--      auto-receive log non-bundle (mis. Cutting) yang masih pending -- lihat detail di
 --      badan procedure. @BundlingResourceId (opsional) = pelaksana yang mengemas bundle ini;
 --      UPDATE menyinkronkan qty_ok/resource_id log tsb, DELETE ikut soft-delete log tsb.
+--      Prompt 23: auto-receive DIPERSEMPIT -- hanya baris dari step non-bundle dengan
+--      sort_order TERBESAR di antara step requires_bundle = 0 hidup artikel ini (step non-
+--      bundle sebelumnya, mis. DTF Print sebelum Cutting, diterima manual oleh divisi
+--      berikutnya lewat tab IN stasiun, bukan lagi otomatis di sini).
 --   8. Prompt 18: CREATE/UPDATE/DELETE ditolak kalau project artikel ini berstatus manual
 --      (ON_HOLD/COMPLETED/CANCELLED) -- pesan RAISERROR menyertakan alasan bila ada.
 --      SIS_Bundle_ReprintLabel TIDAK dikunci (cetak ulang label tetap boleh kapan pun).
+--   9. Prompt 24: @SkipPrintJob (default 0) -- bila 1, CREATE melewati insert print_jobs
+--      (dipakai station saat checkbox "Cetak label otomatis" tidak dicentang). UPDATE guard
+--      dipecah jadi 2 pesan terpisah supaya jelas: log step berikutnya (is_bundling = 0) vs
+--      log Bundling sendiri sudah diterima (received_at terisi) -- keduanya tetap menolak
+--      perubahan, hanya pesannya yang dibedakan.
+--   10. Prompt 25: kalau bundle dibuat dengan @ResourceId (penjahit/Line) terisi, log
+--      Bundling-nya LANGSUNG dibuat received_at/received_by_resource_id = @ResourceId (auto-
+--      diterima oleh Line tujuan) -- Line sudah pasti sejak bundle dibuat, jadi tidak perlu
+--      scan/Terima manual lagi di tab IN stasiun tujuan. Konsekuensi: berlaku juga aturan #4 --
+--      begitu received_at terisi (langsung setelah CREATE), bundle TIDAK bisa lagi
+--      diubah/dihapus lewat SIS_Bundle_Manage (harus direvisi dari sisi divisi tujuan).
+--      Tanpa penjahit (@ResourceId NULL), tetap pending seperti semula (perilaku lama).
 
 SET ANSI_NULLS ON;
 GO
@@ -46,6 +62,7 @@ CREATE OR ALTER PROCEDURE SIS_Bundle_Manage
     @ResourcePersonName  VARCHAR(150) = NULL,
     @PublicBaseUrl       VARCHAR(255) = NULL,
     @BundlingResourceId  INT = NULL,
+    @SkipPrintJob        BIT = 0,
     @UserId              INT = NULL
 AS
 BEGIN
@@ -165,51 +182,75 @@ BEGIN
             DECLARE @NewBundleId INT = CAST(SCOPE_IDENTITY() AS INT);
             DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + @NewSerial;
 
-            DECLARE @Payload NVARCHAR(MAX) = (
-                SELECT
-                    @NewSerial AS serial,
-                    @NewBundleNo AS bundle_no,
-                    @QrContent AS qr_content,
-                    p.project_name AS project_name,
-                    p.no_po AS no_po,
-                    p.material_name AS material_name,
-                    a.article_name AS article_name,
-                    a.style AS style,
-                    a.color AS color,
-                    spk.size_pack_name AS size_pack_name,
-                    spd.size_name AS size_name,
-                    @Qty AS qty,
-                    res.resource_name AS resource_name,
-                    @ResourcePersonName AS resource_person_name,
-                    (SELECT created_at FROM bundles WHERE bundle_id = @NewBundleId) AS started_at
-                FROM articles a
-                INNER JOIN projects p ON p.project_id = a.project_id
-                INNER JOIN size_packs spk ON spk.size_pack_id = a.size_pack_id
-                INNER JOIN article_sizes asz ON asz.article_size_id = @ArticleSizeId
-                INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
-                LEFT JOIN resources res ON res.resource_id = @ResourceId
-                WHERE a.article_id = @ArticleId
-                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
-            );
+            -- Prompt 24: @SkipPrintJob = 1 (checkbox "Cetak label otomatis" tidak dicentang
+            -- di station) -- lewati insert print_jobs, NewPrintJobId dikembalikan NULL.
+            DECLARE @NewPrintJobId INT = NULL;
+            IF @SkipPrintJob = 0
+            BEGIN
+                DECLARE @Payload NVARCHAR(MAX) = (
+                    SELECT
+                        @NewSerial AS serial,
+                        @NewBundleNo AS bundle_no,
+                        @QrContent AS qr_content,
+                        p.project_name AS project_name,
+                        p.no_po AS no_po,
+                        p.material_name AS material_name,
+                        a.article_name AS article_name,
+                        a.style AS style,
+                        a.color AS color,
+                        spk.size_pack_name AS size_pack_name,
+                        spd.size_name AS size_name,
+                        @Qty AS qty,
+                        res.resource_name AS resource_name,
+                        @ResourcePersonName AS resource_person_name,
+                        (SELECT created_at FROM bundles WHERE bundle_id = @NewBundleId) AS started_at
+                    FROM articles a
+                    INNER JOIN projects p ON p.project_id = a.project_id
+                    INNER JOIN size_packs spk ON spk.size_pack_id = a.size_pack_id
+                    INNER JOIN article_sizes asz ON asz.article_size_id = @ArticleSizeId
+                    INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                    LEFT JOIN resources res ON res.resource_id = @ResourceId
+                    WHERE a.article_id = @ArticleId
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+                );
 
-            INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-            VALUES ('BUNDLE_LABEL', @NewBundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+                INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+                VALUES ('BUNDLE_LABEL', @NewBundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
 
-            DECLARE @NewPrintJobId INT = CAST(SCOPE_IDENTITY() AS INT);
+                SET @NewPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
+            END
+
+            -- Prompt 23: hanya step non-bundle TERAKHIR (sort_order terbesar di antara
+            -- requires_bundle = 0 hidup) yang di-auto-receive di sini.
+            DECLARE @LastNonBundleStepId INT;
+            SELECT TOP 1 @LastNonBundleStepId = article_workflow_id
+            FROM article_workflows
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 0
+            ORDER BY sort_order DESC;
 
             -- Prompt 17: catat kegiatan Bundling sebagai log workflow (menunggu diterima
             -- divisi berikutnya) + auto-receive log non-bundle (mis. Cutting) yang masih
             -- pending -- tanggung jawab akurasi qty tetap di divisi non-bundle, sistem
             -- tidak memblokir pembuatan bundle karena ini.
+            -- Prompt 25: kalau bundle langsung ditugaskan ke penjahit/Line (@ResourceId terisi
+            -- -- lihat "Penjahit" di modal Buat Bundle), log Bundling ini LANGSUNG dianggap
+            -- diterima oleh Line tersebut (received_at/received_by_resource_id terisi saat
+            -- INSERT) -- Line tujuan sudah pasti, jadi tidak perlu scan/Terima manual lagi di
+            -- tab IN stasiun. Tanpa penjahit (@ResourceId NULL), tetap pending seperti semula.
             INSERT INTO article_workflow_logs (
                 article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
                 qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing,
-                remark, target_division_id, created_at, created_by
+                remark, target_division_id, received_at, received_by_resource_id, received_remark,
+                created_at, created_by
             )
             VALUES (
                 @BundlingStepId, @NewBundleId, NULL, @BundlingDivisionId, @BundlingResourceId, NULL,
                 @Qty, 0, 0, 0,
-                NULL, @BundlingTargetDivisionId, SYSDATETIME(), @UserId
+                NULL, @BundlingTargetDivisionId,
+                CASE WHEN @ResourceId IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
+                @ResourceId,
+                CASE WHEN @ResourceId IS NOT NULL THEN 'Otomatis: bundle langsung ditugaskan ke penjahit/Line' ELSE NULL END,
+                SYSDATETIME(), @UserId
             );
 
             UPDATE awl
@@ -217,14 +258,13 @@ BEGIN
                 received_by_resource_id = @BundlingResourceId,
                 received_remark = 'Otomatis: pembuatan bundle'
             FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE aw.article_id = @ArticleId AND aw.requires_bundle = 0
-              AND aw.deleted_at IS NULL AND awl.deleted_at IS NULL
+            WHERE awl.article_workflow_id = @LastNonBundleStepId
+              AND awl.deleted_at IS NULL
               AND awl.received_at IS NULL AND awl.target_division_id IS NOT NULL;
 
             COMMIT TRAN;
 
-            SELECT @NewBundleId AS NewId, @NewPrintJobId AS NewPrintJobId, @NewBundleNo AS NewBundleNo;
+            SELECT @NewBundleId AS NewId, @NewPrintJobId AS NewPrintJobId, @NewBundleNo AS NewBundleNo, @NewSerial AS NewSerial;
         END TRY
         BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK TRAN;
@@ -274,14 +314,22 @@ BEGIN
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 0
-        ) OR EXISTS (
+        )
+        BEGIN
+            RAISERROR('Bundle sudah diproses, tidak bisa diubah.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 24: guard terpisah, pesan jelas -- log Bundling bundle ini sendiri sudah
+        -- diserah-terimakan ke divisi berikutnya (received_at terisi).
+        IF EXISTS (
             SELECT 1
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 1 AND awl.received_at IS NOT NULL
         )
         BEGIN
-            RAISERROR('Bundle sudah diproses, tidak bisa diubah.', 16, 1);
+            RAISERROR('Bundle sudah diterima divisi berikutnya, tidak bisa diubah.', 16, 1);
             RETURN;
         END
 

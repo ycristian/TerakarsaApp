@@ -50,6 +50,9 @@ public class BundleCreateRequest
     public int? ResourceId { get; set; }
     public string? ResourcePersonName { get; set; }
     public int? BundlingResourceId { get; set; }
+    // Prompt 24: checkbox "Cetak label otomatis" di station (default true; admin /bundles
+    // tidak mengirim field ini sehingga tetap berperilaku sama seperti sebelumnya).
+    public bool AutoPrint { get; set; } = true;
 }
 
 public class BundleUpdateRequest
@@ -64,8 +67,35 @@ public class BundleUpdateRequest
 public class BundleCreateResult
 {
     public int Id { get; set; }
-    public int PrintJobId { get; set; }
+    // Prompt 24: nullable -- NULL kalau @SkipPrintJob = 1 (checkbox "Cetak label otomatis"
+    // tidak dicentang di station).
+    public int? PrintJobId { get; set; }
     public int BundleNo { get; set; }
+    public string Serial { get; set; } = string.Empty;
+}
+
+// Prompt 24: "Buat Bundle" dari kartu WIP station Bundling -- ResourceId = operator sesi
+// (WAJIB, dikirim ke SP sebagai @BundlingResourceId); Tailor* = penjahit opsional (dikirim
+// sebagai @ResourceId/@ResourcePersonName di SIS_Bundle_Manage) -- nama field beda dari
+// BundleCreateRequest supaya semantik operator-sesi vs penjahit tidak tertukar.
+public class StationBundleCreateRequest
+{
+    public int ArticleId { get; set; }
+    public int ArticleSizeId { get; set; }
+    public int Qty { get; set; }
+    public int ResourceId { get; set; }
+    public int? TailorResourceId { get; set; }
+    public string? TailorPersonName { get; set; }
+    public bool AutoPrint { get; set; } = true;
+}
+
+// Prompt 24: Edit bundle dari tab OUT station Bundling.
+public class StationBundleUpdateRequest
+{
+    public int Qty { get; set; }
+    public int ResourceId { get; set; }
+    public int? TailorResourceId { get; set; }
+    public string? TailorPersonName { get; set; }
 }
 
 // --- Prompt 12: scan QR bundle (/station panel scan + halaman publik /b/{serial}) ---

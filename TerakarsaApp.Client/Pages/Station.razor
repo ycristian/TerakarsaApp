@@ -189,6 +189,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Kode Pairing</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="ClosePairingModal"></button>
                 </div>
                 <div class="modal-body text-center">
                     <p class="text-muted">Scan QR ini langsung dari kamera tablet/HP, buka link-nya, atau ketik kodenya manual di layar aktivasi perangkat.</p>
@@ -199,6 +200,7 @@ else
                         <button class="btn btn-outline-secondary" type="button" @onclick="CopyPairingLink">
                             @(copied ? "Tersalin!" : "Salin Link")
                         </button>
+                        <a class="btn btn-outline-secondary" title="Buka" target="_blank" href="@pairingResult.Link"><i class="fe fe-external-link"></i></a>
                     </div>
                     <div class="text-muted small">Berlaku sampai @pairingResult.ExpiresAt.ToString("HH:mm") &middot; 15 menit, sekali pakai.</div>
                 </div>

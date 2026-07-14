@@ -8,11 +8,18 @@
 --   Menerima baris ini artinya update received_at/received_by_resource_id (action RECEIVE
 --   di SIS_WorkflowLog_Manage), memakai workflow_log_id, bukan lagi article_workflow_id.
 --
---   SIS_Station_ActiveWork: step non-bundle (requires_bundle = 0) milik divisi ini --
---   SELALU tampil untuk semua artikel yang project-nya masih hidup, bukan antrian
+--   SIS_Station_ActiveWork: step non-bundle (requires_bundle = 0) milik divisi ini -- tampil
+--   untuk artikel yang project-nya masih aktif (manual_status bukan COMPLETED/CANCELLED,
+--   sama seperti sp_Report_DivisionWip.sql) DAN sudah berstatus STARTED/ON_GOING/ON_HOLD
+--   (derived_status bukan NOT_STARTED -- lihat sp_Project_Select.sql: manual_status terisi,
+--   ATAU start_date sudah tiba/lewat, ATAU project sudah punya log workflow), bukan antrian
 --   sekali-pakai (baris non-bundle bebas dicatat berulang kapan pun, lihat komentar di
---   sp_WorkflowLog_Manage.sql). Sertakan daftar ukuran artikel (FOR JSON) supaya client
---   bisa menampilkan dropdown Size tanpa round-trip tambahan.
+--   sp_WorkflowLog_Manage.sql). Kartu "Buat Bundle" (is_bundling = 1, Prompt 24) di UNION
+--   ALL kedua ikut gate yang sama -- project yang belum dimulai belum boleh mulai bundling.
+--   Prompt 23: dihidupkan lagi sebagai sumber kartu permanen (artikel x step) di tab WIP --
+--   sejak 12c sempat tak terpakai. Daftar ukuran (FOR JSON) kini menyertakan qty_order
+--   (article_sizes.qty) + total qty_ok tercatat step ini per ukuran, supaya client bisa
+--   menampilkan grid Kirim Hasil (kolom Order/Tercatat) tanpa round-trip tambahan.
 --
 --   SIS_Station_PendingHandover: kebalikan dari PendingReceives -- baris yang DIBUAT oleh
 --   divisi ini sendiri (division_id = @DivisionId), sudah punya tujuan serah, tapi BELUM
@@ -54,6 +61,25 @@
 --   Prompt 23 juga menampilkan baris step terakhir (H+1, lihat komentar di atas), bukan
 --   lagi cuma baris yang ada tujuan serah. Tidak dibuat SP SIS_Station_Outbound terpisah
 --   supaya tidak duplikasi logika.
+--
+--   Prompt 23: SIS_Station_InProgress kini juga menyertakan style/color artikel (murni data
+--   tambahan, tidak mengubah alur kartu bundle) supaya pencarian teks WAJIB di tab WIP bisa
+--   menyaring kartu bundle dan kartu non-bundle dengan field yang sama. SIS_Station_Counts
+--   DikerjakanCount kini menjumlahkan kartu bundle (definisi SIS_Station_InProgress) DENGAN
+--   kartu non-bundle (definisi SIS_Station_ActiveWork), supaya angka WIP di strip atas
+--   konsisten dengan isi tab gabungan.
+--
+-- Prompt 24: SIS_Station_ActiveWork sekarang UNION dua sumber kartu WIP -- step non-bundle
+--   (IsBundling = 0, seperti sebelumnya) DAN step Bundling implisit (is_bundling = 1,
+--   IsBundling = 1) milik @DivisionId, yaitu kartu "Buat Bundle" di station divisi Bundling.
+--   Baris IsBundling = 1 TIDAK membawa SizesJson (detail per size diambil client lewat
+--   SIS_Article_BundleSummary saat modal dibuka) -- sebagai gantinya bawa ringkasan
+--   BundleCount/TotalBundleQty/TotalOrderQty untuk teks ringkas di kartu. SIS_Station_Counts
+--   DikerjakanCount diperluas sejalan (requires_bundle = 0 OR is_bundling = 1).
+--   SIS_Station_PendingHandover kini juga membawa ArticleId, IsBundling, dan data penjahit
+--   bundle (BundleResourceId/BundleResourceName/BundleResourcePersonName, DIBEDAKAN dari
+--   ResourceName yang di baris Bundling berarti pelaksana BUNDLING, bukan penjahit) --
+--   dipakai tombol Edit bundle di tab OUT (menggantikan Revisi/Batal Serah utk baris ini).
 
 SET ANSI_NULLS ON;
 GO
@@ -110,43 +136,134 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT aw.article_workflow_id AS ArticleWorkflowId,
-           p.project_name AS ProjectName, a.article_name AS ArticleName,
-           a.style AS Style, a.color AS Color,
-           aw.step_name AS StepName,
-           CASE WHEN aw.sort_order = (
-               SELECT MAX(aw3.sort_order) FROM article_workflows aw3
-               WHERE aw3.article_id = aw.article_id AND aw3.deleted_at IS NULL
-           ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep,
-           (
-               SELECT TOP 1 aw4.division_id
-               FROM article_workflows aw4
-               WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
-               ORDER BY aw4.sort_order ASC
-           ) AS NextDivisionId,
-           (
-               SELECT TOP 1 d4.division_name
-               FROM article_workflows aw4
-               INNER JOIN divisions d4 ON d4.division_id = aw4.division_id
-               WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
-               ORDER BY aw4.sort_order ASC
-           ) AS NextDivisionName,
-           (
-               SELECT asz.article_size_id AS Id, spd.size_name AS SizeName
-               FROM article_sizes asz
-               INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
-               WHERE asz.article_id = aw.article_id AND asz.deleted_at IS NULL
-               ORDER BY spd.sort_order
-               FOR JSON PATH
-           ) AS SizesJson
-    FROM article_workflows aw
-    INNER JOIN articles a ON a.article_id = aw.article_id
-    INNER JOIN projects p ON p.project_id = a.project_id
-    WHERE aw.division_id = @DivisionId
-      AND aw.deleted_at IS NULL
-      AND aw.requires_bundle = 0
-      AND p.deleted_at IS NULL
-    ORDER BY p.project_name ASC, a.article_name ASC, aw.sort_order ASC;
+    SELECT * FROM (
+        SELECT aw.article_workflow_id AS ArticleWorkflowId,
+               a.article_id AS ArticleId,
+               p.project_name AS ProjectName, a.article_name AS ArticleName,
+               a.style AS Style, a.color AS Color,
+               aw.step_name AS StepName,
+               CAST(0 AS BIT) AS IsBundling,
+               CASE WHEN aw.sort_order = (
+                   SELECT MAX(aw3.sort_order) FROM article_workflows aw3
+                   WHERE aw3.article_id = aw.article_id AND aw3.deleted_at IS NULL
+               ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep,
+               (
+                   SELECT TOP 1 aw4.division_id
+                   FROM article_workflows aw4
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   ORDER BY aw4.sort_order ASC
+               ) AS NextDivisionId,
+               (
+                   SELECT TOP 1 d4.division_name
+                   FROM article_workflows aw4
+                   INNER JOIN divisions d4 ON d4.division_id = aw4.division_id
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   ORDER BY aw4.sort_order ASC
+               ) AS NextDivisionName,
+               (
+                   SELECT asz.article_size_id AS Id, spd.size_name AS SizeName, asz.qty AS QtyOrder,
+                          ISNULL((
+                              SELECT SUM(awl.qty_ok)
+                              FROM article_workflow_logs awl
+                              WHERE awl.article_workflow_id = aw.article_workflow_id
+                                AND awl.article_size_id = asz.article_size_id
+                                AND awl.deleted_at IS NULL
+                          ), 0) AS QtyRecorded
+                   FROM article_sizes asz
+                   INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                   WHERE asz.article_id = aw.article_id AND asz.deleted_at IS NULL
+                   ORDER BY spd.sort_order
+                   FOR JSON PATH
+               ) AS SizesJson,
+               CAST(NULL AS INT) AS BundleCount,
+               CAST(NULL AS INT) AS TotalBundleQty,
+               CAST(NULL AS INT) AS TotalOrderQty,
+               aw.sort_order AS SortOrder
+        FROM article_workflows aw
+        INNER JOIN articles a ON a.article_id = aw.article_id
+        INNER JOIN projects p ON p.project_id = a.project_id
+        WHERE aw.division_id = @DivisionId
+          AND aw.deleted_at IS NULL
+          AND aw.requires_bundle = 0
+          AND p.deleted_at IS NULL
+          AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
+          AND (
+                p.manual_status IS NOT NULL
+                OR (p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE))
+                OR EXISTS (
+                    SELECT 1 FROM article_workflow_logs awl2
+                    INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl2.article_workflow_id
+                    INNER JOIN articles a2 ON a2.article_id = aw2.article_id
+                    WHERE a2.project_id = p.project_id
+                      AND awl2.deleted_at IS NULL AND aw2.deleted_at IS NULL AND a2.deleted_at IS NULL
+                )
+              )
+
+        UNION ALL
+
+        -- Prompt 24: kartu "Buat Bundle" -- step Bundling implisit (is_bundling = 1) milik
+        -- divisi ini. Tanpa SizesJson (detail per size lewat SIS_Article_BundleSummary saat
+        -- modal dibuka) -- cukup ringkasan jumlah bundle vs order untuk teks kartu.
+        SELECT aw.article_workflow_id AS ArticleWorkflowId,
+               a.article_id AS ArticleId,
+               p.project_name AS ProjectName, a.article_name AS ArticleName,
+               a.style AS Style, a.color AS Color,
+               aw.step_name AS StepName,
+               CAST(1 AS BIT) AS IsBundling,
+               CASE WHEN aw.sort_order = (
+                   SELECT MAX(aw3.sort_order) FROM article_workflows aw3
+                   WHERE aw3.article_id = aw.article_id AND aw3.deleted_at IS NULL
+               ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep,
+               (
+                   SELECT TOP 1 aw4.division_id
+                   FROM article_workflows aw4
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   ORDER BY aw4.sort_order ASC
+               ) AS NextDivisionId,
+               (
+                   SELECT TOP 1 d4.division_name
+                   FROM article_workflows aw4
+                   INNER JOIN divisions d4 ON d4.division_id = aw4.division_id
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   ORDER BY aw4.sort_order ASC
+               ) AS NextDivisionName,
+               CAST(NULL AS NVARCHAR(MAX)) AS SizesJson,
+               (
+                   SELECT COUNT(*) FROM bundles b
+                   INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                   WHERE asz.article_id = aw.article_id AND b.deleted_at IS NULL
+               ) AS BundleCount,
+               (
+                   SELECT ISNULL(SUM(b.qty), 0) FROM bundles b
+                   INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                   WHERE asz.article_id = aw.article_id AND b.deleted_at IS NULL
+               ) AS TotalBundleQty,
+               (
+                   SELECT ISNULL(SUM(asz.qty), 0) FROM article_sizes asz
+                   WHERE asz.article_id = aw.article_id AND asz.deleted_at IS NULL
+               ) AS TotalOrderQty,
+               aw.sort_order AS SortOrder
+        FROM article_workflows aw
+        INNER JOIN articles a ON a.article_id = aw.article_id
+        INNER JOIN projects p ON p.project_id = a.project_id
+        WHERE aw.division_id = @DivisionId
+          AND aw.deleted_at IS NULL
+          AND aw.is_bundling = 1
+          AND p.deleted_at IS NULL
+          AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
+          AND (
+                p.manual_status IS NOT NULL
+                OR (p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE))
+                OR EXISTS (
+                    SELECT 1 FROM article_workflow_logs awl2
+                    INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl2.article_workflow_id
+                    INNER JOIN articles a2 ON a2.article_id = aw2.article_id
+                    WHERE a2.project_id = p.project_id
+                      AND awl2.deleted_at IS NULL AND aw2.deleted_at IS NULL AND a2.deleted_at IS NULL
+                )
+              )
+    ) x
+    ORDER BY ProjectName ASC, ArticleName ASC, SortOrder ASC;
 END;
 GO
 
@@ -162,9 +279,13 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT awl.workflow_log_id AS WorkflowLogId, awl.article_workflow_id AS ArticleWorkflowId,
+           a.article_id AS ArticleId,
            p.project_name AS ProjectName, a.article_name AS ArticleName,
            a.style AS Style, a.color AS Color,
            aw.step_name AS StepName,
+           -- Prompt 24: true kalau baris ini log step Bundling implisit (bundle dibuat lewat
+           -- kartu "Buat Bundle") -- client memakai ini utk ganti Revisi/Batal Serah jadi Edit.
+           aw.is_bundling AS IsBundling,
            awl.bundle_id AS BundleId, b.bundle_no AS BundleNo, b.serial AS Serial,
            awl.article_size_id AS ArticleSizeId, spd.size_name AS SizeName,
            awl.qty_ok AS QtyOk, awl.qty_reject_print AS QtyRejectPrint,
@@ -193,7 +314,13 @@ BEGIN
                INNER JOIN divisions d3 ON d3.division_id = aw3.division_id
                WHERE aw3.article_id = a.article_id AND aw3.deleted_at IS NULL
                FOR JSON PATH
-           ) AS TargetDivisionOptionsJson
+           ) AS TargetDivisionOptionsJson,
+           -- Prompt 24: data penjahit BUNDLE (bundles.resource_id/resource_person_name) --
+           -- DIBEDAKAN dari ResourceName di atas yang untuk baris Bundling berarti pelaksana
+           -- bundling (awl.resource_id), bukan penjahit. Dipakai prefill modal Edit bundle.
+           b.resource_id AS BundleResourceId,
+           bres.resource_name AS BundleResourceName,
+           b.resource_person_name AS BundleResourcePersonName
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -203,6 +330,7 @@ BEGIN
     LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
     LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = awl.resource_id
+    LEFT JOIN resources bres ON bres.resource_id = b.resource_id
     WHERE awl.division_id = @DivisionId
       AND awl.deleted_at IS NULL
       AND (
@@ -271,7 +399,7 @@ BEGIN
     ;WITH Base AS (
         SELECT
             b.bundle_id, b.serial, b.bundle_no, b.qty,
-            a.article_id, a.article_name,
+            a.article_id, a.article_name, a.style, a.color,
             p.project_name,
             spd.size_name,
             ISNULL(b.resource_person_name, rr.resource_name) AS tailor_name,
@@ -306,6 +434,7 @@ BEGIN
         bs.bundle_no AS BundleNo,
         bs.project_name AS ProjectName,
         bs.article_name AS ArticleName,
+        bs.style AS Style, bs.color AS Color,
         bs.size_name AS SizeName,
         bs.qty AS Qty,
         bs.tailor_name AS TailorName,
@@ -370,6 +499,20 @@ BEGIN
                 WHERE b.deleted_at IS NULL AND ll.received_at IS NOT NULL AND ll.target_division_id = @DivisionId
                   AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
             ) x
+        )
+        +
+        (
+            -- Prompt 23: tambahkan kartu non-bundle (artikel x step), definisi sama dengan
+            -- SIS_Station_ActiveWork -- tanpa filter Line (kartu non-bundle tidak terikat Line).
+            -- Prompt 24: ikut hitung kartu "Buat Bundle" (is_bundling = 1), selaras dengan
+            -- UNION baru di SIS_Station_ActiveWork.
+            SELECT COUNT(*)
+            FROM article_workflows aw
+            INNER JOIN articles a ON a.article_id = aw.article_id
+            INNER JOIN projects p ON p.project_id = a.project_id
+            WHERE aw.division_id = @DivisionId AND aw.deleted_at IS NULL
+              AND (aw.requires_bundle = 0 OR aw.is_bundling = 1)
+              AND p.deleted_at IS NULL AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
         ) AS DikerjakanCount,
         (
             -- Prompt 23: selaraskan dengan SIS_Station_PendingHandover -- ikut hitung baris

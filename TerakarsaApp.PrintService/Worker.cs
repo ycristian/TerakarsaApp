@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.Extensions.Options;
 using TerakarsaApp.Shared.PrintJobs;
 
@@ -100,12 +99,12 @@ public class Worker : BackgroundService
                 var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
                 Directory.CreateDirectory(dryRunDir);
                 var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.tspl");
-                await File.WriteAllTextAsync(path, tspl, Encoding.ASCII, ct);
+                await File.WriteAllBytesAsync(path, tspl, ct);
                 Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun) serial {payload.Serial}: TSPL ditulis ke {path}");
             }
             else
             {
-                RawPrinterHelper.SendBytesToPrinter(_options.PrinterName, Encoding.ASCII.GetBytes(tspl));
+                RawPrinterHelper.SendBytesToPrinter(_options.PrinterName, tspl);
                 Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {payload.Serial}: dicetak ke printer '{_options.PrinterName}'.");
             }
 

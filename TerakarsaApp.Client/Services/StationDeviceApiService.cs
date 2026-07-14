@@ -54,6 +54,54 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
     }
 
+    // Prompt 24: dropdown "Penjahit" di modal Buat Bundle/Edit Bundle -- divisi lain dari
+    // divisi stasiun ini sendiri (lihat FirstBundleStepDivisionId).
+    public async Task<List<ResourceLookupDto>> GetResourcesByDivisionAsync(int divisionId)
+    {
+        var response = await _http.GetAsync($"api/station/resources/{divisionId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
+    }
+
+    // Prompt 24: ringkasan per size untuk modal "Buat Bundle".
+    public async Task<List<BundleSizeSummaryDto>> GetBundlingSummaryAsync(int articleId)
+    {
+        var response = await _http.GetAsync($"api/station/bundling/articles/{articleId}/summary");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleSizeSummaryDto>>() ?? new();
+    }
+
+    // Prompt 24: "Buat Bundle" dari kartu WIP station Bundling.
+    public async Task<(bool Success, string Error, BundleCreateResult? Result)> CreateBundleAsync(StationBundleCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/bundles", request);
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<BundleCreateResult>();
+            return (true, string.Empty, result);
+        }
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat bundle." : error.Trim('"'), null);
+    }
+
+    // Prompt 24: Edit bundle dari tab OUT station Bundling.
+    public async Task<(bool Success, string Error)> UpdateBundleAsync(int bundleId, StationBundleUpdateRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/bundles/{bundleId}", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan." : error.Trim('"'));
+    }
+
+    // Prompt 24: Cetak Ulang label -- dipakai semua kartu bundle di station + BundleScanCard.
+    public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId)
+    {
+        var response = await _http.PostAsync($"api/station/bundles/{bundleId}/reprint", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));
+    }
+
     // Prompt 22b: resourceId = operator sesi saat ini, dipakai server untuk filter antrian
     // ke Line operator ini (lihat EffectiveResourceId di StationDeviceController).
     public async Task<List<StationPendingReceiveDto>> GetPendingReceivesAsync(int? resourceId)
@@ -83,6 +131,25 @@ public class StationDeviceApiService
         var response = await _http.GetAsync($"api/station/in-progress{ResourceIdQuery(resourceId)}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationInProgressDto>>() ?? new();
+    }
+
+    // Prompt 23: kartu permanen (artikel x step non-bundle) di tab WIP -- tanpa resourceId
+    // (kartu ini tidak terikat Line).
+    public async Task<List<StationActiveWorkDto>> GetActiveWorkAsync()
+    {
+        var response = await _http.GetAsync("api/station/active-work");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationActiveWorkDto>>() ?? new();
+    }
+
+    // Prompt 23: grid "Kirim Hasil" non-bundle -- pindahan dari WorkflowInputApiService.
+    public async Task<(bool Success, string Error, int? ArticleSizeId)> CreateNonBundleLogBatchAsync(StationNonBundleBatchCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/nonbundle-logs/batch", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty, null);
+
+        var result = await response.Content.ReadFromJsonAsync<StationNonBundleBatchResult>();
+        return (false, string.IsNullOrWhiteSpace(result?.Error) ? "Gagal menyimpan data." : result.Error, result?.ArticleSizeId);
     }
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim).

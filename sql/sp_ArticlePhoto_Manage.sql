@@ -1,5 +1,7 @@
 -- Mutasi & pengambilan data article_photos dalam satu SP sederhana
--- (sama seperti project_attachments): GETBYARTICLE, CREATE, DELETE, SETPRIMARY.
+-- (sama seperti project_attachments): GETBYARTICLE, GETFIRSTFORPROJECT, CREATE, DELETE, SETPRIMARY.
+-- GETFIRSTFORPROJECT: foto primary (atau foto pertama) dari artikel dengan article_id
+-- terkecil pada project tsb -- dipakai untuk kolom Foto di Daftar Project.
 -- Foto pertama yang diupload untuk sebuah artikel otomatis jadi is_primary = 1.
 -- Hapus = soft delete metadata saja, file fisik di storage dibiarkan (lihat IFileStorageService).
 -- Jika foto primary dihapus dan masih ada foto lain, foto berikutnya otomatis jadi primary.
@@ -13,6 +15,7 @@ CREATE OR ALTER PROCEDURE SIS_ArticlePhoto_Manage
     @Action     VARCHAR(20),
     @Id         INT = NULL,
     @ArticleId  INT = NULL,
+    @ProjectId  INT = NULL,
     @FileName   VARCHAR(255) = NULL,
     @FilePath   VARCHAR(500) = NULL,
     @FileSizeKb INT = NULL,
@@ -30,6 +33,23 @@ BEGIN
         FROM article_photos
         WHERE article_id = @ArticleId AND deleted_at IS NULL
         ORDER BY sort_order ASC, article_photo_id ASC;
+    END
+
+    ELSE IF @Action = 'GETFIRSTFORPROJECT'
+    BEGIN
+        DECLARE @FirstArticleId INT = (
+            SELECT TOP 1 article_id FROM articles
+            WHERE project_id = @ProjectId AND deleted_at IS NULL
+            ORDER BY article_id ASC
+        );
+
+        SELECT TOP 1 article_photo_id AS Id, article_id AS ArticleId,
+               file_name AS FileName, file_path AS FilePath, file_size_kb AS FileSizeKb,
+               is_primary AS IsPrimary,
+               created_at AS CreatedAt, created_by AS CreatedBy
+        FROM article_photos
+        WHERE article_id = @FirstArticleId AND deleted_at IS NULL
+        ORDER BY is_primary DESC, sort_order ASC, article_photo_id ASC;
     END
 
     ELSE IF @Action = 'CREATE'
