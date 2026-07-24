@@ -99,6 +99,7 @@ BEGIN
     SELECT
         b.bundle_id AS BundleId,
         b.bundle_no AS BundleNo,
+        p.bundle_letter AS BundleLetter,
         b.serial AS Serial,
         b.qty AS Qty,
         spd.size_name AS SizeName,

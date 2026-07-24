@@ -112,7 +112,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(isEditMode ? "Edit User" : "Tambah User")</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"></button>
                 </div>
                 <div class="modal-body">
                     <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
@@ -174,7 +174,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Reset Password — @resetPasswordModel.Username</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => showResetPasswordForm = false"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => showResetPasswordForm = false"></button>
                 </div>
                 <div class="modal-body">
                     <EditForm Model="resetPasswordModel" OnValidSubmit="HandleResetPassword">

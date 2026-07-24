@@ -127,7 +127,7 @@ else
                                 @foreach (var item in wipResults)
                                 {
                                     <tr role="button" @onclick="() => OpenHistoryFromWip(item)">
-                                        <td>@item.BundleNo</td>
+                                        <td>@BundleDisplay.Format(item.BundleLetter, item.BundleNo)</td>
                                         <td>@item.Serial</td>
                                         <td>@item.ProjectName</td>
                                         <td>@item.ArticleName</td>
@@ -269,7 +269,7 @@ else
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <div>
-                                    <h2 class="mb-0">No. @h.BundleNo</h2>
+                                    <h2 class="mb-0">No. @BundleDisplay.Format(h.BundleLetter, h.BundleNo)</h2>
                                     <p class="text-muted mb-0">@h.Serial</p>
                                 </div>
                                 <div class="text-end">
@@ -417,7 +417,7 @@ else
                                 @foreach (var v in varianceResults)
                                 {
                                     <tr>
-                                        <td>@v.BundleNo</td>
+                                        <td>@BundleDisplay.Format(v.BundleLetter, v.BundleNo)</td>
                                         <td>@v.Serial</td>
                                         <td>@v.ArticleName</td>
                                         <td>@v.SizeName</td>

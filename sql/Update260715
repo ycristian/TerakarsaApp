@@ -1,0 +1,13 @@
+SQL TO EXECUTE
+sql/sp_Station_Operations.sql
+sql/sp_Bundle_Manage.sql
+sql/sp_Station_Operations.sql
+sql/alter_25_packing.sql
+sql/sp_Pack_Manage.sql
+sql/sp_Pack_Select.sql
+sql/sp_Station_Manage.sql
+sql/sp_Station_Select.sql
+sql/sp_Station_Operations.sql
+
+
+publish pack_label printservice

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Projects;
+using TerakarsaApp.Shared.Reports;
 
 namespace TerakarsaApp.Client.Services;
 
@@ -10,6 +11,13 @@ public class ArticleApiService
     public ArticleApiService(HttpClient http)
     {
         _http = http;
+    }
+
+    public async Task<ArticleSizeProgressResultDto> GetSizeProgressAsync(int articleId)
+    {
+        var response = await _http.GetAsync($"api/articles/{articleId}/size-progress");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<ArticleSizeProgressResultDto>() ?? new();
     }
 
     public async Task<List<ArticleListItemDto>> GetByProjectAsync(int projectId)

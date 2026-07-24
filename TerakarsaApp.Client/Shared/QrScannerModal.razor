@@ -1,0 +1,88 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@if (Show)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.7);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Scan QR</h5>
+                    <button type="button" class="btn-close" @onclick="HandleClose"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <div id="@containerId" style="max-height: 60vh;"></div>
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@errorMessage</div>
+                    }
+                    else
+                    {
+                        <p class="text-muted mt-2 mb-0">Arahkan kamera ke QR pada label.</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="HandleClose">Batal</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string> OnScanned { get; set; }
+
+    private readonly string containerId = $"qr-scan-{Guid.NewGuid():N}";
+    private DotNetObjectReference<QrScannerModal>? selfRef;
+    private string errorMessage = string.Empty;
+    private bool wasShown = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Show && !wasShown)
+        {
+            wasShown = true;
+            errorMessage = string.Empty;
+            selfRef ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("qrScanner.start", containerId, selfRef);
+        }
+        else if (!Show && wasShown)
+        {
+            wasShown = false;
+            await JS.InvokeVoidAsync("qrScanner.stop");
+        }
+    }
+
+    [JSInvokable("OnScanned")]
+    public async Task HandleJsScanned(string value)
+    {
+        wasShown = false;
+        await OnScanned.InvokeAsync(value);
+    }
+
+    [JSInvokable("OnScanError")]
+    public void HandleJsScanError(string message)
+    {
+        errorMessage = message;
+        StateHasChanged();
+    }
+
+    private async Task HandleClose()
+    {
+        wasShown = false;
+        await JS.InvokeVoidAsync("qrScanner.stop");
+        await OnClose.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (wasShown)
+        {
+            try { await JS.InvokeVoidAsync("qrScanner.stop"); } catch { }
+        }
+        selfRef?.Dispose();
+    }
+}

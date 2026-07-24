@@ -22,13 +22,19 @@ public static class TsplBuilder
         ["5"] = (32, 48),
     };
 
-    private const int RightColX = 210;
-    private const int RightEdge = 460;
+    private const int RightColX = 190;
+    private const int RightEdge = 445;
 
     public static BundleLabelPayload ParseBundleLabelPayload(string payloadJson)
     {
         return JsonSerializer.Deserialize<BundleLabelPayload>(payloadJson)
             ?? throw new InvalidDataException("Payload BUNDLE_LABEL kosong atau tidak valid.");
+    }
+
+    public static PackLabelPayload ParsePackLabelPayload(string payloadJson)
+    {
+        return JsonSerializer.Deserialize<PackLabelPayload>(payloadJson)
+            ?? throw new InvalidDataException("Payload PACK_LABEL kosong atau tidak valid.");
     }
 
     public static byte[] BuildBundleLabel(BundleLabelPayload data)
@@ -62,7 +68,7 @@ public static class TsplBuilder
         // di bawah memangkas itu ke 2 modul (~10 dot/1,25mm per sisi) -- lebih tipis dari 4
         // modul standar ISO tapi masih dalam toleransi mayoritas scanner (feedback: border 4
         // modul kelihatan ketebalan di label fisik).
-        const int qrX = 24, qrY = 108, qrCell = 5, qrQuietModules = 2;
+        const int qrX = 10, qrY = 108, qrCell = 5, qrQuietModules = 1;
         var qrGenerator = new QRCodeGenerator();
         var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.QrContent), QRCodeGenerator.ECCLevel.M);
         var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
@@ -76,12 +82,14 @@ public static class TsplBuilder
         var serial = Sanitize(data.Serial);
         Write(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrHeightDots + 4, "1", 1, 1, serial));
 
-        Write(Text(qrX, 20, "3", 1, 1, data.ProjectName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(qrX, 20, "2", 1, 1, data.ProjectName?.ToUpperInvariant() ?? string.Empty));
         Write(Text(qrX, 50, "1", 1, 1, "#"+data.NoPo?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(qrX, 70, "3", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(qrX, 70, "2", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
 
-        var bundleNoText = $"{data.BundleNo}";
-        Write(Text(RightAlignX(RightEdge, "3", 3, bundleNoText), 26, "3", 3, 3, bundleNoText));
+        // Prompt 27: kode huruf bundle per project (A-Z berputar) -- "B-27" bila project
+        // ybs sudah punya bundle_letter, atau cuma nomor "27" utk project lama (NULL).
+        var bundleNoText = string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}";
+        Write(Text(RightAlignX(RightEdge, "3", 1, bundleNoText), 26, "3", 1 , 1, bundleNoText));
 
         Write($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");
 
@@ -92,14 +100,86 @@ public static class TsplBuilder
         Write(Text(RightAlignX(RightEdge, "2", 1, qtyText + "  "), 132, "2", 1, 1, qtyText));
 
         Write($"BAR {RightColX},162,{RightEdge - RightColX},3\r\n");
-
+        
         Write(Text(RightColX, 174, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
         Write(Text(RightColX, 200, "2", 1, 1, "> " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 226, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 252, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 225, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 240, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
+
+        if (!string.IsNullOrWhiteSpace(data.Remark))
+        {
+            var remarkText = TruncateToFit(Sanitize(data.Remark).ToUpperInvariant(), 40, "1", 1, RightEdge - RightColX);
+            // TSPL tidak punya bold bawaan -- disimulasikan dengan cetak ganda digeser 1 dot
+            // horizontal (double-strike), sama ukuran font dengan baris Size Pack di atasnya.
+            Write(Text(RightColX, 255, "1", 1, 1, remarkText));
+            Write(Text(RightColX + 1, 255, "1", 1, 1, remarkText));
+        }
 
         var mulaiText = data.StartedAt.ToString("dd/MM HH:mm");
         Write(Text(RightAlignX(RightEdge, "2", 1, mulaiText + "   "), 290, "2", 1, 1, mulaiText));
+
+        Write("PRINT 1,1\r\n");
+        return stream.ToArray();
+    }
+
+    // Label karung (pack) 6 x 4 cm, kanvas sama dengan BUNDLE_LABEL. Kiri: QR + serial.
+    // Kanan: project_name, "KARUNG NO." + nomor besar (elemen terbesar di label), total
+    // qty/jumlah artikel, tanggal cetak + badge PLAN/AKTUAL.
+    public static byte[] BuildPackLabel(PackLabelPayload data)
+    {
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        Write("SIZE 60 mm, 40 mm\r\n");
+        Write("GAP 3 mm, 0\r\n");
+        Write("DIRECTION 1\r\n");
+        Write("CLS\r\n");
+
+        // QR ± 23 mm (qrCell dipilih supaya moduleCount khas link /pack/{serial} mendekati
+        // ukuran itu) -- lihat komentar BuildBundleLabel soal kenapa QR digenerate sendiri
+        // (bitmap mentah) alih-alih command QRCODE bawaan printer.
+        const int qrX = 24, qrY = 90, qrCell = 6, qrQuietModules = 2;
+        var qrGenerator = new QRCodeGenerator();
+        var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.QrContent), QRCodeGenerator.ECCLevel.M);
+        var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
+        var qrBitmap = BuildQrBitmap(modules, qrCell, out var qrWidthDots, out var qrHeightDots, out var qrWidthBytes);
+
+        Write($"BITMAP {qrX},{qrY},{qrWidthBytes},{qrHeightDots},0,");
+        stream.Write(qrBitmap, 0, qrBitmap.Length);
+        Write("\r\n");
+
+        var qrCenterX = qrX + qrWidthDots / 2;
+        var serial = Sanitize(data.Serial);
+        Write(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrHeightDots + 6, "1", 1, 1, serial));
+
+        var projectName = TruncateToFit(Sanitize(data.ProjectName)?.ToUpperInvariant() ?? string.Empty, 22, "1", 1, RightEdge - RightColX);
+        Write(Text(RightAlignX(RightEdge, "1", 1, projectName), 16, "1", 1, 1, projectName));
+
+        const string karungNoLabel = "KARUNG NO.";
+        Write(Text(RightAlignX(RightEdge, "1", 1, karungNoLabel), 34, "1", 1, 1, karungNoLabel));
+
+        var packNoText = $"{data.PackNo}";
+        Write(Text(RightAlignX(RightEdge, "3", 3, packNoText), 50, "3", 3, 3, packNoText));
+
+        Write($"BAR {RightColX},134,{RightEdge - RightColX},3\r\n");
+
+        var qtyText = $"{data.TotalQty} pcs";
+        Write(Text(RightColX, 146, "2", 2, 2, qtyText));
+
+        var itemCountText = $"{data.ItemCount} artikel";
+        Write(Text(RightColX, 182, "1", 1, 1, itemCountText));
+
+        Write($"BAR {RightColX},204,{RightEdge - RightColX},3\r\n");
+
+        var dateText = DateTime.Now.ToString("dd/MM");
+        Write(Text(RightColX, 218, "1", 1, 1, dateText));
+
+        var badgeText = data.IsConfirmed ? "AKTUAL" : "PLAN";
+        Write(Text(RightAlignX(RightEdge, "2", 1, badgeText), 216, "2", 1, 1, badgeText));
 
         Write("PRINT 1,1\r\n");
         return stream.ToArray();

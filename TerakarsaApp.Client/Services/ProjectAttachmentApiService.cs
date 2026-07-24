@@ -18,9 +18,16 @@ public class ProjectAttachmentApiService
 
     public async Task<List<ProjectAttachmentDto>> GetByProjectAsync(int projectId)
     {
-        var response = await _http.GetAsync($"api/project-attachments/by-project/{projectId}");
-        if (!response.IsSuccessStatusCode) return new();
-        return await response.Content.ReadFromJsonAsync<List<ProjectAttachmentDto>>() ?? new();
+        try
+        {
+            var response = await _http.GetAsync($"api/project-attachments/by-project/{projectId}");
+            if (!response.IsSuccessStatusCode) return new();
+            return await response.Content.ReadFromJsonAsync<List<ProjectAttachmentDto>>() ?? new();
+        }
+        catch (HttpRequestException)
+        {
+            return new();
+        }
     }
 
     public async Task<(bool Success, string Error, List<ProjectAttachmentUploadResultDto> Results)> UploadManyAsync(
@@ -64,25 +71,39 @@ public class ProjectAttachmentApiService
 
     public async Task<(byte[] Bytes, string ContentType)?> GetFirstPhotoAsync(int projectId)
     {
-        var response = await _http.GetAsync($"api/project-attachments/{projectId}/first-photo");
-        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var response = await _http.GetAsync($"api/project-attachments/{projectId}/first-photo");
+            if (!response.IsSuccessStatusCode) return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-        return (bytes, contentType);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return (bytes, contentType);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public async Task<(byte[] Bytes, string ContentType, string FileName)?> DownloadAsync(int projectId, int attachmentId)
     {
-        var response = await _http.GetAsync($"api/project-attachments/{projectId}/{attachmentId}/download");
-        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var response = await _http.GetAsync($"api/project-attachments/{projectId}/{attachmentId}/download");
+            if (!response.IsSuccessStatusCode) return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
-            ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
-            ?? "file";
-        return (bytes, contentType, fileName);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                ?? "file";
+            return (bytes, contentType, fileName);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public async Task<bool> DeleteAsync(int id)

@@ -16,6 +16,7 @@ CREATE OR ALTER PROCEDURE SIS_Station_Manage
     @IsActive             BIT = 1,
     @DefaultResourceId    INT = NULL,
     @AllowResourceChange  BIT = 1,
+    @EnablePacking        BIT = 0,
     @PairingCode          VARCHAR(10) = NULL,
     @NewToken             VARCHAR(64) = NULL,
     @UserId               INT = NULL
@@ -50,9 +51,9 @@ BEGIN
         DECLARE @NewToken VARCHAR(64) = LOWER(REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', ''));
 
         INSERT INTO stations (station_code, station_name, division_id, station_token, is_active,
-                               default_resource_id, allow_resource_change, created_at, created_by)
+                               default_resource_id, allow_resource_change, enable_packing, created_at, created_by)
         VALUES (@StationCode, @StationName, @DivisionId, @NewToken, @IsActive,
-                @DefaultResourceId, @AllowResourceChange, SYSDATETIME(), @UserId);
+                @DefaultResourceId, @AllowResourceChange, @EnablePacking, SYSDATETIME(), @UserId);
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId, @NewToken AS NewToken;
     END
@@ -93,6 +94,7 @@ BEGIN
             is_active = @IsActive,
             default_resource_id = @DefaultResourceId,
             allow_resource_change = @AllowResourceChange,
+            enable_packing = @EnablePacking,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE station_id = @Id AND deleted_at IS NULL;

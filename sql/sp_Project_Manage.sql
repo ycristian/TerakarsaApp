@@ -38,10 +38,50 @@ BEGIN
 
     IF @Action = 'CREATE'
     BEGIN
-        INSERT INTO projects (customer_id, project_md, project_pic, project_name, no_po, material_name, order_date, [start_date], deadline, delivery_date, remarks, is_urgent, created_at, created_by)
-        VALUES (@CustomerId, @ProjectMd, @ProjectPic, @ProjectName, @NoPo, @MaterialName, @OrderDate, @StartDate, @Deadline, @DeliveryDate, @Remarks, @IsUrgent, SYSDATETIME(), @UserId);
+        BEGIN TRAN;
+        BEGIN TRY
+            DECLARE @LockResult INT;
+            EXEC @LockResult = sp_getapplock
+                @Resource = 'project_bundle_letter',
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 10000;
 
-        SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
+            IF @LockResult < 0
+            BEGIN
+                RAISERROR('Gagal mengunci penomoran huruf bundle project. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
+            -- Prompt 27: huruf bundle per project (A-Z berputar) -- huruf TIDAK pernah
+            -- dipakai ulang, dihitung dari project ber-huruf TERAKHIR (termasuk yang sudah
+            -- soft-deleted) urut project_id. Belum ada project ber-huruf sama sekali -> A.
+            DECLARE @LastLetter CHAR(1);
+            SELECT TOP 1 @LastLetter = bundle_letter
+            FROM projects
+            WHERE bundle_letter IS NOT NULL
+            ORDER BY project_id DESC;
+
+            DECLARE @NewLetter CHAR(1) = CASE
+                WHEN @LastLetter IS NULL THEN 'A'
+                WHEN @LastLetter = 'Z' THEN 'A'
+                ELSE CHAR(ASCII(@LastLetter) + 1)
+            END;
+
+            INSERT INTO projects (customer_id, project_md, project_pic, project_name, no_po, material_name, order_date, [start_date], deadline, delivery_date, remarks, is_urgent, bundle_letter, created_at, created_by)
+            VALUES (@CustomerId, @ProjectMd, @ProjectPic, @ProjectName, @NoPo, @MaterialName, @OrderDate, @StartDate, @Deadline, @DeliveryDate, @Remarks, @IsUrgent, @NewLetter, SYSDATETIME(), @UserId);
+
+            DECLARE @NewProjectId INT = CAST(SCOPE_IDENTITY() AS INT);
+
+            COMMIT TRAN;
+
+            SELECT @NewProjectId AS NewId;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'UPDATE'

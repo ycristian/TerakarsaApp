@@ -249,6 +249,7 @@ CREATE TABLE projects(
  status_reason varchar(255) null,           -- wajib utk ON_HOLD & CANCELLED (komunikasi lintas divisi)
  status_changed_at datetime2 null,
  status_changed_by int null,
+ bundle_letter char(1) null,                -- kode huruf bundle per project (A-Z berputar), generate di SIS_Project_Manage; NULL = project lama tanpa huruf
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -676,6 +677,47 @@ CREATE TABLE stations(
  pairing_code varchar(10) null,             -- Prompt 20: kode pairing aktif; NULL = tidak ada
  pairing_code_expires_at datetime2 null,
  paired_at datetime2 null,                  -- kapan terakhir perangkat berhasil klaim
+ enable_packing bit not null default 0,     -- Prompt 25: stasiun ini boleh membuka modul packing
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
+-- ============ 9b. PACKING ============
+-- Karung (pack) berisi campuran artikel/size dalam SATU project, dibuat di stasiun khusus
+-- packing dari stok hasil step TERAKHIR workflow tiap artikel. Stok tersedia dihitung dari
+-- article_workflow_logs + pack_items (TIDAK ada tabel stok/saldo terpisah), lihat
+-- sp_Pack_Select.sql (SIS_Pack_StockAvailable).
+
+CREATE TABLE packs(
+ pack_id int primary key identity(1,1),
+ project_id int not null
+   constraint FK_packs_projects foreign key references projects(project_id),
+ pack_no int not null,                      -- urut per project, generate di sp_Pack_Manage, tidak dipakai ulang
+ serial varchar(20) not null,               -- PK{yy}-{6 digit global}
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ delete_reason varchar(255) null
+);
+
+CREATE TABLE pack_items(
+ pack_item_id int primary key identity(1,1),
+ pack_id int not null
+   constraint FK_pack_items_packs foreign key references packs(pack_id),
+ article_id int not null
+   constraint FK_pack_items_articles foreign key references articles(article_id),
+ article_size_id int not null
+   constraint FK_pack_items_sizes foreign key references article_sizes(article_size_id),
+ qty_plan int not null,
+ qty_actual int null,                       -- NULL = belum dikonfirmasi (dua lapis qty, lihat CLAUDE.md)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -708,6 +750,7 @@ CREATE UNIQUE INDEX UX_adjustments_no         ON material_adjustments(adjustment
 CREATE UNIQUE INDEX UX_stations_code          ON stations(station_code)             WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stations_token         ON stations(station_token)            WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stations_pairing_code  ON stations(pairing_code)             WHERE pairing_code IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_packs_serial           ON packs(serial)                      WHERE deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
@@ -721,4 +764,6 @@ CREATE INDEX IX_stocks_material     ON material_stocks(material_id);
 CREATE INDEX IX_stations_division   ON stations(division_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_print_jobs_status   ON print_jobs([status]) WHERE deleted_at IS NULL;
 CREATE INDEX IX_print_jobs_ref      ON print_jobs(job_type, ref_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_packs_project       ON packs(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_pack_items_pack     ON pack_items(pack_id) WHERE deleted_at IS NULL;
 GO

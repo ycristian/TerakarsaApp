@@ -50,6 +50,7 @@ BEGIN
                    s.is_active AS IsActive,
                    s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
                    s.allow_resource_change AS AllowResourceChange,
+                   s.enable_packing AS EnablePacking,
                    s.paired_at AS PairedAt,
                    CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
                    s.created_at AS CreatedAt, s.created_by AS CreatedBy,
@@ -84,6 +85,7 @@ BEGIN
            s.is_active AS IsActive,
            s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
            s.allow_resource_change AS AllowResourceChange,
+           s.enable_packing AS EnablePacking,
            s.paired_at AS PairedAt,
            CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
            s.created_at AS CreatedAt, s.created_by AS CreatedBy,
@@ -106,7 +108,8 @@ BEGIN
     SELECT s.station_id AS StationId, s.station_name AS StationName,
            s.division_id AS DivisionId, d.division_name AS DivisionName,
            s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
-           s.allow_resource_change AS AllowResourceChange
+           s.allow_resource_change AS AllowResourceChange,
+           s.enable_packing AS EnablePacking
     FROM stations s
     INNER JOIN divisions d ON d.division_id = s.division_id
     LEFT JOIN resources r ON r.resource_id = s.default_resource_id

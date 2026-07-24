@@ -71,17 +71,29 @@ public class Worker : BackgroundService
 
     private async Task ProcessJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
-        if (job.JobType != "BUNDLE_LABEL")
+        if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL")
         {
             Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung.");
             await ReportSafeAsync(job.PrintJobId, false, "Job type belum didukung.", ct);
             return;
         }
 
-        BundleLabelPayload payload;
+        byte[] tspl;
+        string serial;
         try
         {
-            payload = TsplBuilder.ParseBundleLabelPayload(job.Payload);
+            if (job.JobType == "PACK_LABEL")
+            {
+                var packPayload = TsplBuilder.ParsePackLabelPayload(job.Payload);
+                serial = packPayload.Serial;
+                tspl = TsplBuilder.BuildPackLabel(packPayload);
+            }
+            else
+            {
+                var bundlePayload = TsplBuilder.ParseBundleLabelPayload(job.Payload);
+                serial = bundlePayload.Serial;
+                tspl = TsplBuilder.BuildBundleLabel(bundlePayload);
+            }
         }
         catch (Exception ex)
         {
@@ -89,8 +101,6 @@ public class Worker : BackgroundService
             await ReportSafeAsync(job.PrintJobId, false, $"Payload rusak: {ex.Message}", ct);
             return;
         }
-
-        var tspl = TsplBuilder.BuildBundleLabel(payload);
 
         try
         {
@@ -100,12 +110,12 @@ public class Worker : BackgroundService
                 Directory.CreateDirectory(dryRunDir);
                 var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.tspl");
                 await File.WriteAllBytesAsync(path, tspl, ct);
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun) serial {payload.Serial}: TSPL ditulis ke {path}");
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun) serial {serial}: TSPL ditulis ke {path}");
             }
             else
             {
                 RawPrinterHelper.SendBytesToPrinter(_options.PrinterName, tspl);
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {payload.Serial}: dicetak ke printer '{_options.PrinterName}'.");
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {serial}: dicetak ke printer '{_options.PrinterName}'.");
             }
 
             await ReportSafeAsync(job.PrintJobId, true, null, ct);

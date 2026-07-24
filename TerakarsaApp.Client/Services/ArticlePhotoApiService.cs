@@ -18,9 +18,16 @@ public class ArticlePhotoApiService
 
     public async Task<List<ArticlePhotoDto>> GetByArticleAsync(int articleId)
     {
-        var response = await _http.GetAsync($"api/article-photos/by-article/{articleId}");
-        if (!response.IsSuccessStatusCode) return new();
-        return await response.Content.ReadFromJsonAsync<List<ArticlePhotoDto>>() ?? new();
+        try
+        {
+            var response = await _http.GetAsync($"api/article-photos/by-article/{articleId}");
+            if (!response.IsSuccessStatusCode) return new();
+            return await response.Content.ReadFromJsonAsync<List<ArticlePhotoDto>>() ?? new();
+        }
+        catch (HttpRequestException)
+        {
+            return new();
+        }
     }
 
     public async Task<(bool Success, string Error, List<ArticlePhotoUploadResultDto> Results)> UploadManyAsync(
@@ -62,35 +69,56 @@ public class ArticlePhotoApiService
 
     public async Task<(byte[] Bytes, string ContentType)?> GetPrimaryPhotoAsync(int articleId)
     {
-        var response = await _http.GetAsync($"api/article-photos/{articleId}/primary");
-        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var response = await _http.GetAsync($"api/article-photos/{articleId}/primary");
+            if (!response.IsSuccessStatusCode) return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-        return (bytes, contentType);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return (bytes, contentType);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public async Task<(byte[] Bytes, string ContentType)?> GetFirstPhotoForProjectAsync(int projectId)
     {
-        var response = await _http.GetAsync($"api/article-photos/by-project/{projectId}/first-photo");
-        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var response = await _http.GetAsync($"api/article-photos/by-project/{projectId}/first-photo");
+            if (!response.IsSuccessStatusCode) return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-        return (bytes, contentType);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return (bytes, contentType);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public async Task<(byte[] Bytes, string ContentType, string FileName)?> DownloadAsync(int articleId, int photoId)
     {
-        var response = await _http.GetAsync($"api/article-photos/{articleId}/{photoId}/download");
-        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var response = await _http.GetAsync($"api/article-photos/{articleId}/{photoId}/download");
+            if (!response.IsSuccessStatusCode) return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
-            ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
-            ?? "file";
-        return (bytes, contentType, fileName);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                ?? "file";
+            return (bytes, contentType, fileName);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     public async Task<bool> SetPrimaryAsync(int id)

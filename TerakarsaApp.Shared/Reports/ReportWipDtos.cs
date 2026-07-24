@@ -43,6 +43,7 @@ public class DivisionWipBundleDto
 {
     public int BundleId { get; set; }
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string Serial { get; set; } = string.Empty;
     public string ProjectName { get; set; } = string.Empty;
     public string ArticleName { get; set; } = string.Empty;
@@ -52,4 +53,14 @@ public class DivisionWipBundleDto
     public string? StepName { get; set; }
     public DateTime EventAt { get; set; }
     public string? ReceivedByResourceName { get; set; }
+}
+
+public class ProjectWipProgressDto
+{
+    public int ProjectId { get; set; }
+    public string BuyerName { get; set; } = string.Empty;
+    public string ProjectName { get; set; } = string.Empty;
+    public int OrderQty { get; set; }
+    public int BundleQty { get; set; }
+    public double ProgressPercent { get; set; }
 }

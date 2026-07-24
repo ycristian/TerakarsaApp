@@ -36,7 +36,7 @@ BEGIN
 
     ;WITH Base AS (
         SELECT
-            b.bundle_id, b.serial, b.bundle_no, b.qty,
+            b.bundle_id, b.serial, b.bundle_no, p.bundle_letter, b.qty,
             a.article_id, a.article_name,
             p.project_id, p.project_name,
             spd.size_name,
@@ -96,6 +96,7 @@ BEGIN
         c.bundle_id AS BundleId,
         c.serial AS Serial,
         c.bundle_no AS BundleNo,
+        c.bundle_letter AS BundleLetter,
         c.project_name AS ProjectName,
         c.article_name AS ArticleName,
         c.size_name AS SizeName,
@@ -265,6 +266,7 @@ BEGIN
         b.bundle_id AS BundleId,
         b.serial AS Serial,
         b.bundle_no AS BundleNo,
+        p.bundle_letter AS BundleLetter,
         p.project_name AS ProjectName,
         a.article_name AS ArticleName,
         spd.size_name AS SizeName,
@@ -333,6 +335,7 @@ BEGIN
     )
     SELECT
         b.bundle_no AS BundleNo,
+        p.bundle_letter AS BundleLetter,
         b.serial AS Serial,
         a.article_name AS ArticleName,
         spd.size_name AS SizeName,
@@ -364,5 +367,62 @@ BEGIN
             - ISNULL(curAgg.QtyKeluar, 0)
           ) <> 0
     ORDER BY p.project_name ASC, a.article_name ASC, b.bundle_no ASC, aw.sort_order ASC;
+END;
+GO
+
+-- E. Progres per ukuran -- matriks ukuran x step untuk satu artikel (dipakai kartu
+-- "Laporan Progress" di halaman Edit Project). Kolom PO diambil dari article_sizes.qty
+-- di result set 1 (client), sisanya dari QtyOk kumulatif tiap step di result set 3.
+-- Step ber-bundle (requires_bundle = 1, TERMASUK Bundling implisit) selalu menyimpan
+-- article_size_id = NULL di baris log (lihat sp_Bundle_Manage.sql / sp_WorkflowLog_Manage.sql
+-- -- ukuran melekat ke bundle, bukan ke baris log) -- ukurannya diambil lewat
+-- bundles.article_size_id (nilai TERKINI, konsisten dengan SIS_Report_BundleWip yang juga
+-- pakai ukuran bundle saat ini, bukan ukuran saat log dibuat). Step non-bundle menyimpan
+-- article_size_id langsung di baris log.
+CREATE OR ALTER PROCEDURE SIS_Report_ArticleSizeProgress
+    @ArticleId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Result set 1: ukuran (baris tabel) + target PO.
+    SELECT
+        asz.article_size_id AS SizeId,
+        spd.size_name AS SizeName,
+        spd.sort_order AS SortOrder,
+        asz.qty AS PoQty
+    FROM article_sizes asz
+    INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+    WHERE asz.article_id = @ArticleId AND asz.deleted_at IS NULL
+    ORDER BY spd.sort_order ASC;
+
+    -- Result set 2: step (kolom tabel), urut sort_order, termasuk step Bundling implisit.
+    SELECT
+        aw.article_workflow_id AS ArticleWorkflowId,
+        aw.step_name AS StepName,
+        aw.sort_order AS SortOrder
+    FROM article_workflows aw
+    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL
+    ORDER BY aw.sort_order ASC;
+
+    -- Result set 3: isi sel matriks -- SUM(qty_ok) per (step, ukuran).
+    ;WITH LogSized AS (
+        SELECT
+            l.article_workflow_id,
+            CASE WHEN aw.requires_bundle = 1 THEN b.article_size_id ELSE l.article_size_id END AS SizeId,
+            l.qty_ok
+        FROM article_workflow_logs l
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = l.article_workflow_id
+        LEFT JOIN bundles b ON b.bundle_id = l.bundle_id
+        WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND l.deleted_at IS NULL
+    )
+    SELECT
+        article_workflow_id AS ArticleWorkflowId,
+        SizeId,
+        SUM(qty_ok) AS QtyOk
+    FROM LogSized
+    WHERE SizeId IS NOT NULL
+    GROUP BY article_workflow_id, SizeId
+    ORDER BY article_workflow_id ASC, SizeId ASC;
 END;
 GO

@@ -75,6 +75,7 @@ else
                             <th>Status</th>
                             <th>Status Perangkat</th>
                             <th>Resource Bawaan</th>
+                            <th>Packing</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -96,6 +97,16 @@ else
                                     @if (!s.AllowResourceChange && !string.IsNullOrEmpty(s.DefaultResourceName))
                                     {
                                         <i class="fe fe-lock ms-1" title="Terkunci ke resource bawaan"></i>
+                                    }
+                                </td>
+                                <td>
+                                    @if (s.EnablePacking)
+                                    {
+                                        <span class="badge bg-info text-light">Aktif</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">-</span>
                                     }
                                 </td>
                                 <td>
@@ -122,7 +133,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(isEditMode ? "Edit Stasiun" : "Tambah Stasiun")</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"></button>
                 </div>
                 <div class="modal-body">
                     <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
@@ -167,6 +178,10 @@ else
                         <div class="mb-3 form-check">
                             <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
                             <label class="form-check-label">Aktif</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" id="enablePackingCheck" @bind-Value="formModel.EnablePacking" />
+                            <label class="form-check-label" for="enablePackingCheck">Modul Packing</label>
                         </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
@@ -340,7 +355,8 @@ else
             DivisionId = station.DivisionId,
             IsActive = station.IsActive,
             DefaultResourceId = station.DefaultResourceId ?? 0,
-            AllowResourceChange = station.AllowResourceChange
+            AllowResourceChange = station.AllowResourceChange,
+            EnablePacking = station.EnablePacking
         };
         errorMessage = string.Empty;
         await LoadResourceOptions();
@@ -387,7 +403,8 @@ else
                 DivisionId = formModel.DivisionId,
                 IsActive = formModel.IsActive,
                 DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
-                AllowResourceChange = formModel.AllowResourceChange
+                AllowResourceChange = formModel.AllowResourceChange,
+                EnablePacking = formModel.EnablePacking
             });
 
             isSaving = false;
@@ -411,7 +428,8 @@ else
                 DivisionId = formModel.DivisionId,
                 IsActive = formModel.IsActive,
                 DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
-                AllowResourceChange = formModel.AllowResourceChange
+                AllowResourceChange = formModel.AllowResourceChange,
+                EnablePacking = formModel.EnablePacking
             });
 
             isSaving = false;
@@ -551,6 +569,7 @@ else
 
         public int DefaultResourceId { get; set; }
         public bool AllowResourceChange { get; set; } = true;
+        public bool EnablePacking { get; set; }
 
         // Kebalikan AllowResourceChange, khusus untuk binding checkbox "Kunci ke resource bawaan".
         public bool LockToDefault

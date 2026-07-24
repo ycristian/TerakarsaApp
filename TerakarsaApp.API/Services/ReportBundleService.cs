@@ -107,6 +107,66 @@ public class ReportBundleService
         }
     }
 
+    // SIS_Report_ArticleSizeProgress mengembalikan 3 result set (ukuran, step, sel matriks)
+    // -- pola raw SqlCommand yang sama dengan GetArticleProgressAsync di atas.
+    public async Task<ArticleSizeProgressResultDto> GetArticleSizeProgressAsync(int articleId)
+    {
+        var conn = (SqlConnection)_db.Database.GetDbConnection();
+        var wasClosed = conn.State != System.Data.ConnectionState.Open;
+        if (wasClosed) await conn.OpenAsync();
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SIS_Report_ArticleSizeProgress";
+            cmd.CommandType = System.Data.CommandType.StoredProcedure;
+            cmd.Parameters.Add(new SqlParameter("@ArticleId", articleId));
+
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            var result = new ArticleSizeProgressResultDto();
+
+            while (await reader.ReadAsync())
+            {
+                result.Sizes.Add(new ArticleSizeProgressSizeDto
+                {
+                    SizeId = reader.GetInt32(reader.GetOrdinal("SizeId")),
+                    SizeName = reader.GetString(reader.GetOrdinal("SizeName")),
+                    SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                    PoQty = reader.GetInt32(reader.GetOrdinal("PoQty")),
+                });
+            }
+
+            await reader.NextResultAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Steps.Add(new ArticleSizeProgressStepDto
+                {
+                    ArticleWorkflowId = reader.GetInt32(reader.GetOrdinal("ArticleWorkflowId")),
+                    StepName = reader.GetString(reader.GetOrdinal("StepName")),
+                    SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                });
+            }
+
+            await reader.NextResultAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Cells.Add(new ArticleSizeProgressCellDto
+                {
+                    ArticleWorkflowId = reader.GetInt32(reader.GetOrdinal("ArticleWorkflowId")),
+                    SizeId = reader.GetInt32(reader.GetOrdinal("SizeId")),
+                    QtyOk = reader.GetInt32(reader.GetOrdinal("QtyOk")),
+                });
+            }
+
+            return result;
+        }
+        finally
+        {
+            if (wasClosed) await conn.CloseAsync();
+        }
+    }
+
     public async Task<List<BundleVarianceDto>> GetVarianceAsync(int? projectId, int? articleId)
     {
         var projectIdParam = new SqlParameter("@ProjectId", (object?)projectId ?? DBNull.Value);
@@ -148,6 +208,7 @@ public class ReportBundleService
                     BundleId = reader.GetInt32(reader.GetOrdinal("BundleId")),
                     Serial = reader.GetString(reader.GetOrdinal("Serial")),
                     BundleNo = reader.GetInt32(reader.GetOrdinal("BundleNo")),
+                    BundleLetter = reader.IsDBNull(reader.GetOrdinal("BundleLetter")) ? null : reader.GetString(reader.GetOrdinal("BundleLetter")),
                     ProjectName = reader.GetString(reader.GetOrdinal("ProjectName")),
                     ArticleName = reader.GetString(reader.GetOrdinal("ArticleName")),
                     SizeName = reader.GetString(reader.GetOrdinal("SizeName")),

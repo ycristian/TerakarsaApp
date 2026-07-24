@@ -9,6 +9,9 @@ public class BundleDto
     public int SizeSortOrder { get; set; }
     public string Serial { get; set; } = string.Empty;
     public int BundleNo { get; set; }
+    // Prompt 27: kode huruf bundle project (A-Z berputar), NULL utk project lama tanpa
+    // huruf -- lihat TerakarsaApp.Client BundleDisplay untuk format tampilan "{huruf}-{no}".
+    public string? BundleLetter { get; set; }
     public int Qty { get; set; }
     public int SortOrder { get; set; }
     public int? ResourceId { get; set; }
@@ -28,6 +31,9 @@ public class BundleSizeSummaryDto
     public int BundleQty { get; set; }
     public int BundleCount { get; set; }
     public int TotalBundleQty { get; set; }
+    // Sisa hasil Cutting yang sudah diterima divisi Bundling tapi belum dijadikan bundle
+    // (lihat SIS_Article_BundleSummary) -- dipakai station "Buat Bundle" sebagai saran qty.
+    public int StockCutting { get; set; }
     public bool HasFirstBundleStep { get; set; }
     public bool IsFirstBundleStepReceived { get; set; }
     public int? FirstBundleStepDivisionId { get; set; }
@@ -55,6 +61,15 @@ public class BundleCreateRequest
     public bool AutoPrint { get; set; } = true;
 }
 
+// Prompt: "Print Label Cacat" -- muncul di BundleScanCard setelah Kirim Hasil dengan reject
+// > 0. Copies = jumlah lembar label yang mau dicetak (bukan qty cacat); Remark = catatan Kirim
+// Hasil + ringkasan qty cacat, dirakit di klien, dipakai override SIS_Bundle_ReprintLabel.
+public class BundlePrintDefectLabelRequest
+{
+    public int Copies { get; set; } = 1;
+    public string? Remark { get; set; }
+}
+
 public class BundleUpdateRequest
 {
     public int Id { get; set; }
@@ -62,6 +77,9 @@ public class BundleUpdateRequest
     public int? ResourceId { get; set; }
     public string? ResourcePersonName { get; set; }
     public int? BundlingResourceId { get; set; }
+    // Fix: opsional -- NULL berarti ukuran tidak diubah (dipakai admin /bundles yang belum
+    // punya UI ganti ukuran); station selalu mengirim field ini lewat StationBundleUpdateRequest.
+    public int? ArticleSizeId { get; set; }
 }
 
 public class BundleCreateResult
@@ -71,6 +89,7 @@ public class BundleCreateResult
     // tidak dicentang di station).
     public int? PrintJobId { get; set; }
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string Serial { get; set; } = string.Empty;
 }
 
@@ -90,9 +109,11 @@ public class StationBundleCreateRequest
 }
 
 // Prompt 24: Edit bundle dari tab OUT station Bundling.
+// Fix: ArticleSizeId ditambahkan supaya ukuran bisa diubah dari modal Edit yang sama.
 public class StationBundleUpdateRequest
 {
     public int Qty { get; set; }
+    public int ArticleSizeId { get; set; }
     public int ResourceId { get; set; }
     public int? TailorResourceId { get; set; }
     public string? TailorPersonName { get; set; }
@@ -104,6 +125,7 @@ public class BundleScanBundleDto
 {
     public int BundleId { get; set; }
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string Serial { get; set; } = string.Empty;
     public int Qty { get; set; }
     public string SizeName { get; set; } = string.Empty;

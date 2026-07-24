@@ -1,0 +1,90 @@
+@page "/pack/{Serial}"
+@layout TerakarsaApp.Client.Layout.BlankLayout
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Shared.Packs
+@inject PublicPackApiService PublicApi
+
+<PageTitle>Karung @Serial</PageTitle>
+
+<div class="mb-2">
+    <CloseButton />
+</div>
+
+@if (isLoading)
+{
+    <p class="text-center fs-4 mt-5">Memuat...</p>
+}
+else if (notFound)
+{
+    <div class="alert alert-danger mt-5">Karung dengan serial <strong>@Serial</strong> tidak ditemukan.</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <h2 class="mb-0">Karung @info!.Pack.PackNo dari @info.Pack.TotalPacks</h2>
+                    <p class="text-muted mb-0">@info.Pack.ProjectName &middot; @info.Pack.Serial</p>
+                </div>
+                <span class="badge fs-6 @(info.Pack.IsConfirmed ? "bg-success" : "bg-warning text-dark")">
+                    @(info.Pack.IsConfirmed ? "AKTUAL" : "PLAN")
+                </span>
+            </div>
+            <p class="text-muted mb-0">Dibuat @info.Pack.CreatedAt.ToString("dd/MM/yyyy HH:mm")</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Isi Karung</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border mb-0">
+                    <thead>
+                        <tr>
+                            <th>Artikel</th>
+                            <th>Ukuran</th>
+                            <th>Plan</th>
+                            <th>Aktual</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in info.Items)
+                        {
+                            <tr>
+                                <td>@item.ArticleName <span class="text-muted">@item.Style @item.Color</span></td>
+                                <td>@item.SizeName</td>
+                                <td>@item.QtyPlan</td>
+                                <td>@(item.QtyActual?.ToString() ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr class="fw-bold">
+                            <td colspan="3">Total</td>
+                            <td>@info.Pack.TotalQty</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Serial { get; set; } = string.Empty;
+
+    private bool isLoading = true;
+    private bool notFound = false;
+    private PackScanInfoDto? info;
+
+    protected override async Task OnInitializedAsync()
+    {
+        info = await PublicApi.GetPackAsync(Serial);
+        notFound = info is null;
+        isLoading = false;
+    }
+}

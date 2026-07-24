@@ -31,6 +31,7 @@ public class BundleService
         // Prompt 24: nullable -- NULL kalau @SkipPrintJob = 1.
         public int? NewPrintJobId { get; set; }
         public int NewBundleNo { get; set; }
+        public string? NewBundleLetter { get; set; }
         public string NewSerial { get; set; } = string.Empty;
     }
 
@@ -86,7 +87,7 @@ public class BundleService
                 .ToListAsync();
 
             var row = result.First();
-            return (true, string.Empty, new BundleCreateResult { Id = row.NewId, PrintJobId = row.NewPrintJobId, BundleNo = row.NewBundleNo, Serial = row.NewSerial });
+            return (true, string.Empty, new BundleCreateResult { Id = row.NewId, PrintJobId = row.NewPrintJobId, BundleNo = row.NewBundleNo, BundleLetter = row.NewBundleLetter, Serial = row.NewSerial });
         }
         catch (SqlException ex)
         {
@@ -99,6 +100,7 @@ public class BundleService
         var actionParam = new SqlParameter("@Action", "UPDATE");
         var idParam = new SqlParameter("@Id", request.Id);
         var qtyParam = new SqlParameter("@Qty", request.Qty);
+        var articleSizeIdParam = new SqlParameter("@ArticleSizeId", (object?)request.ArticleSizeId ?? DBNull.Value);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
         var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
         var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
@@ -107,8 +109,8 @@ public class BundleService
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
-                actionParam, idParam, qtyParam, resourceIdParam, resourcePersonNameParam, bundlingResourceIdParam, userIdParam);
+                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
+                actionParam, idParam, qtyParam, articleSizeIdParam, resourceIdParam, resourcePersonNameParam, bundlingResourceIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -162,6 +164,7 @@ public class BundleService
             {
                 BundleId = reader.GetInt32(reader.GetOrdinal("BundleId")),
                 BundleNo = reader.GetInt32(reader.GetOrdinal("BundleNo")),
+                BundleLetter = reader.IsDBNull(reader.GetOrdinal("BundleLetter")) ? null : reader.GetString(reader.GetOrdinal("BundleLetter")),
                 Serial = reader.GetString(reader.GetOrdinal("Serial")),
                 Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
                 SizeName = reader.GetString(reader.GetOrdinal("SizeName")),
@@ -291,6 +294,32 @@ public class BundleService
                 .SqlQueryRaw<int>(
                     "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
                     bundleIdParam, publicBaseUrlParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
+        }
+    }
+
+    // Prompt: "Print Label Cacat" -- reprint label bundle (template sama, lihat
+    // SIS_Bundle_ReprintLabel) sebanyak Copies lembar, remark di-override dengan catatan +
+    // ringkasan qty cacat yang sudah dirakit di klien (BundleScanCard).
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintDefectLabelAsync(int bundleId, int copies, string? remark, int userId)
+    {
+        var bundleIdParam = new SqlParameter("@BundleId", bundleId);
+        var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
+        var copiesParam = new SqlParameter("@Copies", copies);
+        var remarkOverrideParam = new SqlParameter("@RemarkOverride", (object?)remark ?? DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @RemarkOverride = @RemarkOverride, @UserId = @UserId",
+                    bundleIdParam, publicBaseUrlParam, copiesParam, remarkOverrideParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }

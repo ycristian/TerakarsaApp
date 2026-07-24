@@ -14,10 +14,12 @@ namespace TerakarsaApp.API.Controllers;
 public class ArticleController : ControllerBase
 {
     private readonly ArticleService _articleService;
+    private readonly ReportBundleService _reportBundleService;
 
-    public ArticleController(ArticleService articleService)
+    public ArticleController(ArticleService articleService, ReportBundleService reportBundleService)
     {
         _articleService = articleService;
+        _reportBundleService = reportBundleService;
     }
 
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -26,6 +28,17 @@ public class ArticleController : ControllerBase
     public async Task<IActionResult> GetByProject(int projectId)
     {
         var result = await _articleService.GetByProjectAsync(projectId);
+        return Ok(result);
+    }
+
+    // Kartu "Laporan Progress" (matriks ukuran x step) di halaman Edit Project -- reuse
+    // ReportBundleService (SIS_Report_ArticleSizeProgress) di sini supaya tetap bisa diakses
+    // dengan module ORDER_PROJECT saja, tanpa perlu REPORT_BUNDLE (pola sama dengan
+    // report-bundle-picker/* di ReportBundleController yang reuse ArticleService).
+    [HttpGet("{id}/size-progress")]
+    public async Task<IActionResult> GetSizeProgress(int id)
+    {
+        var result = await _reportBundleService.GetArticleSizeProgressAsync(id);
         return Ok(result);
     }
 

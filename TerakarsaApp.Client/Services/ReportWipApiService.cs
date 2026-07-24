@@ -27,21 +27,23 @@ public class ReportWipApiService
         return sb.ToString();
     }
 
-    public async Task<DivisionWipSummaryDto> GetSummaryAsync()
+    public async Task<DivisionWipSummaryDto> GetSummaryAsync(int? projectId = null)
     {
-        var response = await _http.GetAsync("api/report-wip/summary");
+        var query = BuildQuery(("projectId", projectId?.ToString()));
+        var response = await _http.GetAsync($"api/report-wip/summary{query}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<DivisionWipSummaryDto>() ?? new();
     }
 
     public async Task<(bool Success, string Error, List<DivisionWipBundleDto> Result)> GetBundlesAsync(
-        int divisionId, string mode, int? resourceId, bool filterResource)
+        int divisionId, string mode, int? resourceId, bool filterResource, int? projectId = null)
     {
         var query = BuildQuery(
             ("divisionId", divisionId.ToString()),
             ("mode", mode),
             ("resourceId", resourceId?.ToString()),
-            ("filterResource", filterResource ? "true" : "false"));
+            ("filterResource", filterResource ? "true" : "false"),
+            ("projectId", projectId?.ToString()));
 
         var response = await _http.GetAsync($"api/report-wip/bundles{query}");
         if (response.IsSuccessStatusCode)
@@ -49,5 +51,12 @@ public class ReportWipApiService
 
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal memuat daftar bundle." : error.Trim('"'), new());
+    }
+
+    public async Task<List<ProjectWipProgressDto>> GetRunningProjectsAsync()
+    {
+        var response = await _http.GetAsync("api/report-wip/projects");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ProjectWipProgressDto>>() ?? new();
     }
 }

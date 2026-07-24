@@ -63,6 +63,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.StationApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkflowLogApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.BundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicBundleApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicPackApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportBundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportWipApiService>();
 

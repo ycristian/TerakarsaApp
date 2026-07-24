@@ -9,6 +9,7 @@ public class BundleWipDto
     public int BundleId { get; set; }
     public string Serial { get; set; } = string.Empty;
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string ArticleName { get; set; } = string.Empty;
     public string SizeName { get; set; } = string.Empty;
@@ -71,6 +72,7 @@ public class BundleHistoryHeaderDto
     public int BundleId { get; set; }
     public string Serial { get; set; } = string.Empty;
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string ArticleName { get; set; } = string.Empty;
     public string SizeName { get; set; } = string.Empty;
@@ -108,6 +110,7 @@ public class BundleHistoryResultDto
 public class BundleVarianceDto
 {
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string Serial { get; set; } = string.Empty;
     public string ArticleName { get; set; } = string.Empty;
     public string SizeName { get; set; } = string.Empty;
@@ -115,4 +118,36 @@ public class BundleVarianceDto
     public int QtyMasuk { get; set; }
     public int QtyKeluar { get; set; }
     public int Selisih { get; set; }
+}
+
+// Kartu "Laporan Progress" di halaman Edit Project -- matriks ukuran x step untuk satu
+// artikel. Lihat SIS_Report_ArticleSizeProgress: Sizes = baris (+ PO), Steps = kolom,
+// Cells = isi matriks (QtyOk kumulatif per step per ukuran, hanya pasangan yang punya log).
+public class ArticleSizeProgressSizeDto
+{
+    public int SizeId { get; set; }
+    public string SizeName { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public int PoQty { get; set; }
+}
+
+public class ArticleSizeProgressStepDto
+{
+    public int ArticleWorkflowId { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+}
+
+public class ArticleSizeProgressCellDto
+{
+    public int ArticleWorkflowId { get; set; }
+    public int SizeId { get; set; }
+    public int QtyOk { get; set; }
+}
+
+public class ArticleSizeProgressResultDto
+{
+    public List<ArticleSizeProgressSizeDto> Sizes { get; set; } = new();
+    public List<ArticleSizeProgressStepDto> Steps { get; set; } = new();
+    public List<ArticleSizeProgressCellDto> Cells { get; set; } = new();
 }

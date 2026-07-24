@@ -21,7 +21,7 @@ public class ReportWipService
     // masing dengan kolom ArticlesJson (FOR JSON PATH) -- EF Core SqlQueryRaw hanya mendukung
     // satu result set, jadi di sini pakai SqlCommand mentah + reader.NextResultAsync() (pola
     // sama dengan ReportBundleService.GetArticleProgressAsync).
-    public async Task<DivisionWipSummaryDto> GetSummaryAsync()
+    public async Task<DivisionWipSummaryDto> GetSummaryAsync(int? projectId)
     {
         var conn = (SqlConnection)_db.Database.GetDbConnection();
         var wasClosed = conn.State != System.Data.ConnectionState.Open;
@@ -32,6 +32,7 @@ public class ReportWipService
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SIS_Report_DivisionWip";
             cmd.CommandType = System.Data.CommandType.StoredProcedure;
+            cmd.Parameters.Add(new SqlParameter("@ProjectId", (object?)projectId ?? DBNull.Value));
 
             using var reader = await cmd.ExecuteReaderAsync();
 
@@ -87,19 +88,20 @@ public class ReportWipService
     }
 
     public async Task<(bool Success, string Error, List<DivisionWipBundleDto> Result)> GetBundlesAsync(
-        int divisionId, string mode, int? resourceId, bool filterResource)
+        int divisionId, string mode, int? resourceId, bool filterResource, int? projectId)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
         var modeParam = new SqlParameter("@Mode", mode);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value);
         var filterResourceParam = new SqlParameter("@FilterResource", filterResource);
+        var projectIdParam = new SqlParameter("@ProjectId", (object?)projectId ?? DBNull.Value);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<DivisionWipBundleDto>(
-                    "EXEC SIS_Report_DivisionWipBundles @DivisionId = @DivisionId, @Mode = @Mode, @ResourceId = @ResourceId, @FilterResource = @FilterResource",
-                    divisionIdParam, modeParam, resourceIdParam, filterResourceParam)
+                    "EXEC SIS_Report_DivisionWipBundles @DivisionId = @DivisionId, @Mode = @Mode, @ResourceId = @ResourceId, @FilterResource = @FilterResource, @ProjectId = @ProjectId",
+                    divisionIdParam, modeParam, resourceIdParam, filterResourceParam, projectIdParam)
                 .ToListAsync();
             return (true, string.Empty, result);
         }
@@ -107,5 +109,12 @@ public class ReportWipService
         {
             return (false, ex.Message, new List<DivisionWipBundleDto>());
         }
+    }
+
+    public async Task<List<ProjectWipProgressDto>> GetRunningProjectsAsync()
+    {
+        return await _db.Database
+            .SqlQueryRaw<ProjectWipProgressDto>("EXEC SIS_Report_RunningProjects")
+            .ToListAsync();
     }
 }

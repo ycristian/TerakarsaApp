@@ -150,11 +150,7 @@ public class ProjectAttachmentService
         var row = rows.FirstOrDefault(r => PhotoExtensions.Contains(r.FileType.ToLowerInvariant()));
         if (row is null) return null;
 
-        if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))
-            contentType = "application/octet-stream";
-
-        var stream = _fileStorage.OpenRead(row.FilePath);
-        return (stream, contentType, row.FileName);
+        return OpenForDownload(row);
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)?> GetFileForDownloadAsync(int projectId, int attachmentId)
@@ -162,6 +158,13 @@ public class ProjectAttachmentService
         var rows = await GetRowsByProjectAsync(projectId);
         var row = rows.FirstOrDefault(r => r.Id == attachmentId);
         if (row is null) return null;
+
+        return OpenForDownload(row);
+    }
+
+    private (Stream Stream, string ContentType, string FileName)? OpenForDownload(ProjectAttachmentRow row)
+    {
+        if (!_fileStorage.FileExists(row.FilePath)) return null;
 
         if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))
             contentType = "application/octet-stream";

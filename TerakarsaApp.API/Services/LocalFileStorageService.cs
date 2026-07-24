@@ -33,4 +33,10 @@ public class LocalFileStorageService : IFileStorageService
         var fullPath = Path.Combine(_basePath, relativePath);
         return new FileStream(fullPath, FileMode.Open, FileAccess.Read);
     }
+
+    public bool FileExists(string relativePath)
+    {
+        var fullPath = Path.Combine(_basePath, relativePath);
+        return File.Exists(fullPath);
+    }
 }

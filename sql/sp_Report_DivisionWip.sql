@@ -21,7 +21,10 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- A. Ringkasan per divisi -- dua result set (Dikerjakan per resource, Belum diterima per divisi).
+-- @ProjectId (opsional, ditambahkan bersama dropdown filter project di /wip-dashboard):
+-- NULL = semua project (perilaku lama tidak berubah).
 CREATE OR ALTER PROCEDURE SIS_Report_DivisionWip
+    @ProjectId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -49,7 +52,8 @@ BEGIN
     ) ll
     WHERE b.deleted_at IS NULL
       AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
-      AND ll.target_division_id IS NOT NULL;
+      AND ll.target_division_id IS NOT NULL
+      AND (@ProjectId IS NULL OR p.project_id = @ProjectId);
 
     -- Result set 1: Dikerjakan, agregat per (divisi, resource penerima).
     SELECT
@@ -106,11 +110,13 @@ GO
 -- B. Daftar bundle untuk popup "Lihat" satu kartu (satu divisi + satu kelompok).
 -- @FilterResource membedakan "filter resource tidak dipakai" (0, dipakai mode PENDING) vs
 -- "resource NULL" (1 + @ResourceId NULL, kelompok Dikerjakan "Tanpa penerima").
+-- @ProjectId (opsional) menyamakan popup dengan filter project dropdown di dashboard.
 CREATE OR ALTER PROCEDURE SIS_Report_DivisionWipBundles
     @DivisionId      INT,
     @Mode            VARCHAR(20),
     @ResourceId      INT = NULL,
-    @FilterResource  BIT = 0
+    @FilterResource  BIT = 0,
+    @ProjectId       INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -123,7 +129,7 @@ BEGIN
 
     ;WITH LastLog AS (
         SELECT
-            b.bundle_id, b.bundle_no, b.serial,
+            b.bundle_id, b.bundle_no, p.bundle_letter, b.serial,
             a.article_name,
             p.project_name,
             spd.size_name,
@@ -149,10 +155,12 @@ BEGIN
         WHERE b.deleted_at IS NULL
           AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
           AND ll.target_division_id = @DivisionId
+          AND (@ProjectId IS NULL OR p.project_id = @ProjectId)
     )
     SELECT
         l.bundle_id AS BundleId,
         l.bundle_no AS BundleNo,
+        l.bundle_letter AS BundleLetter,
         l.serial AS Serial,
         l.project_name AS ProjectName,
         l.article_name AS ArticleName,
@@ -173,5 +181,46 @@ BEGIN
             ))
         OR (@Mode = 'PENDING' AND l.received_at IS NULL)
     ORDER BY CASE WHEN @Mode = 'DIKERJAKAN' THEN l.received_at ELSE l.created_at END ASC;
+END;
+GO
+
+-- C. Project sedang berjalan + progres qty bundle dibuat vs qty order, dipakai dropdown
+-- filter project di /wip-dashboard. "Sedang berjalan" = manual_status BUKAN
+-- Completed/Cancelled (sama dengan definisi dashboard di atas -- On Hold tetap tampil).
+-- OrderQty = SUM(article_sizes.qty) project ybs, BundleQty = SUM(bundles.qty) project ybs
+-- (bundle_qty di article_sizes TIDAK dipakai -- itu rencana jumlah bundle per size, bukan qty
+-- yang sudah benar-benar dibuat).
+CREATE OR ALTER PROCEDURE SIS_Report_RunningProjects
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        p.project_id AS ProjectId,
+        bu.buyer_name AS BuyerName,
+        p.project_name AS ProjectName,
+        ISNULL(oq.OrderQty, 0) AS OrderQty,
+        ISNULL(bq.BundleQty, 0) AS BundleQty,
+        CASE WHEN ISNULL(oq.OrderQty, 0) > 0
+             THEN CAST(ROUND(100.0 * ISNULL(bq.BundleQty, 0) / oq.OrderQty, 1) AS FLOAT)
+             ELSE CAST(0 AS FLOAT)
+        END AS ProgressPercent
+    FROM projects p
+    INNER JOIN buyers bu ON bu.buyer_id = p.customer_id
+    OUTER APPLY (
+        SELECT SUM(asz.qty) AS OrderQty
+        FROM article_sizes asz
+        INNER JOIN articles a ON a.article_id = asz.article_id AND a.deleted_at IS NULL
+        WHERE a.project_id = p.project_id AND asz.deleted_at IS NULL
+    ) oq
+    OUTER APPLY (
+        SELECT SUM(b.qty) AS BundleQty
+        FROM bundles b
+        INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
+        WHERE a.project_id = p.project_id AND b.deleted_at IS NULL
+    ) bq
+    WHERE p.deleted_at IS NULL
+      AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
+    ORDER BY bu.buyer_name ASC, p.project_name ASC;
 END;
 GO

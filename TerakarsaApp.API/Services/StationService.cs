@@ -113,14 +113,15 @@ public class StationService
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
         var defaultResourceIdParam = new SqlParameter("@DefaultResourceId", request.DefaultResourceId ?? (object)DBNull.Value);
         var allowResourceChangeParam = new SqlParameter("@AllowResourceChange", request.AllowResourceChange);
+        var enablePackingParam = new SqlParameter("@EnablePacking", request.EnablePacking);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<NewStationRow>(
-                    "EXEC SIS_Station_Manage @Action = @Action, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @UserId = @UserId",
-                    actionParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, userIdParam)
+                    "EXEC SIS_Station_Manage @Action = @Action, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @EnablePacking = @EnablePacking, @UserId = @UserId",
+                    actionParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, enablePackingParam, userIdParam)
                 .ToListAsync();
 
             var row = result.FirstOrDefault();
@@ -144,13 +145,14 @@ public class StationService
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
         var defaultResourceIdParam = new SqlParameter("@DefaultResourceId", request.DefaultResourceId ?? (object)DBNull.Value);
         var allowResourceChangeParam = new SqlParameter("@AllowResourceChange", request.AllowResourceChange);
+        var enablePackingParam = new SqlParameter("@EnablePacking", request.EnablePacking);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Station_Manage @Action = @Action, @Id = @Id, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @UserId = @UserId",
-                actionParam, idParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, userIdParam);
+                "EXEC SIS_Station_Manage @Action = @Action, @Id = @Id, @StationCode = @StationCode, @StationName = @StationName, @DivisionId = @DivisionId, @IsActive = @IsActive, @DefaultResourceId = @DefaultResourceId, @AllowResourceChange = @AllowResourceChange, @EnablePacking = @EnablePacking, @UserId = @UserId",
+                actionParam, idParam, codeParam, nameParam, divisionIdParam, isActiveParam, defaultResourceIdParam, allowResourceChangeParam, enablePackingParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

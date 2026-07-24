@@ -20,16 +20,16 @@ public class BundleApiService
         return await response.Content.ReadFromJsonAsync<ArticleBundlesDto>() ?? new() { ArticleId = articleId };
     }
 
-    public async Task<(bool Success, string Error, int BundleNo)> CreateAsync(BundleCreateRequest request)
+    public async Task<(bool Success, string Error, int BundleNo, string? BundleLetter)> CreateAsync(BundleCreateRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/bundles", request);
         if (response.IsSuccessStatusCode)
         {
             var result = await response.Content.ReadFromJsonAsync<BundleCreateResult>();
-            return (true, string.Empty, result?.BundleNo ?? 0);
+            return (true, string.Empty, result?.BundleNo ?? 0, result?.BundleLetter);
         }
         var error = await response.Content.ReadAsStringAsync();
-        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat bundle." : error.Trim('"'), 0);
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat bundle." : error.Trim('"'), 0, null);
     }
 
     public async Task<(bool Success, string Error)> UpdateAsync(int id, BundleUpdateRequest request)

@@ -107,50 +107,58 @@ else
                             <InputText class="form-control" @bind-Value="formModel.ProjectName" />
                             <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Buyer</label>
-                            <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
-                                              IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
-                                              Placeholder="Cari buyer..." />
-                            <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Buyer</label>
+                                <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
+                                                  IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
+                                                  Placeholder="Cari buyer..." />
+                                <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">No PO</label>
+                                <InputText class="form-control" @bind-Value="formModel.NoPo" />
+                                <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">MD</label>
-                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
-                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
-                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">PIC</label>
-                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
-                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
-                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">No PO</label>
-                            <InputText class="form-control" @bind-Value="formModel.NoPo" />
-                            <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">MD</label>
+                                <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
+                                                  IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                                  Placeholder="Cari nama karyawan..." AllowNone="true" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">PIC</label>
+                                <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
+                                                  IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                                  Placeholder="Cari nama karyawan..." AllowNone="true" />
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Bahan</label>
                             <InputText class="form-control" @bind-Value="formModel.MaterialName" />
                             <ValidationMessage For="@(() => formModel.MaterialName)" class="text-danger" />
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Order</label>
-                            <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Order</label>
+                                <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Deadline</label>
+                                <InputDate class="form-control" @bind-Value="formModel.Deadline" />
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Mulai</label>
-                            <InputDate class="form-control" @bind-Value="formModel.StartDate" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Deadline</label>
-                            <InputDate class="form-control" @bind-Value="formModel.Deadline" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Kirim</label>
-                            <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Mulai</label>
+                                <InputDate class="form-control" @bind-Value="formModel.StartDate" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Kirim</label>
+                                <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Catatan</label>

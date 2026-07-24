@@ -82,6 +82,7 @@ builder.Services.AddScoped<ArticleWorkflowService>();
 builder.Services.AddScoped<StationService>();
 builder.Services.AddScoped<WorkflowLogService>();
 builder.Services.AddScoped<BundleService>();
+builder.Services.AddScoped<PackService>();
 builder.Services.AddScoped<PrintJobService>();
 builder.Services.AddScoped<ReportBundleService>();
 builder.Services.AddScoped<ReportWipService>();

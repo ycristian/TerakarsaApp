@@ -33,6 +33,9 @@ public class BundleLabelPayload
     [JsonPropertyName("bundle_no")]
     public int BundleNo { get; set; }
 
+    [JsonPropertyName("bundle_letter")]
+    public string? BundleLetter { get; set; }
+
     [JsonPropertyName("qr_content")]
     public string QrContent { get; set; } = string.Empty;
 
@@ -71,4 +74,36 @@ public class BundleLabelPayload
 
     [JsonPropertyName("started_at")]
     public DateTime StartedAt { get; set; }
+
+    // Prompt: remark cetak di bawah size_pack_name (bold) -- diambil dari
+    // article_workflow_logs.remark terbaru, atau di-override untuk Print Label Cacat
+    // (lihat SIS_Bundle_ReprintLabel @RemarkOverride).
+    [JsonPropertyName("remark")]
+    public string? Remark { get; set; }
+}
+
+// Bentuk payload JSON print_jobs untuk job_type PACK_LABEL (lihat sql/sp_Pack_Manage.sql,
+// dirakit lewat FOR JSON PATH dengan nama kolom snake_case -- cocokkan lewat JsonPropertyName).
+public class PackLabelPayload
+{
+    [JsonPropertyName("serial")]
+    public string Serial { get; set; } = string.Empty;
+
+    [JsonPropertyName("qr_content")]
+    public string QrContent { get; set; } = string.Empty;
+
+    [JsonPropertyName("project_name")]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [JsonPropertyName("pack_no")]
+    public int PackNo { get; set; }
+
+    [JsonPropertyName("total_qty")]
+    public int TotalQty { get; set; }
+
+    [JsonPropertyName("item_count")]
+    public int ItemCount { get; set; }
+
+    [JsonPropertyName("is_confirmed")]
+    public bool IsConfirmed { get; set; }
 }

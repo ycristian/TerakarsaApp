@@ -3,6 +3,8 @@ using Microsoft.Extensions.Options;
 using TerakarsaApp.API.Authorization;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Packs;
+using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Stations;
 using TerakarsaApp.Shared.WorkflowLogs;
 
@@ -21,17 +23,26 @@ public class StationDeviceController : ControllerBase
     private readonly WorkflowLogService _workflowLogService;
     private readonly ResourceService _resourceService;
     private readonly BundleService _bundleService;
+    private readonly PackService _packService;
+    private readonly ProjectService _projectService;
+    private readonly ArticlePhotoService _articlePhotoService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
         WorkflowLogService workflowLogService,
         ResourceService resourceService,
         BundleService bundleService,
+        PackService packService,
+        ProjectService projectService,
+        ArticlePhotoService articlePhotoService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
         _resourceService = resourceService;
         _bundleService = bundleService;
+        _packService = packService;
+        _projectService = projectService;
+        _articlePhotoService = articlePhotoService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -96,6 +107,12 @@ public class StationDeviceController : ControllerBase
         if (summary.Count == 0 || summary[0].BundlingDivisionId != CurrentStation.DivisionId)
             return BadRequest("Divisi ini tidak memiliki step Bundling untuk artikel ini.");
 
+        // Fix: qty tidak boleh melebihi Stock Cutting (sisa hasil Cutting yang sudah diterima
+        // divisi Bundling tapi belum dijadikan bundle) -- lihat SIS_Article_BundleSummary.
+        var sizeInfo = summary.FirstOrDefault(s => s.ArticleSizeId == request.ArticleSizeId);
+        if (sizeInfo is not null && request.Qty > sizeInfo.StockCutting)
+            return BadRequest($"Qty tidak boleh lebih dari Stock Cutting ({sizeInfo.StockCutting}).");
+
         var (success, error, result) = await _bundleService.CreateAsync(new BundleCreateRequest
         {
             ArticleId = request.ArticleId,
@@ -118,17 +135,31 @@ public class StationDeviceController : ControllerBase
     {
         var operatorResourceId = EffectiveResourceId(request.ResourceId);
         if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (request.ArticleSizeId <= 0) return BadRequest("Ukuran wajib dipilih.");
         if (request.Qty <= 0) return BadRequest("Qty bundle harus lebih dari 0.");
 
         var (success, error) = await _bundleService.UpdateAsync(new BundleUpdateRequest
         {
             Id = id,
             Qty = request.Qty,
+            ArticleSizeId = request.ArticleSizeId,
             ResourceId = request.TailorResourceId,
             ResourcePersonName = request.TailorPersonName,
             BundlingResourceId = operatorResourceId
         }, _systemUserId);
 
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Fix: "Hapus" bundle dari tab OUT station Bundling -- dipakai untuk baris yang sudah
+    // received_at (auto-diterima Line tujuan saat dibuat) tapi masih WIP murni & dalam
+    // jendela 1 jam (lihat SIS_Station_PendingHandover/SIS_Bundle_Manage DELETE). SP sendiri
+    // yang menegakkan aturan waktu/status -- endpoint ini cukup teruskan error apa adanya.
+    [HttpDelete("bundles/{id:int}")]
+    public async Task<IActionResult> DeleteBundle(int id)
+    {
+        var (success, error) = await _bundleService.DeleteAsync(id, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok();
     }
@@ -139,6 +170,18 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> ReprintBundle(int id)
     {
         var (success, error, printJobId) = await _bundleService.ReprintAsync(id, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
+    // Prompt: "Print Label Cacat" -- popup di BundleScanCard setelah Kirim Hasil dengan
+    // reject > 0. Copies = jumlah lembar, semua station boleh (sama seperti reprint di atas).
+    [HttpPost("bundles/{id:int}/print-defect-label")]
+    public async Task<IActionResult> PrintDefectLabel(int id, [FromBody] BundlePrintDefectLabelRequest request)
+    {
+        if (request.Copies < 1) return BadRequest("Jumlah label harus minimal 1.");
+
+        var (success, error, printJobId) = await _bundleService.PrintDefectLabelAsync(id, request.Copies, request.Remark, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }
@@ -188,6 +231,19 @@ public class StationDeviceController : ControllerBase
     {
         var result = await _workflowLogService.GetActiveWorkAsync(CurrentStation.DivisionId);
         return Ok(result);
+    }
+
+    // Fix: foto utama artikel untuk kartu "Buat Bundle" di tab WIP -- setara
+    // api/article-photos/{articleId}/primary (ArticlePhotoController) tapi lewat token
+    // stasiun, bukan JWT, supaya bisa dipanggil dari /station tanpa login.
+    [HttpGet("articles/{articleId:int}/photo")]
+    public async Task<IActionResult> GetArticlePhoto(int articleId)
+    {
+        var result = await _articlePhotoService.GetPrimaryPhotoForDownloadAsync(articleId);
+        if (result is null) return NotFound();
+
+        var (stream, contentType, fileName) = result.Value;
+        return File(stream, contentType, fileName);
     }
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) di atas /station.
@@ -270,7 +326,8 @@ public class StationDeviceController : ControllerBase
             Remark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId,
             ConfirmExceed = request.ConfirmExceed,
-            ConfirmShort = request.ConfirmShort
+            ConfirmShort = request.ConfirmShort,
+            ActingAllowResourceChange = CurrentStation.AllowResourceChange
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -405,5 +462,123 @@ public class StationDeviceController : ControllerBase
 
         if (!success) return BadRequest(error);
         return Ok();
+    }
+
+    // Prompt 25: modul Packing -- hanya stasiun dengan enable_packing yang boleh membuka
+    // tab "Packing"/memanggil endpoint ini (lihat SIS_Station_GetByToken + StationMeDto).
+    private IActionResult? RequirePackingEnabled() =>
+        CurrentStation.EnablePacking ? null : StatusCode(403, "Modul packing tidak aktif untuk stasiun ini.");
+
+    [HttpGet("packing/projects")]
+    public async Task<IActionResult> GetPackingProjects()
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        var result = await _projectService.GetPagedAsync(new ProjectPagedRequest
+        {
+            PageNumber = 1,
+            PageSize = 500,
+            SortColumn = "CreatedAt",
+            SortDirection = "desc"
+        });
+        return Ok(result.Items);
+    }
+
+    [HttpGet("packing/stock/{projectId:int}")]
+    public async Task<IActionResult> GetPackingStock(int projectId)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        var result = await _packService.GetStockAvailableAsync(projectId);
+        return Ok(result);
+    }
+
+    [HttpGet("packing/packs/{projectId:int}")]
+    public async Task<IActionResult> GetPackingPacks(int projectId)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        var result = await _packService.GetProjectPackingAsync(projectId);
+        return Ok(result);
+    }
+
+    [HttpPost("packing/packs")]
+    public async Task<IActionResult> CreatePack([FromBody] PackCreateRequest request)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        if (request.Items.Count == 0)
+            return BadRequest("Karung harus berisi minimal 1 item.");
+
+        var (success, error, result) = await _packService.CreateAsync(request, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(result);
+    }
+
+    [HttpPut("packing/packs/{id:int}/plan")]
+    public async Task<IActionResult> UpdatePackPlan(int id, [FromBody] PackUpdatePlanRequest request)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        if (request.Items.Count == 0)
+            return BadRequest("Karung harus berisi minimal 1 item.");
+
+        var (success, error) = await _packService.UpdatePlanAsync(id, request, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    [HttpPut("packing/packs/{id:int}/confirm")]
+    public async Task<IActionResult> ConfirmPack(int id, [FromBody] PackConfirmRequest request)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        if (request.Items.Count == 0)
+            return BadRequest("Minimal satu item harus dikonfirmasi.");
+
+        var (success, error) = await _packService.ConfirmAsync(id, request, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    [HttpPost("packing/packs/{id:int}/reprint")]
+    public async Task<IActionResult> ReprintPack(int id)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        var (success, error, printJobId) = await _packService.ReprintAsync(id, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
+    [HttpDelete("packing/packs/{id:int}")]
+    public async Task<IActionResult> DeletePack(int id, [FromQuery] string? reason)
+    {
+        var forbid = RequirePackingEnabled();
+        if (forbid is not null) return forbid;
+
+        if (string.IsNullOrWhiteSpace(reason))
+            return BadRequest("Alasan hapus karung wajib diisi.");
+
+        var (success, error) = await _packService.DeleteAsync(id, reason, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 25: panel scan QR karung di /station (sama pola dengan scan/{serial} bundle
+    // di atas), operator sesi tidak relevan untuk packing (read-only, tanpa aksi lanjutan).
+    [HttpGet("packing/scan/{serial}")]
+    public async Task<IActionResult> ScanPack(string serial)
+    {
+        var result = await _packService.GetScanInfoAsync(serial);
+        if (result is null) return NotFound("Karung tidak ditemukan.");
+        return Ok(result);
     }
 }

@@ -10,7 +10,7 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-2">
             <div>
-                <h2 class="mb-0">No. @Info.Bundle.BundleNo</h2>
+                <h2 class="mb-0">No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo)</h2>
                 <p class="text-muted mb-0">@Info.Bundle.Serial</p>
             </div>
             <div class="text-end">
@@ -184,7 +184,7 @@
                     <button type="button" class="btn-close" @onclick="CloseEditModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>No. @Info.Bundle.BundleNo - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
+                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
 
                     <div class="d-flex justify-content-end mb-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ResetEdit">Reset</button>
@@ -213,8 +213,12 @@
                         <div class="form-text mb-2">Masuk: @editQuotaInfo.QtyMasuk &middot; Tercatat: @editQuotaInfo.QtySudah &middot; Sisa: @editQuotaInfo.Sisa</div>
                     }
 
-                    <label class="form-label">Catatan (opsional)</label>
+                    <label class="form-label">Catatan (wajib jika ada reject)</label>
                     <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
+                    @if (!string.IsNullOrEmpty(editRemarkError))
+                    {
+                        <div class="text-danger small mb-2">@editRemarkError</div>
+                    }
 
                     @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
                     {
@@ -246,6 +250,50 @@
     </div>
 }
 
+@if (showDefectLabelModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Print Label Cacat</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDefectLabelModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
+
+                    <div class="text-danger small mb-3">
+                        @if (defectQtyRejectPrint > 0)
+                        {
+                            <div>Reject Print: @defectQtyRejectPrint</div>
+                        }
+                        @if (defectQtyRejectFabric > 0)
+                        {
+                            <div>Reject Bahan: @defectQtyRejectFabric</div>
+                        }
+                        @if (defectQtyRejectSewing > 0)
+                        {
+                            <div>Reject Jahit: @defectQtyRejectSewing</div>
+                        }
+                    </div>
+
+                    <label class="form-label">Jumlah Label</label>
+                    <input type="number" min="1" class="form-control form-control-lg" @bind="defectLabelCopies" />
+
+                    @if (!string.IsNullOrEmpty(defectLabelError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@defectLabelError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseDefectLabelModal">Lewati</button>
+                    <button class="btn btn-primary" disabled="@(defectLabelBusy || defectLabelCopies < 1)" @onclick="SubmitDefectLabel">Cetak</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (showCompleteModal)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
@@ -256,7 +304,7 @@
                     <button type="button" class="btn-close" @onclick="CloseCompleteModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>No. @Info.Bundle.BundleNo - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
+                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
 
                     <div class="d-flex justify-content-end mb-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="SetCompleteAllOk">Set All OK</button>
@@ -292,8 +340,12 @@
                         </div>
                     </div>
 
-                    <label class="form-label">Catatan (opsional)</label>
+                    <label class="form-label">Catatan (wajib jika ada reject)</label>
                     <textarea class="form-control mb-2" rows="2" @bind="completeRemark"></textarea>
+                    @if (!string.IsNullOrEmpty(completeRemarkError))
+                    {
+                        <div class="text-danger small mb-2">@completeRemarkError</div>
+                    }
 
                     @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
                     {
@@ -364,6 +416,7 @@
     private int completeQtyRejectFabric;
     private int completeQtyRejectSewing;
     private string completeRemark = string.Empty;
+    private string completeRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? completeQuotaInfo;
 
     protected override async Task OnParametersSetAsync()
@@ -377,6 +430,7 @@
 
     private void OpenCompleteModal()
     {
+        completeRemarkError = string.Empty;
         showCompleteModal = true;
     }
 
@@ -399,6 +453,14 @@
 
     private async Task DoSubmitComplete(bool confirmExceed, bool confirmShort)
     {
+        var totalReject = completeQtyRejectPrint + completeQtyRejectFabric + completeQtyRejectSewing;
+        if (totalReject > 0 && string.IsNullOrWhiteSpace(completeRemark))
+        {
+            completeRemarkError = "Catatan wajib diisi jika ada reject.";
+            return;
+        }
+        completeRemarkError = string.Empty;
+
         await OnComplete.InvokeAsync(new BundleCompleteFormValues
         {
             QtyOk = completeQtyOk,
@@ -413,6 +475,62 @@
         if (string.IsNullOrEmpty(ActionError))
         {
             showCompleteModal = false;
+
+            if (totalReject > 0)
+            {
+                defectQtyRejectPrint = completeQtyRejectPrint;
+                defectQtyRejectFabric = completeQtyRejectFabric;
+                defectQtyRejectSewing = completeQtyRejectSewing;
+                defectRemark = completeRemark;
+                defectLabelCopies = 1;
+                defectLabelError = string.Empty;
+                showDefectLabelModal = true;
+            }
+        }
+    }
+
+    // Prompt: "Print Label Cacat" -- muncul setelah Kirim Hasil berhasil disimpan dengan
+    // reject > 0. Cetak ulang label bundle (template sama, lihat SIS_Bundle_ReprintLabel)
+    // sebanyak Copies lembar, remark di-override dengan catatan Kirim Hasil + ringkasan qty
+    // cacat (BUKAN qty cacat itu sendiri -- Copies murni jumlah lembar fisik yang dicetak).
+    private bool showDefectLabelModal = false;
+    private int defectLabelCopies = 1;
+    private bool defectLabelBusy = false;
+    private string defectLabelError = string.Empty;
+    private int defectQtyRejectPrint;
+    private int defectQtyRejectFabric;
+    private int defectQtyRejectSewing;
+    private string defectRemark = string.Empty;
+
+    private void CloseDefectLabelModal()
+    {
+        showDefectLabelModal = false;
+    }
+
+    private async Task SubmitDefectLabel()
+    {
+        if (defectLabelCopies < 1) return;
+
+        defectLabelBusy = true;
+        defectLabelError = string.Empty;
+
+        var parts = new List<string>();
+        if (defectQtyRejectPrint > 0) parts.Add($"Print {defectQtyRejectPrint}");
+        if (defectQtyRejectFabric > 0) parts.Add($"Bahan {defectQtyRejectFabric}");
+        if (defectQtyRejectSewing > 0) parts.Add($"Jahit {defectQtyRejectSewing}");
+        var defectSummary = "Cacat: " + string.Join(", ", parts);
+        var remark = string.IsNullOrWhiteSpace(defectRemark) ? defectSummary : $"{defectRemark} — {defectSummary}";
+
+        var (success, error) = await StationApi.PrintDefectLabelAsync(Info.Bundle.BundleId, defectLabelCopies, remark);
+
+        defectLabelBusy = false;
+        if (success)
+        {
+            showDefectLabelModal = false;
+        }
+        else
+        {
+            defectLabelError = error;
         }
     }
 
@@ -422,6 +540,7 @@
     private int editQtyRejectFabric;
     private int editQtyRejectSewing;
     private string editRemark = string.Empty;
+    private string editRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? editQuotaInfo;
 
     private async Task OpenEditModal()
@@ -434,6 +553,7 @@
         editQuotaInfo = Info.Action.ActionArticleWorkflowId is not null
             ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
             : null;
+        editRemarkError = string.Empty;
         showEditModal = true;
     }
 
@@ -449,6 +569,7 @@
         editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
         editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
         editRemark = Info.Action.ActionRemark ?? string.Empty;
+        editRemarkError = string.Empty;
     }
 
     private Task SubmitEdit() => DoSubmitEdit(false, false);
@@ -457,6 +578,14 @@
 
     private async Task DoSubmitEdit(bool confirmExceed, bool confirmShort)
     {
+        var totalReject = editQtyRejectPrint + editQtyRejectFabric + editQtyRejectSewing;
+        if (totalReject > 0 && string.IsNullOrWhiteSpace(editRemark))
+        {
+            editRemarkError = "Catatan wajib diisi jika ada reject.";
+            return;
+        }
+        editRemarkError = string.Empty;
+
         await OnEdit.InvokeAsync(new BundleCompleteFormValues
         {
             QtyOk = editQtyOk,

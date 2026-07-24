@@ -115,7 +115,7 @@ else
                                 @foreach (var b in sizeGroup)
                                 {
                                     <tr>
-                                        <td>@b.BundleNo</td>
+                                        <td>@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
                                         <td>@b.Serial</td>
                                         <td>@b.Qty</td>
                                         <td>@FormatPenjahit(b)</td>
@@ -142,7 +142,7 @@ else
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Tambah Bundle</h5>
-                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAddForm"><span aria-hidden="true">&times;</span></button>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAddForm"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
@@ -159,7 +159,7 @@ else
                             <label class="form-label">Penjahit (resource)</label>
                             <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="addForm.ResourceId"
                                               IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
-                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                                              Placeholder="Cari resource..." />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Penjahit (bebas)</label>
@@ -199,7 +199,7 @@ else
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit Bundle @editForm.Serial</h5>
-                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseEditForm"><span aria-hidden="true">&times;</span></button>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseEditForm"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
@@ -389,6 +389,12 @@ else
             return;
         }
 
+        if (addForm.ResourceId <= 0)
+        {
+            addError = "Penjahit (resource) wajib dipilih.";
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(addForm.ResourcePersonName))
         {
             addError = "Nama penjahit wajib diisi.";
@@ -431,7 +437,7 @@ else
         if (result.Success)
         {
             showAddForm = false;
-            addSuccessMessage = $"Bundle #{result.BundleNo} dibuat.";
+            addSuccessMessage = $"Bundle {BundleDisplay.Format(result.BundleLetter, result.BundleNo)} dibuat.";
             await LoadBundles();
         }
         else

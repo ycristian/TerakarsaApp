@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Packs;
+using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Resources;
 using TerakarsaApp.Shared.Stations;
 using TerakarsaApp.Shared.WorkflowLogs;
@@ -93,6 +95,16 @@ public class StationDeviceApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan." : error.Trim('"'));
     }
 
+    // Fix: "Hapus" bundle dari tab OUT station Bundling (baris sudah received_at tapi masih
+    // WIP murni & dalam jendela 1 jam -- lihat StationPendingHandoverDto.ReceivedAt).
+    public async Task<(bool Success, string Error)> DeleteBundleAsync(int bundleId)
+    {
+        var response = await _http.DeleteAsync($"api/station/bundles/{bundleId}");
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus bundle." : error.Trim('"'));
+    }
+
     // Prompt 24: Cetak Ulang label -- dipakai semua kartu bundle di station + BundleScanCard.
     public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId)
     {
@@ -100,6 +112,16 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));
+    }
+
+    // Prompt: "Print Label Cacat" -- reprint label bundle N lembar, remark di-override dengan
+    // catatan + ringkasan qty cacat.
+    public async Task<(bool Success, string Error)> PrintDefectLabelAsync(int bundleId, int copies, string? remark)
+    {
+        var response = await _http.PostAsJsonAsync($"api/station/bundles/{bundleId}/print-defect-label", new BundlePrintDefectLabelRequest { Copies = copies, Remark = remark });
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak label cacat." : error.Trim('"'));
     }
 
     // Prompt 22b: resourceId = operator sesi saat ini, dipakai server untuk filter antrian
@@ -140,6 +162,24 @@ public class StationDeviceApiService
         var response = await _http.GetAsync("api/station/active-work");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationActiveWorkDto>>() ?? new();
+    }
+
+    // Fix: foto utama artikel untuk kartu "Buat Bundle" di tab WIP.
+    public async Task<(byte[] Bytes, string ContentType)?> GetArticlePhotoAsync(int articleId)
+    {
+        try
+        {
+            var response = await _http.GetAsync($"api/station/articles/{articleId}/photo");
+            if (!response.IsSuccessStatusCode) return null;
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return (bytes, contentType);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     // Prompt 23: grid "Kirim Hasil" non-bundle -- pindahan dari WorkflowInputApiService.
@@ -233,5 +273,79 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan revisi." : error.Trim('"'));
+    }
+
+    // Prompt 25: modul Packing -- dropdown project ("aktif") dipakai untuk memilih project
+    // sebelum masuk sub-tab Stok Siap Pack/Karung.
+    public async Task<List<ProjectDto>> GetPackingProjectsAsync()
+    {
+        var response = await _http.GetAsync("api/station/packing/projects");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ProjectDto>>() ?? new();
+    }
+
+    public async Task<List<PackStockAvailableDto>> GetPackingStockAsync(int projectId)
+    {
+        var response = await _http.GetAsync($"api/station/packing/stock/{projectId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PackStockAvailableDto>>() ?? new();
+    }
+
+    public async Task<ProjectPackingDto> GetPackingPacksAsync(int projectId)
+    {
+        var response = await _http.GetAsync($"api/station/packing/packs/{projectId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<ProjectPackingDto>() ?? new();
+    }
+
+    public async Task<(bool Success, string Error, PackCreateResult? Result)> CreatePackAsync(PackCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/packing/packs", request);
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<PackCreateResult>();
+            return (true, string.Empty, result);
+        }
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat karung." : error.Trim('"'), null);
+    }
+
+    public async Task<(bool Success, string Error)> UpdatePackPlanAsync(int packId, PackUpdatePlanRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/packing/packs/{packId}/plan", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan planning." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> ConfirmPackAsync(int packId, PackConfirmRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/packing/packs/{packId}/confirm", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan konfirmasi." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> ReprintPackAsync(int packId)
+    {
+        var response = await _http.PostAsync($"api/station/packing/packs/{packId}/reprint", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> DeletePackAsync(int packId, string reason)
+    {
+        var response = await _http.DeleteAsync($"api/station/packing/packs/{packId}?reason={Uri.EscapeDataString(reason)}");
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus karung." : error.Trim('"'));
+    }
+
+    public async Task<PackScanInfoDto?> ScanPackAsync(string serial)
+    {
+        var response = await _http.GetAsync($"api/station/packing/scan/{Uri.EscapeDataString(serial)}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<PackScanInfoDto>();
     }
 }

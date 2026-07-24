@@ -75,6 +75,21 @@ BEGIN
                 ) j ON j.Id = spd.size_pack_detail_id
             WHERE spd.size_pack_id = @Id AND spd.deleted_at IS NULL;
 
+            -- Baris lama yang sudah tidak ada di JSON -> soft delete
+            -- (harus dijalankan SEBELUM insert baris baru: baris baru belum
+            -- punya Id di JSON, jadi kalau insert duluan baris itu akan
+            -- langsung ikut ke-soft-delete di sini karena Id barunya juga
+            -- tidak ada di JSON)
+            UPDATE spd
+            SET spd.deleted_at = SYSDATETIME(),
+                spd.deleted_by = @UserId
+            FROM size_pack_details spd
+            WHERE spd.size_pack_id = @Id AND spd.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM OPENJSON(@Details) WITH (Id INT '$.Id') j
+                  WHERE j.Id = spd.size_pack_detail_id
+              );
+
             -- Baris tanpa Id -> insert baru
             INSERT INTO size_pack_details (size_pack_id, size_name, sort_order, [description], created_at, created_by)
             SELECT @Id, j.SizeName, j.SortOrder, j.[Description], SYSDATETIME(), @UserId
@@ -86,17 +101,6 @@ BEGIN
                     [Description] VARCHAR(255) '$.Description'
                 ) j
             WHERE j.Id IS NULL;
-
-            -- Baris lama yang sudah tidak ada di JSON -> soft delete
-            UPDATE spd
-            SET spd.deleted_at = SYSDATETIME(),
-                spd.deleted_by = @UserId
-            FROM size_pack_details spd
-            WHERE spd.size_pack_id = @Id AND spd.deleted_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM OPENJSON(@Details) WITH (Id INT '$.Id') j
-                  WHERE j.Id = spd.size_pack_detail_id
-              );
 
             COMMIT TRAN;
         END TRY

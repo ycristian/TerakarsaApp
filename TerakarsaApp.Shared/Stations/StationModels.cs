@@ -12,6 +12,8 @@ public class StationDto
     public int? DefaultResourceId { get; set; }
     public string? DefaultResourceName { get; set; }
     public bool AllowResourceChange { get; set; } = true;
+    // Prompt 25: stasiun ini boleh membuka modul packing (tab "Packing" di /station).
+    public bool EnablePacking { get; set; }
     // Prompt 20: status pairing untuk admin -- station_token sendiri tidak pernah dikembalikan.
     public DateTime? PairedAt { get; set; }
     public DateTime? PairingCodeExpiresAt { get; set; }
@@ -29,6 +31,7 @@ public class StationCreateRequest
     public bool IsActive { get; set; } = true;
     public int? DefaultResourceId { get; set; }
     public bool AllowResourceChange { get; set; } = true;
+    public bool EnablePacking { get; set; }
 }
 
 public class StationUpdateRequest
@@ -40,6 +43,7 @@ public class StationUpdateRequest
     public bool IsActive { get; set; }
     public int? DefaultResourceId { get; set; }
     public bool AllowResourceChange { get; set; } = true;
+    public bool EnablePacking { get; set; }
 }
 
 public class StationPagedRequest
@@ -96,4 +100,6 @@ public class StationMeDto
     public int? DefaultResourceId { get; set; }
     public string? DefaultResourceName { get; set; }
     public bool AllowResourceChange { get; set; } = true;
+    // Prompt 25: gate tab "Packing" di /station.
+    public bool EnablePacking { get; set; }
 }

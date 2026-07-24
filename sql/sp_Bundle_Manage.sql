@@ -11,11 +11,12 @@
 --      appsettings.json (App:PublicBaseUrl) di layer API dan dikirim sebagai parameter --
 --      serial baru diketahui hanya di dalam transaksi ini (sp_getapplock), jadi qr_content
 --      lengkap dirakit di sini, bukan di API.
---   4. UPDATE/DELETE ditolak bila bundle sudah punya log hidup di step station (is_bundling =
+--   4. UPDATE ditolak bila bundle sudah punya log hidup di step station (is_bundling =
 --      0, artinya sudah disentuh divisi produksi) ATAU log Bundling-nya sudah received_at
 --      terisi (sudah diserah-terimakan ke divisi berikutnya) -- selama belum, supervisor masih
---      bisa ganti line/qty/hapus bundle. Perbaikan Prompt 17: pengecekan lama memakai kolom
+--      bisa ganti line/qty. Perbaikan Prompt 17: pengecekan lama memakai kolom
 --      [status] = 'COMPLETED' yang sudah dihapus sejak Prompt 12b (bug, selalu gagal).
+--      DELETE memakai aturan waktu, bukan status -- lihat catatan di action DELETE.
 --   5. Serial tidak pernah berubah setelah dibuat.
 --   6. bundle_no = nomor urut pendek per project (1, 2, 3, ...), naik terus lintas artikel
 --      sampai project selesai, dihitung atas SEMUA bundle project ini (termasuk yang
@@ -46,6 +47,23 @@
 --      begitu received_at terisi (langsung setelah CREATE), bundle TIDAK bisa lagi
 --      diubah/dihapus lewat SIS_Bundle_Manage (harus direvisi dari sisi divisi tujuan).
 --      Tanpa penjahit (@ResourceId NULL), tetap pending seperti semula (perilaku lama).
+--      Fix: CREATE sekarang mewajibkan @ResourceId (RAISERROR bila NULL) -- cabang "tanpa
+--      penjahit" di atas jadi tidak pernah kejadian lagi dari CREATE, tapi dibiarkan (bukan
+--      dihapus) karena UPDATE tidak ikut diwajibkan (bundle lama boleh tetap tanpa penjahit).
+--   11. Fix: jendela 1 jam pada DELETE hanya berlaku KALAU log Bundling-nya sudah received_at
+--      terisi (auto-diterima Line tujuan saat dibuat) -- selama belum diterima divisi
+--      berikutnya, Hapus boleh kapan pun (tidak ada batas waktu). Begitu diterima, Hapus
+--      hanya boleh selama masih dalam 1 jam sejak bundles.created_at; lewat itu harus
+--      direvisi manual dari divisi tujuan (dipakai tombol "Hapus" tab OUT station Bundling).
+--   12. Fix: UPDATE mengikuti aturan jendela 1 jam yang sama dengan DELETE -- begitu log
+--      Bundling sudah received_at terisi, UPDATE tetap diizinkan selama masih dalam 1 jam
+--      sejak bundles.created_at (dipakai tombol "Edit" di tab OUT station, berdampingan
+--      dengan "Hapus"). Lewat 1 jam, harus direvisi manual dari divisi tujuan. Selama belum
+--      diterima, UPDATE tidak dibatasi waktu sama sekali.
+--   13. Fix: UPDATE bisa ikut mengubah ukuran (@ArticleSizeId, opsional -- NULL berarti tidak
+--      diubah, dipakai admin /bundles yang belum mengirim field ini). Kalau ukuran berubah,
+--      sort_order dihitung ulang relatif ke grup ukuran baru (pola sama dengan CREATE) supaya
+--      urutan tampil tetap konsisten per ukuran.
 
 SET ANSI_NULLS ON;
 GO
@@ -93,6 +111,15 @@ BEGIN
         IF @Qty IS NULL OR @Qty <= 0
         BEGIN
             RAISERROR('Qty bundle harus lebih dari 0.', 16, 1);
+            RETURN;
+        END
+
+        -- Fix: Penjahit (resource) wajib dipilih saat bundle dibuat -- sebelumnya @ResourceId
+        -- NULL diperbolehkan (log Bundling tetap pending, lihat catatan #10), tapi sekarang
+        -- UI (station & admin bundle) selalu mewajibkan pilihan penjahit, ditegakkan di sini juga.
+        IF @ResourceId IS NULL
+        BEGIN
+            RAISERROR('Penjahit (resource) wajib dipilih.', 16, 1);
             RETURN;
         END
 
@@ -165,6 +192,11 @@ BEGIN
             INNER JOIN articles a ON a.article_id = b.article_id
             WHERE a.project_id = @ProjectId;
 
+            -- Prompt 27: huruf bundle project ini (NULL utk project lama sebelum Prompt 27) --
+            -- dipakai payload label + dikembalikan ke client, TIDAK mengubah bundle_no itu sendiri.
+            DECLARE @NewBundleLetter CHAR(1);
+            SELECT @NewBundleLetter = bundle_letter FROM projects WHERE project_id = @ProjectId;
+
             DECLARE @NextSort INT;
             SELECT @NextSort = ISNULL(MAX(sort_order), 0) + 1
             FROM bundles
@@ -191,6 +223,7 @@ BEGIN
                     SELECT
                         @NewSerial AS serial,
                         @NewBundleNo AS bundle_no,
+                        @NewBundleLetter AS bundle_letter,
                         @QrContent AS qr_content,
                         p.project_name AS project_name,
                         p.no_po AS no_po,
@@ -203,7 +236,8 @@ BEGIN
                         @Qty AS qty,
                         res.resource_name AS resource_name,
                         @ResourcePersonName AS resource_person_name,
-                        (SELECT created_at FROM bundles WHERE bundle_id = @NewBundleId) AS started_at
+                        (SELECT created_at FROM bundles WHERE bundle_id = @NewBundleId) AS started_at,
+                        CAST(NULL AS VARCHAR(255)) AS remark
                     FROM articles a
                     INNER JOIN projects p ON p.project_id = a.project_id
                     INNER JOIN size_packs spk ON spk.size_pack_id = a.size_pack_id
@@ -264,7 +298,7 @@ BEGIN
 
             COMMIT TRAN;
 
-            SELECT @NewBundleId AS NewId, @NewPrintJobId AS NewPrintJobId, @NewBundleNo AS NewBundleNo, @NewSerial AS NewSerial;
+            SELECT @NewBundleId AS NewId, @NewPrintJobId AS NewPrintJobId, @NewBundleNo AS NewBundleNo, @NewSerial AS NewSerial, @NewBundleLetter AS NewBundleLetter;
         END TRY
         BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK TRAN;
@@ -283,8 +317,8 @@ BEGIN
         -- Prompt 17: perbaikan bug -- [status] sudah dihapus sejak Prompt 12b. Tolak bila
         -- bundle sudah punya log hidup di step station (sudah dikerjakan) atau log Bundling-
         -- nya sudah diserah-terimakan (received_at terisi).
-        DECLARE @UpdArticleId INT, @UpdBundlingDivisionId INT;
-        SELECT @UpdArticleId = b.article_id, @UpdBundlingDivisionId = aw.division_id
+        DECLARE @UpdArticleId INT, @UpdBundlingDivisionId INT, @UpdCreatedAt DATETIME2, @UpdCurrentSizeId INT;
+        SELECT @UpdArticleId = b.article_id, @UpdBundlingDivisionId = aw.division_id, @UpdCreatedAt = b.created_at, @UpdCurrentSizeId = b.article_size_id
         FROM bundles b
         LEFT JOIN article_workflows aw ON aw.article_id = b.article_id AND aw.deleted_at IS NULL AND aw.is_bundling = 1
         WHERE b.bundle_id = @Id AND b.deleted_at IS NULL;
@@ -322,6 +356,8 @@ BEGIN
 
         -- Prompt 24: guard terpisah, pesan jelas -- log Bundling bundle ini sendiri sudah
         -- diserah-terimakan ke divisi berikutnya (received_at terisi).
+        -- Fix: selama masih dalam jendela 1 jam sejak bundles.created_at (aturan sama dengan
+        -- DELETE), UPDATE tetap diizinkan meski received_at sudah terisi -- lihat catatan #12.
         IF EXISTS (
             SELECT 1
             FROM article_workflow_logs awl
@@ -329,8 +365,11 @@ BEGIN
             WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 1 AND awl.received_at IS NOT NULL
         )
         BEGIN
-            RAISERROR('Bundle sudah diterima divisi berikutnya, tidak bisa diubah.', 16, 1);
-            RETURN;
+            IF @UpdCreatedAt < DATEADD(HOUR, -1, SYSDATETIME())
+            BEGIN
+                RAISERROR('Bundle sudah diterima divisi berikutnya dan lebih dari 1 jam sejak dibuat, tidak bisa diubah.', 16, 1);
+                RETURN;
+            END
         END
 
         IF @BundlingResourceId IS NOT NULL AND NOT EXISTS (
@@ -342,8 +381,27 @@ BEGIN
             RETURN;
         END
 
+        -- Fix: ukuran boleh diubah lewat Edit bundle di station -- lihat catatan #13.
+        IF @ArticleSizeId IS NOT NULL AND @ArticleSizeId <> @UpdCurrentSizeId AND NOT EXISTS (
+            SELECT 1 FROM article_sizes
+            WHERE article_size_id = @ArticleSizeId AND article_id = @UpdArticleId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Ukuran tidak ditemukan untuk artikel ini.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @UpdNewSizeId INT = ISNULL(@ArticleSizeId, @UpdCurrentSizeId);
+        DECLARE @UpdSortOrder INT;
+        IF @UpdNewSizeId <> @UpdCurrentSizeId
+            SELECT @UpdSortOrder = ISNULL(MAX(sort_order), 0) + 1 FROM bundles WHERE article_size_id = @UpdNewSizeId AND deleted_at IS NULL;
+        ELSE
+            SELECT @UpdSortOrder = sort_order FROM bundles WHERE bundle_id = @Id;
+
         UPDATE bundles
         SET qty = @Qty,
+            article_size_id = @UpdNewSizeId,
+            sort_order = @UpdSortOrder,
             resource_id = @ResourceId,
             resource_person_name = @ResourcePersonName,
             updated_at = SYSDATETIME(),
@@ -362,8 +420,8 @@ BEGIN
 
     ELSE IF @Action = 'DELETE'
     BEGIN
-        DECLARE @DelArticleId INT;
-        SELECT @DelArticleId = article_id FROM bundles WHERE bundle_id = @Id AND deleted_at IS NULL;
+        DECLARE @DelArticleId INT, @DelCreatedAt DATETIME2;
+        SELECT @DelArticleId = article_id, @DelCreatedAt = created_at FROM bundles WHERE bundle_id = @Id AND deleted_at IS NULL;
 
         -- Prompt 18: project terkunci (manual_status) menolak penghapusan bundle.
         DECLARE @LockStatus_Delete VARCHAR(20), @LockReason_Delete VARCHAR(255);
@@ -390,15 +448,27 @@ BEGIN
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 0
-        ) OR EXISTS (
+        )
+        BEGIN
+            RAISERROR('Bundle sudah diproses, tidak bisa dihapus.', 16, 1);
+            RETURN;
+        END
+
+        -- Fix: jendela 1 jam hanya berlaku kalau log Bundling-nya sudah received_at (mis.
+        -- auto-diterima Line tujuan saat dibuat, lihat catatan #10 di atas) -- lihat #11.
+        -- Selama belum diterima divisi berikutnya, Hapus boleh kapan pun.
+        IF EXISTS (
             SELECT 1
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 1 AND awl.received_at IS NOT NULL
         )
         BEGIN
-            RAISERROR('Bundle sudah diproses, tidak bisa dihapus.', 16, 1);
-            RETURN;
+            IF @DelCreatedAt < DATEADD(HOUR, -1, SYSDATETIME())
+            BEGIN
+                RAISERROR('Bundle sudah diterima divisi berikutnya dan lebih dari 1 jam sejak dibuat, tidak bisa dihapus.', 16, 1);
+                RETURN;
+            END
         END
 
         UPDATE bundles
@@ -419,10 +489,17 @@ GO
 
 -- Cetak ulang label: insert baris print_jobs baru, payload dirakit ulang dari data terkini
 -- (bukan dari job lama, supaya perubahan qty/penjahit ikut terbawa di label baru).
+-- remark payload = article_workflow_logs.remark TERBARU milik bundle ini (dicetak bold di
+-- bawah Size Pack, lihat TsplBuilder.BuildBundleLabel), kecuali @RemarkOverride diisi.
+-- Prompt: dipakai juga untuk "Print Label Cacat" (BundleScanCard) -- @Copies = jumlah lembar
+-- yang diminta user, @RemarkOverride = catatan Kirim Hasil + ringkasan qty cacat (dirakit di
+-- BundleService.PrintDefectLabelAsync), supaya beda dari remark log yang sudah tersimpan.
 CREATE OR ALTER PROCEDURE SIS_Bundle_ReprintLabel
-    @BundleId      INT,
-    @PublicBaseUrl VARCHAR(255) = NULL,
-    @UserId        INT
+    @BundleId       INT,
+    @PublicBaseUrl  VARCHAR(255) = NULL,
+    @Copies         INT = 1,
+    @RemarkOverride VARCHAR(255) = NULL,
+    @UserId         INT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -433,12 +510,19 @@ BEGIN
         RETURN;
     END
 
+    IF @Copies IS NULL OR @Copies < 1
+    BEGIN
+        RAISERROR('Jumlah label harus minimal 1.', 16, 1);
+        RETURN;
+    END
+
     DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + (SELECT serial FROM bundles WHERE bundle_id = @BundleId);
 
     DECLARE @Payload NVARCHAR(MAX) = (
         SELECT
             b.serial AS serial,
             b.bundle_no AS bundle_no,
+            p.bundle_letter AS bundle_letter,
             @QrContent AS qr_content,
             p.project_name AS project_name,
             p.no_po AS no_po,
@@ -451,7 +535,13 @@ BEGIN
             b.qty AS qty,
             res.resource_name AS resource_name,
             b.resource_person_name AS resource_person_name,
-            b.created_at AS started_at
+            b.created_at AS started_at,
+            ISNULL(@RemarkOverride, (
+                SELECT TOP 1 remark FROM article_workflow_logs
+                WHERE bundle_id = b.bundle_id AND deleted_at IS NULL
+                  AND remark IS NOT NULL AND LTRIM(RTRIM(remark)) <> ''
+                ORDER BY created_at DESC
+            )) AS remark
         FROM bundles b
         INNER JOIN articles a ON a.article_id = b.article_id
         INNER JOIN projects p ON p.project_id = a.project_id
@@ -463,9 +553,17 @@ BEGIN
         FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
     );
 
-    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-    VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+    DECLARE @Copy INT = 0;
+    DECLARE @LastPrintJobId INT;
+    WHILE @Copy < @Copies
+    BEGIN
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+        VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
 
-    SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
+        SET @LastPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
+        SET @Copy += 1;
+    END
+
+    SELECT @LastPrintJobId AS NewPrintJobId;
 END;
 GO

@@ -48,6 +48,7 @@ public class StationPendingReceiveDto
     public int WorkflowLogId { get; set; }
     public int ArticleWorkflowId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -57,8 +58,10 @@ public class StationPendingReceiveDto
     public string FromDivisionName { get; set; } = string.Empty;
     public int? BundleId { get; set; }
     public int? BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string? Serial { get; set; }
     public string? SizeName { get; set; }
+    public int? SizeSortOrder { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
 
@@ -69,6 +72,7 @@ public class StationPendingHandoverDto
     // Prompt 24: dipakai memanggil bundling-summary (dropdown penjahit) saat Edit bundle.
     public int ArticleId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -78,9 +82,11 @@ public class StationPendingHandoverDto
     public bool IsBundling { get; set; }
     public int? BundleId { get; set; }
     public int? BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string? Serial { get; set; }
     public int? ArticleSizeId { get; set; }
     public string? SizeName { get; set; }
+    public int? SizeSortOrder { get; set; }
     public int QtyOk { get; set; }
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
@@ -97,6 +103,10 @@ public class StationPendingHandoverDto
     public string? ResourceName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    // Fix: terisi utk baris Bundling yang auto-diterima Line tujuan saat dibuat -- client
+    // menukar tombol Edit (ReceivedAt null) jadi Hapus (ReceivedAt terisi, hanya dalam
+    // jendela 1 jam sejak CreatedAt, lihat SIS_Station_PendingHandover).
+    public DateTime? ReceivedAt { get; set; }
     public List<ArticleSizeOptionDto> Sizes { get; set; } = new();
     // Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER). Tidak dipakai untuk
     // baris IsLastStep.
@@ -118,7 +128,9 @@ public class StationInProgressDto
     public int BundleId { get; set; }
     public string Serial { get; set; } = string.Empty;
     public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     // Prompt 23: murni tambahan data (tidak mengubah alur kartu bundle) supaya pencarian teks
     // WAJIB di tab WIP bisa menyaring kartu bundle dan non-bundle dengan field yang sama.
@@ -199,6 +211,7 @@ public class StationRecentReceivedDto
 {
     public int WorkflowLogId { get; set; }
     public int? BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
     public string? Serial { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? SizeName { get; set; }
@@ -250,6 +263,7 @@ public class StationActiveWorkDto
     // Prompt 24: dipakai memanggil bundling-summary/bundles (create) untuk kartu "Buat Bundle".
     public int ArticleId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
+    public string? NoPo { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -268,6 +282,9 @@ public class StationActiveWorkDto
     public int? BundleCount { get; set; }
     public int? TotalBundleQty { get; set; }
     public int? TotalOrderQty { get; set; }
+    // Fix: sisa hasil Cutting yang sudah diterima divisi Bundling tapi belum dijadikan bundle,
+    // PER SIZE (size dengan stock 0 tidak disertakan) -- lihat SIS_Station_ActiveWork.
+    public List<StationBundleStockCuttingDto> StockCutting { get; set; } = new();
 }
 
 public class StationActiveWorkSizeDto
@@ -276,6 +293,12 @@ public class StationActiveWorkSizeDto
     public string SizeName { get; set; } = string.Empty;
     public int QtyOrder { get; set; }
     public int QtyRecorded { get; set; }
+}
+
+public class StationBundleStockCuttingDto
+{
+    public string SizeName { get; set; } = string.Empty;
+    public int StockCutting { get; set; }
 }
 
 // Prompt 23: grid "Kirim Hasil" non-bundle dari kartu WIP stasiun -- satu baris per ukuran,

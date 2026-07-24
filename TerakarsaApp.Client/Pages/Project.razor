@@ -15,7 +15,6 @@
 @inject EmployeeApiService EmployeeApi
 @inject ArticleApiService ArticleApi
 @inject ArticlePhotoApiService ArticlePhotoApi
-@inject ReportBundleApiService ReportApi
 @inject BundleApiService BundleApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
@@ -253,7 +252,7 @@ else
                                     <tbody>
                                         @foreach (var b in summaries)
                                         {
-                                            var pct = a.TotalQty > 0 ? Math.Round(100.0 * b.TotalBundleQty / a.TotalQty) : 0;
+                                            var pct = b.QtyOrder > 0 ? Math.Round(100.0 * b.TotalBundleQty / b.QtyOrder) : 0;
                                             <tr class="small">
                                                 <td class="ps-0">@b.SizeName</td>
                                                 <td>@b.BundleCount bundle</td>
@@ -274,20 +273,16 @@ else
     <div class="col-lg-4">
         <div class="card h-100 mb-0">
             <div class="card-header">
-                <h3 class="card-title mb-0">Work Progress</h3>
+                <h3 class="card-title mb-0">Laporan Progress per Ukuran</h3>
             </div>
             <div class="card-body">
-                @if (!hasProgressAccess)
+                @if (selectedProjectId is null)
                 {
-                    <p class="text-muted mb-0">Anda tidak memiliki akses ke work progress.</p>
+                    <p class="text-muted mb-0">Pilih project untuk melihat laporan progress.</p>
                 }
-                else if (selectedProjectId is null)
+                else if (isLoadingSizeProgress)
                 {
-                    <p class="text-muted mb-0">Pilih project untuk melihat work progress.</p>
-                }
-                else if (isLoadingProgress)
-                {
-                    <p class="mb-0">Memuat work progress...</p>
+                    <p class="mb-0">Memuat laporan progress...</p>
                 }
                 else if (selectedProjectArticles.Count == 0)
                 {
@@ -297,38 +292,62 @@ else
                 {
                     @foreach (var a in selectedProjectArticles)
                     {
-                        var steps = ProgressStepsFor(a.Id);
-                        <div class="border-bottom pb-2 mb-2">
-                            <div class="fw-bold">@a.ArticleName</div>
-                            @if (steps.Count == 0)
-                            {
-                                <div class="small text-muted">Belum ada workflow.</div>
-                            }
-                            else
-                            {
-                                <table class="table table-sm table-borderless mb-0" style="table-layout: fixed;">
-                                    <colgroup>
-                                        <col style="width: 20px;" />
-                                        <col />
-                                        <col />
-                                        <col />
-                                    </colgroup>
+                        <div class="fw-bold mb-1">@a.ArticleName</div>
+                        @if (!articleSizeProgress.TryGetValue(a.Id, out var progress) || progress.Sizes.Count == 0)
+                        {
+                            <div class="small text-muted mb-2">Belum ada data ukuran.</div>
+                        }
+                        else
+                        {
+                            var steps = progress.Steps.OrderBy(s => s.SortOrder).ToList();
+                            var sizes = progress.Sizes.OrderBy(s => s.SortOrder).ToList();
+                            var poTotal = sizes.Sum(s => s.PoQty);
+                            <div class="table-responsive mb-2">
+                                <table class="table table-sm table-bordered border text-center mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-start">Ukuran</th>
+                                            <th>PO</th>
+                                            @foreach (var step in steps)
+                                            {
+                                                <th>@step.StepName</th>
+                                            }
+                                        </tr>
+                                    </thead>
                                     <tbody>
-                                        @for (var i = 0; i < steps.Count; i++)
+                                        @foreach (var size in sizes)
                                         {
-                                            var step = steps[i];
-                                            var pct = a.TotalQty > 0 ? Math.Round(100.0 * step.QtyOk / a.TotalQty) : 0;
-                                            <tr class="small">
-                                                <td class="ps-0">@(i + 1)</td>
-                                                <td>@step.StepName</td>
-                                                <td>@step.QtyOk pcs</td>
-                                                <td class="text-end pe-0">@pct %</td>
+                                            <tr>
+                                                <td class="text-start fw-bold">@size.SizeName</td>
+                                                <td>@size.PoQty</td>
+                                                @foreach (var step in steps)
+                                                {
+                                                    <td>@GetCellQty(progress, step.ArticleWorkflowId, size.SizeId)</td>
+                                                }
                                             </tr>
                                         }
                                     </tbody>
+                                    <tfoot>
+                                        <tr class="fw-bold">
+                                            <td class="text-start">Total</td>
+                                            <td>@poTotal</td>
+                                            @foreach (var step in steps)
+                                            {
+                                                <td>@GetStepTotal(progress, step.ArticleWorkflowId)</td>
+                                            }
+                                        </tr>
+                                        <tr class="small text-muted">
+                                            <td class="text-start">%</td>
+                                            <td>-</td>
+                                            @foreach (var step in steps)
+                                            {
+                                                <td>@GetStepPercentLabel(progress, step.ArticleWorkflowId, poTotal)</td>
+                                            }
+                                        </tr>
+                                    </tfoot>
                                 </table>
-                            }
-                        </div>
+                            </div>
+                        }
                     }
                 }
             </div>
@@ -343,7 +362,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Tambah Project</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"></button>
                 </div>
                 <div class="modal-body">
                     <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
@@ -355,50 +374,58 @@ else
                             <InputText class="form-control" @bind-Value="formModel.ProjectName" />
                             <ValidationMessage For="@(() => formModel.ProjectName)" class="text-danger" />
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Buyer</label>
-                            <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
-                                              IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
-                                              Placeholder="Cari buyer..." />
-                            <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Buyer</label>
+                                <SearchableSelect TItem="BuyerDto" Items="buyerOptions" @bind-Value="formModel.CustomerId"
+                                                  IdSelector="@(b => b.Id)" TextSelector="@(b => b.BuyerName)"
+                                                  Placeholder="Cari buyer..." />
+                                <ValidationMessage For="@(() => formModel.CustomerId)" class="text-danger" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">No PO</label>
+                                <InputText class="form-control" @bind-Value="formModel.NoPo" />
+                                <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">MD</label>
-                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
-                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
-                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">PIC</label>
-                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
-                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
-                                              Placeholder="Cari nama karyawan..." AllowNone="true" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">No PO</label>
-                            <InputText class="form-control" @bind-Value="formModel.NoPo" />
-                            <ValidationMessage For="@(() => formModel.NoPo)" class="text-danger" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">MD</label>
+                                <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectMd"
+                                                  IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                                  Placeholder="Cari nama karyawan..." AllowNone="true" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">PIC</label>
+                                <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" @bind-Value="formModel.ProjectPic"
+                                                  IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                                  Placeholder="Cari nama karyawan..." AllowNone="true" />
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Bahan</label>
                             <InputText class="form-control" @bind-Value="formModel.MaterialName" />
                             <ValidationMessage For="@(() => formModel.MaterialName)" class="text-danger" />
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Order</label>
-                            <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Order</label>
+                                <InputDate class="form-control" @bind-Value="formModel.OrderDate" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Deadline</label>
+                                <InputDate class="form-control" @bind-Value="formModel.Deadline" />
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Mulai</label>
-                            <InputDate class="form-control" @bind-Value="formModel.StartDate" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Deadline</label>
-                            <InputDate class="form-control" @bind-Value="formModel.Deadline" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Tanggal Kirim</label>
-                            <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Mulai</label>
+                                <InputDate class="form-control" @bind-Value="formModel.StartDate" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Tanggal Kirim</label>
+                                <InputDate class="form-control" @bind-Value="formModel.DeliveryDate" />
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Catatan</label>
@@ -456,29 +483,24 @@ else
     private bool isDeletingArticle = false;
     private ArticleListItemDto? articlePendingDelete;
 
-    private bool hasProgressAccess = false;
-    private bool isLoadingProgress = false;
-    private ArticleProgressResultDto progressResult = new();
+    private bool isLoadingSizeProgress = false;
+    private Dictionary<int, ArticleSizeProgressResultDto> articleSizeProgress = new();
 
     private bool hasBundleAccess = false;
     private bool isLoadingBundleSummaries = false;
     private Dictionary<int, List<BundleSizeSummaryDto>> articleBundleSummaries = new();
 
-    private class ProgressStepRow
-    {
-        public string StepName { get; set; } = string.Empty;
-        public int SortOrder { get; set; }
-        public int QtyOk { get; set; }
-    }
+    private static int GetCellQty(ArticleSizeProgressResultDto progress, int articleWorkflowId, int sizeId)
+        => progress.Cells.FirstOrDefault(c => c.ArticleWorkflowId == articleWorkflowId && c.SizeId == sizeId)?.QtyOk ?? 0;
 
-    private List<ProgressStepRow> ProgressStepsFor(int articleId)
-    {
-        var bundleRows = progressResult.BundleSteps.Where(s => s.ArticleId == articleId)
-            .Select(s => new ProgressStepRow { StepName = s.StepName, SortOrder = s.SortOrder, QtyOk = s.QtyOk });
-        var nonBundleRows = progressResult.NonBundleSteps.Where(s => s.ArticleId == articleId)
-            .Select(s => new ProgressStepRow { StepName = s.StepName, SortOrder = s.SortOrder, QtyOk = s.QtyOk });
+    private static int GetStepTotal(ArticleSizeProgressResultDto progress, int articleWorkflowId)
+        => progress.Cells.Where(c => c.ArticleWorkflowId == articleWorkflowId).Sum(c => c.QtyOk);
 
-        return bundleRows.Concat(nonBundleRows).OrderBy(r => r.SortOrder).ToList();
+    private static string GetStepPercentLabel(ArticleSizeProgressResultDto progress, int articleWorkflowId, int poTotal)
+    {
+        if (poTotal <= 0) return "-";
+        var stepTotal = GetStepTotal(progress, articleWorkflowId);
+        return $"{(decimal)stepTotal / poTotal * 100:0.0}%";
     }
 
     private string searchTerm = string.Empty;
@@ -493,7 +515,6 @@ else
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "ORDER_PROJECT");
-        hasProgressAccess = state.User.HasClaim("module", "REPORT_BUNDLE");
         hasBundleAccess = state.User.HasClaim("module", "BUNDLE_MANAGE");
 
         if (hasAccess == true)
@@ -685,17 +706,21 @@ else
         isLoadingArticles = false;
         await LoadArticleThumbnails();
         await LoadArticleSizes(projectId);
-        await LoadProgress(projectId);
+        await LoadSizeProgress();
         await LoadBundleSummaries();
     }
 
-    private async Task LoadProgress(int projectId)
+    private async Task LoadSizeProgress()
     {
-        if (!hasProgressAccess) return;
-
-        isLoadingProgress = true;
-        progressResult = await ReportApi.GetProgressAsync(projectId);
-        isLoadingProgress = false;
+        isLoadingSizeProgress = true;
+        var tasks = selectedProjectArticles.Select(async a =>
+        {
+            var progress = await ArticleApi.GetSizeProgressAsync(a.Id);
+            return (a.Id, Progress: progress);
+        });
+        var results = await Task.WhenAll(tasks);
+        articleSizeProgress = results.ToDictionary(r => r.Id, r => r.Progress);
+        isLoadingSizeProgress = false;
     }
 
     private async Task LoadBundleSummaries()

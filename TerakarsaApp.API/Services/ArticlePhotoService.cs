@@ -181,8 +181,10 @@ public class ArticlePhotoService
         return OpenForDownload(row);
     }
 
-    private (Stream Stream, string ContentType, string FileName) OpenForDownload(ArticlePhotoRow row)
+    private (Stream Stream, string ContentType, string FileName)? OpenForDownload(ArticlePhotoRow row)
     {
+        if (!_fileStorage.FileExists(row.FilePath)) return null;
+
         if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))
             contentType = "application/octet-stream";
 

@@ -4,6 +4,8 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Packs
+@using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.Stations
 @using TerakarsaApp.Shared.WorkflowLogs
@@ -93,6 +95,9 @@ else
                 </p>
             </div>
             <div class="d-flex gap-2">
+                <button class="btn btn-primary btn-sm" @onclick="() => showQrScanner = true">
+                    <i class="fe fe-camera"></i> Scan QR
+                </button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshLists" disabled="@isLoadingLists">
                     <i class="fe fe-refresh-cw"></i> Refresh
                 </button>
@@ -104,6 +109,11 @@ else
             </div>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(qrScanError))
+    {
+        <div class="alert alert-danger mb-3">@qrScanError</div>
+    }
 
     <div class="row g-2 mb-3">
         <div class="col-4">
@@ -150,6 +160,14 @@ else
                         OUT <span class="badge bg-secondary ms-1">@outbound.Count</span>
                     </a>
                 </li>
+                @if (station.EnablePacking)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link @(activeTab == "packing" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("packing")'>
+                            Packing
+                        </a>
+                    </li>
+                }
             </ul>
         </div>
         <div class="card-body">
@@ -169,11 +187,11 @@ else
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
-                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
+                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@FormatProject(item.NoPo, item.ProjectName))</span></h5>
                                             <p class="text-muted mb-0">@item.Style @item.Color</p>
                                         </div>
                                         <div class="text-end">
-                                            <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
+                                            <span class="badge bg-dark d-block mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial</span>
                                             @if (!string.IsNullOrEmpty(item.SizeName))
                                             {
                                                 <span class="badge bg-secondary">@item.SizeName</span>
@@ -206,7 +224,7 @@ else
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
-                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@grp.ProjectName)</span></h5>
+                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@FormatProject(grp.NoPo, grp.ProjectName))</span></h5>
                                             <p class="text-muted mb-0">@grp.Style @grp.Color</p>
                                         </div>
                                         <span class="badge bg-secondary">@grp.Items.Count ukuran</span>
@@ -249,21 +267,28 @@ else
                 {
                     @foreach (var group in FilteredWipGroups)
                     {
-                        <h6 class="text-muted mt-3 mb-2">@group.Key</h6>
+                        <h6 class="text-muted mt-3 mb-2">@FormatProject(group.First().NoPo, group.Key)</h6>
                         @foreach (var card in group)
                         {
                             @if (card.NonBundle is { IsBundling: true } bl)
                             {
                                 <div class="card mb-2 border-primary">
                                     <div class="card-body">
-                                        <div class="d-flex justify-content-between align-items-start mb-2">
-                                            <div>
-                                                <h5 class="mb-1">@bl.ArticleName</h5>
-                                                <p class="text-muted mb-0">
-                                                    @bl.Style @bl.Color &middot; @(bl.BundleCount ?? 0) bundle &middot; total @(bl.TotalBundleQty ?? 0) dari @(bl.TotalOrderQty ?? 0)
-                                                </p>
+                                        <div class="d-flex align-items-start gap-2 mb-2">
+                                            @{ articlePhotoCache.TryGetValue(bl.ArticleId, out var blPhotoSrc); }
+                                            @if (blPhotoSrc is not null)
+                                            {
+                                                <img src="@blPhotoSrc" alt="@bl.ArticleName" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;" @onclick="() => OpenPhotoModal(blPhotoSrc)" />
+                                            }
+                                            <div class="d-flex justify-content-between align-items-start flex-grow-1">
+                                                <div>
+                                                    <h5 class="mb-1">@bl.ArticleName</h5>
+                                                    <p class="text-muted mb-0">
+                                                        @bl.Style @bl.Color &middot; @(bl.BundleCount ?? 0) bundle &middot; total @(bl.TotalBundleQty ?? 0) dari @(bl.TotalOrderQty ?? 0) &middot; Stock Cutting: @StockCuttingText(bl)
+                                                    </p>
+                                                </div>
+                                                <span class="badge bg-primary text-light">Bundling</span>
                                             </div>
-                                            <span class="badge bg-primary text-light">Bundling</span>
                                         </div>
                                         <hr class="my-2" />
                                         <div class="d-flex justify-content-end">
@@ -301,9 +326,9 @@ else
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                                             <div>
-                                                <h5 class="mb-1">No. @item.BundleNo &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
+                                                <h5 class="mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
                                                 <p class="text-muted mb-0">
-                                                    @item.ProjectName
+                                                    @FormatProject(item.NoPo, item.ProjectName)
                                                     @if (!string.IsNullOrEmpty(item.SizeName))
                                                     {
                                                         <text> &middot; Size @item.SizeName</text>
@@ -330,7 +355,7 @@ else
                     }
                 }
             }
-            else
+            else if (activeTab == "kirim")
             {
                 @if (outbound.Count == 0)
                 {
@@ -346,13 +371,13 @@ else
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
-                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@item.ProjectName)</span></h5>
+                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@FormatProject(item.NoPo, item.ProjectName))</span></h5>
                                             <p class="text-muted mb-0">@item.Style @item.Color</p>
                                         </div>
                                         <div class="text-end">
                                             @if (item.BundleId is not null)
                                             {
-                                                <span class="badge bg-dark d-block mb-1">No. @item.BundleNo &middot; @item.Serial</span>
+                                                <span class="badge bg-dark d-block mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial</span>
                                             }
                                             @if (!string.IsNullOrEmpty(item.SizeName))
                                             {
@@ -375,6 +400,10 @@ else
                                                 }
                                             </p>
                                             <div>Qty OK: <strong>@item.QtyOk</strong></div>
+                                            @if (item.IsBundling && !string.IsNullOrEmpty(BundleTailorName(item)))
+                                            {
+                                                <div>Penjahit: <strong>@BundleTailorName(item)</strong></div>
+                                            }
                                             @foreach (var line in RejectLines(item))
                                             {
                                                 <div class="text-danger">@line</div>
@@ -396,9 +425,15 @@ else
                                             {
                                                 <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => HandleReprint(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
                                             }
-                                            @if (item.IsBundling)
+                                            @if (item.IsBundling && item.ReceivedAt is null)
                                             {
                                                 <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenEditBundleModal(item)">Edit</button>
+                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(item)">Hapus</button>
+                                            }
+                                            else if (item.IsBundling)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenEditBundleModal(item)">Edit</button>
+                                                <button class="btn btn-outline-danger btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenDeleteBundleModal(item)">Hapus</button>
                                             }
                                             else
                                             {
@@ -408,9 +443,13 @@ else
                                         </div>
                                     </div>
                                     <div class="text-muted small mt-2 mb-0">
-                                        @if (item.IsBundling)
+                                        @if (item.IsBundling && item.ReceivedAt is null)
                                         {
-                                            <text>Bisa diedit selama divisi berikutnya belum menekan Terima.</text>
+                                            <text>Bisa diedit/dihapus tanpa batas waktu selama divisi berikutnya belum menekan Terima.</text>
+                                        }
+                                        else if (item.IsBundling)
+                                        {
+                                            <text>Sudah diterima @item.TargetDivisionName dan masih WIP — bisa diedit/dihapus sampai 1 jam setelah bundle dibuat.</text>
                                         }
                                         else if (item.IsLastStep)
                                         {
@@ -430,7 +469,7 @@ else
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
-                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@grp.ProjectName)</span></h5>
+                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@FormatProject(grp.NoPo, grp.ProjectName))</span></h5>
                                             <p class="text-muted mb-0">@grp.Style @grp.Color</p>
                                         </div>
                                         <span class="badge bg-secondary">@grp.Items.Count ukuran</span>
@@ -477,6 +516,121 @@ else
                             </div>
                         }
                     }
+                }
+            }
+            else if (activeTab == "packing")
+            {
+                <div class="mb-3" style="max-width: 420px;">
+                    <label class="form-label">Project</label>
+                    <SearchableSelect TItem="ProjectDto" Items="packingProjects" Value="packingProjectId" ValueChanged="HandlePackingProjectChanged"
+                                      IdSelector="@(p => p.Id)" TextSelector="@(p => p.ProjectName)"
+                                      Placeholder="Cari project..." />
+                </div>
+
+                @if (packingProjectId <= 0)
+                {
+                    <p class="text-muted mb-0">Pilih project untuk melihat stok siap pack.</p>
+                }
+                else if (isLoadingPacking)
+                {
+                    <p class="text-muted mb-0">Memuat...</p>
+                }
+                else
+                {
+                    <ul class="nav nav-pills mb-3 align-items-center">
+                        <li class="nav-item">
+                            <a class="nav-link @(packingSubTab == "stock" ? "active" : "")" href="javascript:void(0)" @onclick='() => packingSubTab = "stock"'>Stok Siap Pack</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(packingSubTab == "packs" ? "active" : "")" href="javascript:void(0)" @onclick='() => packingSubTab = "packs"'>
+                                Karung <span class="badge bg-secondary ms-1">@packingData.Packs.Count</span>
+                            </a>
+                        </li>
+                        <li class="nav-item ms-auto">
+                            <button class="btn btn-primary btn-sm" disabled="@isBusy" @onclick="OpenCreatePackModal">+ Buat Karung</button>
+                        </li>
+                    </ul>
+
+                    @if (packingSubTab == "stock")
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Artikel</th>
+                                        <th>Ukuran</th>
+                                        <th>Selesai</th>
+                                        <th>Sudah Dipack</th>
+                                        <th>Tersedia</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in packingStock)
+                                    {
+                                        <tr>
+                                            <td>@row.ArticleName <span class="text-muted">@row.Style @row.Color</span></td>
+                                            <td>@row.SizeName</td>
+                                            <td>@row.QtyDone</td>
+                                            <td>@row.QtyPacked</td>
+                                            <td class="@(row.QtyAvailable > 0 ? "fw-bold" : "")">@row.QtyAvailable</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        @if (packingData.Packs.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Belum ada karung untuk project ini.</p>
+                        }
+                        else
+                        {
+                            @foreach (var pack in packingData.Packs)
+                            {
+                                <div class="card mb-2" @key="pack.Id">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h4 class="mb-0">Karung No. @pack.PackNo</h4>
+                                                <p class="text-muted mb-0">@pack.Serial &middot; @pack.ArticleCount artikel &middot; Label: @(pack.LabelStatus ?? "-")</p>
+                                            </div>
+                                            <span class="badge @(pack.IsConfirmed ? "bg-success" : "bg-warning text-dark")">@(pack.IsConfirmed ? "AKTUAL" : "PLAN")</span>
+                                        </div>
+                                        <ul class="list-group list-group-flush mb-2">
+                                            @foreach (var item in packingData.Items.Where(i => i.PackId == pack.Id))
+                                            {
+                                                <li class="list-group-item px-0 py-1 d-flex justify-content-between">
+                                                    <span>@item.ArticleName @item.Style @item.Color &middot; @item.SizeName</span>
+                                                    <strong>@item.QtyPlan@(item.QtyActual is not null ? $" (aktual {item.QtyActual})" : "")</strong>
+                                                </li>
+                                            }
+                                        </ul>
+                                        <p class="text-muted mb-2">Total plan: @pack.TotalPlan &middot; Total aktual: @pack.TotalActual</p>
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <button class="btn btn-success btn-sm" disabled="@isBusy" @onclick="() => OpenConfirmPackModal(pack)">@(pack.IsConfirmed ? "Edit Aktual" : "Konfirmasi")</button>
+                                            @if (!pack.IsConfirmed)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenEditPlanModal(pack)">Edit Planning</button>
+                                            }
+                                            <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => HandleReprintPack(pack.Id)">Cetak Ulang</button>
+                                            <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenDeletePackModal(pack)">Hapus</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        }
+                    }
+                }
+
+                @if (!string.IsNullOrEmpty(packingError))
+                {
+                    <div class="alert alert-danger mt-3 mb-0">@packingError</div>
+                }
+                @if (!string.IsNullOrEmpty(packingFeedback))
+                {
+                    <div class="alert alert-success mt-3 mb-0">@packingFeedback</div>
                 }
             }
 
@@ -527,7 +681,7 @@ else
                     <button type="button" class="btn-close" @onclick="CloseSerahkanModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>No. @serahkanTarget.BundleNo &middot; @serahkanTarget.SizeName</strong> &middot; @serahkanTarget.Serial</p>
+                    <p><strong>No. @BundleDisplay.Format(serahkanTarget.BundleLetter, serahkanTarget.BundleNo) &middot; @serahkanTarget.SizeName</strong> &middot; @serahkanTarget.Serial</p>
                     <p class="text-muted">@serahkanTarget.NextStepName</p>
 
                     <div class="d-flex justify-content-end mb-2">
@@ -564,7 +718,7 @@ else
                         </div>
                     </div>
 
-                    <label class="form-label">Catatan (opsional)</label>
+                    <label class="form-label">Catatan (wajib jika ada reject)</label>
                     <textarea class="form-control" rows="2" @bind="serahkanRemark"></textarea>
 
                     @if (!string.IsNullOrEmpty(serahkanError) && serahkanError.StartsWith("QTY_EXCEED|"))
@@ -672,7 +826,7 @@ else
                         </table>
                     </div>
 
-                    <label class="form-label mt-2">Catatan (opsional, berlaku untuk seluruh batch)</label>
+                    <label class="form-label mt-2">Catatan (berlaku untuk seluruh batch; wajib jika ada reject)</label>
                     <textarea class="form-control" rows="2" @bind="nonBundleRemark"></textarea>
 
                     @if (!string.IsNullOrEmpty(nonBundleError))
@@ -683,6 +837,22 @@ else
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseNonBundleModal">Batal</button>
                     <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmNonBundleSave">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showPhotoModal && photoModalSrc is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.8);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-transparent border-0">
+                <div class="modal-header border-0">
+                    <button type="button" class="btn-close btn-close-white" @onclick="ClosePhotoModal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img src="@photoModalSrc" alt="Foto artikel" style="max-width: 100%; max-height: 80vh; object-fit: contain;" />
                 </div>
             </div>
         </div>
@@ -727,7 +897,7 @@ else
                 <div class="modal-body">
                     @if (reviseTarget.BundleId is not null)
                     {
-                        <p><strong>No. @reviseTarget.BundleNo - @reviseTarget.SizeName</strong> &middot; @reviseTarget.Serial</p>
+                        <p><strong>No. @BundleDisplay.Format(reviseTarget.BundleLetter, reviseTarget.BundleNo) - @reviseTarget.SizeName</strong> &middot; @reviseTarget.Serial</p>
                         <p class="text-muted">@reviseTarget.ArticleName &middot; @reviseTarget.StepName</p>
                     }
                     else
@@ -772,7 +942,7 @@ else
                         </div>
                     }
 
-                    <label class="form-label">Catatan (opsional)</label>
+                    <label class="form-label">Catatan (wajib jika ada reject)</label>
                     <textarea class="form-control" rows="2" @bind="reviseRemark"></textarea>
 
                     @if (!string.IsNullOrEmpty(reviseError))
@@ -802,7 +972,7 @@ else
                     @if (batalSerahTarget.BundleId is not null)
                     {
                         <p class="mb-1">
-                            Yakin batal@(batalSerahTarget.IsLastStep ? "" : " serah") bundle No. @batalSerahTarget.BundleNo &middot; @batalSerahTarget.Serial?
+                            Yakin batal@(batalSerahTarget.IsLastStep ? "" : " serah") bundle No. @BundleDisplay.Format(batalSerahTarget.BundleLetter, batalSerahTarget.BundleNo) &middot; @batalSerahTarget.Serial?
                         </p>
                         <p class="text-muted mb-0">
                             @(batalSerahTarget.IsLastStep
@@ -954,12 +1124,12 @@ else
                 </div>
                 <div class="modal-body">
                     <div class="table-responsive mb-3">
-                        <table class="table table-bordered border mb-0">
+                        <table class="table table-sm table-bordered border mb-0">
                             <thead>
                                 <tr>
                                     <th>Ukuran</th>
                                     <th>Qty Order</th>
-                                    <th>Saran Bundle Qty</th>
+                                    <th>Stock Cutting</th>
                                     <th>Jumlah Bundle</th>
                                     <th>Total Qty Bundle</th>
                                 </tr>
@@ -967,10 +1137,11 @@ else
                             <tbody>
                                 @foreach (var s in buatBundleSummary)
                                 {
-                                    <tr class="@(s.TotalBundleQty != s.QtyOrder ? "table-warning" : "")">
+                                    <tr class="@(s.TotalBundleQty != s.QtyOrder ? "table-warning" : "")"
+                                        style="cursor:pointer;" @onclick="() => HandleBuatBundleSizeChanged(s.ArticleSizeId)">
                                         <td>@s.SizeName</td>
                                         <td>@s.QtyOrder</td>
-                                        <td>@s.BundleQty</td>
+                                        <td>@s.StockCutting</td>
                                         <td>@s.BundleCount</td>
                                         <td>@s.TotalBundleQty</td>
                                     </tr>
@@ -985,28 +1156,34 @@ else
                     }
 
                     <div class="mb-3">
-                        <label class="form-label">Ukuran</label>
-                        <SearchableSelect TItem="BundleSizeSummaryDto" Items="buatBundleSummary" Value="buatBundleArticleSizeId" ValueChanged="HandleBuatBundleSizeChanged"
-                                          IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => s.SizeName)"
-                                          Placeholder="Cari ukuran..." />
+                        <label class="form-label">Penjahit (Tim)</label>
+                        <div class="row g-2">
+                            @foreach (var r in buatBundleTailorOptions)
+                            {
+                                <div class="col-6 col-md-4">
+                                    <button type="button" class="btn @(buatBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                            @onclick="() => buatBundleTailorResourceId = r.Id">
+                                        @r.ResourceName
+                                    </button>
+                                </div>
+                            }
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Qty</label>
-                        <input type="number" min="1" class="form-control form-control-lg" @bind="buatBundleQty" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Penjahit (resource, opsional)</label>
-                        <SearchableSelect TItem="ResourceLookupDto" Items="buatBundleTailorOptions" @bind-Value="buatBundleTailorResourceId"
-                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
-                                          AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nama Penjahit (bebas, opsional)</label>
-                        <input class="form-control" maxlength="150" @bind="buatBundleTailorPersonName" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Pelaksana Bundling</label>
-                        <div class="form-control form-control-lg bg-light">@currentOperatorName</div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Ukuran</label>
+                            <SearchableSelect TItem="BundleSizeSummaryDto" Items="buatBundleSummary" Value="buatBundleArticleSizeId" ValueChanged="HandleBuatBundleSizeChanged"
+                                              IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => s.SizeName)"
+                                              Placeholder="Cari ukuran..." />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Qty</label>
+                            <input type="number" min="1" class="form-control form-control-lg" @bind="buatBundleQty" />
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <label class="form-label">Nama Penjahit (bebas, opsional)</label>
+                            <input class="form-control" maxlength="150" @bind="buatBundleTailorPersonName" />
+                        </div>
                     </div>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="buatBundleAutoPrint" @bind="buatBundleAutoPrint" />
@@ -1037,16 +1214,38 @@ else
                     <button type="button" class="btn-close" @onclick="CloseEditBundleModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p><strong>No. @editBundleTarget.BundleNo &middot; @editBundleTarget.SizeName</strong> &middot; @editBundleTarget.Serial</p>
-                    <div class="mb-3">
-                        <label class="form-label">Qty</label>
-                        <input type="number" min="1" class="form-control form-control-lg" @bind="editBundleQty" />
+                    <p><strong>No. @BundleDisplay.Format(editBundleTarget.BundleLetter, editBundleTarget.BundleNo)</strong> &middot; @editBundleTarget.Serial</p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-7">
+                            <label class="form-label">Ukuran</label>
+                            <SearchableSelect TItem="BundleSizeSummaryDto" Items="editBundleSummary" Value="editBundleArticleSizeId" ValueChanged="(int v) => editBundleArticleSizeId = v"
+                                              IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => s.SizeName)"
+                                              Placeholder="Cari ukuran..." />
+                        </div>
+                        <div class="col-5">
+                            <label class="form-label">Qty</label>
+                            <input type="number" min="1" class="form-control form-control-lg" @bind="editBundleQty" />
+                        </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Penjahit (resource, opsional)</label>
-                        <SearchableSelect TItem="ResourceLookupDto" Items="editBundleTailorOptions" @bind-Value="editBundleTailorResourceId"
-                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
-                                          AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                        <label class="form-label">Penjahit (Tim, opsional)</label>
+                        <div class="row g-2">
+                            <div class="col-6 col-md-4">
+                                <button type="button" class="btn @(editBundleTailorResourceId == 0 ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                        @onclick="() => editBundleTailorResourceId = 0">
+                                    - Tidak ada -
+                                </button>
+                            </div>
+                            @foreach (var r in editBundleTailorOptions)
+                            {
+                                <div class="col-6 col-md-4">
+                                    <button type="button" class="btn @(editBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                            @onclick="() => editBundleTailorResourceId = r.Id">
+                                        @r.ResourceName
+                                    </button>
+                                </div>
+                            }
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Nama Penjahit (bebas, opsional)</label>
@@ -1065,6 +1264,166 @@ else
         </div>
     </div>
 }
+
+@if (showDeleteBundleModal && deleteBundleTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Hapus Bundle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeleteBundleModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">Yakin hapus bundle No. @BundleDisplay.Format(deleteBundleTarget.BundleLetter, deleteBundleTarget.BundleNo) &middot; @deleteBundleTarget.Serial?</p>
+                    <p class="text-muted mb-0">Bundle sudah diterima @deleteBundleTarget.TargetDivisionName. Hanya bisa dihapus sampai 1 jam setelah bundle dibuat.</p>
+                    @if (!string.IsNullOrEmpty(deleteBundleError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@deleteBundleError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseDeleteBundleModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmDeleteBundle">Ya, Hapus</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showPackFormModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditPlanMode ? "Edit Planning Karung" : "Buat Karung")</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePackFormModal"></button>
+                </div>
+                <div class="modal-body">
+                    @foreach (var row in packFormRows)
+                    {
+                        <div class="row g-2 align-items-end mb-2" @key="row">
+                            <div class="col-5">
+                                <label class="form-label">Artikel</label>
+                                <SearchableSelect TItem="PackArticleOption" Items="packArticleOptions" Value="row.ArticleId" ValueChanged="@(v => HandlePackFormArticleChanged(row, v))"
+                                                  IdSelector="@(a => a.ArticleId)" TextSelector="@(a => a.Label)"
+                                                  Placeholder="Cari artikel..." />
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label">Ukuran</label>
+                                <SearchableSelect TItem="PackStockAvailableDto" Items="PackFormSizeOptions(row.ArticleId)" @bind-Value="row.ArticleSizeId"
+                                                  IdSelector="@(s => s.ArticleSizeId)" TextSelector="@(s => $"{s.SizeName} (sisa {AvailableForPlanRow(row, s)})")"
+                                                  Placeholder="Cari ukuran..." />
+                            </div>
+                            <div class="col-2">
+                                <label class="form-label">Qty</label>
+                                <input type="number" min="1" class="form-control" @bind="row.QtyPlan" />
+                            </div>
+                            <div class="col-1">
+                                <button type="button" class="btn btn-outline-danger" disabled="@(packFormRows.Count <= 1)" @onclick="() => RemovePackFormRow(row)"><i class="fe fe-trash-2"></i></button>
+                            </div>
+                        </div>
+                    }
+                    <button type="button" class="btn btn-outline-secondary btn-sm mb-3" @onclick="AddPackFormRow">+ Tambah Baris</button>
+
+                    @if (!isEditPlanMode)
+                    {
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="packFormAutoPrint" @bind="packFormAutoPrint" />
+                            <label class="form-check-label" for="packFormAutoPrint">Cetak label otomatis</label>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(packFormError))
+                    {
+                        <div class="alert alert-danger mb-0">@packFormError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="ClosePackFormModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="SubmitPackForm">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showConfirmPackModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Konfirmasi Karung</h5>
+                    <button type="button" class="btn-close" @onclick="CloseConfirmPackModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered border mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Artikel</th>
+                                    <th>Ukuran</th>
+                                    <th>Plan</th>
+                                    <th>Qty Aktual</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in confirmRows)
+                                {
+                                    <tr>
+                                        <td>@row.ArticleName @row.Style @row.Color</td>
+                                        <td>@row.SizeName</td>
+                                        <td>@row.QtyPlan</td>
+                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyActual" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (!string.IsNullOrEmpty(confirmError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@confirmError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseConfirmPackModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmPackSubmit">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showDeletePackModal && deletePackTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Hapus Karung</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeletePackModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Yakin ingin menghapus Karung No. @deletePackTarget.PackNo (@deletePackTarget.Serial)?</p>
+                    <label class="form-label">Alasan (wajib)</label>
+                    <textarea class="form-control" rows="2" @bind="deletePackReason"></textarea>
+                    @if (!string.IsNullOrEmpty(deletePackError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@deletePackError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseDeletePackModal">Batal</button>
+                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmDeletePack">Ya, Hapus</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<QrScannerModal Show="showQrScanner" OnScanned="HandleQrScanned" OnClose="() => showQrScanner = false" />
 
 <ConfirmDeleteModal Show="showLogoutConfirm" IsBusy="isLoggingOut" Title="Keluar dari Perangkat"
                      ConfirmText="Ya, Keluar" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
@@ -1098,6 +1457,11 @@ else
     private List<StationInProgressDto> inProgress = new();
     private List<StationActiveWorkDto> activeWork = new();
     private List<StationPendingHandoverDto> outbound = new();
+    // Fix: cache foto utama per ArticleId untuk kartu "Buat Bundle" -- null berarti sudah
+    // dicoba tapi artikel tidak punya foto, supaya tidak fetch ulang tiap refresh.
+    private Dictionary<int, string?> articlePhotoCache = new();
+    private bool showPhotoModal = false;
+    private string? photoModalSrc;
     private bool isLoadingLists = false;
     private bool isBusy = false;
     private string actionError = string.Empty;
@@ -1143,9 +1507,14 @@ else
     private class WipCard
     {
         public string ProjectName = string.Empty;
+        public string? NoPo;
         public StationInProgressDto? Bundle;
         public StationActiveWorkDto? NonBundle;
     }
+
+    // Format tampilan nama project di kartu station: "[No PO] - [Nama Project]".
+    private static string FormatProject(string? noPo, string projectName) =>
+        string.IsNullOrWhiteSpace(noPo) ? projectName : $"{noPo} - {projectName}";
 
     // Gabungan kartu non-bundle di tab IN/OUT: baris log per size (BundleId = null) yang
     // dibuat dalam batch yang sama (artikel sama + waktu dibuat sama, dibulatkan ke menit --
@@ -1166,6 +1535,7 @@ else
         public int ArticleWorkflowId;
         public string ArticleName = string.Empty;
         public string ProjectName = string.Empty;
+        public string? NoPo;
         public string? Style;
         public string? Color;
         public string StepName = string.Empty;
@@ -1188,12 +1558,13 @@ else
                         ArticleWorkflowId = g.Key.ArticleWorkflowId,
                         ArticleName = g.First().ArticleName,
                         ProjectName = g.First().ProjectName,
+                        NoPo = g.First().NoPo,
                         Style = g.First().Style,
                         Color = g.First().Color,
                         StepName = g.First().StepName,
                         FromDivisionName = g.First().FromDivisionName,
                         GroupTime = g.Min(x => x.SentAt),
-                        Items = g.OrderBy(x => x.SizeName).ToList()
+                        Items = g.OrderBy(x => x.SizeSortOrder).ToList()
                     }
                 })
         )
@@ -1213,6 +1584,7 @@ else
         public int ArticleId;
         public string ArticleName = string.Empty;
         public string ProjectName = string.Empty;
+        public string? NoPo;
         public string? Style;
         public string? Color;
         public string StepName = string.Empty;
@@ -1238,6 +1610,7 @@ else
                         ArticleId = g.First().ArticleId,
                         ArticleName = g.First().ArticleName,
                         ProjectName = g.First().ProjectName,
+                        NoPo = g.First().NoPo,
                         Style = g.First().Style,
                         Color = g.First().Color,
                         StepName = g.First().StepName,
@@ -1245,7 +1618,7 @@ else
                         TargetDivisionName = g.First().TargetDivisionName,
                         GroupTime = g.Min(x => x.CreatedAt),
                         UpdatedAt = g.Any(x => x.UpdatedAt is not null) ? g.Max(x => x.UpdatedAt) : null,
-                        Items = g.OrderBy(x => x.SizeName).ToList()
+                        Items = g.OrderBy(x => x.SizeSortOrder).ToList()
                     }
                 })
         )
@@ -1269,10 +1642,18 @@ else
     private bool showEditBundleModal = false;
     private StationPendingHandoverDto? editBundleTarget;
     private List<ResourceLookupDto> editBundleTailorOptions = new();
+    private List<BundleSizeSummaryDto> editBundleSummary = new();
     private int editBundleQty;
+    private int editBundleArticleSizeId;
     private int editBundleTailorResourceId;
     private string editBundleTailorPersonName = string.Empty;
     private string editBundleError = string.Empty;
+
+    // Fix: modal "Hapus Bundle" -- tab OUT baris is_bundling yang sudah ReceivedAt (auto-
+    // diterima Line tujuan), diganti dari tombol Edit selama masih dalam jendela 1 jam.
+    private bool showDeleteBundleModal = false;
+    private StationPendingHandoverDto? deleteBundleTarget;
+    private string deleteBundleError = string.Empty;
 
     // Prompt 24: Cetak Ulang label -- dipakai kartu bundle di IN/WIP/OUT.
     private string reprintFeedback = string.Empty;
@@ -1513,21 +1894,53 @@ else
         counts = await StationApi.GetCountsAsync(currentOperatorId);
         isLoadingLists = false;
         StateHasChanged();
+
+        await LoadMissingArticlePhotos();
     }
 
-    private void SetTab(string tab)
+    // Fix: foto kartu "Buat Bundle" -- fetch lazy per ArticleId yang belum ada di cache,
+    // supaya tidak refetch ulang setiap RefreshLists (polling) selama daftar kartu sama.
+    private async Task LoadMissingArticlePhotos()
+    {
+        var articleIds = activeWork.Where(a => a.IsBundling).Select(a => a.ArticleId).Distinct()
+            .Where(id => !articlePhotoCache.ContainsKey(id)).ToList();
+        if (articleIds.Count == 0) return;
+
+        foreach (var articleId in articleIds)
+        {
+            var result = await StationApi.GetArticlePhotoAsync(articleId);
+            articlePhotoCache[articleId] = result is null
+                ? null
+                : $"data:{result.Value.ContentType};base64,{Convert.ToBase64String(result.Value.Bytes)}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task SetTab(string tab)
     {
         activeTab = tab;
+        if (tab == "packing" && packingProjects.Count == 0)
+        {
+            packingProjects = await StationApi.GetPackingProjectsAsync();
+        }
     }
 
     // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
     // satu daftar WIP, dikelompokkan per project supaya tetap terbaca saat jumlahnya banyak.
     private IEnumerable<WipCard> AllWipCards =>
-        activeWork.Select(a => new WipCard { ProjectName = a.ProjectName, NonBundle = a })
-            .Concat(inProgress.Select(b => new WipCard { ProjectName = b.ProjectName, Bundle = b }));
+        activeWork.Select(a => new WipCard { ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a })
+            .Concat(inProgress.Select(b => new WipCard { ProjectName = b.ProjectName, NoPo = b.NoPo, Bundle = b }));
 
     private static bool ContainsSearch(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    // Fix: teks ringkas "Stock Cutting" kartu Buat Bundle -- per size (bukan total gabungan),
+    // supaya operator langsung tahu size mana yang siap dibundle tanpa buka modal.
+    private static string StockCuttingText(StationActiveWorkDto card) =>
+        card.StockCutting.Count == 0
+            ? "0"
+            : string.Join(", ", card.StockCutting.Select(s => $"{s.SizeName} {s.StockCutting}"));
 
     private bool MatchesWipSearch(WipCard card)
     {
@@ -1615,6 +2028,12 @@ else
             return;
         }
 
+        if (entries.Any(e => e.QtyRejectPrint + e.QtyRejectFabric + e.QtyRejectSewing > 0) && string.IsNullOrWhiteSpace(nonBundleRemark))
+        {
+            nonBundleError = "Catatan wajib diisi jika ada reject.";
+            return;
+        }
+
         isBusy = true;
         nonBundleError = string.Empty;
 
@@ -1650,6 +2069,11 @@ else
         return parts;
     }
 
+    // Fix: kartu OUT (tab Dikirim) belum menampilkan penjahit -- "Oleh" di kartu ini berarti
+    // pelaksana Bundling (awl.resource_id), bukan penjahit (bundles.resource_id/person_name).
+    private static string? BundleTailorName(StationPendingHandoverDto item) =>
+        item.BundleResourcePersonName ?? item.BundleResourceName;
+
     private static string MinutesAgo(DateTime at)
     {
         var minutes = (int)Math.Max(0, (DateTime.Now - at).TotalMinutes);
@@ -1658,6 +2082,11 @@ else
         if (hours < 24) return $"{hours} jam lalu";
         return $"{hours / 24} hari lalu";
     }
+
+    // Fix: tombol Edit/Hapus di kartu OUT bundle yang sudah auto-diterima (ReceivedAt terisi) --
+    // jendela 1 jam murni informatif di sini, server (SIS_Bundle_Manage UPDATE/DELETE) yang menegakkan.
+    private static bool CanEditOrDeleteBundle(StationPendingHandoverDto item) =>
+        DateTime.Now - item.CreatedAt < TimeSpan.FromHours(1);
 
     private async Task ReceiveOne(StationPendingReceiveDto item)
     {
@@ -1784,6 +2213,13 @@ else
     {
         if (serahkanTarget?.NextArticleWorkflowId is null || currentOperatorId is null) return;
 
+        var serahkanTotalReject = serahkanQtyRejectPrint + serahkanQtyRejectFabric + serahkanQtyRejectSewing;
+        if (serahkanTotalReject > 0 && string.IsNullOrWhiteSpace(serahkanRemark))
+        {
+            serahkanError = "Catatan wajib diisi jika ada reject.";
+            return;
+        }
+
         isBusy = true;
         serahkanError = string.Empty;
 
@@ -1811,6 +2247,19 @@ else
 
         CloseSerahkanModal();
         await RefreshLists();
+    }
+
+    private void OpenPhotoModal(string? src)
+    {
+        if (src is null) return;
+        photoModalSrc = src;
+        showPhotoModal = true;
+    }
+
+    private void ClosePhotoModal()
+    {
+        showPhotoModal = false;
+        photoModalSrc = null;
     }
 
     private void OpenBatalTerimaModal(StationInProgressDto item)
@@ -1888,6 +2337,13 @@ else
     private async Task ConfirmRevise()
     {
         if (reviseTarget is null || currentOperatorId is null) return;
+
+        var reviseTotalReject = reviseQtyRejectPrint + reviseQtyRejectFabric + reviseQtyRejectSewing;
+        if (reviseTotalReject > 0 && string.IsNullOrWhiteSpace(reviseRemark))
+        {
+            reviseError = "Catatan wajib diisi jika ada reject.";
+            return;
+        }
 
         isBusy = true;
         reviseError = string.Empty;
@@ -2041,6 +2497,14 @@ else
     {
         if (reviseGroupTarget is null || currentOperatorId is null) return;
 
+        var reviseGroupBadRow = reviseGroupRows.FirstOrDefault(r =>
+            r.QtyRejectPrint + r.QtyRejectFabric + r.QtyRejectSewing > 0 && string.IsNullOrWhiteSpace(r.Remark));
+        if (reviseGroupBadRow is not null)
+        {
+            reviseGroupError = $"{reviseGroupBadRow.SizeName}: catatan wajib diisi jika ada reject.";
+            return;
+        }
+
         isBusy = true;
         reviseGroupError = string.Empty;
 
@@ -2134,8 +2598,8 @@ else
         if (firstSize is not null)
         {
             buatBundleArticleSizeId = firstSize.ArticleSizeId;
-            buatBundleQty = firstSize.BundleQty;
         }
+        buatBundleQty = 0;
 
         showBuatBundleModal = true;
     }
@@ -2149,8 +2613,7 @@ else
     private void HandleBuatBundleSizeChanged(int articleSizeId)
     {
         buatBundleArticleSizeId = articleSizeId;
-        var sizeInfo = buatBundleSummary.FirstOrDefault(s => s.ArticleSizeId == articleSizeId);
-        if (sizeInfo is not null) buatBundleQty = sizeInfo.BundleQty;
+        buatBundleQty = 0;
     }
 
     private async Task ConfirmBuatBundle()
@@ -2169,6 +2632,19 @@ else
         if (buatBundleQty <= 0)
         {
             buatBundleError = "Qty bundle harus lebih dari 0.";
+            return;
+        }
+
+        var buatBundleSizeInfo = buatBundleSummary.FirstOrDefault(s => s.ArticleSizeId == buatBundleArticleSizeId);
+        if (buatBundleSizeInfo is not null && buatBundleQty > buatBundleSizeInfo.StockCutting)
+        {
+            buatBundleError = $"Qty tidak boleh lebih dari Stock Cutting ({buatBundleSizeInfo.StockCutting}).";
+            return;
+        }
+
+        if (buatBundleTailorResourceId <= 0)
+        {
+            buatBundleError = "Penjahit (Tim) wajib dipilih.";
             return;
         }
 
@@ -2206,12 +2682,13 @@ else
     {
         editBundleTarget = item;
         editBundleQty = item.QtyOk;
+        editBundleArticleSizeId = item.ArticleSizeId ?? 0;
         editBundleTailorResourceId = item.BundleResourceId ?? 0;
         editBundleTailorPersonName = item.BundleResourcePersonName ?? string.Empty;
         editBundleError = string.Empty;
 
-        var summary = await StationApi.GetBundlingSummaryAsync(item.ArticleId);
-        var tailorDivisionId = summary.FirstOrDefault()?.FirstBundleStepDivisionId;
+        editBundleSummary = await StationApi.GetBundlingSummaryAsync(item.ArticleId);
+        var tailorDivisionId = editBundleSummary.FirstOrDefault()?.FirstBundleStepDivisionId;
         editBundleTailorOptions = tailorDivisionId is int divisionId
             ? await StationApi.GetResourcesByDivisionAsync(divisionId)
             : new();
@@ -2231,10 +2708,32 @@ else
 
         editBundleError = string.Empty;
 
+        if (editBundleArticleSizeId <= 0)
+        {
+            editBundleError = "Ukuran wajib dipilih.";
+            return;
+        }
+
         if (editBundleQty <= 0)
         {
             editBundleError = "Qty bundle harus lebih dari 0.";
             return;
+        }
+
+        // Fix: qty tidak boleh melebihi Stock Cutting -- sisa StockCutting size ini (dari
+        // ringkasan yang diambil saat modal dibuka) belum menghitung qty lama bundle ini
+        // sendiri (masih ikut TotalBundleQty ukuran semula), jadi ditambahkan kembali sebagai
+        // headroom HANYA kalau ukuran tidak diubah -- kalau pindah ukuran, qty lama tidak
+        // pernah ikut TotalBundleQty ukuran baru jadi tidak ada headroom untuk ditambahkan.
+        var editSizeInfo = editBundleSummary.FirstOrDefault(s => s.ArticleSizeId == editBundleArticleSizeId);
+        if (editSizeInfo is not null)
+        {
+            var maxQty = editSizeInfo.StockCutting + (editBundleArticleSizeId == editBundleTarget.ArticleSizeId ? editBundleTarget.QtyOk : 0);
+            if (editBundleQty > maxQty)
+            {
+                editBundleError = $"Qty tidak boleh lebih dari Stock Cutting ({maxQty}).";
+                return;
+            }
         }
 
         isBusy = true;
@@ -2242,6 +2741,7 @@ else
         var (success, error) = await StationApi.UpdateBundleAsync(editBundleTarget.BundleId.Value, new StationBundleUpdateRequest
         {
             Qty = editBundleQty,
+            ArticleSizeId = editBundleArticleSizeId,
             ResourceId = currentOperatorId.Value,
             TailorResourceId = editBundleTailorResourceId > 0 ? editBundleTailorResourceId : null,
             TailorPersonName = string.IsNullOrWhiteSpace(editBundleTailorPersonName) ? null : editBundleTailorPersonName
@@ -2256,6 +2756,43 @@ else
         }
 
         CloseEditBundleModal();
+        await RefreshLists();
+    }
+
+    // Fix: "Hapus Bundle" -- tab OUT baris is_bundling yang sudah ReceivedAt (auto-diterima
+    // Line tujuan saat dibuat), menggantikan Edit selama masih dalam jendela 1 jam.
+    private void OpenDeleteBundleModal(StationPendingHandoverDto item)
+    {
+        deleteBundleTarget = item;
+        deleteBundleError = string.Empty;
+        showDeleteBundleModal = true;
+    }
+
+    private void CloseDeleteBundleModal()
+    {
+        showDeleteBundleModal = false;
+        deleteBundleTarget = null;
+        deleteBundleError = string.Empty;
+    }
+
+    private async Task ConfirmDeleteBundle()
+    {
+        if (deleteBundleTarget?.BundleId is null) return;
+
+        isBusy = true;
+        deleteBundleError = string.Empty;
+
+        var (success, error) = await StationApi.DeleteBundleAsync(deleteBundleTarget.BundleId.Value);
+
+        isBusy = false;
+
+        if (!success)
+        {
+            deleteBundleError = error;
+            return;
+        }
+
+        CloseDeleteBundleModal();
         await RefreshLists();
     }
 
@@ -2282,6 +2819,299 @@ else
         }
 
         reprintFeedback = "Label masuk antrian cetak.";
+    }
+
+    // Prompt 25: modul Packing -- tab baru (gate: station.EnablePacking), tanpa keterikatan
+    // operator sesi (packs tidak punya kolom resource_id, created_by selalu user sistem).
+    private List<ProjectDto> packingProjects = new();
+    private int packingProjectId;
+    private string packingSubTab = "stock";
+    private bool isLoadingPacking = false;
+    private List<PackStockAvailableDto> packingStock = new();
+    private ProjectPackingDto packingData = new();
+    private string packingError = string.Empty;
+    private string packingFeedback = string.Empty;
+
+    private class PackArticleOption
+    {
+        public int ArticleId;
+        public string Label = string.Empty;
+    }
+
+    private List<PackArticleOption> packArticleOptions = new();
+
+    private async Task HandlePackingProjectChanged(int projectId)
+    {
+        packingProjectId = projectId;
+        packingSubTab = "stock";
+        await LoadPackingData();
+    }
+
+    private async Task LoadPackingData()
+    {
+        if (packingProjectId <= 0) return;
+
+        isLoadingPacking = true;
+        packingStock = await StationApi.GetPackingStockAsync(packingProjectId);
+        packingData = await StationApi.GetPackingPacksAsync(packingProjectId);
+        packArticleOptions = packingStock
+            .GroupBy(s => s.ArticleId)
+            .Select(g => new PackArticleOption { ArticleId = g.Key, Label = $"{g.First().ArticleName} {g.First().Style} {g.First().Color}".Trim() })
+            .OrderBy(a => a.Label)
+            .ToList();
+        isLoadingPacking = false;
+    }
+
+    private List<PackStockAvailableDto> PackFormSizeOptions(int articleId) =>
+        packingStock.Where(s => s.ArticleId == articleId).OrderBy(s => s.SortOrder).ToList();
+
+    // Sisa stok yang ditampilkan di dropdown ukuran harus memperhitungkan qty yang SUDAH
+    // dipakai baris lain pada form yang sedang diedit (belum tersimpan), supaya operator
+    // tidak input dobel melebihi stok nyata sebelum submit.
+    private int AvailableForPlanRow(PackFormRow currentRow, PackStockAvailableDto size)
+    {
+        var reservedByOtherRows = packFormRows
+            .Where(r => r != currentRow && r.ArticleId == size.ArticleId && r.ArticleSizeId == size.ArticleSizeId)
+            .Sum(r => r.QtyPlan);
+        return size.QtyAvailable - reservedByOtherRows;
+    }
+
+    private class PackFormRow
+    {
+        public int ArticleId;
+        public int ArticleSizeId;
+        public int QtyPlan = 1;
+    }
+
+    private bool showPackFormModal = false;
+    private bool isEditPlanMode = false;
+    private int editPlanPackId;
+    private List<PackFormRow> packFormRows = new();
+    private bool packFormAutoPrint = true;
+    private string packFormError = string.Empty;
+
+    private void OpenCreatePackModal()
+    {
+        isEditPlanMode = false;
+        editPlanPackId = 0;
+        packFormRows = new() { new PackFormRow() };
+        packFormAutoPrint = true;
+        packFormError = string.Empty;
+        showPackFormModal = true;
+    }
+
+    private void OpenEditPlanModal(PackListItemDto pack)
+    {
+        isEditPlanMode = true;
+        editPlanPackId = pack.Id;
+        packFormRows = packingData.Items
+            .Where(i => i.PackId == pack.Id)
+            .Select(i => new PackFormRow { ArticleId = i.ArticleId, ArticleSizeId = i.ArticleSizeId, QtyPlan = i.QtyPlan })
+            .ToList();
+        if (packFormRows.Count == 0) packFormRows.Add(new PackFormRow());
+        packFormError = string.Empty;
+        showPackFormModal = true;
+    }
+
+    private void ClosePackFormModal()
+    {
+        showPackFormModal = false;
+    }
+
+    private void HandlePackFormArticleChanged(PackFormRow row, int articleId)
+    {
+        row.ArticleId = articleId;
+        row.ArticleSizeId = 0;
+    }
+
+    private void AddPackFormRow() => packFormRows.Add(new PackFormRow());
+
+    private void RemovePackFormRow(PackFormRow row)
+    {
+        if (packFormRows.Count <= 1) return;
+        packFormRows.Remove(row);
+    }
+
+    private async Task SubmitPackForm()
+    {
+        packFormError = string.Empty;
+
+        if (packFormRows.Count == 0 || packFormRows.Any(r => r.ArticleId <= 0 || r.ArticleSizeId <= 0 || r.QtyPlan <= 0))
+        {
+            packFormError = "Isi semua baris (artikel, ukuran, qty lebih dari 0).";
+            return;
+        }
+
+        isBusy = true;
+        var items = packFormRows.Select(r => new PackItemInput { ArticleId = r.ArticleId, ArticleSizeId = r.ArticleSizeId, QtyPlan = r.QtyPlan }).ToList();
+
+        if (isEditPlanMode)
+        {
+            var (success, error) = await StationApi.UpdatePackPlanAsync(editPlanPackId, new PackUpdatePlanRequest { Items = items });
+            isBusy = false;
+            if (!success) { packFormError = error; return; }
+            packingFeedback = "Planning karung disimpan.";
+        }
+        else
+        {
+            var (success, error, result) = await StationApi.CreatePackAsync(new PackCreateRequest { ProjectId = packingProjectId, Items = items, AutoPrint = packFormAutoPrint });
+            isBusy = false;
+            if (!success) { packFormError = error; return; }
+            packingFeedback = $"Karung No. {result?.PackNo} dibuat" + (result?.PrintJobId is not null ? " · label masuk antrian cetak" : "");
+        }
+
+        showPackFormModal = false;
+        await LoadPackingData();
+    }
+
+    private class ConfirmRow
+    {
+        public int PackItemId;
+        public string ArticleName = string.Empty;
+        public string? Style;
+        public string? Color;
+        public string SizeName = string.Empty;
+        public int QtyPlan;
+        public int QtyActual;
+    }
+
+    private bool showConfirmPackModal = false;
+    private int confirmPackId;
+    private List<ConfirmRow> confirmRows = new();
+    private string confirmError = string.Empty;
+
+    private void OpenConfirmPackModal(PackListItemDto pack)
+    {
+        confirmPackId = pack.Id;
+        confirmRows = packingData.Items
+            .Where(i => i.PackId == pack.Id)
+            .Select(i => new ConfirmRow
+            {
+                PackItemId = i.PackItemId,
+                ArticleName = i.ArticleName,
+                Style = i.Style,
+                Color = i.Color,
+                SizeName = i.SizeName,
+                QtyPlan = i.QtyPlan,
+                QtyActual = i.QtyActual ?? i.QtyPlan
+            }).ToList();
+        confirmError = string.Empty;
+        showConfirmPackModal = true;
+    }
+
+    private void CloseConfirmPackModal()
+    {
+        showConfirmPackModal = false;
+    }
+
+    private async Task ConfirmPackSubmit()
+    {
+        isBusy = true;
+        confirmError = string.Empty;
+
+        var items = confirmRows.Select(r => new PackConfirmItemInput { PackItemId = r.PackItemId, QtyActual = r.QtyActual }).ToList();
+        var (success, error) = await StationApi.ConfirmPackAsync(confirmPackId, new PackConfirmRequest { Items = items });
+
+        isBusy = false;
+        if (!success) { confirmError = error; return; }
+
+        showConfirmPackModal = false;
+        packingFeedback = "Karung dikonfirmasi.";
+        await LoadPackingData();
+    }
+
+    private bool showDeletePackModal = false;
+    private PackListItemDto? deletePackTarget;
+    private string deletePackReason = string.Empty;
+    private string deletePackError = string.Empty;
+
+    private void OpenDeletePackModal(PackListItemDto pack)
+    {
+        deletePackTarget = pack;
+        deletePackReason = string.Empty;
+        deletePackError = string.Empty;
+        showDeletePackModal = true;
+    }
+
+    private void CloseDeletePackModal()
+    {
+        showDeletePackModal = false;
+        deletePackTarget = null;
+    }
+
+    private async Task ConfirmDeletePack()
+    {
+        if (deletePackTarget is null) return;
+
+        if (string.IsNullOrWhiteSpace(deletePackReason))
+        {
+            deletePackError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
+        isBusy = true;
+        deletePackError = string.Empty;
+
+        var (success, error) = await StationApi.DeletePackAsync(deletePackTarget.Id, deletePackReason);
+
+        isBusy = false;
+
+        if (!success)
+        {
+            deletePackError = error;
+            return;
+        }
+
+        showDeletePackModal = false;
+        deletePackTarget = null;
+        packingFeedback = "Karung dihapus.";
+        await LoadPackingData();
+    }
+
+    private async Task HandleReprintPack(int packId)
+    {
+        isBusy = true;
+        packingError = string.Empty;
+        packingFeedback = string.Empty;
+
+        var (success, error) = await StationApi.ReprintPackAsync(packId);
+
+        isBusy = false;
+
+        if (!success)
+        {
+            packingError = error;
+            return;
+        }
+
+        packingFeedback = "Label masuk antrian cetak.";
+    }
+
+    // Scan QR lewat kamera (label bundle/karung) -- QR selalu berisi URL absolut
+    // ({PublicBaseUrl}/b/{serial} atau /pack/{serial}); hasilnya dinavigasi client-side
+    // (NavigationManager, TANPA forceLoad) supaya tetap dalam app, bukan buka tab baru.
+    private bool showQrScanner = false;
+    private string qrScanError = string.Empty;
+
+    private void HandleQrScanned(string value)
+    {
+        showQrScanner = false;
+
+        var path = ExtractLocalPath(value);
+        if (path is null)
+        {
+            qrScanError = "QR tidak dikenali.";
+            return;
+        }
+
+        qrScanError = string.Empty;
+        Nav.NavigateTo(path);
+    }
+
+    private static string? ExtractLocalPath(string value)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri)) return uri.PathAndQuery;
+        return value.StartsWith('/') ? value : null;
     }
 
     public void Dispose()

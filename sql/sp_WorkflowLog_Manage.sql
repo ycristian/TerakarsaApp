@@ -18,7 +18,8 @@
 --       ini). Step ber-bundle pertama TIDAK LAGI bebas prasyarat sejak Prompt 17.
 --     - Khusus step station PERTAMA (MIN sort_order di antara requires_bundle = 1 AND
 --       is_bundling = 0): kalau bundles.resource_id diisi, @ResourceId wajib sama (bundle
---       ditugaskan ke line tertentu).
+--       ditugaskan ke line tertentu) -- KECUALI stasiun pengirim tidak terkunci ke resource
+--       bawaan (@ActingAllowResourceChange = 1, Prompt 27), match ini dilewati sepenuhnya.
 --     - @ArticleSizeId harus NULL (size sudah melekat di bundle).
 --   Umum: qty tidak boleh negatif; @ActingDivisionId (diisi dari token stasiun bila ada)
 --   harus sama dengan divisi step, kalau tidak ditolak. target_division_id TIDAK LAGI
@@ -128,7 +129,8 @@ CREATE OR ALTER PROCEDURE SIS_WorkflowLog_Manage
     @UpdatedByResourceId INT = NULL,
     @ConfirmExceed       BIT = 0,
     @ConfirmShort        BIT = 0,
-    @NewTargetDivisionId INT = NULL
+    @NewTargetDivisionId INT = NULL,
+    @ActingAllowResourceChange BIT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -269,8 +271,13 @@ BEGIN
             END
 
             -- Validasi "bundle ditugaskan ke line lain" hanya berlaku di step station PERTAMA
-            -- (bukan lagi step ber-bundle pertama overall -- itu sekarang Bundling).
-            IF @SortOrder = @FirstStationBundleSort
+            -- (bukan lagi step ber-bundle pertama overall -- itu sekarang Bundling). Prompt 27:
+            -- kalau stasiun pengirim TIDAK terkunci ke resource bawaan (@ActingAllowResourceChange
+            -- = 1), match persis dilewati -- operator sesi manapun di divisi ini (sudah dijamin
+            -- lewat @ActingDivisionId + daftar operator stasiun) boleh mengirim hasil biarpun
+            -- beda dari resource yang ditugaskan ke bundle. Stasiun terkunci (atau pemanggil non-
+            -- stasiun, @ActingAllowResourceChange NULL) tetap wajib match persis seperti semula.
+            IF @SortOrder = @FirstStationBundleSort AND ISNULL(@ActingAllowResourceChange, 0) = 0
             BEGIN
                 DECLARE @BundleResourceId INT;
                 SELECT @BundleResourceId = resource_id FROM bundles WHERE bundle_id = @BundleId;

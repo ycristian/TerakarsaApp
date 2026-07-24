@@ -23,6 +23,7 @@ BEGIN
         spd.sort_order AS SizeSortOrder,
         b.serial AS Serial,
         b.bundle_no AS BundleNo,
+        p.bundle_letter AS BundleLetter,
         b.qty AS Qty,
         b.sort_order AS SortOrder,
         b.resource_id AS ResourceId,
@@ -32,6 +33,8 @@ BEGIN
         pj.PrintedAt AS PrintedAt,
         b.created_at AS CreatedAt
     FROM bundles b
+    INNER JOIN articles a ON a.article_id = b.article_id
+    INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = b.resource_id
@@ -57,6 +60,12 @@ GO
 -- dipakai client untuk dropdown "Penjahit (resource)" di BundleManager.razor, yaitu resource
 -- divisi STATION ber-bundle pertama (mis. Sewing, is_bundling = 0), bukan divisi Bundling.
 -- BundlingDivisionId (baru) dipakai untuk dropdown terpisah "Pelaksana Bundling".
+-- StockCutting (baru): total qty step non-bundle TERAKHIR (mis. Cutting) yang sudah DITERIMA
+-- divisi Bundling untuk size ini, dikurangi total qty bundle yang sudah dibuat dari size ini --
+-- sisa hasil potong yang belum dijadikan bundle. Definisi step sumbernya SAMA dengan
+-- @LastNonBundleStepId di SIS_Bundle_Manage CREATE (step requires_bundle = 0 dengan sort_order
+-- terbesar). Dipakai station "Buat Bundle" (StationDevice.razor) menggantikan "Saran Bundle
+-- Qty" (asz.bundle_qty, tetap dipertahankan sebagai kolom BundleQty untuk BundleManager.razor).
 CREATE OR ALTER PROCEDURE SIS_Article_BundleSummary
     @ArticleId INT
 AS
@@ -86,6 +95,12 @@ BEGIN
     FROM article_workflows
     WHERE article_id = @ArticleId AND deleted_at IS NULL AND is_bundling = 1;
 
+    DECLARE @LastNonBundleStepId INT;
+    SELECT TOP 1 @LastNonBundleStepId = article_workflow_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 0
+    ORDER BY sort_order DESC;
+
     SELECT
         asz.article_size_id AS ArticleSizeId,
         spd.size_name AS SizeName,
@@ -94,6 +109,14 @@ BEGIN
         asz.bundle_qty AS BundleQty,
         COUNT(b.bundle_id) AS BundleCount,
         ISNULL(SUM(b.qty), 0) AS TotalBundleQty,
+        ISNULL((
+            SELECT SUM(awl.qty_ok)
+            FROM article_workflow_logs awl
+            WHERE awl.article_workflow_id = @LastNonBundleStepId
+              AND awl.article_size_id = asz.article_size_id
+              AND awl.deleted_at IS NULL
+              AND awl.received_at IS NOT NULL
+        ), 0) - ISNULL(SUM(b.qty), 0) AS StockCutting,
         @HasFirstBundleStep AS HasFirstBundleStep,
         @IsFirstBundleStepReceived AS IsFirstBundleStepReceived,
         @FirstStationBundleDivisionId AS FirstBundleStepDivisionId,

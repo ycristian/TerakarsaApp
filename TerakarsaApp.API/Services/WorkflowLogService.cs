@@ -32,6 +32,10 @@ public class WorkflowLogCreateInput
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini (baris susulan
     // menyusul kemudian) -- juga hanya berarti utk step ber-bundle.
     public bool ConfirmShort { get; set; }
+    // Prompt 27: AllowResourceChange stasiun pengirim -- kalau stasiun TIDAK terkunci ke
+    // resource bawaan, SP melewati validasi "bundle ditugaskan ke line lain" (step station
+    // pertama). NULL untuk pemanggil non-stasiun -- SP memperlakukannya sama seperti terkunci.
+    public bool? ActingAllowResourceChange { get; set; }
 }
 
 public class WorkflowLogReceiveInput
@@ -85,6 +89,7 @@ public class WorkflowLogService
         public int ArticleWorkflowId { get; set; }
         public int ArticleId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
+        public string? NoPo { get; set; }
         public string ArticleName { get; set; } = string.Empty;
         public string? Style { get; set; }
         public string? Color { get; set; }
@@ -97,6 +102,7 @@ public class WorkflowLogService
         public int? BundleCount { get; set; }
         public int? TotalBundleQty { get; set; }
         public int? TotalOrderQty { get; set; }
+        public string? StockCuttingJson { get; set; }
         // Dipakai hanya utk ORDER BY di SQL (UNION ActiveWork + kartu Buat Bundle) -- tidak
         // diteruskan ke StationActiveWorkDto.
         public int SortOrder { get; set; }
@@ -108,6 +114,7 @@ public class WorkflowLogService
         public int ArticleWorkflowId { get; set; }
         public int ArticleId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
+        public string? NoPo { get; set; }
         public string ArticleName { get; set; } = string.Empty;
         public string? Style { get; set; }
         public string? Color { get; set; }
@@ -115,9 +122,11 @@ public class WorkflowLogService
         public bool IsBundling { get; set; }
         public int? BundleId { get; set; }
         public int? BundleNo { get; set; }
+        public string? BundleLetter { get; set; }
         public string? Serial { get; set; }
         public int? ArticleSizeId { get; set; }
         public string? SizeName { get; set; }
+        public int? SizeSortOrder { get; set; }
         public int QtyOk { get; set; }
         public int QtyRejectPrint { get; set; }
         public int QtyRejectFabric { get; set; }
@@ -128,6 +137,7 @@ public class WorkflowLogService
         public string? ResourceName { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        public DateTime? ReceivedAt { get; set; }
         public string? SizesJson { get; set; }
         public string? TargetDivisionOptionsJson { get; set; }
         public int? BundleResourceId { get; set; }
@@ -193,6 +203,7 @@ public class WorkflowLogService
             ArticleWorkflowId = row.ArticleWorkflowId,
             ArticleId = row.ArticleId,
             ProjectName = row.ProjectName,
+            NoPo = row.NoPo,
             ArticleName = row.ArticleName,
             Style = row.Style,
             Color = row.Color,
@@ -200,9 +211,11 @@ public class WorkflowLogService
             IsBundling = row.IsBundling,
             BundleId = row.BundleId,
             BundleNo = row.BundleNo,
+            BundleLetter = row.BundleLetter,
             Serial = row.Serial,
             ArticleSizeId = row.ArticleSizeId,
             SizeName = row.SizeName,
+            SizeSortOrder = row.SizeSortOrder,
             QtyOk = row.QtyOk,
             QtyRejectPrint = row.QtyRejectPrint,
             QtyRejectFabric = row.QtyRejectFabric,
@@ -213,6 +226,7 @@ public class WorkflowLogService
             ResourceName = row.ResourceName,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt,
+            ReceivedAt = row.ReceivedAt,
             Sizes = string.IsNullOrEmpty(row.SizesJson)
                 ? new()
                 : JsonSerializer.Deserialize<List<ArticleSizeOptionDto>>(row.SizesJson) ?? new(),
@@ -240,6 +254,7 @@ public class WorkflowLogService
             ArticleWorkflowId = row.ArticleWorkflowId,
             ArticleId = row.ArticleId,
             ProjectName = row.ProjectName,
+            NoPo = row.NoPo,
             ArticleName = row.ArticleName,
             Style = row.Style,
             Color = row.Color,
@@ -253,7 +268,10 @@ public class WorkflowLogService
                 : JsonSerializer.Deserialize<List<StationActiveWorkSizeDto>>(row.SizesJson) ?? new(),
             BundleCount = row.BundleCount,
             TotalBundleQty = row.TotalBundleQty,
-            TotalOrderQty = row.TotalOrderQty
+            TotalOrderQty = row.TotalOrderQty,
+            StockCutting = string.IsNullOrEmpty(row.StockCuttingJson)
+                ? new()
+                : JsonSerializer.Deserialize<List<StationBundleStockCuttingDto>>(row.StockCuttingJson) ?? new()
         }).ToList();
     }
 
@@ -339,7 +357,7 @@ public class WorkflowLogService
     }
 
     private const string CreateLogSql =
-        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort";
+        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort, @ActingAllowResourceChange = @ActingAllowResourceChange";
 
     private static SqlParameter[] BuildCreateLogParams(WorkflowLogCreateInput input, int userId) => new[]
     {
@@ -356,7 +374,8 @@ public class WorkflowLogService
         new SqlParameter("@UserId", userId),
         new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value),
         new SqlParameter("@ConfirmExceed", input.ConfirmExceed),
-        new SqlParameter("@ConfirmShort", input.ConfirmShort)
+        new SqlParameter("@ConfirmShort", input.ConfirmShort),
+        new SqlParameter("@ActingAllowResourceChange", (object?)input.ActingAllowResourceChange ?? DBNull.Value)
     };
 
     public async Task<(bool Success, string Error)> CreateAsync(WorkflowLogCreateInput input, int userId)

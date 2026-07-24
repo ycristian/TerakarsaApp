@@ -29,10 +29,19 @@ else if (hasAccess == false)
 }
 else
 {
-    <div class="d-flex justify-content-end mb-3">
-        <button class="btn btn-outline-primary" disabled="@isLoading" @onclick="LoadSummary">
-            <i class="fe fe-refresh-cw me-1"></i> Refresh
-        </button>
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-md-5">
+            <label class="form-label">Project</label>
+            <SearchableSelect TItem="ProjectWipProgressDto" Items="runningProjects" @bind-Value="selectedProjectId"
+                              IdSelector="@(p => p.ProjectId)" TextSelector="@(p => $"{p.BuyerName} — {p.ProjectName} - {p.ProgressPercent}%")"
+                              AllowNone="true" NoneLabel="- Semua Project -" Placeholder="Cari project..."
+                              @bind-Value:after="LoadSummary" />
+        </div>
+        <div class="col-md-7 d-flex justify-content-end">
+            <button class="btn btn-outline-primary" disabled="@isLoading" @onclick="LoadSummary">
+                <i class="fe fe-refresh-cw me-1"></i> Refresh
+            </button>
+        </div>
     </div>
 
     @if (isLoading)
@@ -122,9 +131,9 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@modalTitle</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
                     @if (isLoadingModal)
                     {
                         <p class="mb-0">Memuat data...</p>
@@ -139,39 +148,70 @@ else
                     }
                     else
                     {
-                        <div class="table-responsive">
-                            <table class="table table-bordered border text-nowrap mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Bundle No</th>
-                                        <th>Serial</th>
-                                        <th>Project</th>
-                                        <th>Artikel</th>
-                                        <th>Size</th>
-                                        <th>Pcs</th>
-                                        <th>Penjahit</th>
-                                        <th>Step Asal</th>
-                                        <th>@(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var b in modalBundles)
-                                    {
-                                        <tr>
-                                            <td>@b.BundleNo</td>
-                                            <td>@b.Serial</td>
-                                            <td>@b.ProjectName</td>
-                                            <td>@b.ArticleName</td>
-                                            <td>@b.SizeName</td>
-                                            <td>@b.QtyOk</td>
-                                            <td>@(b.TailorName ?? "-")</td>
-                                            <td>@(b.StepName ?? "-")</td>
-                                            <td>@FormatDateTime(b.EventAt) (@Umur(b.EventAt))</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <input type="text" class="form-control" placeholder="Cari bundle no, serial, project, artikel, penjahit..." @bind="modalSearch" @bind:event="oninput" />
+                            </div>
+                            <div class="col-md-4">
+                                <select class="form-select" @bind="modalSortField">
+                                    <option value="BundleNo">Urutkan: Bundle No</option>
+                                    <option value="Serial">Urutkan: Serial</option>
+                                    <option value="ProjectName">Urutkan: Project</option>
+                                    <option value="ArticleName">Urutkan: Artikel</option>
+                                    <option value="SizeName">Urutkan: Size</option>
+                                    <option value="QtyOk">Urutkan: Pcs</option>
+                                    <option value="TailorName">Urutkan: Penjahit</option>
+                                    <option value="StepName">Urutkan: Step Asal</option>
+                                    <option value="EventAt">Urutkan: @(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <button type="button" class="btn btn-outline-secondary w-100" @onclick="() => modalSortAsc = !modalSortAsc">
+                                    <i class="fe @ModalSortIconClass me-1"></i>@(modalSortAsc ? "Asc" : "Desc")
+                                </button>
+                            </div>
                         </div>
+
+                        @if (FilteredAndSortedModalBundles().Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada bundle yang cocok dengan pencarian.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-bordered border text-nowrap mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Bundle No</th>
+                                            <th>Serial</th>
+                                            <th>Project</th>
+                                            <th>Artikel</th>
+                                            <th>Size</th>
+                                            <th>Pcs</th>
+                                            <th>Penjahit</th>
+                                            <th>Step Asal</th>
+                                            <th>@(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var b in FilteredAndSortedModalBundles())
+                                        {
+                                            <tr>
+                                                <td>@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                <td>@b.Serial</td>
+                                                <td>@b.ProjectName</td>
+                                                <td>@b.ArticleName</td>
+                                                <td>@b.SizeName</td>
+                                                <td>@b.QtyOk</td>
+                                                <td>@(b.TailorName ?? "-")</td>
+                                                <td>@(b.StepName ?? "-")</td>
+                                                <td>@FormatDateTime(b.EventAt) (@Umur(b.EventAt))</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
                     }
                 </div>
             </div>
@@ -187,6 +227,9 @@ else
     private Dictionary<int, string> divisionNames = new();
     private List<int> divisionIds = new();
 
+    private List<ProjectWipProgressDto> runningProjects = new();
+    private int selectedProjectId;
+
     // --- Modal ---
     private bool showModal = false;
     private bool isLoadingModal = false;
@@ -194,6 +237,9 @@ else
     private string modalMode = string.Empty;
     private string modalError = string.Empty;
     private List<DivisionWipBundleDto> modalBundles = new();
+    private string modalSearch = string.Empty;
+    private string modalSortField = "BundleNo";
+    private bool modalSortAsc = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -202,13 +248,14 @@ else
 
         if (hasAccess != true) return;
 
+        runningProjects = await WipApi.GetRunningProjectsAsync();
         await LoadSummary();
     }
 
     private async Task LoadSummary()
     {
         isLoading = true;
-        summary = await WipApi.GetSummaryAsync();
+        summary = await WipApi.GetSummaryAsync(selectedProjectId > 0 ? selectedProjectId : null);
 
         divisionNames = summary.Working
             .Select(w => (w.DivisionId, w.DivisionName))
@@ -249,9 +296,12 @@ else
         isLoadingModal = true;
         modalError = string.Empty;
         modalBundles = new();
+        modalSearch = string.Empty;
+        modalSortField = "BundleNo";
+        modalSortAsc = true;
         StateHasChanged();
 
-        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "DIKERJAKAN", w.ResourceId, filterResource: true);
+        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "DIKERJAKAN", w.ResourceId, filterResource: true, projectId: selectedProjectId > 0 ? selectedProjectId : null);
         if (!success)
         {
             modalError = error;
@@ -271,9 +321,12 @@ else
         isLoadingModal = true;
         modalError = string.Empty;
         modalBundles = new();
+        modalSearch = string.Empty;
+        modalSortField = "BundleNo";
+        modalSortAsc = true;
         StateHasChanged();
 
-        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "PENDING", null, filterResource: false);
+        var (success, error, result) = await WipApi.GetBundlesAsync(divisionId, "PENDING", null, filterResource: false, projectId: selectedProjectId > 0 ? selectedProjectId : null);
         if (!success)
         {
             modalError = error;
@@ -285,8 +338,45 @@ else
         isLoadingModal = false;
     }
 
+    private string ModalSortIconClass => modalSortAsc ? "fe-arrow-up" : "fe-arrow-down";
+
     private void CloseModal()
     {
         showModal = false;
+    }
+
+    private List<DivisionWipBundleDto> FilteredAndSortedModalBundles()
+    {
+        IEnumerable<DivisionWipBundleDto> query = modalBundles;
+
+        if (!string.IsNullOrWhiteSpace(modalSearch))
+        {
+            var term = modalSearch.Trim();
+            query = query.Where(b =>
+                b.BundleNo.ToString().Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.Serial.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.ProjectName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.ArticleName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                b.SizeName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (b.TailorName ?? "").Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (b.StepName ?? "").Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        Func<DivisionWipBundleDto, object> keySelector = modalSortField switch
+        {
+            "Serial" => b => b.Serial,
+            "ProjectName" => b => b.ProjectName,
+            "ArticleName" => b => b.ArticleName,
+            "SizeName" => b => b.SizeName,
+            "QtyOk" => b => b.QtyOk,
+            "TailorName" => b => b.TailorName ?? string.Empty,
+            "StepName" => b => b.StepName ?? string.Empty,
+            "EventAt" => b => b.EventAt,
+            _ => b => b.BundleNo,
+        };
+
+        query = modalSortAsc ? query.OrderBy(keySelector) : query.OrderByDescending(keySelector);
+
+        return query.ToList();
     }
 }

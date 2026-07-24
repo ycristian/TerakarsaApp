@@ -12,10 +12,12 @@ namespace TerakarsaApp.API.Controllers;
 public class PublicController : ControllerBase
 {
     private readonly BundleService _bundleService;
+    private readonly PackService _packService;
 
-    public PublicController(BundleService bundleService)
+    public PublicController(BundleService bundleService, PackService packService)
     {
         _bundleService = bundleService;
+        _packService = packService;
     }
 
     [HttpGet("bundles/{serial}")]
@@ -27,5 +29,14 @@ public class PublicController : ControllerBase
         var wip = await _bundleService.GetArticleWipAsync(scanInfo.Bundle.ArticleId);
 
         return Ok(new PublicBundleDetailDto { ScanInfo = scanInfo, Wip = wip });
+    }
+
+    // Prompt 25: link QR label karung = {PublicBaseUrl}/pack/{serial}.
+    [HttpGet("packs/{serial}")]
+    public async Task<IActionResult> GetPack(string serial)
+    {
+        var scanInfo = await _packService.GetScanInfoAsync(serial);
+        if (scanInfo is null) return NotFound("Karung tidak ditemukan.");
+        return Ok(scanInfo);
     }
 }
