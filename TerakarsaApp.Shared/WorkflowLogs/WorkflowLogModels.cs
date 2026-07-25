@@ -18,6 +18,9 @@ public class WorkflowLogDto
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    public string LogType { get; set; } = "NORMAL";
     public string? Remark { get; set; }
     public int? TargetDivisionId { get; set; }
     public string? TargetDivisionName { get; set; }
@@ -63,6 +66,8 @@ public class StationPendingReceiveDto
     public string? SizeName { get; set; }
     public int? SizeSortOrder { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    // Prompt 28: badge "Penyesuaian" untuk item hasil ADJUST (qty_ok > 0) di tab Masuk.
+    public bool IsAdjustment { get; set; }
 }
 
 public class StationPendingHandoverDto
@@ -91,6 +96,8 @@ public class StationPendingHandoverDto
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     public string? TargetDivisionName { get; set; }
     // Prompt 23: true kalau baris ini step TERAKHIR artikel (tidak ada tujuan serah, tidak
@@ -161,6 +168,8 @@ public class StationLogUpdateRequest
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     // Pelaksana (operator sesi aktif) yang melakukan revisi ini -- Prompt 12d.
     public int ResourceId { get; set; }
@@ -192,6 +201,8 @@ public class StationReviseHandoverRequest
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     public int NewTargetDivisionId { get; set; }
     public int? NewResourceId { get; set; }
@@ -238,6 +249,8 @@ public class StationCompleteRequest
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     // Prompt 14: konfirmasi sadar melebihi kuota qty masuk step ini (lihat SIS_WorkflowLog_Manage).
     public bool ConfirmExceed { get; set; }
@@ -311,6 +324,8 @@ public class StationNonBundleBatchEntryRequest
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
 }
 
 public class StationNonBundleBatchCreateRequest
@@ -327,4 +342,21 @@ public class StationNonBundleBatchResult
 {
     public string Error { get; set; } = string.Empty;
     public int? ArticleSizeId { get; set; }
+}
+
+// Prompt 28: panel Penyesuaian di /b/{serial} -- mutasi qty reject/hilang -> reject/hilang
+// lain ATAU Qty OK, total keenam nilai wajib 0 (lihat SIS_WorkflowLog_Manage @Action = 'ADJUST').
+public class StationAdjustRequest
+{
+    public int ArticleWorkflowId { get; set; }
+    public int BundleId { get; set; }
+    public int ResourceId { get; set; }
+    public int QtyOk { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    public int? TargetDivisionId { get; set; }
+    public string? Remark { get; set; }
 }

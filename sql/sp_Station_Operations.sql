@@ -123,7 +123,9 @@ BEGIN
            d.division_name AS FromDivisionName,
            awl.bundle_id AS BundleId, b.bundle_no AS BundleNo, p.bundle_letter AS BundleLetter, b.serial AS Serial,
            spd.size_name AS SizeName, spd.sort_order AS SizeSortOrder,
-           awl.updated_at AS UpdatedAt
+           awl.updated_at AS UpdatedAt,
+           -- Prompt 28: badge "Penyesuaian" di tab Masuk untuk baris ADJUSTMENT (qty_ok > 0).
+           CASE WHEN awl.log_type = 'ADJUSTMENT' THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsAdjustment
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -136,6 +138,9 @@ BEGIN
     WHERE awl.target_division_id = @DivisionId
       AND awl.received_at IS NULL
       AND awl.deleted_at IS NULL
+      -- Prompt 28: baris qty_ok = 0 (NORMAL maupun ADJUSTMENT) tidak pernah butuh diterima --
+      -- tidak ada barang fisik yang benar-benar berpindah ke divisi ini.
+      AND awl.qty_ok > 0
       -- Prompt 22b: stasiun terkunci ke satu Line (resource) hanya melihat bundle yang
       -- ditugaskan ke Line itu; item non-bundle atau bundle tanpa Line, dan stasiun yang
       -- tidak terkunci (@ResourceId NULL), tetap tampil seperti sebelumnya.
@@ -350,6 +355,10 @@ BEGIN
            COALESCE(b.article_size_id, awl.article_size_id) AS ArticleSizeId, spd.size_name AS SizeName, spd.sort_order AS SizeSortOrder,
            awl.qty_ok AS QtyOk, awl.qty_reject_print AS QtyRejectPrint,
            awl.qty_reject_fabric AS QtyRejectFabric, awl.qty_reject_sewing AS QtyRejectSewing,
+           -- Fix: dua kolom ini ada di StationPendingHandoverRow (C#) sejak Prompt 28 tapi
+           -- kelupaan ditambah di SELECT ini -- bikin EF Core FromSql error "required column
+           -- 'QtyLost' was not present" begitu tab Dikirim dibuka.
+           awl.qty_reject_rework AS QtyRejectRework, awl.qty_lost AS QtyLost,
            awl.remark AS Remark,
            td.division_name AS TargetDivisionName,
            -- Prompt 23: baris step terakhir (target_division_id NULL, jendela H+1) -- lihat
@@ -397,8 +406,14 @@ BEGIN
     WHERE awl.division_id = @DivisionId
       AND awl.deleted_at IS NULL
       AND (
-            (awl.target_division_id IS NOT NULL AND awl.received_at IS NULL)
-            OR (awl.target_division_id IS NULL
+            -- Prompt 28: baris qty_ok = 0 tidak pernah butuh diterima -- jangan tampilkan
+            -- sebagai "menunggu diterima" di tab Dikirim juga.
+            (awl.target_division_id IS NOT NULL AND awl.received_at IS NULL AND awl.qty_ok > 0)
+            -- Prompt 28: baris ADJUSTMENT dengan qty_ok = 0 SELALU target_division_id NULL
+            -- (lihat SIS_WorkflowLog_Manage ADJUST) terlepas dari step ini step terakhir
+            -- artikel atau bukan -- batasi cabang "step terakhir, jendela H+1" ini ke baris
+            -- NORMAL saja supaya baris ADJUSTMENT begitu tidak nyasar tampil di sini.
+            OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL'
                 AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl.created_at) AS DATE))
             -- Fix: bundle Bundling yang langsung auto-diterima Line tujuan saat dibuat (lihat
             -- SIS_Bundle_Manage CREATE @ResourceId) tetap tampil di OUT selama masih WIP murni
@@ -517,7 +532,7 @@ BEGIN
                 END
                 -
                 ISNULL((
-                    SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing)
+                    SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
                     FROM article_workflow_logs
                     WHERE article_workflow_id = q.ArticleWorkflowId AND bundle_id = bs.bundle_id AND deleted_at IS NULL
                 ), 0)
@@ -610,6 +625,8 @@ BEGIN
             LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
             LEFT JOIN resources br ON br.resource_id = b.resource_id
             WHERE awl.target_division_id = @DivisionId AND awl.received_at IS NULL AND awl.deleted_at IS NULL
+              -- Prompt 28: baris qty_ok = 0 tidak pernah butuh diterima -- lihat SIS_Station_PendingReceives.
+              AND awl.qty_ok > 0
               -- Fix: lihat komentar Line vs divisi di SIS_Station_PendingReceives.
               AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
         ) AS MasukCount,
@@ -644,7 +661,7 @@ BEGIN
                         END
                         -
                         ISNULL((
-                            SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing)
+                            SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
                             FROM article_workflow_logs
                             WHERE article_workflow_id = q.ArticleWorkflowId AND bundle_id = b.bundle_id AND deleted_at IS NULL
                         ), 0)
@@ -714,8 +731,9 @@ BEGIN
             INNER JOIN article_workflows aw3 ON aw3.article_workflow_id = awl3.article_workflow_id
             WHERE awl3.division_id = @DivisionId AND awl3.deleted_at IS NULL
               AND (
-                    (awl3.target_division_id IS NOT NULL AND awl3.received_at IS NULL)
-                    OR (awl3.target_division_id IS NULL
+                    -- Prompt 28: samakan dengan SIS_Station_PendingHandover.
+                    (awl3.target_division_id IS NOT NULL AND awl3.received_at IS NULL AND awl3.qty_ok > 0)
+                    OR (awl3.target_division_id IS NULL AND awl3.log_type = 'NORMAL'
                         AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl3.created_at) AS DATE))
                     OR (
                           aw3.is_bundling = 1

@@ -396,6 +396,8 @@ else
                                             <th>Reject Print</th>
                                             <th>Reject Bahan</th>
                                             <th>Reject Jahit</th>
+                                            <th>Reject Rework</th>
+                                            <th>Hilang</th>
                                             <th>Tujuan</th>
                                             <th>Status Terima</th>
                                             <th>Catatan</th>
@@ -412,7 +414,13 @@ else
                                         @foreach (var log in workflowLogs)
                                         {
                                             <tr>
-                                                <td>@log.StepName</td>
+                                                <td>
+                                                    @log.StepName
+                                                    @if (log.LogType == "ADJUSTMENT")
+                                                    {
+                                                        <span class="badge bg-warning text-dark ms-1">Penyesuaian</span>
+                                                    }
+                                                </td>
                                                 <td>@(log.SizeName ?? "-")</td>
                                                 <td>@log.DivisionName</td>
                                                 <td>@(log.ResourceName ?? "-")</td>
@@ -421,6 +429,8 @@ else
                                                 <td>@log.QtyRejectPrint</td>
                                                 <td>@log.QtyRejectFabric</td>
                                                 <td>@log.QtyRejectSewing</td>
+                                                <td>@log.QtyRejectRework</td>
+                                                <td>@log.QtyLost</td>
                                                 <td>@(log.TargetDivisionName ?? "-")</td>
                                                 <td>
                                                     @if (log.TargetDivisionId is null)

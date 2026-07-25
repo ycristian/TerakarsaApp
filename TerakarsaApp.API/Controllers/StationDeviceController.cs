@@ -310,7 +310,7 @@ public class StationDeviceController : ControllerBase
             return BadRequest("Step tanpa bundle dicatat lewat menu Hasil Cutting.");
 
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0)
+            || request.QtyRejectSewing < 0 || request.QtyRejectRework < 0 || request.QtyLost < 0)
             return BadRequest("Qty tidak boleh negatif.");
 
         var (success, error) = await _workflowLogService.CreateAsync(new WorkflowLogCreateInput
@@ -323,11 +323,42 @@ public class StationDeviceController : ControllerBase
             QtyRejectPrint = request.QtyRejectPrint,
             QtyRejectFabric = request.QtyRejectFabric,
             QtyRejectSewing = request.QtyRejectSewing,
+            QtyRejectRework = request.QtyRejectRework,
+            QtyLost = request.QtyLost,
             Remark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId,
             ConfirmExceed = request.ConfirmExceed,
             ConfirmShort = request.ConfirmShort,
             ActingAllowResourceChange = CurrentStation.AllowResourceChange
+        }, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 28: panel Penyesuaian di /b/{serial} -- mutasi qty reject/hilang -> reject/hilang
+    // lain ATAU Qty OK (BundleScanCard). Hanya divisi pemilik step (ActingDivisionId dari
+    // token) yang boleh menyesuaikan -- ditegakkan ulang di SIS_WorkflowLog_Manage.
+    [HttpPost("adjust")]
+    public async Task<IActionResult> Adjust([FromBody] StationAdjustRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _workflowLogService.AdjustAsync(new WorkflowLogAdjustInput
+        {
+            ArticleWorkflowId = request.ArticleWorkflowId,
+            BundleId = request.BundleId,
+            ResourceId = resourceId,
+            QtyOk = request.QtyOk,
+            QtyRejectPrint = request.QtyRejectPrint,
+            QtyRejectFabric = request.QtyRejectFabric,
+            QtyRejectSewing = request.QtyRejectSewing,
+            QtyRejectRework = request.QtyRejectRework,
+            QtyLost = request.QtyLost,
+            TargetDivisionId = request.TargetDivisionId,
+            Remark = request.Remark,
+            ActingDivisionId = CurrentStation.DivisionId
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -354,7 +385,8 @@ public class StationDeviceController : ControllerBase
             if (entry.ArticleSizeId <= 0)
                 return BadRequest("Size wajib dipilih.");
 
-            if (entry.QtyOk < 0 || entry.QtyRejectPrint < 0 || entry.QtyRejectFabric < 0 || entry.QtyRejectSewing < 0)
+            if (entry.QtyOk < 0 || entry.QtyRejectPrint < 0 || entry.QtyRejectFabric < 0 || entry.QtyRejectSewing < 0
+                || entry.QtyRejectRework < 0 || entry.QtyLost < 0)
                 return BadRequest("Qty tidak boleh negatif.");
         }
 
@@ -368,6 +400,8 @@ public class StationDeviceController : ControllerBase
             QtyRejectPrint = entry.QtyRejectPrint,
             QtyRejectFabric = entry.QtyRejectFabric,
             QtyRejectSewing = entry.QtyRejectSewing,
+            QtyRejectRework = entry.QtyRejectRework,
+            QtyLost = entry.QtyLost,
             Remark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId,
             ConfirmExceed = false
@@ -385,7 +419,7 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> UpdateLog(int id, [FromBody] StationLogUpdateRequest request)
     {
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0)
+            || request.QtyRejectSewing < 0 || request.QtyRejectRework < 0 || request.QtyLost < 0)
             return BadRequest("Qty tidak boleh negatif.");
 
         var resourceId = EffectiveResourceId(request.ResourceId);
@@ -398,6 +432,8 @@ public class StationDeviceController : ControllerBase
             QtyRejectPrint = request.QtyRejectPrint,
             QtyRejectFabric = request.QtyRejectFabric,
             QtyRejectSewing = request.QtyRejectSewing,
+            QtyRejectRework = request.QtyRejectRework,
+            QtyLost = request.QtyLost,
             Remark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId,
             UpdatedByResourceId = resourceId > 0 ? resourceId : null,
@@ -448,7 +484,7 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> ReviseHandover(int id, [FromBody] StationReviseHandoverRequest request)
     {
         if (request.QtyOk < 0 || request.QtyRejectPrint < 0 || request.QtyRejectFabric < 0
-            || request.QtyRejectSewing < 0)
+            || request.QtyRejectSewing < 0 || request.QtyRejectRework < 0 || request.QtyLost < 0)
             return BadRequest("Qty tidak boleh negatif.");
 
         var resourceId = EffectiveResourceId(request.ResourceId);

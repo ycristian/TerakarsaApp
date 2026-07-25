@@ -151,6 +151,11 @@ public class BundleScanTimelineDto
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    // Prompt 28: "NORMAL" atau "ADJUSTMENT" -- baris ADJUSTMENT tampil dengan badge
+    // "Penyesuaian" + nilai bertanda (+/-) di timeline BundleScanCard.
+    public string LogType { get; set; } = "NORMAL";
     public string? TargetDivisionName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ReceivedAt { get; set; }
@@ -175,7 +180,34 @@ public class BundleScanActionDto
     public int? ActionQtyRejectPrint { get; set; }
     public int? ActionQtyRejectFabric { get; set; }
     public int? ActionQtyRejectSewing { get; set; }
+    public int? ActionQtyRejectRework { get; set; }
+    public int? ActionQtyLost { get; set; }
     public string? ActionRemark { get; set; }
+
+    // Prompt 28: true kalau divisi pemanggil punya minimal satu step ber-bundle bundle ini
+    // dengan saldo reject/hilang > 0 -- independen dari AllowedAction di atas, dipakai
+    // menampilkan tombol "Penyesuaian" di BundleScanCard. Detail saldo per step ada di
+    // BundleScanInfoDto.AdjustSteps.
+    public bool AllowedAdjust { get; set; }
+}
+
+// Prompt 28: saldo reject/hilang per step ber-bundle milik divisi pemanggil untuk bundle ini
+// -- dipakai prefill form Penyesuaian (pilih step kalau lebih dari satu, tampilkan saldo per
+// kategori). Lihat SIS_Bundle_ScanInfo result set 4.
+public class BundleAdjustStepSaldoDto
+{
+    public int ArticleWorkflowId { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public int SaldoRejectPrint { get; set; }
+    public int SaldoRejectFabric { get; set; }
+    public int SaldoRejectSewing { get; set; }
+    public int SaldoRejectRework { get; set; }
+    public int SaldoLost { get; set; }
+    // Divisi step ber-bundle berikutnya (terkunci, sama seperti alur COMPLETE) -- NULL kalau
+    // step ini step ber-bundle terakhir artikel. Hanya relevan kalau Qty OK diisi > 0.
+    public int? NextDivisionId { get; set; }
+    public string? NextDivisionName { get; set; }
 }
 
 public class BundleScanInfoDto
@@ -183,6 +215,7 @@ public class BundleScanInfoDto
     public BundleScanBundleDto Bundle { get; set; } = new();
     public List<BundleScanTimelineDto> Timeline { get; set; } = new();
     public BundleScanActionDto Action { get; set; } = new();
+    public List<BundleAdjustStepSaldoDto> AdjustSteps { get; set; } = new();
 }
 
 public class ArticleWipStepDto

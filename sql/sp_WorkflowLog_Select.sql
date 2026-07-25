@@ -28,6 +28,7 @@ BEGIN
            awl.resource_id AS ResourceId, r.resource_name AS ResourceName,
            awl.qty_ok AS QtyOk, awl.qty_reject_print AS QtyRejectPrint,
            awl.qty_reject_fabric AS QtyRejectFabric, awl.qty_reject_sewing AS QtyRejectSewing,
+           awl.qty_reject_rework AS QtyRejectRework, awl.qty_lost AS QtyLost, awl.log_type AS LogType,
            awl.remark AS Remark,
            awl.target_division_id AS TargetDivisionId, td.division_name AS TargetDivisionName,
            awl.received_at AS ReceivedAt, rr.resource_name AS ReceivedByResourceName,
@@ -89,7 +90,7 @@ BEGIN
     SET @QtyMasuk = ISNULL(@QtyMasuk, 0);
 
     DECLARE @QtySudah INT;
-    SELECT @QtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing), 0)
+    SELECT @QtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
     FROM article_workflow_logs
     WHERE article_workflow_id = @ArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
 

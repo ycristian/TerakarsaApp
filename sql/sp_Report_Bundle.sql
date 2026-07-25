@@ -140,7 +140,7 @@ BEGIN
          WHERE l.article_workflow_id = aw.article_workflow_id AND l.received_at IS NOT NULL AND l.deleted_at IS NULL) AS BundleDiterima,
         (SELECT ISNULL(SUM(l.qty_ok), 0) FROM article_workflow_logs l
          WHERE l.article_workflow_id = aw.article_workflow_id AND l.deleted_at IS NULL) AS QtyOk,
-        (SELECT ISNULL(SUM(l.qty_reject_print + l.qty_reject_fabric + l.qty_reject_sewing), 0)
+        (SELECT ISNULL(SUM(l.qty_reject_print + l.qty_reject_fabric + l.qty_reject_sewing + l.qty_reject_rework + l.qty_lost), 0)
          FROM article_workflow_logs l
          WHERE l.article_workflow_id = aw.article_workflow_id AND l.deleted_at IS NULL) AS QtyReject
     FROM article_workflows aw
@@ -160,7 +160,7 @@ BEGIN
          WHERE asz.article_id = a.article_id AND asz.deleted_at IS NULL) AS QtyTarget,
         (SELECT ISNULL(SUM(l.qty_ok), 0) FROM article_workflow_logs l
          WHERE l.article_workflow_id = aw.article_workflow_id AND l.deleted_at IS NULL) AS QtyOk,
-        (SELECT ISNULL(SUM(l.qty_reject_print + l.qty_reject_fabric + l.qty_reject_sewing), 0)
+        (SELECT ISNULL(SUM(l.qty_reject_print + l.qty_reject_fabric + l.qty_reject_sewing + l.qty_reject_rework + l.qty_lost), 0)
          FROM article_workflow_logs l
          WHERE l.article_workflow_id = aw.article_workflow_id AND l.deleted_at IS NULL) AS QtyReject
     FROM article_workflows aw
@@ -290,7 +290,7 @@ BEGIN
         d.division_name AS DivisionName,
         td.division_name AS TargetDivisionName,
         awl.qty_ok AS QtyOk,
-        (awl.qty_reject_print + awl.qty_reject_fabric + awl.qty_reject_sewing) AS QtyReject,
+        (awl.qty_reject_print + awl.qty_reject_fabric + awl.qty_reject_sewing + awl.qty_reject_rework + awl.qty_lost) AS QtyReject,
         awl.remark AS Remark,
         r.resource_name AS PelaksanaName,
         awl.created_at AS CreatedAt,
@@ -328,7 +328,7 @@ BEGIN
     ;WITH StepAgg AS (
         SELECT article_workflow_id, bundle_id,
                SUM(qty_ok) AS QtyOk,
-               SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing) AS QtyKeluar
+               SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost) AS QtyKeluar
         FROM article_workflow_logs
         WHERE deleted_at IS NULL
         GROUP BY article_workflow_id, bundle_id

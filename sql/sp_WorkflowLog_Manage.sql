@@ -103,6 +103,30 @@
 -- Prompt 18 -- penguncian project: CREATE/UPDATE/RECEIVE/UNRECEIVE ditolak kalau project
 -- artikel bersangkutan berstatus manual (ON_HOLD/COMPLETED/CANCELLED) -- pesan RAISERROR
 -- menyertakan alasan bila ada. DELETE TIDAK dikunci (koreksi data oleh admin tetap boleh).
+--
+-- Prompt 28 -- @QtyRejectRework/@QtyLost: dua kategori qty baru, diperlakukan identik dengan
+-- qty_reject_* yang sudah ada di CREATE/UPDATE/REVISE_HANDOVER (validasi non-negatif, ikut
+-- SUM @QtySudah kuota). DELETE tidak berubah (soft delete generik, berlaku sama utk baris
+-- NORMAL maupun ADJUSTMENT).
+--
+-- Prompt 28 -- @Action = 'ADJUST': penyesuaian qty ber-bundle (hanya step requires_bundle = 1
+-- hidup) -- memindah qty yang SUDAH tercatat sebagai reject/hilang ke kategori reject/hilang
+-- lain ATAU ke Qty OK (barang diperbaiki/ditemukan). Qty OK TIDAK PERNAH boleh dikurangi lewat
+-- aksi ini. Dicatat sebagai baris BARU log_type = 'ADJUSTMENT' (riwayat baris lama terjaga),
+-- bukan UPDATE baris lama. Jumlah keenam nilai (@QtyOk + 5 kategori reject/lost, boleh negatif
+-- utk kategori yg dikurangi) WAJIB 0 -- murni mutasi antar kategori, tidak menambah/mengurangi
+-- total step. Karena totalnya selalu 0, baris ADJUSTMENT otomatis netral terhadap kuota
+-- step-nya sendiri (@QtySudah di CREATE/UPDATE tidak perlu filter log_type). @QtyOk pada baris
+-- ADJUSTMENT tetap ikut terhitung ke @QtyMasuk step BERIKUTNYA (SUM qty_ok apa adanya, tanpa
+-- filter log_type) -- barang hasil perbaikan mengalir maju seperti hasil normal.
+-- Saldo per kategori reject/lost = SUM kolom itu atas semua baris hidup (step, bundle) ini
+-- (NORMAL + ADJUSTMENT sebelumnya) -- tidak boleh negatif setelah penyesuaian. @QtyOk > 0
+-- mewajibkan @TargetDivisionId (divisi step ber-bundle berikutnya, dikunci sama seperti
+-- COMPLETE) KECUALI step ini step ber-bundle terakhir; @QtyOk = 0 -> target_division_id NULL
+-- (baris ini tidak pernah "diserahkan", tidak butuh diterima -- lihat catatan qty_ok = 0 di
+-- SIS_Station_PendingReceives/PendingHandover & SIS_Bundle_ScanInfo).
+-- @ActingDivisionId (dari token stasiun) WAJIB = divisi step (divisi pemilik step tempat
+-- reject/hilang tercatat) -- hanya divisi itu yang boleh menyesuaikan.
 
 SET ANSI_NULLS ON;
 GO
@@ -120,6 +144,8 @@ CREATE OR ALTER PROCEDURE SIS_WorkflowLog_Manage
     @QtyRejectPrint      INT = 0,
     @QtyRejectFabric     INT = 0,
     @QtyRejectSewing     INT = 0,
+    @QtyRejectRework     INT = 0,
+    @QtyLost             INT = 0,
     @Remark              VARCHAR(500) = NULL,
     @UserId              INT = NULL,
     @DeleteReason        VARCHAR(255) = NULL,
@@ -130,7 +156,8 @@ CREATE OR ALTER PROCEDURE SIS_WorkflowLog_Manage
     @ConfirmExceed       BIT = 0,
     @ConfirmShort        BIT = 0,
     @NewTargetDivisionId INT = NULL,
-    @ActingAllowResourceChange BIT = NULL
+    @ActingAllowResourceChange BIT = NULL,
+    @TargetDivisionId    INT = NULL     -- Prompt 28: hanya dipakai @Action = 'ADJUST'
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -184,6 +211,7 @@ BEGIN
         END
 
         IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;
@@ -300,11 +328,11 @@ BEGIN
             SET @QtyMasuk = ISNULL(@QtyMasuk, 0);
 
             DECLARE @QtySudah INT;
-            SELECT @QtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing), 0)
+            SELECT @QtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
             FROM article_workflow_logs
             WHERE article_workflow_id = @ArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
 
-            IF @ConfirmExceed = 0 AND (@QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing) > @QtyMasuk
+            IF @ConfirmExceed = 0 AND (@QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost) > @QtyMasuk
             BEGIN
                 RAISERROR('QTY_EXCEED|Total melebihi qty masuk step ini (masuk %d, sudah tercatat %d).', 16, 1, @QtyMasuk, @QtySudah);
                 RETURN;
@@ -312,9 +340,9 @@ BEGIN
 
             -- Prompt 14b: kurang dari batas boleh (baris susulan menyusul), tapi lewat
             -- konfirmasi sadar juga -- simetris dengan exceed di atas.
-            IF @ConfirmShort = 0 AND (@QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing) < @QtyMasuk
+            IF @ConfirmShort = 0 AND (@QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost) < @QtyMasuk
             BEGIN
-                DECLARE @NewTotalCreate INT = @QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing;
+                DECLARE @NewTotalCreate INT = @QtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost;
                 RAISERROR('QTY_SHORT|Total baru %d dari %d - serahan tidak lengkap. Sisa bisa dicatat sebagai baris susulan.', 16, 1, @NewTotalCreate, @QtyMasuk);
                 RETURN;
             END
@@ -322,12 +350,12 @@ BEGIN
 
         INSERT INTO article_workflow_logs (
             article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
-            qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing,
+            qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
             remark, target_division_id, created_at, created_by
         )
         VALUES (
             @ArticleWorkflowId, @BundleId, @ArticleSizeId, @DivisionId, @ResourceId, NULL,
-            @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing,
+            @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
             @Remark, @ComputedTargetDivisionId, SYSDATETIME(), @UserId
         );
 
@@ -407,6 +435,7 @@ BEGIN
         END
 
         IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;
@@ -463,20 +492,20 @@ BEGIN
             SET @UpdQtyMasuk = ISNULL(@UpdQtyMasuk, 0);
 
             DECLARE @UpdQtySudah INT;
-            SELECT @UpdQtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing), 0)
+            SELECT @UpdQtySudah = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
             FROM article_workflow_logs
             WHERE article_workflow_id = @UpdArticleWorkflowId AND bundle_id = @UpdBundleId
               AND deleted_at IS NULL AND workflow_log_id <> @Id;
 
-            IF @ConfirmExceed = 0 AND (@UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing) > @UpdQtyMasuk
+            IF @ConfirmExceed = 0 AND (@UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost) > @UpdQtyMasuk
             BEGIN
                 RAISERROR('QTY_EXCEED|Total melebihi qty masuk step ini (masuk %d, sudah tercatat %d).', 16, 1, @UpdQtyMasuk, @UpdQtySudah);
                 RETURN;
             END
 
-            IF @ConfirmShort = 0 AND (@UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing) < @UpdQtyMasuk
+            IF @ConfirmShort = 0 AND (@UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost) < @UpdQtyMasuk
             BEGIN
-                DECLARE @NewTotalUpdate INT = @UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing;
+                DECLARE @NewTotalUpdate INT = @UpdQtySudah + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost;
                 RAISERROR('QTY_SHORT|Total baru %d dari %d - serahan tidak lengkap. Sisa bisa dicatat sebagai baris susulan.', 16, 1, @NewTotalUpdate, @UpdQtyMasuk);
                 RETURN;
             END
@@ -487,6 +516,8 @@ BEGIN
             qty_reject_print = @QtyRejectPrint,
             qty_reject_fabric = @QtyRejectFabric,
             qty_reject_sewing = @QtyRejectSewing,
+            qty_reject_rework = @QtyRejectRework,
+            qty_lost = @QtyLost,
             remark = @Remark,
             article_size_id = @ArticleSizeId,
             updated_at = SYSDATETIME(),
@@ -709,6 +740,7 @@ BEGIN
         END
 
         IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;
@@ -750,6 +782,8 @@ BEGIN
             qty_reject_print = @QtyRejectPrint,
             qty_reject_fabric = @QtyRejectFabric,
             qty_reject_sewing = @QtyRejectSewing,
+            qty_reject_rework = @QtyRejectRework,
+            qty_lost = @QtyLost,
             remark = @Remark,
             target_division_id = @NewTargetDivisionId,
             resource_id = ISNULL(@ResourceId, resource_id),
@@ -757,6 +791,165 @@ BEGIN
             updated_by = @UserId,
             updated_by_resource_id = @UpdatedByResourceId
         WHERE workflow_log_id = @Id;
+    END
+
+    ELSE IF @Action = 'ADJUST'
+    BEGIN
+        DECLARE @AdjDivisionId INT, @AdjRequiresBundle BIT, @AdjArticleId INT, @AdjSortOrder INT, @AdjIsBundling BIT;
+
+        SELECT @AdjDivisionId = division_id, @AdjRequiresBundle = requires_bundle,
+               @AdjArticleId = article_id, @AdjSortOrder = sort_order, @AdjIsBundling = is_bundling
+        FROM article_workflows
+        WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL;
+
+        IF @AdjDivisionId IS NULL
+        BEGIN
+            RAISERROR('Step workflow tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @AdjRequiresBundle = 0 OR @AdjIsBundling = 1
+        BEGIN
+            RAISERROR('Penyesuaian hanya berlaku untuk step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
+        IF @BundleId IS NULL OR NOT EXISTS (
+            SELECT 1 FROM bundles WHERE bundle_id = @BundleId AND article_id = @AdjArticleId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Bundle tidak sesuai dengan artikel step ini.', 16, 1);
+            RETURN;
+        END
+
+        IF @ResourceId IS NULL OR NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @ResourceId AND division_id = @AdjDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Pelaksana penyesuaian tidak valid untuk divisi ini.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 18: project terkunci (manual_status) menolak penyesuaian juga.
+        DECLARE @LockStatus_Adjust VARCHAR(20), @LockReason_Adjust VARCHAR(255);
+        SELECT @LockStatus_Adjust = p.manual_status, @LockReason_Adjust = p.status_reason
+        FROM projects p
+        INNER JOIN articles a ON a.project_id = p.project_id
+        WHERE a.article_id = @AdjArticleId;
+
+        IF @LockStatus_Adjust IS NOT NULL
+        BEGIN
+            DECLARE @LockLabel_Adjust VARCHAR(30) = CASE @LockStatus_Adjust
+                WHEN 'ON_HOLD' THEN 'sedang ditahan'
+                WHEN 'COMPLETED' THEN 'sudah ditandai selesai'
+                WHEN 'CANCELLED' THEN 'sudah dibatalkan'
+                ELSE @LockStatus_Adjust END;
+            DECLARE @LockSuffix_Adjust VARCHAR(300) = CASE WHEN @LockReason_Adjust IS NOT NULL AND LTRIM(RTRIM(@LockReason_Adjust)) <> ''
+                THEN ' (Alasan: ' + @LockReason_Adjust + ')' ELSE '' END;
+            RAISERROR('Project %s%s. Hubungi supervisor untuk melanjutkan.', 16, 1, @LockLabel_Adjust, @LockSuffix_Adjust);
+            RETURN;
+        END
+
+        IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @AdjDivisionId
+        BEGIN
+            RAISERROR('Penyesuaian hanya boleh dilakukan divisi pemilik step ini.', 16, 1);
+            RETURN;
+        END
+
+        IF @QtyOk < 0
+        BEGIN
+            RAISERROR('Qty OK tidak boleh dikurangi lewat penyesuaian.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @AdjTotal INT = @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost;
+        IF @AdjTotal <> 0
+        BEGIN
+            RAISERROR('Total penyesuaian harus 0.', 16, 1);
+            RETURN;
+        END
+
+        IF @QtyOk = 0 AND @QtyRejectPrint = 0 AND @QtyRejectFabric = 0 AND @QtyRejectSewing = 0
+           AND @QtyRejectRework = 0 AND @QtyLost = 0
+        BEGIN
+            RAISERROR('Minimal satu nilai penyesuaian harus diisi.', 16, 1);
+            RETURN;
+        END
+
+        -- Saldo per kategori reject/lost = SUM kolom itu atas semua baris hidup (step, bundle)
+        -- ini -- tidak boleh negatif setelah penyesuaian.
+        DECLARE @SaldoRejectPrint INT, @SaldoRejectFabric INT, @SaldoRejectSewing INT,
+                @SaldoRejectRework INT, @SaldoLost INT;
+        SELECT @SaldoRejectPrint = ISNULL(SUM(qty_reject_print), 0),
+               @SaldoRejectFabric = ISNULL(SUM(qty_reject_fabric), 0),
+               @SaldoRejectSewing = ISNULL(SUM(qty_reject_sewing), 0),
+               @SaldoRejectRework = ISNULL(SUM(qty_reject_rework), 0),
+               @SaldoLost = ISNULL(SUM(qty_lost), 0)
+        FROM article_workflow_logs
+        WHERE article_workflow_id = @ArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
+
+        -- RAISERROR TIDAK menerima ekspresi (mis. -@QtyRejectPrint) sebagai argumen --
+        -- harus variabel/literal polos, jadi nilai negasi ditampung dulu ke variabel lokal.
+        DECLARE @NegQtyRejectPrint INT = -@QtyRejectPrint, @NegQtyRejectFabric INT = -@QtyRejectFabric,
+                @NegQtyRejectSewing INT = -@QtyRejectSewing, @NegQtyRejectRework INT = -@QtyRejectRework,
+                @NegQtyLost INT = -@QtyLost;
+
+        IF @SaldoRejectPrint + @QtyRejectPrint < 0
+        BEGIN
+            RAISERROR('Saldo Reject Print hanya %d, tidak bisa dikurangi %d.', 16, 1, @SaldoRejectPrint, @NegQtyRejectPrint);
+            RETURN;
+        END
+        IF @SaldoRejectFabric + @QtyRejectFabric < 0
+        BEGIN
+            RAISERROR('Saldo Reject Bahan hanya %d, tidak bisa dikurangi %d.', 16, 1, @SaldoRejectFabric, @NegQtyRejectFabric);
+            RETURN;
+        END
+        IF @SaldoRejectSewing + @QtyRejectSewing < 0
+        BEGIN
+            RAISERROR('Saldo Reject Jahit hanya %d, tidak bisa dikurangi %d.', 16, 1, @SaldoRejectSewing, @NegQtyRejectSewing);
+            RETURN;
+        END
+        IF @SaldoRejectRework + @QtyRejectRework < 0
+        BEGIN
+            RAISERROR('Saldo Reject Rework hanya %d, tidak bisa dikurangi %d.', 16, 1, @SaldoRejectRework, @NegQtyRejectRework);
+            RETURN;
+        END
+        IF @SaldoLost + @QtyLost < 0
+        BEGIN
+            RAISERROR('Saldo Hilang hanya %d, tidak bisa dikurangi %d.', 16, 1, @SaldoLost, @NegQtyLost);
+            RETURN;
+        END
+
+        -- Divisi tujuan terkunci sesuai urutan workflow (sama seperti @ComputedTargetDivisionId
+        -- di CREATE) -- @TargetDivisionId dari pemanggil sekadar wajib diisi (bukti UI sudah
+        -- menampilkannya), nilai final tetap dihitung ulang di sini, bukan dipercaya mentah.
+        DECLARE @AdjTargetDivisionId INT = NULL;
+        IF @QtyOk > 0
+        BEGIN
+            SELECT TOP 1 @AdjTargetDivisionId = division_id
+            FROM article_workflows
+            WHERE article_id = @AdjArticleId AND deleted_at IS NULL AND sort_order > @AdjSortOrder
+            ORDER BY sort_order ASC;
+
+            IF @AdjTargetDivisionId IS NOT NULL AND @TargetDivisionId IS NULL
+            BEGIN
+                RAISERROR('Divisi tujuan wajib diisi kalau Qty OK bertambah.', 16, 1);
+                RETURN;
+            END
+        END
+
+        INSERT INTO article_workflow_logs (
+            article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
+            qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
+            remark, target_division_id, log_type, created_at, created_by
+        )
+        VALUES (
+            @ArticleWorkflowId, @BundleId, NULL, @AdjDivisionId, @ResourceId, NULL,
+            @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
+            @Remark, @AdjTargetDivisionId, 'ADJUSTMENT', SYSDATETIME(), @UserId
+        );
+
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
     END
 
     ELSE IF @Action = 'DELETE'

@@ -95,6 +95,7 @@ else
                                     <th>MD</th>
                                     <th>PIC</th>
                                     <th>Catatan</th>
+                                    <th>%</th>
                                     <th>Status</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -128,6 +129,7 @@ else
                                         <td>@(p.ProjectMdName ?? "-")</td>
                                         <td>@(p.ProjectPicName ?? "-")</td>
                                         <td>@(p.Remarks ?? "-")</td>
+                                        <td>@p.ProgressPercent.ToString("0.#")%</td>
                                         <td>
                                             <span class="badge @StatusBadgeClass(p.DerivedStatus)" title="@(p.DerivedStatus == "ON_HOLD" ? p.StatusReason : null)">@StatusLabel(p.DerivedStatus)</span>
                                             @if (p.DerivedStatus == "ON_HOLD" && !string.IsNullOrWhiteSpace(p.StatusReason))

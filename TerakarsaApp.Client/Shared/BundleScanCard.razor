@@ -59,31 +59,43 @@
                     <div class="d-flex justify-content-between">
                         <span>
                             <strong>@t.SortOrder - @t.StepName</strong>
+                            @if (t.LogType == "ADJUSTMENT")
+                            {
+                                <span class="badge bg-warning text-dark ms-1">Penyesuaian</span>
+                            }
                         </span>
                         <span class="text-muted">@t.CreatedAt.ToString("dd/MM HH:mm")</span>
                     </div>
-                    @if (t.QtyOk > 0 || t.QtyRejectPrint > 0 || t.QtyRejectFabric > 0 || t.QtyRejectSewing > 0 || !string.IsNullOrEmpty(t.TargetDivisionName) || !string.IsNullOrEmpty(t.ResourceName))
+                    @if (t.QtyOk > 0 || t.QtyRejectPrint != 0 || t.QtyRejectFabric != 0 || t.QtyRejectSewing != 0 || t.QtyRejectRework != 0 || t.QtyLost != 0 || !string.IsNullOrEmpty(t.TargetDivisionName) || !string.IsNullOrEmpty(t.ResourceName))
                     {
                         <div class="text-muted small">
                             @if (!string.IsNullOrEmpty(t.ResourceName))
                             {
                                 <div>Pelaksana: @(!string.IsNullOrEmpty(t.DivisionName) ? $"{t.DivisionName} - " : "")@t.ResourceName</div>
                             }
-                            @if (t.QtyOk > 0)
+                            @if (t.QtyOk != 0)
                             {
-                                <div>Qty OK: @t.QtyOk</div>
+                                <div>Qty OK: @FormatSigned(t.QtyOk, t.LogType)</div>
                             }
-                            @if (t.QtyRejectPrint > 0)
+                            @if (t.QtyRejectPrint != 0)
                             {
-                                <div class="text-danger">Reject Print: @t.QtyRejectPrint</div>
+                                <div class="text-danger">Reject Print: @FormatSigned(t.QtyRejectPrint, t.LogType)</div>
                             }
-                            @if (t.QtyRejectFabric > 0)
+                            @if (t.QtyRejectFabric != 0)
                             {
-                                <div class="text-danger">Reject Bahan: @t.QtyRejectFabric</div>
+                                <div class="text-danger">Reject Bahan: @FormatSigned(t.QtyRejectFabric, t.LogType)</div>
                             }
-                            @if (t.QtyRejectSewing > 0)
+                            @if (t.QtyRejectSewing != 0)
                             {
-                                <div class="text-danger">Reject Jahit: @t.QtyRejectSewing</div>
+                                <div class="text-danger">Reject Jahit: @FormatSigned(t.QtyRejectSewing, t.LogType)</div>
+                            }
+                            @if (t.QtyRejectRework != 0)
+                            {
+                                <div class="text-danger">Reject Rework: @FormatSigned(t.QtyRejectRework, t.LogType)</div>
+                            }
+                            @if (t.QtyLost != 0)
+                            {
+                                <div class="text-danger">Hilang: @FormatSigned(t.QtyLost, t.LogType)</div>
                             }
                             @if (!string.IsNullOrEmpty(t.TargetDivisionName))
                             {
@@ -170,9 +182,110 @@
             {
                 <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
             }
+
+            @if (Info.Action.AllowedAdjust)
+            {
+                <button class="btn btn-outline-warning btn-sm w-100 mt-2" disabled="@Busy" @onclick="OpenAdjustModal">
+                    <i class="fe fe-edit-3"></i> Penyesuaian
+                </button>
+            }
         }
     </div>
 </div>
+
+@if (showAdjustModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Penyesuaian</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAdjustModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
+
+                    @if (Info.AdjustSteps.Count > 1)
+                    {
+                        <label class="form-label">Step</label>
+                        <select class="form-select mb-2" @bind="adjustSelectedStepId" @bind:after="OnAdjustStepChanged">
+                            @foreach (var s in Info.AdjustSteps)
+                            {
+                                <option value="@s.ArticleWorkflowId">@s.SortOrder - @s.StepName</option>
+                            }
+                        </select>
+                    }
+
+                    @if (adjustStep is not null)
+                    {
+                        <div class="row g-2 mb-1 small text-muted">
+                            <div class="col-6">Kategori</div>
+                            <div class="col-3">Saldo</div>
+                            <div class="col-3">Mutasi</div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-1">
+                            <div class="col-6">Reject Print</div>
+                            <div class="col-3">@adjustStep.SaldoRejectPrint</div>
+                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectPrint" /></div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-1">
+                            <div class="col-6">Reject Bahan</div>
+                            <div class="col-3">@adjustStep.SaldoRejectFabric</div>
+                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectFabric" /></div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-1">
+                            <div class="col-6">Reject Jahit</div>
+                            <div class="col-3">@adjustStep.SaldoRejectSewing</div>
+                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectSewing" /></div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-1">
+                            <div class="col-6">Reject Rework</div>
+                            <div class="col-3">@adjustStep.SaldoRejectRework</div>
+                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectRework" /></div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-1">
+                            <div class="col-6">Hilang</div>
+                            <div class="col-3">@adjustStep.SaldoLost</div>
+                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyLost" /></div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-2">
+                            <div class="col-6">Qty OK</div>
+                            <div class="col-3">-</div>
+                            <div class="col-3"><input type="number" min="0" class="form-control form-control-sm" @bind="adjustQtyOk" /></div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-2 p-2 rounded @(AdjustTotal == 0 ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger")">
+                            <span>Total Mutasi</span>
+                            <strong>@AdjustTotal</strong>
+                        </div>
+
+                        @if (adjustQtyOk > 0)
+                        {
+                            <div class="mb-2">
+                                <label class="form-label">Divisi Tujuan</label>
+                                <div class="form-control form-control-sm bg-light">
+                                    @(adjustStep.NextDivisionId is not null ? adjustStep.NextDivisionName : "Step terakhir — tidak ada serah lanjutan")
+                                </div>
+                            </div>
+                        }
+
+                        <label class="form-label">Catatan (opsional)</label>
+                        <textarea class="form-control" rows="2" @bind="adjustRemark"></textarea>
+                    }
+
+                    @if (!string.IsNullOrEmpty(adjustError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@adjustError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseAdjustModal">Batal</button>
+                    <button class="btn btn-warning" disabled="@(Busy || adjustStep is null || AdjustTotal != 0)" @onclick="SubmitAdjust">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @if (showEditModal)
 {
@@ -205,6 +318,14 @@
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectRework" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hilang</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyLost" />
                         </div>
                     </div>
 
@@ -326,6 +447,14 @@
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectSewing" />
                         </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectRework" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hilang</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyLost" />
+                        </div>
                     </div>
 
                     @if (completeQuotaInfo is not null)
@@ -385,6 +514,8 @@
     [Parameter] public EventCallback<string?> OnReceive { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnComplete { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnEdit { get; set; }
+    // Prompt 28: panel Penyesuaian -- lihat OpenAdjustModal/SubmitAdjust di bawah.
+    [Parameter] public EventCallback<BundleAdjustFormValues> OnAdjust { get; set; }
     // Prompt 24: Cetak Ulang -- hanya masuk akal saat ada token stasiun (endpoint reprint
     // butuh header X-Station-Token); halaman publik /b/{serial} tanpa token mengirim false.
     [Parameter] public bool AllowReprint { get; set; }
@@ -411,10 +542,17 @@
 
     private BundleScanTimelineDto? PendingReceive => Info.Timeline.LastOrDefault(t => t.ReceivedAt is null);
 
+    // Prompt 28: baris ADJUSTMENT boleh bernilai negatif (mutasi) -- tampilkan tanda +/- di
+    // timeline supaya jelas arah mutasinya; baris NORMAL tetap tampil polos (selalu >= 0).
+    private static string FormatSigned(int value, string logType) =>
+        logType == "ADJUSTMENT" && value > 0 ? $"+{value}" : value.ToString();
+
     private int completeQtyOk;
     private int completeQtyRejectPrint;
     private int completeQtyRejectFabric;
     private int completeQtyRejectSewing;
+    private int completeQtyRejectRework;
+    private int completeQtyLost;
     private string completeRemark = string.Empty;
     private string completeRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? completeQuotaInfo;
@@ -445,6 +583,8 @@
         completeQtyRejectPrint = 0;
         completeQtyRejectFabric = 0;
         completeQtyRejectSewing = 0;
+        completeQtyRejectRework = 0;
+        completeQtyLost = 0;
     }
 
     private Task SubmitComplete() => DoSubmitComplete(false, false);
@@ -453,7 +593,7 @@
 
     private async Task DoSubmitComplete(bool confirmExceed, bool confirmShort)
     {
-        var totalReject = completeQtyRejectPrint + completeQtyRejectFabric + completeQtyRejectSewing;
+        var totalReject = completeQtyRejectPrint + completeQtyRejectFabric + completeQtyRejectSewing + completeQtyRejectRework + completeQtyLost;
         if (totalReject > 0 && string.IsNullOrWhiteSpace(completeRemark))
         {
             completeRemarkError = "Catatan wajib diisi jika ada reject.";
@@ -467,6 +607,8 @@
             QtyRejectPrint = completeQtyRejectPrint,
             QtyRejectFabric = completeQtyRejectFabric,
             QtyRejectSewing = completeQtyRejectSewing,
+            QtyRejectRework = completeQtyRejectRework,
+            QtyLost = completeQtyLost,
             Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark,
             ConfirmExceed = confirmExceed,
             ConfirmShort = confirmShort
@@ -539,6 +681,8 @@
     private int editQtyRejectPrint;
     private int editQtyRejectFabric;
     private int editQtyRejectSewing;
+    private int editQtyRejectRework;
+    private int editQtyLost;
     private string editRemark = string.Empty;
     private string editRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? editQuotaInfo;
@@ -549,6 +693,8 @@
         editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
         editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
         editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
+        editQtyRejectRework = Info.Action.ActionQtyRejectRework ?? 0;
+        editQtyLost = Info.Action.ActionQtyLost ?? 0;
         editRemark = Info.Action.ActionRemark ?? string.Empty;
         editQuotaInfo = Info.Action.ActionArticleWorkflowId is not null
             ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
@@ -568,6 +714,8 @@
         editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
         editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
         editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
+        editQtyRejectRework = Info.Action.ActionQtyRejectRework ?? 0;
+        editQtyLost = Info.Action.ActionQtyLost ?? 0;
         editRemark = Info.Action.ActionRemark ?? string.Empty;
         editRemarkError = string.Empty;
     }
@@ -578,7 +726,7 @@
 
     private async Task DoSubmitEdit(bool confirmExceed, bool confirmShort)
     {
-        var totalReject = editQtyRejectPrint + editQtyRejectFabric + editQtyRejectSewing;
+        var totalReject = editQtyRejectPrint + editQtyRejectFabric + editQtyRejectSewing + editQtyRejectRework + editQtyLost;
         if (totalReject > 0 && string.IsNullOrWhiteSpace(editRemark))
         {
             editRemarkError = "Catatan wajib diisi jika ada reject.";
@@ -592,6 +740,8 @@
             QtyRejectPrint = editQtyRejectPrint,
             QtyRejectFabric = editQtyRejectFabric,
             QtyRejectSewing = editQtyRejectSewing,
+            QtyRejectRework = editQtyRejectRework,
+            QtyLost = editQtyLost,
             Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark,
             ConfirmExceed = confirmExceed,
             ConfirmShort = confirmShort
@@ -600,6 +750,98 @@
         if (string.IsNullOrEmpty(ActionError))
         {
             showEditModal = false;
+        }
+    }
+
+    // Prompt 28: panel Penyesuaian -- pilih step ber-bundle bersaldo, mutasi antar kategori
+    // reject/hilang atau ke Qty OK, total wajib 0 (ditegakkan lagi di SIS_WorkflowLog_Manage).
+    private bool showAdjustModal = false;
+    private int adjustSelectedStepId;
+    private int adjustQtyOk;
+    private int adjustQtyRejectPrint;
+    private int adjustQtyRejectFabric;
+    private int adjustQtyRejectSewing;
+    private int adjustQtyRejectRework;
+    private int adjustQtyLost;
+    private string adjustRemark = string.Empty;
+    private string adjustError = string.Empty;
+
+    private BundleAdjustStepSaldoDto? adjustStep =>
+        Info.AdjustSteps.FirstOrDefault(s => s.ArticleWorkflowId == adjustSelectedStepId);
+
+    private int AdjustTotal => adjustQtyOk + adjustQtyRejectPrint + adjustQtyRejectFabric
+        + adjustQtyRejectSewing + adjustQtyRejectRework + adjustQtyLost;
+
+    private void OpenAdjustModal()
+    {
+        adjustSelectedStepId = Info.AdjustSteps.FirstOrDefault()?.ArticleWorkflowId ?? 0;
+        ResetAdjustQty();
+        adjustRemark = string.Empty;
+        adjustError = string.Empty;
+        showAdjustModal = true;
+    }
+
+    private void CloseAdjustModal()
+    {
+        showAdjustModal = false;
+    }
+
+    private void OnAdjustStepChanged() => ResetAdjustQty();
+
+    private void ResetAdjustQty()
+    {
+        adjustQtyOk = 0;
+        adjustQtyRejectPrint = 0;
+        adjustQtyRejectFabric = 0;
+        adjustQtyRejectSewing = 0;
+        adjustQtyRejectRework = 0;
+        adjustQtyLost = 0;
+    }
+
+    private async Task SubmitAdjust()
+    {
+        if (adjustStep is null || AdjustTotal != 0) return;
+
+        if (adjustQtyOk == 0 && adjustQtyRejectPrint == 0 && adjustQtyRejectFabric == 0
+            && adjustQtyRejectSewing == 0 && adjustQtyRejectRework == 0 && adjustQtyLost == 0)
+        {
+            adjustError = "Isi minimal satu nilai penyesuaian.";
+            return;
+        }
+
+        // Cegah mutasi minus melebihi saldo (server menegakkan ulang, ini cuma UX).
+        if (adjustStep.SaldoRejectPrint + adjustQtyRejectPrint < 0
+            || adjustStep.SaldoRejectFabric + adjustQtyRejectFabric < 0
+            || adjustStep.SaldoRejectSewing + adjustQtyRejectSewing < 0
+            || adjustStep.SaldoRejectRework + adjustQtyRejectRework < 0
+            || adjustStep.SaldoLost + adjustQtyLost < 0)
+        {
+            adjustError = "Mutasi minus tidak boleh melebihi saldo kategori tsb.";
+            return;
+        }
+
+        adjustError = string.Empty;
+
+        await OnAdjust.InvokeAsync(new BundleAdjustFormValues
+        {
+            ArticleWorkflowId = adjustStep.ArticleWorkflowId,
+            QtyOk = adjustQtyOk,
+            QtyRejectPrint = adjustQtyRejectPrint,
+            QtyRejectFabric = adjustQtyRejectFabric,
+            QtyRejectSewing = adjustQtyRejectSewing,
+            QtyRejectRework = adjustQtyRejectRework,
+            QtyLost = adjustQtyLost,
+            TargetDivisionId = adjustQtyOk > 0 ? adjustStep.NextDivisionId : null,
+            Remark = string.IsNullOrWhiteSpace(adjustRemark) ? null : adjustRemark
+        });
+
+        if (string.IsNullOrEmpty(ActionError))
+        {
+            showAdjustModal = false;
+        }
+        else
+        {
+            adjustError = ActionError;
         }
     }
 }

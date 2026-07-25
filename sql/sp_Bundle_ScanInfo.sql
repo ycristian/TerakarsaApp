@@ -65,6 +65,7 @@ BEGIN
         DivisionName VARCHAR(255) NULL,
         ResourceName VARCHAR(255) NULL,
         QtyOk INT, QtyRejectPrint INT, QtyRejectFabric INT, QtyRejectSewing INT,
+        QtyRejectRework INT, QtyLost INT, LogType VARCHAR(15),
         TargetDivisionName VARCHAR(255) NULL,
         CreatedAt DATETIME2,
         ReceivedAt DATETIME2 NULL, ReceivedByResourceName VARCHAR(255) NULL, ReceivedRemark VARCHAR(500) NULL
@@ -76,6 +77,7 @@ BEGIN
            d.division_name,
            r.resource_name,
            awl.qty_ok, awl.qty_reject_print, awl.qty_reject_fabric, awl.qty_reject_sewing,
+           awl.qty_reject_rework, awl.qty_lost, awl.log_type,
            td.division_name,
            awl.created_at,
            awl.received_at, rr.resource_name, awl.received_remark
@@ -124,7 +126,7 @@ BEGIN
 
     -- 2. Timeline lengkap
     SELECT StepName, SortOrder, SizeName, DivisionName, ResourceName,
-           QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing,
+           QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost, LogType,
            TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark
     FROM @Timeline
     ORDER BY SortOrder ASC, CreatedAt ASC;
@@ -147,6 +149,8 @@ BEGIN
     DECLARE @ActionQtyRejectPrint INT = NULL;
     DECLARE @ActionQtyRejectFabric INT = NULL;
     DECLARE @ActionQtyRejectSewing INT = NULL;
+    DECLARE @ActionQtyRejectRework INT = NULL;
+    DECLARE @ActionQtyLost INT = NULL;
     DECLARE @ActionRemark VARCHAR(500) = NULL;
 
     DECLARE @MaxArticleSort INT = (
@@ -172,7 +176,8 @@ BEGIN
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
-          AND awl.target_division_id = @DivisionId AND awl.received_at IS NULL;
+          -- Prompt 28: baris qty_ok = 0 tidak pernah butuh diterima.
+          AND awl.target_division_id = @DivisionId AND awl.received_at IS NULL AND awl.qty_ok > 0;
 
         IF @PendingReceiveWorkflowLogId IS NOT NULL
         BEGIN
@@ -190,6 +195,7 @@ BEGIN
             SELECT TOP 1 @EditWorkflowLogId = awl.workflow_log_id, @EditStepId = aw.article_workflow_id,
                          @ActionQtyOk = awl.qty_ok, @ActionQtyRejectPrint = awl.qty_reject_print,
                          @ActionQtyRejectFabric = awl.qty_reject_fabric, @ActionQtyRejectSewing = awl.qty_reject_sewing,
+                         @ActionQtyRejectRework = awl.qty_reject_rework, @ActionQtyLost = awl.qty_lost,
                          @ActionRemark = awl.remark
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
@@ -266,6 +272,7 @@ BEGIN
 
                     SELECT @ActionQtyOk = qty_ok, @ActionQtyRejectPrint = qty_reject_print,
                            @ActionQtyRejectFabric = qty_reject_fabric, @ActionQtyRejectSewing = qty_reject_sewing,
+                           @ActionQtyRejectRework = qty_reject_rework, @ActionQtyLost = qty_lost,
                            @ActionRemark = remark
                     FROM article_workflow_logs
                     WHERE workflow_log_id = @LastLogId;
@@ -299,7 +306,7 @@ BEGIN
                          ), 0)
                     END,
                     ISNULL((
-                        SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing)
+                        SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
                         FROM article_workflow_logs
                         WHERE article_workflow_id = bs.article_workflow_id AND bundle_id = @BundleId AND deleted_at IS NULL
                     ), 0)
@@ -371,7 +378,9 @@ BEGIN
                         IF @PrevStepId IS NOT NULL AND EXISTS (
                             SELECT 1 FROM article_workflow_logs
                             WHERE article_workflow_id = @PrevStepId AND bundle_id = @BundleId AND deleted_at IS NULL
-                              AND received_at IS NOT NULL AND target_division_id = @CurDivisionId
+                              -- Prompt 28: hanya baris qty_ok > 0 yang relevan (baris qty_ok = 0
+                              -- tidak pernah benar-benar "diterima" divisi ini).
+                              AND received_at IS NOT NULL AND target_division_id = @CurDivisionId AND qty_ok > 0
                         )
                         BEGIN
                             SET @AllowedAction = 'COMPLETE';
@@ -389,11 +398,66 @@ BEGIN
         END
     END
 
+    -- Prompt 28: allowed_adjust + saldo per step ber-bundle milik @DivisionId (untuk tombol +
+    -- prefill panel Penyesuaian di BundleScanCard) -- dihitung terpisah dari @AllowedAction di
+    -- atas (independen: bisa saja AllowedAction = 'NONE'/'COMPLETE' tapi divisi ini tetap punya
+    -- saldo reject/hilang tersisa dari step yang sudah lewat).
+    DECLARE @AdjustSteps TABLE (
+        ArticleWorkflowId INT, StepName VARCHAR(255), SortOrder INT,
+        SaldoRejectPrint INT, SaldoRejectFabric INT, SaldoRejectSewing INT,
+        SaldoRejectRework INT, SaldoLost INT,
+        NextDivisionId INT NULL, NextDivisionName VARCHAR(255) NULL
+    );
+
+    IF @DivisionId IS NOT NULL
+    BEGIN
+        INSERT INTO @AdjustSteps (ArticleWorkflowId, StepName, SortOrder,
+            SaldoRejectPrint, SaldoRejectFabric, SaldoRejectSewing, SaldoRejectRework, SaldoLost)
+        SELECT aw.article_workflow_id, aw.step_name, aw.sort_order,
+               ISNULL(SUM(awl.qty_reject_print), 0), ISNULL(SUM(awl.qty_reject_fabric), 0),
+               ISNULL(SUM(awl.qty_reject_sewing), 0), ISNULL(SUM(awl.qty_reject_rework), 0),
+               ISNULL(SUM(awl.qty_lost), 0)
+        FROM article_workflows aw
+        LEFT JOIN article_workflow_logs awl ON awl.article_workflow_id = aw.article_workflow_id
+            AND awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
+        WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+          AND aw.is_bundling = 0 AND aw.division_id = @DivisionId
+        GROUP BY aw.article_workflow_id, aw.step_name, aw.sort_order
+        HAVING ISNULL(SUM(awl.qty_reject_print), 0) + ISNULL(SUM(awl.qty_reject_fabric), 0)
+             + ISNULL(SUM(awl.qty_reject_sewing), 0) + ISNULL(SUM(awl.qty_reject_rework), 0)
+             + ISNULL(SUM(awl.qty_lost), 0) > 0;
+
+        -- Divisi tujuan terkunci (step ber-bundle berikutnya) -- hanya relevan kalau nanti
+        -- Qty OK diisi > 0 (client menyembunyikannya kalau tidak), NULL kalau step ini step
+        -- ber-bundle terakhir artikel (sama seperti @NextDivisionId di @AllowedAction atas).
+        UPDATE ads
+        SET NextDivisionId = nd.division_id, NextDivisionName = nd2.division_name
+        FROM @AdjustSteps ads
+        OUTER APPLY (
+            SELECT TOP 1 division_id
+            FROM article_workflows
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > ads.SortOrder
+            ORDER BY sort_order ASC
+        ) nd
+        LEFT JOIN divisions nd2 ON nd2.division_id = nd.division_id;
+    END
+
+    DECLARE @AllowedAdjust BIT = CASE WHEN EXISTS (SELECT 1 FROM @AdjustSteps) THEN 1 ELSE 0 END;
+
     SELECT @AllowedAction AS AllowedAction, @ActionArticleWorkflowId AS ActionArticleWorkflowId,
            @ActionWorkflowLogId AS ActionWorkflowLogId, @Message AS Message, @IsLastStep AS IsLastStep,
            @NextDivisionId AS NextDivisionId, @NextDivisionName AS NextDivisionName,
            @ActionQtyOk AS ActionQtyOk, @ActionQtyRejectPrint AS ActionQtyRejectPrint,
            @ActionQtyRejectFabric AS ActionQtyRejectFabric, @ActionQtyRejectSewing AS ActionQtyRejectSewing,
-           @ActionRemark AS ActionRemark;
+           @ActionQtyRejectRework AS ActionQtyRejectRework, @ActionQtyLost AS ActionQtyLost,
+           @ActionRemark AS ActionRemark, @AllowedAdjust AS AllowedAdjust;
+
+    -- 4. Saldo per step ber-bundle milik @DivisionId yang bisa disesuaikan (kosong kalau
+    -- AllowedAdjust = 0).
+    SELECT ArticleWorkflowId, StepName, SortOrder,
+           SaldoRejectPrint, SaldoRejectFabric, SaldoRejectSewing, SaldoRejectRework, SaldoLost,
+           NextDivisionId, NextDivisionName
+    FROM @AdjustSteps
+    ORDER BY SortOrder ASC;
 END;
 GO

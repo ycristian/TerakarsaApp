@@ -89,7 +89,7 @@ public static class TsplBuilder
         // Prompt 27: kode huruf bundle per project (A-Z berputar) -- "B-27" bila project
         // ybs sudah punya bundle_letter, atau cuma nomor "27" utk project lama (NULL).
         var bundleNoText = string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}";
-        Write(Text(RightAlignX(RightEdge, "3", 1, bundleNoText), 26, "3", 1 , 1, bundleNoText));
+        Write(Text(RightAlignX(RightEdge, "2", 1, bundleNoText), 26, "2", 1 , 1, bundleNoText));
 
         Write($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");
 

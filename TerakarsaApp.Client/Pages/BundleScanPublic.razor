@@ -73,7 +73,7 @@ else
             <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
         }
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
-                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" AllowReprint="true" />
+                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true" />
     }
     else
     {
@@ -325,6 +325,8 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
+            QtyRejectRework = values.QtyRejectRework,
+            QtyLost = values.QtyLost,
             Remark = values.Remark,
             ConfirmExceed = values.ConfirmExceed,
             ConfirmShort = values.ConfirmShort
@@ -348,9 +350,38 @@ else
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,
             QtyRejectSewing = values.QtyRejectSewing,
+            QtyRejectRework = values.QtyRejectRework,
+            QtyLost = values.QtyLost,
             Remark = values.Remark,
             ConfirmExceed = values.ConfirmExceed,
             ConfirmShort = values.ConfirmShort
+        });
+
+        actionBusy = false;
+        if (!success) { actionError = error; return; }
+        await Rescan();
+    }
+
+    private async Task HandleAdjust(BundleAdjustFormValues values)
+    {
+        if (operatorId is null) return;
+
+        actionBusy = true;
+        actionError = string.Empty;
+
+        var (success, error) = await StationApi.AdjustAsync(new TerakarsaApp.Shared.WorkflowLogs.StationAdjustRequest
+        {
+            ArticleWorkflowId = values.ArticleWorkflowId,
+            BundleId = scanInfo!.Bundle.BundleId,
+            ResourceId = operatorId.Value,
+            QtyOk = values.QtyOk,
+            QtyRejectPrint = values.QtyRejectPrint,
+            QtyRejectFabric = values.QtyRejectFabric,
+            QtyRejectSewing = values.QtyRejectSewing,
+            QtyRejectRework = values.QtyRejectRework,
+            QtyLost = values.QtyLost,
+            TargetDivisionId = values.TargetDivisionId,
+            Remark = values.Remark
         });
 
         actionBusy = false;

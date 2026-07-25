@@ -25,6 +25,8 @@ public class WorkflowLogCreateInput
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     public int? ActingDivisionId { get; set; }
     // Prompt 14: konfirmasi sadar melebihi kuota qty masuk step ini (hanya berarti utk step ber-bundle).
@@ -65,6 +67,8 @@ public class WorkflowLogUpdateInput
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     public int? ActingDivisionId { get; set; }
     // Pelaksana (operator sesi aktif) saat revisi dari stasiun -- Prompt 12d.
@@ -73,6 +77,24 @@ public class WorkflowLogUpdateInput
     public bool ConfirmExceed { get; set; }
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini.
     public bool ConfirmShort { get; set; }
+}
+
+// Prompt 28: panel Penyesuaian -- mutasi qty reject/hilang -> reject/hilang lain ATAU Qty OK,
+// dicatat sebagai baris baru log_type = 'ADJUSTMENT'. Lihat sp_WorkflowLog_Manage.sql action ADJUST.
+public class WorkflowLogAdjustInput
+{
+    public int ArticleWorkflowId { get; set; }
+    public int BundleId { get; set; }
+    public int ResourceId { get; set; }
+    public int QtyOk { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    public int? TargetDivisionId { get; set; }
+    public string? Remark { get; set; }
+    public int? ActingDivisionId { get; set; }
 }
 
 public class WorkflowLogService
@@ -131,6 +153,8 @@ public class WorkflowLogService
         public int QtyRejectPrint { get; set; }
         public int QtyRejectFabric { get; set; }
         public int QtyRejectSewing { get; set; }
+        public int QtyRejectRework { get; set; }
+        public int QtyLost { get; set; }
         public string? Remark { get; set; }
         public string? TargetDivisionName { get; set; }
         public bool IsLastStep { get; set; }
@@ -220,6 +244,8 @@ public class WorkflowLogService
             QtyRejectPrint = row.QtyRejectPrint,
             QtyRejectFabric = row.QtyRejectFabric,
             QtyRejectSewing = row.QtyRejectSewing,
+            QtyRejectRework = row.QtyRejectRework,
+            QtyLost = row.QtyLost,
             Remark = row.Remark,
             TargetDivisionName = row.TargetDivisionName,
             IsLastStep = row.IsLastStep,
@@ -335,6 +361,8 @@ public class WorkflowLogService
         var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", request.QtyRejectPrint);
         var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", request.QtyRejectFabric);
         var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", request.QtyRejectSewing);
+        var qtyRejectReworkParam = new SqlParameter("@QtyRejectRework", request.QtyRejectRework);
+        var qtyLostParam = new SqlParameter("@QtyLost", request.QtyLost);
         var remarkParam = new SqlParameter("@Remark", (object?)request.Remark ?? DBNull.Value);
         var newTargetDivisionIdParam = new SqlParameter("@NewTargetDivisionId", request.NewTargetDivisionId);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.NewResourceId ?? DBNull.Value);
@@ -345,8 +373,9 @@ public class WorkflowLogService
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @NewTargetDivisionId = @NewTargetDivisionId, @ResourceId = @ResourceId, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @UpdatedByResourceId = @UpdatedByResourceId",
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @Remark = @Remark, @NewTargetDivisionId = @NewTargetDivisionId, @ResourceId = @ResourceId, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @UpdatedByResourceId = @UpdatedByResourceId",
                 actionParam, idParam, qtyOkParam, qtyRejectPrintParam, qtyRejectFabricParam, qtyRejectSewingParam,
+                qtyRejectReworkParam, qtyLostParam,
                 remarkParam, newTargetDivisionIdParam, resourceIdParam, userIdParam, actingDivisionIdParam, updatedByResourceIdParam);
             return (true, string.Empty);
         }
@@ -357,7 +386,7 @@ public class WorkflowLogService
     }
 
     private const string CreateLogSql =
-        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort, @ActingAllowResourceChange = @ActingAllowResourceChange";
+        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort, @ActingAllowResourceChange = @ActingAllowResourceChange";
 
     private static SqlParameter[] BuildCreateLogParams(WorkflowLogCreateInput input, int userId) => new[]
     {
@@ -370,6 +399,8 @@ public class WorkflowLogService
         new SqlParameter("@QtyRejectPrint", input.QtyRejectPrint),
         new SqlParameter("@QtyRejectFabric", input.QtyRejectFabric),
         new SqlParameter("@QtyRejectSewing", input.QtyRejectSewing),
+        new SqlParameter("@QtyRejectRework", input.QtyRejectRework),
+        new SqlParameter("@QtyLost", input.QtyLost),
         new SqlParameter("@Remark", (object?)input.Remark ?? DBNull.Value),
         new SqlParameter("@UserId", userId),
         new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value),
@@ -426,6 +457,8 @@ public class WorkflowLogService
         var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", input.QtyRejectPrint);
         var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", input.QtyRejectFabric);
         var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", input.QtyRejectSewing);
+        var qtyRejectReworkParam = new SqlParameter("@QtyRejectRework", input.QtyRejectRework);
+        var qtyLostParam = new SqlParameter("@QtyLost", input.QtyLost);
         var remarkParam = new SqlParameter("@Remark", (object?)input.Remark ?? DBNull.Value);
         var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
@@ -436,9 +469,10 @@ public class WorkflowLogService
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @ArticleSizeId = @ArticleSizeId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @Remark = @Remark, @ActingDivisionId = @ActingDivisionId, @UserId = @UserId, @UpdatedByResourceId = @UpdatedByResourceId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort",
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @ArticleSizeId = @ArticleSizeId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @Remark = @Remark, @ActingDivisionId = @ActingDivisionId, @UserId = @UserId, @UpdatedByResourceId = @UpdatedByResourceId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort",
                 actionParam, idParam, articleSizeIdParam, qtyOkParam, qtyRejectPrintParam,
-                qtyRejectFabricParam, qtyRejectSewingParam, remarkParam, actingDivisionIdParam,
+                qtyRejectFabricParam, qtyRejectSewingParam, qtyRejectReworkParam, qtyLostParam,
+                remarkParam, actingDivisionIdParam,
                 userIdParam, updatedByResourceIdParam, confirmExceedParam, confirmShortParam);
             return (true, string.Empty);
         }
@@ -495,6 +529,39 @@ public class WorkflowLogService
             await _db.Database.ExecuteSqlRawAsync(
                 "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @UpdatedByResourceId = @UpdatedByResourceId",
                 actionParam, idParam, userIdParam, actingDivisionIdParam, updatedByResourceIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    // Prompt 28: panel Penyesuaian -- lihat sp_WorkflowLog_Manage.sql action ADJUST.
+    public async Task<(bool Success, string Error)> AdjustAsync(WorkflowLogAdjustInput input, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "ADJUST");
+        var articleWorkflowIdParam = new SqlParameter("@ArticleWorkflowId", input.ArticleWorkflowId);
+        var bundleIdParam = new SqlParameter("@BundleId", input.BundleId);
+        var resourceIdParam = new SqlParameter("@ResourceId", input.ResourceId);
+        var qtyOkParam = new SqlParameter("@QtyOk", input.QtyOk);
+        var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", input.QtyRejectPrint);
+        var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", input.QtyRejectFabric);
+        var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", input.QtyRejectSewing);
+        var qtyRejectReworkParam = new SqlParameter("@QtyRejectRework", input.QtyRejectRework);
+        var qtyLostParam = new SqlParameter("@QtyLost", input.QtyLost);
+        var targetDivisionIdParam = new SqlParameter("@TargetDivisionId", (object?)input.TargetDivisionId ?? DBNull.Value);
+        var remarkParam = new SqlParameter("@Remark", (object?)input.Remark ?? DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
+        var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @TargetDivisionId = @TargetDivisionId, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId",
+                actionParam, articleWorkflowIdParam, bundleIdParam, resourceIdParam, qtyOkParam,
+                qtyRejectPrintParam, qtyRejectFabricParam, qtyRejectSewingParam, qtyRejectReworkParam, qtyLostParam,
+                targetDivisionIdParam, remarkParam, userIdParam, actingDivisionIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

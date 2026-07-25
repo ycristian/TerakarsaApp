@@ -1,0 +1,596 @@
+@page "/super-admin"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.SuperAdmin
+@using TerakarsaApp.Shared.WorkflowLogs
+@inject SuperAdminApiService SuperAdminApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Super Admin</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Super Admin</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Super Admin</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="alert alert-warning">
+        <strong>Koreksi Langsung.</strong> Halaman ini melewati guard normal (kuota qty, kunci penerimaan, dsb).
+        Semua perubahan tetap tercatat (updated_by / delete_reason) tapi nilainya disimpan apa adanya. Gunakan
+        dengan hati-hati.
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <h3 class="card-title">Cari Bundle</h3>
+        </div>
+        <div class="card-body">
+            <div class="d-flex gap-2 mb-3">
+                <input class="form-control" style="max-width: 400px;" placeholder="Serial / no. bundle / nama artikel / nama project..."
+                       @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+                <button class="btn btn-primary" @onclick="Search" disabled="@isSearching">Cari</button>
+            </div>
+
+            @if (isSearching)
+            {
+                <p>Mencari...</p>
+            }
+            else if (searchResults.Count == 0)
+            {
+                <p class="text-muted">Tidak ada hasil.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0">
+                        <thead>
+                            <tr>
+                                <th>No. Bundle</th>
+                                <th>Serial</th>
+                                <th>Project</th>
+                                <th>Artikel</th>
+                                <th>Style/Warna</th>
+                                <th>Ukuran</th>
+                                <th>Qty</th>
+                                <th>Jml Log</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in searchResults)
+                            {
+                                <tr class="@(selectedBundleId == r.BundleId ? "table-active" : "")">
+                                    <td>@BundleDisplay.Format(r.BundleLetter, r.BundleNo)</td>
+                                    <td>@r.Serial</td>
+                                    <td>@r.ProjectName</td>
+                                    <td>@r.ArticleName</td>
+                                    <td>@(string.Join(" / ", new[] { r.Style, r.Color }.Where(s => !string.IsNullOrWhiteSpace(s))))</td>
+                                    <td>@r.SizeName</td>
+                                    <td>@r.Qty</td>
+                                    <td>@r.LiveLogCount</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" @onclick="() => SelectBundle(r.BundleId)">Pilih</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isLoadingDetail)
+    {
+        <p>Memuat detail bundle...</p>
+    }
+    else if (detail is not null)
+    {
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="card-title">Edit Bundle -- @detail.Bundle.Serial</h3>
+                <button class="btn btn-sm btn-danger" @onclick="OpenDeleteBundleModal">Hapus Bundle</button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    @detail.Bundle.ProjectName &middot; @detail.Bundle.ArticleName
+                    @if (!string.IsNullOrWhiteSpace(detail.Bundle.Style) || !string.IsNullOrWhiteSpace(detail.Bundle.Color))
+                    {
+                        <text> &middot; @(string.Join(" / ", new[] { detail.Bundle.Style, detail.Bundle.Color }.Where(s => !string.IsNullOrWhiteSpace(s))))</text>
+                    }
+                </p>
+
+                <div class="alert alert-danger py-2">
+                    Mengubah serial membuat label QR yang sudah dicetak tidak berlaku.
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Ukuran</label>
+                        <select class="form-select" @bind="bundleForm.ArticleSizeId">
+                            @foreach (var s in detail.SizeOptions)
+                            {
+                                <option value="@s.Id">@s.SizeName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Qty</label>
+                        <input type="number" min="1" class="form-control" @bind="bundleForm.Qty" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">No. Bundle</label>
+                        <input type="number" min="1" class="form-control" @bind="bundleForm.BundleNo" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Serial</label>
+                        <input class="form-control" @bind="bundleForm.Serial" />
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(bundleError))
+                {
+                    <div class="alert alert-danger mt-3 mb-0">@bundleError</div>
+                }
+                @if (!string.IsNullOrEmpty(bundleSuccessMessage))
+                {
+                    <div class="alert alert-success mt-3 mb-0 d-flex justify-content-between align-items-center">
+                        <span>@bundleSuccessMessage</span>
+                        <button class="btn btn-sm btn-outline-success" disabled="@isReprinting" @onclick="ReprintLabel">
+                            @(isReprinting ? "Mencetak..." : "Cetak Ulang Label")
+                        </button>
+                    </div>
+                }
+
+                <button class="btn btn-primary mt-3" disabled="@isSavingBundle" @onclick="SaveBundle">
+                    @(isSavingBundle ? "Menyimpan..." : "Simpan Perubahan Bundle")
+                </button>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header">
+                <h3 class="card-title">Log Bundle</h3>
+            </div>
+            <div class="card-body">
+                @if (detail.Logs.Count == 0)
+                {
+                    <p class="text-muted">Belum ada log workflow untuk bundle ini.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Step</th>
+                                    <th>Tipe</th>
+                                    <th>OK</th>
+                                    <th>Rej. Print</th>
+                                    <th>Rej. Bahan</th>
+                                    <th>Rej. Jahit</th>
+                                    <th>Rej. Rework</th>
+                                    <th>Hilang</th>
+                                    <th>Tujuan</th>
+                                    <th>Diterima</th>
+                                    <th>Catatan</th>
+                                    <th>Dibuat</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var log in detail.Logs)
+                                {
+                                    <tr>
+                                        <td>@log.StepName</td>
+                                        <td>
+                                            @if (log.LogType == "ADJUSTMENT")
+                                            {
+                                                <span class="badge bg-warning-transparent text-warning">Penyesuaian</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">Normal</span>
+                                            }
+                                        </td>
+                                        <td>@log.QtyOk</td>
+                                        <td>@log.QtyRejectPrint</td>
+                                        <td>@log.QtyRejectFabric</td>
+                                        <td>@log.QtyRejectSewing</td>
+                                        <td>@log.QtyRejectRework</td>
+                                        <td>@log.QtyLost</td>
+                                        <td>@(log.TargetDivisionName ?? "-")</td>
+                                        <td>
+                                            @if (log.ReceivedAt is not null)
+                                            {
+                                                <span class="badge bg-success-transparent text-success">@log.ReceivedAt.Value.ToString("dd/MM/yyyy HH:mm")</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">Belum</span>
+                                            }
+                                        </td>
+                                        <td>@(log.Remark ?? "-")</td>
+                                        <td>@log.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditLogModal(log)"><i class="fe fe-edit"></i></button>
+                                            <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => OpenDeleteLogModal(log)"><i class="fe fe-trash-2"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@if (showEditLogModal && editLogTarget is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Log -- @editLogTarget.StepName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditLogModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning py-2">
+                        Tanpa validasi kuota -- angka disimpan apa adanya.
+                    </div>
+                    @if (editLogTarget.LogType == "ADJUSTMENT")
+                    {
+                        <div class="alert alert-info py-2">
+                            Baris penyesuaian: jumlah keenam qty di bawah harus tetap 0.
+                        </div>
+                    }
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label">Qty OK</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyOk" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Print</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyRejectPrint" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Bahan</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyRejectFabric" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Jahit</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyRejectSewing" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Rework</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyRejectRework" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hilang</label>
+                            <input type="number" class="form-control form-control-lg" @bind="editLogForm.QtyLost" />
+                        </div>
+                    </div>
+
+                    <label class="form-label">Catatan</label>
+                    <textarea class="form-control" rows="2" @bind="editLogForm.Remark"></textarea>
+
+                    @if (!string.IsNullOrEmpty(editLogError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@editLogError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseEditLogModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@isSavingLog" @onclick="SaveLog">
+                        @(isSavingLog ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteBundleModal" IsBusy="isDeletingBundle" OnConfirm="ConfirmDeleteBundle" OnCancel="CancelDeleteBundle">
+    <Message>
+        <p>Yakin ingin menghapus bundle "@detail?.Bundle.Serial"?</p>
+        <label class="form-label">Alasan hapus (wajib)</label>
+        <textarea class="form-control" rows="2" @bind="deleteBundleReason"></textarea>
+        @if (!string.IsNullOrEmpty(deleteBundleError))
+        {
+            <div class="text-danger mt-2">@deleteBundleError</div>
+        }
+    </Message>
+</ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="showDeleteLogModal" IsBusy="isDeletingLog" OnConfirm="ConfirmDeleteLog" OnCancel="CancelDeleteLog">
+    <Message>
+        <p>Yakin ingin menghapus log "@deleteLogTarget?.StepName" (@deleteLogTarget?.CreatedAt.ToString("dd/MM/yyyy HH:mm"))?</p>
+        @if (deleteLogTarget?.ReceivedAt is not null)
+        {
+            <div class="alert alert-warning py-2">Baris ini sudah diterima divisi tujuan.</div>
+        }
+        @if (deleteLogUsedByNextStep)
+        {
+            <div class="alert alert-warning py-2">Baris ini sudah dipakai sebagai dasar step berikutnya.</div>
+        }
+        <label class="form-label">Alasan hapus (wajib)</label>
+        <textarea class="form-control" rows="2" @bind="deleteLogReason"></textarea>
+        @if (!string.IsNullOrEmpty(deleteLogError))
+        {
+            <div class="text-danger mt-2">@deleteLogError</div>
+        }
+    </Message>
+</ConfirmDeleteModal>
+
+@code {
+    private bool? hasAccess = null;
+
+    private string searchTerm = string.Empty;
+    private bool isSearching = false;
+    private List<SuperAdminBundleSearchResultDto> searchResults = new();
+    private System.Threading.Timer? debounceTimer;
+
+    private int? selectedBundleId;
+    private bool isLoadingDetail = false;
+    private SuperAdminBundleDetailDto? detail;
+
+    private SuperAdminBundleUpdateRequest bundleForm = new();
+    private bool isSavingBundle = false;
+    private string bundleError = string.Empty;
+    private string bundleSuccessMessage = string.Empty;
+    private bool isReprinting = false;
+
+    private bool showDeleteBundleModal = false;
+    private bool isDeletingBundle = false;
+    private string deleteBundleReason = string.Empty;
+    private string deleteBundleError = string.Empty;
+
+    private bool showEditLogModal = false;
+    private WorkflowLogDto? editLogTarget;
+    private SuperAdminLogUpdateRequest editLogForm = new();
+    private bool isSavingLog = false;
+    private string editLogError = string.Empty;
+
+    private bool showDeleteLogModal = false;
+    private WorkflowLogDto? deleteLogTarget;
+    private bool deleteLogUsedByNextStep = false;
+    private bool isDeletingLog = false;
+    private string deleteLogReason = string.Empty;
+    private string deleteLogError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "SUPER_ADMIN");
+
+        if (hasAccess == true)
+            await Search();
+    }
+
+    private void HandleSearchKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await Search();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task Search()
+    {
+        isSearching = true;
+        searchResults = await SuperAdminApi.SearchBundlesAsync(searchTerm);
+        isSearching = false;
+    }
+
+    private async Task SelectBundle(int bundleId)
+    {
+        selectedBundleId = bundleId;
+        isLoadingDetail = true;
+        bundleError = string.Empty;
+        bundleSuccessMessage = string.Empty;
+        detail = await SuperAdminApi.GetBundleDetailAsync(bundleId);
+        isLoadingDetail = false;
+
+        if (detail is not null)
+        {
+            bundleForm = new SuperAdminBundleUpdateRequest
+            {
+                ArticleSizeId = detail.Bundle.ArticleSizeId,
+                Qty = detail.Bundle.Qty,
+                BundleNo = detail.Bundle.BundleNo,
+                Serial = detail.Bundle.Serial
+            };
+        }
+    }
+
+    private async Task ReloadDetail()
+    {
+        if (selectedBundleId is null) return;
+        detail = await SuperAdminApi.GetBundleDetailAsync(selectedBundleId.Value);
+        await Search();
+    }
+
+    private async Task SaveBundle()
+    {
+        if (selectedBundleId is null) return;
+
+        isSavingBundle = true;
+        bundleError = string.Empty;
+        bundleSuccessMessage = string.Empty;
+
+        var result = await SuperAdminApi.UpdateBundleAsync(selectedBundleId.Value, bundleForm);
+        isSavingBundle = false;
+
+        if (result.Success)
+        {
+            bundleSuccessMessage = "Perubahan bundle tersimpan.";
+            await ReloadDetail();
+        }
+        else
+        {
+            bundleError = result.Error;
+        }
+    }
+
+    private async Task ReprintLabel()
+    {
+        if (selectedBundleId is null) return;
+
+        isReprinting = true;
+        var result = await SuperAdminApi.ReprintBundleAsync(selectedBundleId.Value);
+        isReprinting = false;
+
+        bundleSuccessMessage = result.Success ? "Label baru masuk antrian cetak." : string.Empty;
+        if (!result.Success)
+            bundleError = result.Error;
+    }
+
+    private void OpenDeleteBundleModal()
+    {
+        deleteBundleReason = string.Empty;
+        deleteBundleError = string.Empty;
+        showDeleteBundleModal = true;
+    }
+
+    private void CancelDeleteBundle()
+    {
+        showDeleteBundleModal = false;
+    }
+
+    private async Task ConfirmDeleteBundle()
+    {
+        if (selectedBundleId is null) return;
+
+        if (string.IsNullOrWhiteSpace(deleteBundleReason))
+        {
+            deleteBundleError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
+        isDeletingBundle = true;
+        var result = await SuperAdminApi.DeleteBundleAsync(selectedBundleId.Value, deleteBundleReason);
+        isDeletingBundle = false;
+
+        if (result.Success)
+        {
+            showDeleteBundleModal = false;
+            detail = null;
+            selectedBundleId = null;
+            await Search();
+        }
+        else
+        {
+            deleteBundleError = result.Error;
+        }
+    }
+
+    private void OpenEditLogModal(WorkflowLogDto log)
+    {
+        editLogTarget = log;
+        editLogForm = new SuperAdminLogUpdateRequest
+        {
+            QtyOk = log.QtyOk,
+            QtyRejectPrint = log.QtyRejectPrint,
+            QtyRejectFabric = log.QtyRejectFabric,
+            QtyRejectSewing = log.QtyRejectSewing,
+            QtyRejectRework = log.QtyRejectRework,
+            QtyLost = log.QtyLost,
+            Remark = log.Remark
+        };
+        editLogError = string.Empty;
+        showEditLogModal = true;
+    }
+
+    private void CloseEditLogModal()
+    {
+        showEditLogModal = false;
+        editLogTarget = null;
+    }
+
+    private async Task SaveLog()
+    {
+        if (editLogTarget is null) return;
+
+        isSavingLog = true;
+        editLogError = string.Empty;
+
+        var result = await SuperAdminApi.UpdateLogAsync(editLogTarget.Id, editLogForm);
+        isSavingLog = false;
+
+        if (result.Success)
+        {
+            showEditLogModal = false;
+            editLogTarget = null;
+            await ReloadDetail();
+        }
+        else
+        {
+            editLogError = result.Error;
+        }
+    }
+
+    private void OpenDeleteLogModal(WorkflowLogDto log)
+    {
+        deleteLogTarget = log;
+        deleteLogUsedByNextStep = detail?.Logs.Any(x => x.SortOrder > log.SortOrder) ?? false;
+        deleteLogReason = string.Empty;
+        deleteLogError = string.Empty;
+        showDeleteLogModal = true;
+    }
+
+    private void CancelDeleteLog()
+    {
+        showDeleteLogModal = false;
+        deleteLogTarget = null;
+    }
+
+    private async Task ConfirmDeleteLog()
+    {
+        if (deleteLogTarget is null) return;
+
+        if (string.IsNullOrWhiteSpace(deleteLogReason))
+        {
+            deleteLogError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
+        isDeletingLog = true;
+        var result = await SuperAdminApi.DeleteLogAsync(deleteLogTarget.Id, deleteLogReason);
+        isDeletingLog = false;
+
+        if (result.Success)
+        {
+            showDeleteLogModal = false;
+            deleteLogTarget = null;
+            await ReloadDetail();
+        }
+        else
+        {
+            deleteLogError = result.Error;
+        }
+    }
+}

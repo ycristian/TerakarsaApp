@@ -66,5 +66,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicBundleApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicPackApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportBundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportWipApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportProduksiApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.SuperAdminApiService>();
 
 await builder.Build().RunAsync();

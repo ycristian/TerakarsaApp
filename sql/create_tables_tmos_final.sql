@@ -432,7 +432,8 @@ CREATE TABLE bundles(
  updated_at datetime2 null,
  updated_by int null,
  deleted_at datetime2 null,
- deleted_by int null
+ deleted_by int null,
+ delete_reason varchar(255) null    -- Prompt 29: alasan hapus lewat SIS_SuperAdmin_Manage BUNDLE_DELETE
 );
 
 -- LOG MURNI, MODEL 1-BARIS-PER-SERAH-TERIMA (Prompt 12b): tidak boleh di-update
@@ -458,6 +459,11 @@ CREATE TABLE bundles(
 -- bundle, received_at NULL sampai divisi berikutnya RECEIVE). RECEIVE/UNRECEIVE/DELETE baris
 -- ini tetap lewat jalur generik di sp_WorkflowLog_Manage; UPDATE praktis hanya lewat
 -- SIS_Bundle_Manage UPDATE (sinkron qty_ok/resource_id dengan bundle).
+-- Prompt 28: qty_reject_rework/qty_lost -- dua kategori qty tambahan, sama pola dengan
+-- qty_reject_*. log_type membedakan baris normal dari baris ADJUSTMENT (mutasi antar
+-- kategori qty pada bundle+step yang sama, lihat SIS_WorkflowLog_Manage action ADJUST) --
+-- baris ADJUSTMENT boleh berisi nilai NEGATIF pada kolom reject/lost (mutasi), qty_ok pada
+-- baris ADJUSTMENT selalu >= 0, dan jumlah keenam kolom qty baris ADJUSTMENT selalu 0.
 CREATE TABLE article_workflow_logs(
  workflow_log_id int primary key identity(1,1),
  article_workflow_id int not null
@@ -476,6 +482,9 @@ CREATE TABLE article_workflow_logs(
  qty_reject_print int not null default 0,   -- reject sablon
  qty_reject_fabric int not null default 0,  -- reject bahan
  qty_reject_sewing int not null default 0,  -- reject jahit
+ qty_reject_rework int not null default 0,  -- reject rework (Prompt 28)
+ qty_lost int not null default 0,           -- hilang (Prompt 28)
+ log_type varchar(15) not null default 'NORMAL',  -- NORMAL / ADJUSTMENT (mutasi antar kategori qty, total 0)
  remark varchar(500) null,
  received_at datetime2 null,
  received_by_resource_id int null           -- sebelumnya received_by, dipertegas ini FK ke resources

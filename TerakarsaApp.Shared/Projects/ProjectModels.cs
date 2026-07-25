@@ -26,6 +26,9 @@ public class ProjectDto
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? UpdatedBy { get; set; }
+    // Fix: % progress project, dihitung per size (surplus satu size tidak menutupi kekurangan
+    // size lain) -- lihat komentar SIS_Project_GetAll/GetById di sql/sp_Project_Select.sql.
+    public double ProgressPercent { get; set; }
 }
 
 public class ProjectCreateRequest

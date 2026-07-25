@@ -2,6 +2,15 @@
 -- INNER JOIN buyers (customer_id, wajib diisi), LEFT JOIN employees 2x (project_md/project_pic, nullable).
 -- Mutasi (create/update/delete/set_status) ada di sp_Project_Manage.sql (SIS_Project_Manage).
 --
+-- Fix: ProgressPercent -- % progress project (SIS_Project_GetAll LIST & SIS_Project_GetById),
+-- dihitung PER SIZE lalu digabung, BUKAN total bundle / total order mentah. Alasan: kalau satu
+-- size over-produced (surplus) dan size lain under-produced (kurang), rasio total bisa
+-- kelihatan 100% padahal sebenarnya belum lengkap (mis. order S10/M10, bundle S12/M8 -> total
+-- 20/20 = 100% padahal M kurang 2). Per size: CappedQty = MIN(SUM(bundles.qty size itu),
+-- article_sizes.qty order size itu) -- surplus di satu size TIDAK menutupi kekurangan size
+-- lain. ProgressPercent = SUM(CappedQty semua size) / SUM(OrderQty semua size) * 100 --
+-- otomatis tidak akan pernah > 100% karena tiap suku sudah dibatasi order-nya sendiri.
+--
 -- Prompt 18 -- derived_status: manual_status TIDAK PERNAH disimpan untuk status otomatis --
 -- diturunkan di sini setiap kali dibaca lewat CROSS APPLY (satu sumber kebenaran, tidak bisa
 -- basi). Kalau manual_status terisi (ON_HOLD/COMPLETED/CANCELLED), itulah derived_status.
@@ -86,7 +95,8 @@ BEGIN
                    p.status_reason AS StatusReason, p.status_changed_at AS StatusChangedAt,
                    su.FullName AS StatusChangedByName,
                    p.created_at AS CreatedAt, p.created_by AS CreatedBy,
-                   p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy
+                   p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy,
+                   ISNULL(prog.ProgressPercent, 0) AS ProgressPercent
             FROM projects p
             INNER JOIN buyers b ON b.buyer_id = p.customer_id
             LEFT JOIN employees md ON md.employee_id = p.project_md
@@ -103,6 +113,22 @@ BEGIN
                             WHEN p.[start_date] IS NOT NULL AND p.[start_date] <= CAST(GETDATE() AS DATE)
                             THEN ''STARTED'' ELSE ''NOT_STARTED'' END AS DerivedStatus
             ) ds
+            OUTER APPLY (
+                SELECT CASE WHEN SUM(sz.OrderQty) > 0
+                            THEN CAST(ROUND(100.0 * SUM(sz.CappedQty) / SUM(sz.OrderQty), 1) AS FLOAT)
+                            ELSE CAST(0 AS FLOAT) END AS ProgressPercent
+                FROM (
+                    SELECT asz.article_size_id, asz.qty AS OrderQty,
+                           CASE WHEN ISNULL(bq.BundleQty, 0) > asz.qty THEN asz.qty ELSE ISNULL(bq.BundleQty, 0) END AS CappedQty
+                    FROM article_sizes asz
+                    INNER JOIN articles a2 ON a2.article_id = asz.article_id AND a2.deleted_at IS NULL
+                    OUTER APPLY (
+                        SELECT SUM(bnd.qty) AS BundleQty FROM bundles bnd
+                        WHERE bnd.article_size_id = asz.article_size_id AND bnd.deleted_at IS NULL
+                    ) bq
+                    WHERE a2.project_id = p.project_id AND asz.deleted_at IS NULL
+                ) sz
+            ) prog
             WHERE p.deleted_at IS NULL
               AND (@SearchTerm IS NULL
                    OR p.project_name LIKE ''%'' + @SearchTerm + ''%''
@@ -150,12 +176,29 @@ BEGIN
            p.status_reason AS StatusReason, p.status_changed_at AS StatusChangedAt,
            su.FullName AS StatusChangedByName,
            p.created_at AS CreatedAt, p.created_by AS CreatedBy,
-           p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy
+           p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy,
+           ISNULL(prog.ProgressPercent, 0) AS ProgressPercent
     FROM projects p
     INNER JOIN buyers b ON b.buyer_id = p.customer_id
     LEFT JOIN employees md ON md.employee_id = p.project_md
     LEFT JOIN employees pic ON pic.employee_id = p.project_pic
     LEFT JOIN Users su ON su.Id = p.status_changed_by
+    OUTER APPLY (
+        SELECT CASE WHEN SUM(sz.OrderQty) > 0
+                    THEN CAST(ROUND(100.0 * SUM(sz.CappedQty) / SUM(sz.OrderQty), 1) AS FLOAT)
+                    ELSE CAST(0 AS FLOAT) END AS ProgressPercent
+        FROM (
+            SELECT asz.article_size_id, asz.qty AS OrderQty,
+                   CASE WHEN ISNULL(bq.BundleQty, 0) > asz.qty THEN asz.qty ELSE ISNULL(bq.BundleQty, 0) END AS CappedQty
+            FROM article_sizes asz
+            INNER JOIN articles a2 ON a2.article_id = asz.article_id AND a2.deleted_at IS NULL
+            OUTER APPLY (
+                SELECT SUM(bnd.qty) AS BundleQty FROM bundles bnd
+                WHERE bnd.article_size_id = asz.article_size_id AND bnd.deleted_at IS NULL
+            ) bq
+            WHERE a2.project_id = p.project_id AND asz.deleted_at IS NULL
+        ) sz
+    ) prog
     WHERE p.project_id = @Id AND p.deleted_at IS NULL;
 END;
 GO

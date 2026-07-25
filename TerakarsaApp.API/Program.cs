@@ -86,6 +86,8 @@ builder.Services.AddScoped<PackService>();
 builder.Services.AddScoped<PrintJobService>();
 builder.Services.AddScoped<ReportBundleService>();
 builder.Services.AddScoped<ReportWipService>();
+builder.Services.AddScoped<ReportProduksiService>();
+builder.Services.AddScoped<SuperAdminService>();
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
 builder.Services.Configure<PrintServiceOptions>(builder.Configuration.GetSection("PrintService"));

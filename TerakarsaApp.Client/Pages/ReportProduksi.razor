@@ -1,0 +1,594 @@
+@page "/reports/produksi"
+@attribute [Authorize]
+@using System.Globalization
+@using System.Text
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Reports
+@using TerakarsaApp.Shared.Resources
+@inject ReportProduksiApiService ReportApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<PageTitle>Laporan Produksi</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Laporan Produksi</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Laporan Produksi</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Divisi <span class="text-danger">*</span></label>
+                    <SearchableSelect TItem="DivisionDto" Items="divisions" @bind-Value="selectedDivisionId"
+                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                      Placeholder="Cari divisi..." @bind-Value:after="OnDivisionChanged" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Resource (Line)</label>
+                    <SearchableSelect TItem="ResourceLookupDto" Items="resources" @bind-Value="selectedResourceId"
+                                      IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                      AllowNone="true" NoneLabel="- All -" Placeholder="Cari resource..."
+                                      Disabled="@(selectedDivisionId <= 0)" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Periode Gajian</label>
+                    <select class="form-select" @bind="selectedPeriodIndex">
+                        @for (var i = 0; i < periods.Count; i++)
+                        {
+                            <option value="@i">@periods[i].Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" disabled="@(isLoading || selectedDivisionId <= 0)" @onclick="LoadReport">Tampilkan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <p class="mb-0">Memuat data...</p>
+    }
+    else if (!loaded)
+    {
+        <p class="text-muted mb-0">Pilih divisi dan periode, lalu klik Tampilkan.</p>
+    }
+    else
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="h3 mb-0">@Fmt(result.Summary.QtyDone)</div>
+                        <div class="text-muted small">Qty Done</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="h3 mb-0 text-primary">@Fmt(result.Summary.QtyMenungguQc)</div>
+                        <div class="text-muted small">Menunggu QC</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="h3 mb-0 text-warning">@Fmt(result.Summary.QtyWip)</div>
+                        <div class="text-muted small">WIP</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="h3 mb-0 text-danger">@Fmt(result.Summary.QtyReject)</div>
+                        <div class="text-muted small">Reject</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="h3 mb-0">@Fmt(result.Summary.PelaksanaAktif)</div>
+                        <div class="text-muted small">Pelaksana Aktif</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <button class="btn btn-sm @(activeTabKey == "semua" ? "btn-primary" : "btn-outline-primary")" style="min-width:96px"
+                    @onclick='() => activeTabKey = "semua"'>
+                <div class="fw-semibold">Semua</div>
+                <div class="small">@Fmt(result.Agg.Sum(a => a.QtyDone)) pcs</div>
+            </button>
+            @foreach (var tab in pelaksanaTabs)
+            {
+                @if (selectedResourceId <= 0 && tabGroupStarts.Contains(tab.Key))
+                {
+                    <div class="w-100 mt-1">
+                        <small class="text-muted text-uppercase fw-bold">— @tab.LineResourceName —</small>
+                    </div>
+                }
+                <button class="btn btn-sm @(activeTabKey == tab.Key ? "btn-primary" : "btn-outline-primary")" style="min-width:96px"
+                        @onclick="() => activeTabKey = tab.Key" title="@tab.PelaksanaName">
+                    <div class="fw-semibold text-truncate" style="max-width:130px">@tab.PelaksanaName</div>
+                    <div class="small">@Fmt(tab.QtyDoneTotal) pcs</div>
+                </button>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-end mb-2">
+                    <button class="btn btn-outline-success btn-sm" @onclick="ExportToExcel">
+                        <i class="fe fe-download"></i> Export ke Excel
+                    </button>
+                </div>
+                @if (activeTabKey == "semua")
+                {
+                    @if (result.Agg.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Tidak ada data pada periode ini.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border text-nowrap mb-0">
+                                <thead>
+                                    <tr>
+                                        @if (selectedResourceId <= 0)
+                                        {
+                                            <th>Resource</th>
+                                        }
+                                        <th>No PO</th>
+                                        <th>Nama PO</th>
+                                        <th>Article</th>
+                                        <th class="text-end">Qty Done</th>
+                                        <th class="text-end">Menunggu QC</th>
+                                        <th class="text-end">WIP</th>
+                                        <th class="text-end">Reject</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in result.Agg)
+                                    {
+                                        var isNewGroup = aggGroupStarts.Contains(row);
+                                        <tr class="@(isNewGroup && row != result.Agg[0] ? "border-top border-2" : "")">
+                                            @if (selectedResourceId <= 0)
+                                            {
+                                                <td>@(isNewGroup ? row.LineResourceName : "")</td>
+                                            }
+                                            <td>@(row.PoNumber ?? "-")</td>
+                                            <td>@row.PoName</td>
+                                            <td>@row.ArticleName</td>
+                                            <td class="text-end">@Fmt(row.QtyDone)</td>
+                                            <td class="text-end @(row.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(row.QtyMenungguQc)</td>
+                                            <td class="text-end @(row.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(row.QtyWip)</td>
+                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(row.QtyReject)</td>
+                                        </tr>
+                                    }
+                                    <tr class="fw-bold table-light">
+                                        @if (selectedResourceId <= 0)
+                                        {
+                                            <td></td>
+                                        }
+                                        <td colspan="3">TOTAL</td>
+                                        <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyDone))</td>
+                                        <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyMenungguQc))</td>
+                                        <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyWip))</td>
+                                        <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyReject))</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+                else
+                {
+                    var tab = pelaksanaTabs.FirstOrDefault(t => t.Key == activeTabKey);
+                    var rows = tab is null ? new List<ProduksiDetailRowDto>() : RowsForTab(tab);
+                    var articleRows = ArticleSummaryFor(rows);
+                    @if (articleRows.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Tidak ada data untuk pelaksana ini.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-bordered border text-nowrap mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>No PO</th>
+                                        <th>Nama PO</th>
+                                        <th>Article</th>
+                                        <th class="text-end">Qty Done</th>
+                                        <th class="text-end">Menunggu QC</th>
+                                        <th class="text-end">WIP</th>
+                                        <th class="text-end">Reject</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in articleRows)
+                                    {
+                                        <tr>
+                                            <td>@(row.PoNumber ?? "-")</td>
+                                            <td>@row.PoName</td>
+                                            <td>@row.ArticleName</td>
+                                            <td class="text-end">@Fmt(row.QtyDone)</td>
+                                            <td class="text-end @(row.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(row.QtyMenungguQc)</td>
+                                            <td class="text-end @(row.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(row.QtyWip)</td>
+                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(row.QtyReject)</td>
+                                            <td>
+                                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenBundleModal(tab!, row)">Lihat</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                    <tr class="fw-bold table-light">
+                                        <td colspan="3">Total @tab?.PelaksanaName</td>
+                                        <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyDone))</td>
+                                        <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyMenungguQc))</td>
+                                        <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyWip))</td>
+                                        <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyReject))</td>
+                                        <td></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0">
+                            Catatan: WIP per pelaksana adalah perkiraan berdasarkan penerima bundle. Total WIP yang akurat mengikuti tab Semua.
+                        </p>
+                    }
+                }
+            </div>
+        </div>
+    }
+}
+
+@if (bundleModalOpen)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@bundleModalTitle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBundleModal"></button>
+                </div>
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Bundle</th>
+                                    <th>Size</th>
+                                    <th class="text-end">Qty Done</th>
+                                    <th class="text-end">Menunggu QC</th>
+                                    <th class="text-end">WIP</th>
+                                    <th class="text-end">Reject</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in bundleModalRows)
+                                {
+                                    <tr>
+                                        <td>@(r.BundleSerial ?? "-")</td>
+                                        <td>@r.SizeName</td>
+                                        <td class="text-end">@Fmt(r.QtyDone)</td>
+                                        <td class="text-end @(r.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(r.QtyMenungguQc)</td>
+                                        <td class="text-end @(r.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(r.QtyWip)</td>
+                                        <td class="text-end @(r.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(r.QtyReject)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseBundleModal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool? hasAccess = null;
+
+    private List<DivisionDto> divisions = new();
+    private List<ResourceLookupDto> resources = new();
+
+    private int selectedDivisionId;
+    private int selectedResourceId;
+    private int selectedPeriodIndex;
+
+    private List<PeriodOption> periods = new();
+
+    private bool isLoading = false;
+    private bool loaded = false;
+    private string activeTabKey = "semua";
+
+    private ProduksiReportResultDto result = new();
+    private List<PelaksanaTab> pelaksanaTabs = new();
+    private HashSet<ProduksiAggRowDto> aggGroupStarts = new();
+    private HashSet<string> tabGroupStarts = new();
+
+    private bool bundleModalOpen = false;
+    private List<ProduksiDetailRowDto> bundleModalRows = new();
+    private string bundleModalTitle = string.Empty;
+
+    private static readonly string[] MonthNames =
+        { "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des" };
+
+    private class PeriodOption
+    {
+        public DateTime Start { get; set; }
+        public DateTime End { get; set; }
+        public string Label => $"Sab {Start.Day:00} {MonthNames[Start.Month - 1]} 10:00 — Sab {End.Day:00} {MonthNames[End.Month - 1]} 10:00 ({End.Year})";
+    }
+
+    private class PelaksanaTab
+    {
+        public int? LineResourceId { get; set; }
+        public string LineResourceName { get; set; } = string.Empty;
+        public string PelaksanaName { get; set; } = string.Empty;
+        public int QtyDoneTotal { get; set; }
+        public int QtyMenungguQcTotal { get; set; }
+        public string Key => $"{(LineResourceId?.ToString() ?? "L")}_{PelaksanaName}";
+    }
+
+    private class ArticleSummaryRow
+    {
+        public int PoId { get; set; }
+        public string? PoNumber { get; set; }
+        public string PoName { get; set; } = string.Empty;
+        public int ArticleId { get; set; }
+        public string ArticleName { get; set; } = string.Empty;
+        public int QtyDone { get; set; }
+        public int QtyMenungguQc { get; set; }
+        public int QtyWip { get; set; }
+        public int QtyReject { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "REPORT_PRODUKSI");
+
+        if (hasAccess != true) return;
+
+        periods = BuildPeriods();
+        divisions = await ReportApi.GetDivisionsAsync();
+    }
+
+    private static List<PeriodOption> BuildPeriods()
+    {
+        var now = DateTime.Now;
+        var daysSinceSaturday = ((int)now.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
+        var candidate = now.Date.AddDays(-daysSinceSaturday).AddHours(10);
+        if (candidate > now) candidate = candidate.AddDays(-7);
+
+        var list = new List<PeriodOption>();
+        for (var i = 0; i < 12; i++)
+        {
+            var start = candidate.AddDays(-7 * i);
+            list.Add(new PeriodOption { Start = start, End = start.AddDays(7) });
+        }
+        return list;
+    }
+
+    private async Task OnDivisionChanged()
+    {
+        selectedResourceId = 0;
+        resources = selectedDivisionId > 0 ? await ReportApi.GetResourcesAsync(selectedDivisionId) : new();
+    }
+
+    private async Task LoadReport()
+    {
+        if (selectedDivisionId <= 0) return;
+
+        isLoading = true;
+        var period = periods[selectedPeriodIndex];
+        result = await ReportApi.GetReportAsync(
+            selectedDivisionId,
+            selectedResourceId > 0 ? selectedResourceId : null,
+            period.Start, period.End);
+
+        pelaksanaTabs = BuildTabs(result.Detail);
+
+        aggGroupStarts = new HashSet<ProduksiAggRowDto>();
+        int? prevLine = null;
+        foreach (var row in result.Agg)
+        {
+            if (row.LineResourceId != prevLine) aggGroupStarts.Add(row);
+            prevLine = row.LineResourceId;
+        }
+
+        tabGroupStarts = pelaksanaTabs
+            .GroupBy(t => t.LineResourceName)
+            .Select(g => g.First().Key)
+            .ToHashSet();
+
+        activeTabKey = "semua";
+        loaded = true;
+        isLoading = false;
+    }
+
+    // Tab pelaksana cuma muncul kalau punya hasil di periode ini -- Qty Done atau Menunggu QC
+    // > 0 (WIP/Reject doang, tanpa Done/Menunggu, tidak cukup buat bikin tab muncul).
+    private static List<PelaksanaTab> BuildTabs(List<ProduksiDetailRowDto> detail)
+    {
+        var tabs = new List<PelaksanaTab>();
+        foreach (var d in detail)
+        {
+            var key = $"{(d.LineResourceId?.ToString() ?? "L")}_{d.PelaksanaName}";
+            var existing = tabs.FirstOrDefault(t => t.Key == key);
+            if (existing is null)
+            {
+                tabs.Add(new PelaksanaTab
+                {
+                    LineResourceId = d.LineResourceId,
+                    LineResourceName = d.LineResourceName,
+                    PelaksanaName = d.PelaksanaName,
+                    QtyDoneTotal = d.QtyDone,
+                    QtyMenungguQcTotal = d.QtyMenungguQc
+                });
+            }
+            else
+            {
+                existing.QtyDoneTotal += d.QtyDone;
+                existing.QtyMenungguQcTotal += d.QtyMenungguQc;
+            }
+        }
+
+        return tabs
+            .Where(t => t.QtyDoneTotal > 0 || t.QtyMenungguQcTotal > 0)
+            .OrderBy(t => t.LineResourceId is null ? 1 : 0)
+            .ThenBy(t => t.LineResourceName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.PelaksanaName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private List<ProduksiDetailRowDto> RowsForTab(PelaksanaTab tab) =>
+        result.Detail.Where(d => d.LineResourceId == tab.LineResourceId && d.PelaksanaName == tab.PelaksanaName).ToList();
+
+    private static List<ArticleSummaryRow> ArticleSummaryFor(List<ProduksiDetailRowDto> rows) =>
+        rows.GroupBy(r => (r.PoId, r.ArticleId))
+            .Select(g => new ArticleSummaryRow
+            {
+                PoId = g.Key.PoId,
+                PoNumber = g.First().PoNumber,
+                PoName = g.First().PoName,
+                ArticleId = g.Key.ArticleId,
+                ArticleName = g.First().ArticleName,
+                QtyDone = g.Sum(x => x.QtyDone),
+                QtyMenungguQc = g.Sum(x => x.QtyMenungguQc),
+                QtyWip = g.Sum(x => x.QtyWip),
+                QtyReject = g.Sum(x => x.QtyReject)
+            })
+            .OrderBy(r => r.PoNumber)
+            .ThenBy(r => r.ArticleName)
+            .ToList();
+
+    private void OpenBundleModal(PelaksanaTab tab, ArticleSummaryRow articleRow)
+    {
+        bundleModalRows = RowsForTab(tab).Where(r => r.PoId == articleRow.PoId && r.ArticleId == articleRow.ArticleId).ToList();
+        bundleModalTitle = $"{articleRow.ArticleName} — {tab.PelaksanaName}";
+        bundleModalOpen = true;
+    }
+
+    private void CloseBundleModal()
+    {
+        bundleModalOpen = false;
+        bundleModalRows = new();
+    }
+
+    private static string Fmt(int n) => n.ToString("N0", CultureInfo.GetCultureInfo("id-ID"));
+
+    // Export ke Excel = CSV (dipisah ";", cocok default locale id-ID) lewat JS interop
+    // downloadFileFromBytes yang sudah ada (dipakai jg oleh ProjectEdit.razor buat attachment).
+    // Mengekspor data tabel yang SEDANG tampil (tab Semua -> Agg; tab pelaksana -> ringkasan
+    // artikel pelaksana itu), bukan seluruh Detail mentah.
+    private async Task ExportToExcel()
+    {
+        string csv;
+        string fileNameSuffix;
+
+        if (activeTabKey == "semua")
+        {
+            csv = BuildAggCsv();
+            fileNameSuffix = "semua";
+        }
+        else
+        {
+            var tab = pelaksanaTabs.FirstOrDefault(t => t.Key == activeTabKey);
+            if (tab is null) return;
+
+            var rows = ArticleSummaryFor(RowsForTab(tab));
+            csv = BuildArticleSummaryCsv(rows, tab.PelaksanaName);
+            fileNameSuffix = tab.PelaksanaName;
+        }
+
+        var safeSuffix = string.Concat(fileNameSuffix.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-'));
+        var period = periods[selectedPeriodIndex];
+        var fileName = $"laporan-produksi-{safeSuffix}-{period.Start:yyyyMMdd}.csv";
+
+        var bytes = new UTF8Encoding(true).GetBytes(csv);
+        var base64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/csv;charset=utf-8;", base64);
+    }
+
+    private string BuildAggCsv()
+    {
+        var sb = new StringBuilder();
+        AppendCsvLine(sb, "Resource", "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject");
+
+        foreach (var row in result.Agg)
+        {
+            AppendCsvLine(sb,
+                row.LineResourceName, row.PoNumber ?? "-", row.PoName, row.ArticleName,
+                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString());
+        }
+
+        AppendCsvLine(sb, "TOTAL", "", "", "",
+            result.Agg.Sum(a => a.QtyDone).ToString(), result.Agg.Sum(a => a.QtyMenungguQc).ToString(),
+            result.Agg.Sum(a => a.QtyWip).ToString(), result.Agg.Sum(a => a.QtyReject).ToString());
+
+        return sb.ToString();
+    }
+
+    private static string BuildArticleSummaryCsv(List<ArticleSummaryRow> rows, string pelaksanaName)
+    {
+        var sb = new StringBuilder();
+        AppendCsvLine(sb, "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject");
+
+        foreach (var row in rows)
+        {
+            AppendCsvLine(sb,
+                row.PoNumber ?? "-", row.PoName, row.ArticleName,
+                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString());
+        }
+
+        AppendCsvLine(sb, $"Total {pelaksanaName}", "", "",
+            rows.Sum(r => r.QtyDone).ToString(), rows.Sum(r => r.QtyMenungguQc).ToString(),
+            rows.Sum(r => r.QtyWip).ToString(), rows.Sum(r => r.QtyReject).ToString());
+
+        return sb.ToString();
+    }
+
+    private static void AppendCsvLine(StringBuilder sb, params string[] fields)
+    {
+        sb.AppendLine(string.Join(';', fields.Select(CsvEscape)));
+    }
+
+    private static string CsvEscape(string? value)
+    {
+        value ??= string.Empty;
+        return value.IndexOfAny(new[] { ';', '"', '\n', '\r' }) >= 0
+            ? "\"" + value.Replace("\"", "\"\"") + "\""
+            : value;
+    }
+}

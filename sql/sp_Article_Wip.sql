@@ -83,7 +83,7 @@ BEGIN
             WHERE article_workflow_id = aw.article_workflow_id AND deleted_at IS NULL
         ) AS QtyOk,
         (
-            SELECT ISNULL(SUM(qty_reject_print + qty_reject_fabric + qty_reject_sewing), 0)
+            SELECT ISNULL(SUM(qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
             FROM article_workflow_logs
             WHERE article_workflow_id = aw.article_workflow_id AND deleted_at IS NULL
         ) AS QtyReject

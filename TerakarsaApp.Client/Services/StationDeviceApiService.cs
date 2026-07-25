@@ -225,6 +225,15 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<BundleScanInfoDto>();
     }
 
+    // Prompt 28: panel Penyesuaian di /b/{serial} (BundleScanCard).
+    public async Task<(bool Success, string Error)> AdjustAsync(StationAdjustRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/adjust", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan penyesuaian." : error.Trim('"'));
+    }
+
     public async Task<(bool Success, string Error)> ReceiveAsync(StationReceiveRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/station/receive", request);

@@ -202,6 +202,10 @@ else
                                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                                         <p class="mb-0">
                                             Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong>
+                                            @if (item.IsAdjustment)
+                                            {
+                                                <span class="badge bg-warning text-dark ms-1">Penyesuaian</span>
+                                            }
                                             @if (item.UpdatedAt is not null)
                                             {
                                                 <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
@@ -704,6 +708,14 @@ else
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectSewing" />
                         </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectRework" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hilang</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyLost" />
+                        </div>
                     </div>
 
                     @if (serahkanQuotaInfo is not null)
@@ -777,6 +789,14 @@ else
                             <input class="form-check-input" type="checkbox" id="nbShowRejectSewing" @bind="nonBundleShowRejectSewing" @bind:after="OnNonBundleShowRejectSewingChanged" />
                             <label class="form-check-label" for="nbShowRejectSewing">Reject Jahit</label>
                         </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="nbShowRejectRework" @bind="nonBundleShowRejectRework" @bind:after="OnNonBundleShowRejectReworkChanged" />
+                            <label class="form-check-label" for="nbShowRejectRework">Reject Rework</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="nbShowLost" @bind="nonBundleShowLost" @bind:after="OnNonBundleShowLostChanged" />
+                            <label class="form-check-label" for="nbShowLost">Hilang</label>
+                        </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-bordered border mb-0">
@@ -797,6 +817,14 @@ else
                                     @if (nonBundleShowRejectSewing)
                                     {
                                         <th>Reject Jahit</th>
+                                    }
+                                    @if (nonBundleShowRejectRework)
+                                    {
+                                        <th>Reject Rework</th>
+                                    }
+                                    @if (nonBundleShowLost)
+                                    {
+                                        <th>Hilang</th>
                                     }
                                 </tr>
                             </thead>
@@ -819,6 +847,14 @@ else
                                         @if (nonBundleShowRejectSewing)
                                         {
                                             <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                        }
+                                        @if (nonBundleShowRejectRework)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" /></td>
+                                        }
+                                        @if (nonBundleShowLost)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" /></td>
                                         }
                                     </tr>
                                 }
@@ -925,6 +961,14 @@ else
                             <label class="form-label">Reject Jahit</label>
                             <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectSewing" />
                         </div>
+                        <div class="col-6">
+                            <label class="form-label">Reject Rework</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectRework" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hilang</label>
+                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyLost" />
+                        </div>
                     </div>
 
                     @if (reviseQuotaInfo is not null)
@@ -1024,6 +1068,14 @@ else
                             <input class="form-check-input" type="checkbox" id="rgShowRejectSewing" @bind="reviseGroupShowRejectSewing" @bind:after="OnReviseGroupShowRejectSewingChanged" />
                             <label class="form-check-label" for="rgShowRejectSewing">Reject Jahit</label>
                         </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="rgShowRejectRework" @bind="reviseGroupShowRejectRework" @bind:after="OnReviseGroupShowRejectReworkChanged" />
+                            <label class="form-check-label" for="rgShowRejectRework">Reject Rework</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="rgShowLost" @bind="reviseGroupShowLost" @bind:after="OnReviseGroupShowLostChanged" />
+                            <label class="form-check-label" for="rgShowLost">Hilang</label>
+                        </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-bordered border mb-0">
@@ -1042,6 +1094,14 @@ else
                                     @if (reviseGroupShowRejectSewing)
                                     {
                                         <th>Reject Jahit</th>
+                                    }
+                                    @if (reviseGroupShowRejectRework)
+                                    {
+                                        <th>Reject Rework</th>
+                                    }
+                                    @if (reviseGroupShowLost)
+                                    {
+                                        <th>Hilang</th>
                                     }
                                     <th>Catatan</th>
                                 </tr>
@@ -1063,6 +1123,14 @@ else
                                         @if (reviseGroupShowRejectSewing)
                                         {
                                             <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                        }
+                                        @if (reviseGroupShowRejectRework)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" /></td>
+                                        }
+                                        @if (reviseGroupShowLost)
+                                        {
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" /></td>
                                         }
                                         <td><input class="form-control" @bind="row.Remark" /></td>
                                     </tr>
@@ -1479,6 +1547,8 @@ else
     private int serahkanQtyRejectPrint;
     private int serahkanQtyRejectFabric;
     private int serahkanQtyRejectSewing;
+    private int serahkanQtyRejectRework;
+    private int serahkanQtyLost;
     private string serahkanRemark = string.Empty;
     private string serahkanError = string.Empty;
     private WorkflowQuotaInfoDto? serahkanQuotaInfo;
@@ -1491,6 +1561,8 @@ else
     private bool nonBundleShowRejectPrint = false;
     private bool nonBundleShowRejectFabric = false;
     private bool nonBundleShowRejectSewing = false;
+    private bool nonBundleShowRejectRework = false;
+    private bool nonBundleShowLost = false;
 
     private class NonBundleGridRow
     {
@@ -1502,6 +1574,8 @@ else
         public int QtyRejectPrint;
         public int QtyRejectFabric;
         public int QtyRejectSewing;
+        public int QtyRejectRework;
+        public int QtyLost;
     }
 
     private class WipCard
@@ -1668,6 +1742,8 @@ else
     private int reviseQtyRejectPrint;
     private int reviseQtyRejectFabric;
     private int reviseQtyRejectSewing;
+    private int reviseQtyRejectRework;
+    private int reviseQtyLost;
     private int reviseTargetDivisionId;
     private string reviseRemark = string.Empty;
     private string reviseError = string.Empty;
@@ -1685,6 +1761,8 @@ else
     private bool reviseGroupShowRejectPrint = false;
     private bool reviseGroupShowRejectFabric = false;
     private bool reviseGroupShowRejectSewing = false;
+    private bool reviseGroupShowRejectRework = false;
+    private bool reviseGroupShowLost = false;
 
     private class ReviseGroupRow
     {
@@ -1695,6 +1773,8 @@ else
         public int QtyRejectPrint;
         public int QtyRejectFabric;
         public int QtyRejectSewing;
+        public int QtyRejectRework;
+        public int QtyLost;
         public string Remark = string.Empty;
     }
 
@@ -1980,6 +2060,8 @@ else
         nonBundleShowRejectPrint = false;
         nonBundleShowRejectFabric = false;
         nonBundleShowRejectSewing = false;
+        nonBundleShowRejectRework = false;
+        nonBundleShowLost = false;
         showNonBundleModal = true;
     }
 
@@ -2007,19 +2089,33 @@ else
             foreach (var row in nonBundleRows) row.QtyRejectSewing = 0;
     }
 
+    private void OnNonBundleShowRejectReworkChanged()
+    {
+        if (!nonBundleShowRejectRework)
+            foreach (var row in nonBundleRows) row.QtyRejectRework = 0;
+    }
+
+    private void OnNonBundleShowLostChanged()
+    {
+        if (!nonBundleShowLost)
+            foreach (var row in nonBundleRows) row.QtyLost = 0;
+    }
+
     private async Task ConfirmNonBundleSave()
     {
         if (nonBundleTarget is null || currentOperatorId is null) return;
 
         var entries = nonBundleRows
-            .Where(r => r.QtyOk > 0 || r.QtyRejectPrint > 0 || r.QtyRejectFabric > 0 || r.QtyRejectSewing > 0)
+            .Where(r => r.QtyOk > 0 || r.QtyRejectPrint > 0 || r.QtyRejectFabric > 0 || r.QtyRejectSewing > 0 || r.QtyRejectRework > 0 || r.QtyLost > 0)
             .Select(r => new StationNonBundleBatchEntryRequest
             {
                 ArticleSizeId = r.ArticleSizeId,
                 QtyOk = r.QtyOk,
                 QtyRejectPrint = r.QtyRejectPrint,
                 QtyRejectFabric = r.QtyRejectFabric,
-                QtyRejectSewing = r.QtyRejectSewing
+                QtyRejectSewing = r.QtyRejectSewing,
+                QtyRejectRework = r.QtyRejectRework,
+                QtyLost = r.QtyLost
             }).ToList();
 
         if (entries.Count == 0)
@@ -2028,7 +2124,7 @@ else
             return;
         }
 
-        if (entries.Any(e => e.QtyRejectPrint + e.QtyRejectFabric + e.QtyRejectSewing > 0) && string.IsNullOrWhiteSpace(nonBundleRemark))
+        if (entries.Any(e => e.QtyRejectPrint + e.QtyRejectFabric + e.QtyRejectSewing + e.QtyRejectRework + e.QtyLost > 0) && string.IsNullOrWhiteSpace(nonBundleRemark))
         {
             nonBundleError = "Catatan wajib diisi jika ada reject.";
             return;
@@ -2066,6 +2162,8 @@ else
         if (item.QtyRejectPrint > 0) parts.Add($"Reject Print: {item.QtyRejectPrint}");
         if (item.QtyRejectFabric > 0) parts.Add($"Reject Bahan: {item.QtyRejectFabric}");
         if (item.QtyRejectSewing > 0) parts.Add($"Reject Jahit: {item.QtyRejectSewing}");
+        if (item.QtyRejectRework > 0) parts.Add($"Reject Rework: {item.QtyRejectRework}");
+        if (item.QtyLost > 0) parts.Add($"Hilang: {item.QtyLost}");
         return parts;
     }
 
@@ -2189,6 +2287,8 @@ else
         serahkanQtyRejectPrint = 0;
         serahkanQtyRejectFabric = 0;
         serahkanQtyRejectSewing = 0;
+        serahkanQtyRejectRework = 0;
+        serahkanQtyLost = 0;
         serahkanRemark = string.Empty;
         serahkanError = string.Empty;
         serahkanQuotaInfo = await StationApi.GetQuotaInfoAsync(item.NextArticleWorkflowId.Value, item.BundleId);
@@ -2201,6 +2301,8 @@ else
         serahkanQtyRejectPrint = 0;
         serahkanQtyRejectFabric = 0;
         serahkanQtyRejectSewing = 0;
+        serahkanQtyRejectRework = 0;
+        serahkanQtyLost = 0;
     }
 
     private void CloseSerahkanModal()
@@ -2213,7 +2315,7 @@ else
     {
         if (serahkanTarget?.NextArticleWorkflowId is null || currentOperatorId is null) return;
 
-        var serahkanTotalReject = serahkanQtyRejectPrint + serahkanQtyRejectFabric + serahkanQtyRejectSewing;
+        var serahkanTotalReject = serahkanQtyRejectPrint + serahkanQtyRejectFabric + serahkanQtyRejectSewing + serahkanQtyRejectRework + serahkanQtyLost;
         if (serahkanTotalReject > 0 && string.IsNullOrWhiteSpace(serahkanRemark))
         {
             serahkanError = "Catatan wajib diisi jika ada reject.";
@@ -2232,6 +2334,8 @@ else
             QtyRejectPrint = serahkanQtyRejectPrint,
             QtyRejectFabric = serahkanQtyRejectFabric,
             QtyRejectSewing = serahkanQtyRejectSewing,
+            QtyRejectRework = serahkanQtyRejectRework,
+            QtyLost = serahkanQtyLost,
             Remark = string.IsNullOrWhiteSpace(serahkanRemark) ? null : serahkanRemark,
             ConfirmExceed = confirmExceed,
             ConfirmShort = confirmShort
@@ -2307,6 +2411,8 @@ else
         reviseQtyRejectPrint = item.QtyRejectPrint;
         reviseQtyRejectFabric = item.QtyRejectFabric;
         reviseQtyRejectSewing = item.QtyRejectSewing;
+        reviseQtyRejectRework = item.QtyRejectRework;
+        reviseQtyLost = item.QtyLost;
         reviseTargetDivisionId = item.TargetDivisionOptions.FirstOrDefault(d => d.DivisionName == item.TargetDivisionName)?.Id
             ?? (item.TargetDivisionOptions.Count == 1 ? item.TargetDivisionOptions[0].Id : 0);
         reviseRemark = item.Remark ?? string.Empty;
@@ -2325,6 +2431,8 @@ else
         reviseQtyRejectPrint = reviseTarget.QtyRejectPrint;
         reviseQtyRejectFabric = reviseTarget.QtyRejectFabric;
         reviseQtyRejectSewing = reviseTarget.QtyRejectSewing;
+        reviseQtyRejectRework = reviseTarget.QtyRejectRework;
+        reviseQtyLost = reviseTarget.QtyLost;
         reviseRemark = reviseTarget.Remark ?? string.Empty;
     }
 
@@ -2338,7 +2446,7 @@ else
     {
         if (reviseTarget is null || currentOperatorId is null) return;
 
-        var reviseTotalReject = reviseQtyRejectPrint + reviseQtyRejectFabric + reviseQtyRejectSewing;
+        var reviseTotalReject = reviseQtyRejectPrint + reviseQtyRejectFabric + reviseQtyRejectSewing + reviseQtyRejectRework + reviseQtyLost;
         if (reviseTotalReject > 0 && string.IsNullOrWhiteSpace(reviseRemark))
         {
             reviseError = "Catatan wajib diisi jika ada reject.";
@@ -2359,6 +2467,8 @@ else
                 QtyRejectPrint = reviseQtyRejectPrint,
                 QtyRejectFabric = reviseQtyRejectFabric,
                 QtyRejectSewing = reviseQtyRejectSewing,
+                QtyRejectRework = reviseQtyRejectRework,
+                QtyLost = reviseQtyLost,
                 Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
                 ResourceId = currentOperatorId.Value
             });
@@ -2389,6 +2499,8 @@ else
             QtyRejectPrint = reviseQtyRejectPrint,
             QtyRejectFabric = reviseQtyRejectFabric,
             QtyRejectSewing = reviseQtyRejectSewing,
+            QtyRejectRework = reviseQtyRejectRework,
+            QtyLost = reviseQtyLost,
             Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
             NewTargetDivisionId = reviseTargetDivisionId,
             ResourceId = currentOperatorId.Value
@@ -2458,6 +2570,8 @@ else
             QtyRejectPrint = i.QtyRejectPrint,
             QtyRejectFabric = i.QtyRejectFabric,
             QtyRejectSewing = i.QtyRejectSewing,
+            QtyRejectRework = i.QtyRejectRework,
+            QtyLost = i.QtyLost,
             Remark = i.Remark ?? string.Empty
         }).ToList();
         reviseGroupError = string.Empty;
@@ -2466,6 +2580,8 @@ else
         reviseGroupShowRejectPrint = reviseGroupRows.Any(r => r.QtyRejectPrint > 0);
         reviseGroupShowRejectFabric = reviseGroupRows.Any(r => r.QtyRejectFabric > 0);
         reviseGroupShowRejectSewing = reviseGroupRows.Any(r => r.QtyRejectSewing > 0);
+        reviseGroupShowRejectRework = reviseGroupRows.Any(r => r.QtyRejectRework > 0);
+        reviseGroupShowLost = reviseGroupRows.Any(r => r.QtyLost > 0);
         showReviseGroupModal = true;
     }
 
@@ -2493,12 +2609,24 @@ else
             foreach (var row in reviseGroupRows) row.QtyRejectSewing = 0;
     }
 
+    private void OnReviseGroupShowRejectReworkChanged()
+    {
+        if (!reviseGroupShowRejectRework)
+            foreach (var row in reviseGroupRows) row.QtyRejectRework = 0;
+    }
+
+    private void OnReviseGroupShowLostChanged()
+    {
+        if (!reviseGroupShowLost)
+            foreach (var row in reviseGroupRows) row.QtyLost = 0;
+    }
+
     private async Task ConfirmReviseGroup()
     {
         if (reviseGroupTarget is null || currentOperatorId is null) return;
 
         var reviseGroupBadRow = reviseGroupRows.FirstOrDefault(r =>
-            r.QtyRejectPrint + r.QtyRejectFabric + r.QtyRejectSewing > 0 && string.IsNullOrWhiteSpace(r.Remark));
+            r.QtyRejectPrint + r.QtyRejectFabric + r.QtyRejectSewing + r.QtyRejectRework + r.QtyLost > 0 && string.IsNullOrWhiteSpace(r.Remark));
         if (reviseGroupBadRow is not null)
         {
             reviseGroupError = $"{reviseGroupBadRow.SizeName}: catatan wajib diisi jika ada reject.";
@@ -2517,6 +2645,8 @@ else
                 QtyRejectPrint = row.QtyRejectPrint,
                 QtyRejectFabric = row.QtyRejectFabric,
                 QtyRejectSewing = row.QtyRejectSewing,
+                QtyRejectRework = row.QtyRejectRework,
+                QtyLost = row.QtyLost,
                 Remark = string.IsNullOrWhiteSpace(row.Remark) ? null : row.Remark,
                 ResourceId = currentOperatorId.Value
             });

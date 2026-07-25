@@ -9,6 +9,8 @@ public class BundleCompleteFormValues
     public int QtyRejectPrint { get; set; }
     public int QtyRejectFabric { get; set; }
     public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
     public string? Remark { get; set; }
     // Prompt 14: konfirmasi sadar melebihi kuota qty masuk step ini.
     public bool ConfirmExceed { get; set; }

@@ -194,6 +194,9 @@ public class BundleService
                     QtyRejectPrint = reader.GetInt32(reader.GetOrdinal("QtyRejectPrint")),
                     QtyRejectFabric = reader.GetInt32(reader.GetOrdinal("QtyRejectFabric")),
                     QtyRejectSewing = reader.GetInt32(reader.GetOrdinal("QtyRejectSewing")),
+                    QtyRejectRework = reader.GetInt32(reader.GetOrdinal("QtyRejectRework")),
+                    QtyLost = reader.GetInt32(reader.GetOrdinal("QtyLost")),
+                    LogType = reader.GetString(reader.GetOrdinal("LogType")),
                     TargetDivisionName = reader.IsDBNull(reader.GetOrdinal("TargetDivisionName")) ? null : reader.GetString(reader.GetOrdinal("TargetDivisionName")),
                     CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
                     ReceivedAt = reader.IsDBNull(reader.GetOrdinal("ReceivedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedAt")),
@@ -227,11 +230,35 @@ public class BundleService
                 action.ActionQtyRejectFabric = reader.IsDBNull(actionQtyRejectFabricOrdinal) ? null : reader.GetInt32(actionQtyRejectFabricOrdinal);
                 var actionQtyRejectSewingOrdinal = reader.GetOrdinal("ActionQtyRejectSewing");
                 action.ActionQtyRejectSewing = reader.IsDBNull(actionQtyRejectSewingOrdinal) ? null : reader.GetInt32(actionQtyRejectSewingOrdinal);
+                var actionQtyRejectReworkOrdinal = reader.GetOrdinal("ActionQtyRejectRework");
+                action.ActionQtyRejectRework = reader.IsDBNull(actionQtyRejectReworkOrdinal) ? null : reader.GetInt32(actionQtyRejectReworkOrdinal);
+                var actionQtyLostOrdinal = reader.GetOrdinal("ActionQtyLost");
+                action.ActionQtyLost = reader.IsDBNull(actionQtyLostOrdinal) ? null : reader.GetInt32(actionQtyLostOrdinal);
                 var actionRemarkOrdinal = reader.GetOrdinal("ActionRemark");
                 action.ActionRemark = reader.IsDBNull(actionRemarkOrdinal) ? null : reader.GetString(actionRemarkOrdinal);
+                action.AllowedAdjust = reader.GetBoolean(reader.GetOrdinal("AllowedAdjust"));
             }
 
-            return new BundleScanInfoDto { Bundle = bundle, Timeline = timeline, Action = action };
+            await reader.NextResultAsync();
+            var adjustSteps = new List<BundleAdjustStepSaldoDto>();
+            while (await reader.ReadAsync())
+            {
+                adjustSteps.Add(new BundleAdjustStepSaldoDto
+                {
+                    ArticleWorkflowId = reader.GetInt32(reader.GetOrdinal("ArticleWorkflowId")),
+                    StepName = reader.GetString(reader.GetOrdinal("StepName")),
+                    SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                    SaldoRejectPrint = reader.GetInt32(reader.GetOrdinal("SaldoRejectPrint")),
+                    SaldoRejectFabric = reader.GetInt32(reader.GetOrdinal("SaldoRejectFabric")),
+                    SaldoRejectSewing = reader.GetInt32(reader.GetOrdinal("SaldoRejectSewing")),
+                    SaldoRejectRework = reader.GetInt32(reader.GetOrdinal("SaldoRejectRework")),
+                    SaldoLost = reader.GetInt32(reader.GetOrdinal("SaldoLost")),
+                    NextDivisionId = reader.IsDBNull(reader.GetOrdinal("NextDivisionId")) ? null : reader.GetInt32(reader.GetOrdinal("NextDivisionId")),
+                    NextDivisionName = reader.IsDBNull(reader.GetOrdinal("NextDivisionName")) ? null : reader.GetString(reader.GetOrdinal("NextDivisionName")),
+                });
+            }
+
+            return new BundleScanInfoDto { Bundle = bundle, Timeline = timeline, Action = action, AdjustSteps = adjustSteps };
         }
         finally
         {
