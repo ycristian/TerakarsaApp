@@ -23,6 +23,7 @@ public class StationDeviceController : ControllerBase
     private readonly WorkflowLogService _workflowLogService;
     private readonly ResourceService _resourceService;
     private readonly BundleService _bundleService;
+    private readonly EmployeeService _employeeService;
     private readonly PackService _packService;
     private readonly ProjectService _projectService;
     private readonly ArticlePhotoService _articlePhotoService;
@@ -32,6 +33,7 @@ public class StationDeviceController : ControllerBase
         WorkflowLogService workflowLogService,
         ResourceService resourceService,
         BundleService bundleService,
+        EmployeeService employeeService,
         PackService packService,
         ProjectService projectService,
         ArticlePhotoService articlePhotoService,
@@ -40,6 +42,7 @@ public class StationDeviceController : ControllerBase
         _workflowLogService = workflowLogService;
         _resourceService = resourceService;
         _bundleService = bundleService;
+        _employeeService = employeeService;
         _packService = packService;
         _projectService = projectService;
         _articlePhotoService = articlePhotoService;
@@ -80,6 +83,15 @@ public class StationDeviceController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 32: dropdown "Penjahit" (employee) cascading di bawah dropdown Line (TailorResourceId)
+    // di modal Buat Bundle/Edit Bundle -- menggantikan input teks bebas.
+    [HttpGet("employees/{resourceId:int}")]
+    public async Task<IActionResult> GetEmployeesByResource(int resourceId)
+    {
+        var result = await _employeeService.GetActiveByResourceAsync(resourceId);
+        return Ok(result);
+    }
+
     // Prompt 24: ringkasan per size untuk modal "Buat Bundle" -- juga dipakai memvalidasi
     // divisi token = divisi Bundling artikel ini (BundlingDivisionId).
     [HttpGet("bundling/articles/{articleId:int}/summary")]
@@ -94,7 +106,7 @@ public class StationDeviceController : ControllerBase
     }
 
     // Prompt 24: "Buat Bundle" dari kartu WIP station Bundling -- @BundlingResourceId =
-    // operator sesi (WAJIB), penjahit (TailorResourceId/TailorPersonName) opsional.
+    // operator sesi (WAJIB), penjahit (TailorResourceId/TailorEmployeeId) opsional.
     [HttpPost("bundles")]
     public async Task<IActionResult> CreateBundle([FromBody] StationBundleCreateRequest request)
     {
@@ -102,6 +114,7 @@ public class StationDeviceController : ControllerBase
         if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
         if (request.ArticleSizeId <= 0) return BadRequest("Ukuran wajib dipilih.");
         if (request.Qty <= 0) return BadRequest("Qty bundle harus lebih dari 0.");
+        if (request.PrintCopies < 0) return BadRequest("Jumlah label tidak boleh negatif.");
 
         var summary = await _bundleService.GetSummaryAsync(request.ArticleId);
         if (summary.Count == 0 || summary[0].BundlingDivisionId != CurrentStation.DivisionId)
@@ -119,9 +132,10 @@ public class StationDeviceController : ControllerBase
             ArticleSizeId = request.ArticleSizeId,
             Qty = request.Qty,
             ResourceId = request.TailorResourceId,
-            ResourcePersonName = request.TailorPersonName,
+            EmployeeId = request.TailorEmployeeId,
             BundlingResourceId = operatorResourceId,
-            AutoPrint = request.AutoPrint
+            PrintCopies = request.PrintCopies,
+            Remarks = request.Remarks
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -144,8 +158,9 @@ public class StationDeviceController : ControllerBase
             Qty = request.Qty,
             ArticleSizeId = request.ArticleSizeId,
             ResourceId = request.TailorResourceId,
-            ResourcePersonName = request.TailorPersonName,
-            BundlingResourceId = operatorResourceId
+            EmployeeId = request.TailorEmployeeId,
+            BundlingResourceId = operatorResourceId,
+            Remarks = request.Remarks
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -165,11 +180,14 @@ public class StationDeviceController : ControllerBase
     }
 
     // Prompt 24: cetak ulang label bundle -- semua station boleh, tanpa batasan divisi, cukup
-    // token perangkat valid.
+    // token perangkat valid. Fix: @copies (default 1) -- jumlah label yang dicetak, diisi user
+    // lewat modal konfirmasi Cetak Ulang.
     [HttpPost("bundles/{id:int}/reprint")]
-    public async Task<IActionResult> ReprintBundle(int id)
+    public async Task<IActionResult> ReprintBundle(int id, [FromQuery] int copies = 1)
     {
-        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, _systemUserId);
+        if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
+
+        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }
@@ -182,6 +200,19 @@ public class StationDeviceController : ControllerBase
         if (request.Copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
         var (success, error, printJobId) = await _bundleService.PrintDefectLabelAsync(id, request.Copies, request.Remark, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
+    // Fix: "Cetak Reject" -- nota reject untuk satu baris log timeline (BundleScanCard),
+    // tombol client hanya tampil kalau baris itu punya reject > 0 (SP menegakkan ulang).
+    // Semua station boleh, sama seperti reprint label bundle di atas.
+    [HttpPost("logs/{id:int}/print-reject")]
+    public async Task<IActionResult> PrintReject(int id, [FromQuery] int copies = 1)
+    {
+        if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
+
+        var (success, error, printJobId) = await _workflowLogService.PrintRejectAsync(id, copies, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }
@@ -584,12 +615,13 @@ public class StationDeviceController : ControllerBase
     }
 
     [HttpPost("packing/packs/{id:int}/reprint")]
-    public async Task<IActionResult> ReprintPack(int id)
+    public async Task<IActionResult> ReprintPack(int id, [FromQuery] int copies = 1)
     {
         var forbid = RequirePackingEnabled();
         if (forbid is not null) return forbid;
+        if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
-        var (success, error, printJobId) = await _packService.ReprintAsync(id, _systemUserId);
+        var (success, error, printJobId) = await _packService.ReprintAsync(id, copies, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }

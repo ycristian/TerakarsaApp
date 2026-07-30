@@ -16,18 +16,61 @@ public class ReportBundleService
         _db = db;
     }
 
-    public async Task<List<BundleWipDto>> GetWipAsync(int? projectId, int? articleId, int? divisionId, string? status)
+    // Fix: order-by-klik-header + pagination -- pola sama dengan ProjectService.GetPagedAsync
+    // (dua panggilan SP: LIST untuk halaman data, COUNT untuk total + breakdown per status
+    // dipakai badge ringkasan). Lihat SIS_Report_BundleWip di sql/sp_Report_Bundle.sql.
+    private class BundleWipCountRow
     {
-        var projectIdParam = new SqlParameter("@ProjectId", (object?)projectId ?? DBNull.Value);
-        var articleIdParam = new SqlParameter("@ArticleId", (object?)articleId ?? DBNull.Value);
-        var divisionIdParam = new SqlParameter("@DivisionId", (object?)divisionId ?? DBNull.Value);
-        var statusParam = new SqlParameter("@Status", (object?)status ?? DBNull.Value);
+        public int TotalCount { get; set; }
+        public int BelumMulaiCount { get; set; }
+        public int TransitCount { get; set; }
+        public int DikerjakanCount { get; set; }
+        public int SelesaiCount { get; set; }
+    }
 
-        return await _db.Database
+    public async Task<BundleWipPagedResult> GetWipAsync(BundleWipPagedRequest request)
+    {
+        var listActionParam = new SqlParameter("@Action", "LIST");
+        var projectIdParam = new SqlParameter("@ProjectId", (object?)request.ProjectId ?? DBNull.Value);
+        var articleIdParam = new SqlParameter("@ArticleId", (object?)request.ArticleId ?? DBNull.Value);
+        var divisionIdParam = new SqlParameter("@DivisionId", (object?)request.DivisionId ?? DBNull.Value);
+        var statusParam = new SqlParameter("@Status", (object?)request.Status ?? DBNull.Value);
+        var pageNumberParam = new SqlParameter("@PageNumber", request.PageNumber);
+        var pageSizeParam = new SqlParameter("@PageSize", request.PageSize);
+        var sortColumnParam = new SqlParameter("@SortColumn", (object?)request.SortColumn ?? DBNull.Value);
+        var sortDirectionParam = new SqlParameter("@SortDirection", request.SortDirection);
+
+        var items = await _db.Database
             .SqlQueryRaw<BundleWipDto>(
-                "EXEC SIS_Report_BundleWip @ProjectId = @ProjectId, @ArticleId = @ArticleId, @DivisionId = @DivisionId, @Status = @Status",
-                projectIdParam, articleIdParam, divisionIdParam, statusParam)
+                "EXEC SIS_Report_BundleWip @Action = @Action, @ProjectId = @ProjectId, @ArticleId = @ArticleId, @DivisionId = @DivisionId, @Status = @Status, @PageNumber = @PageNumber, @PageSize = @PageSize, @SortColumn = @SortColumn, @SortDirection = @SortDirection",
+                listActionParam, projectIdParam, articleIdParam, divisionIdParam, statusParam, pageNumberParam, pageSizeParam, sortColumnParam, sortDirectionParam)
             .ToListAsync();
+
+        var countActionParam = new SqlParameter("@Action", "COUNT");
+        var countProjectIdParam = new SqlParameter("@ProjectId", (object?)request.ProjectId ?? DBNull.Value);
+        var countArticleIdParam = new SqlParameter("@ArticleId", (object?)request.ArticleId ?? DBNull.Value);
+        var countDivisionIdParam = new SqlParameter("@DivisionId", (object?)request.DivisionId ?? DBNull.Value);
+        var countStatusParam = new SqlParameter("@Status", (object?)request.Status ?? DBNull.Value);
+
+        var countResult = await _db.Database
+            .SqlQueryRaw<BundleWipCountRow>(
+                "EXEC SIS_Report_BundleWip @Action = @Action, @ProjectId = @ProjectId, @ArticleId = @ArticleId, @DivisionId = @DivisionId, @Status = @Status",
+                countActionParam, countProjectIdParam, countArticleIdParam, countDivisionIdParam, countStatusParam)
+            .ToListAsync();
+
+        var counts = countResult.FirstOrDefault() ?? new BundleWipCountRow();
+
+        return new BundleWipPagedResult
+        {
+            Items = items,
+            TotalCount = counts.TotalCount,
+            PageNumber = request.PageNumber,
+            PageSize = request.PageSize,
+            BelumMulaiCount = counts.BelumMulaiCount,
+            TransitCount = counts.TransitCount,
+            DikerjakanCount = counts.DikerjakanCount,
+            SelesaiCount = counts.SelesaiCount
+        };
     }
 
     // SIS_Report_ArticleProgress mengembalikan 2 result set (step ber-bundle, step
@@ -217,6 +260,7 @@ public class ReportBundleService
                     Status = reader.GetString(reader.GetOrdinal("Status")),
                     PosisiDivisionName = reader.IsDBNull(reader.GetOrdinal("PosisiDivisionName")) ? null : reader.GetString(reader.GetOrdinal("PosisiDivisionName")),
                     StepName = reader.IsDBNull(reader.GetOrdinal("StepName")) ? null : reader.GetString(reader.GetOrdinal("StepName")),
+                    EmployeeName = reader.IsDBNull(reader.GetOrdinal("EmployeeName")) ? null : reader.GetString(reader.GetOrdinal("EmployeeName")),
                 };
             }
 
@@ -225,6 +269,7 @@ public class ReportBundleService
             {
                 history.Timeline.Add(new BundleHistoryTimelineDto
                 {
+                    Id = reader.GetInt32(reader.GetOrdinal("Id")),
                     StepName = reader.GetString(reader.GetOrdinal("StepName")),
                     DivisionName = reader.IsDBNull(reader.GetOrdinal("DivisionName")) ? null : reader.GetString(reader.GetOrdinal("DivisionName")),
                     TargetDivisionName = reader.IsDBNull(reader.GetOrdinal("TargetDivisionName")) ? null : reader.GetString(reader.GetOrdinal("TargetDivisionName")),

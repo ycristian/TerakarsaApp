@@ -1,5 +1,8 @@
 -- Direkonstruksi dari pemanggilan di ProductService.cs (definisi asli tidak ada di repo ini).
 -- Aman dijalankan kapan pun: CREATE OR ALTER hanya memperbarui definisi proc, tidak menyentuh data.
+--
+-- Fix: @Search kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
 CREATE OR ALTER PROCEDURE SIS_Product_Manage
     @Action        NVARCHAR(20),
@@ -38,7 +41,10 @@ BEGIN
         DECLARE @Sql NVARCHAR(MAX) = N'
             SELECT Id, Name, Price, Stock, IsActive, CreatedAt
             FROM Products
-            WHERE (@Search IS NULL OR Name LIKE ''%'' + @Search + ''%'')
+            WHERE (@Search IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@Search, '' '') tok
+                    WHERE tok.value <> '''' AND NOT (Name LIKE ''%'' + tok.value + ''%'')
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
@@ -52,7 +58,10 @@ BEGIN
     BEGIN
         SELECT COUNT(*) AS TotalCount
         FROM Products
-        WHERE (@Search IS NULL OR Name LIKE '%' + @Search + '%');
+        WHERE (@Search IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@Search, ' ') tok
+                WHERE tok.value <> '' AND NOT (Name LIKE '%' + tok.value + '%')
+              ));
     END
 
     ELSE IF @Action = 'INSERT'

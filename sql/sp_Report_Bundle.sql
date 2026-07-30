@@ -24,95 +24,215 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
--- A. WIP -- posisi setiap bundle saat ini.
+-- A. WIP -- posisi setiap bundle saat ini. Fix: @Action LIST/COUNT + paging/sort-by-klik-
+-- header (pola sama dengan SIS_Project_GetAll, lihat sp_Project_Select.sql) -- @SortColumn
+-- dipetakan ke kolom asli lewat @OrderCol (CASE), tiebreak stabil supaya OFFSET/FETCH antar
+-- halaman tidak lompat/dobel baris kalau kolom sort punya nilai duplikat. Tanpa @SortColumn
+-- (NULL, kondisi awal halaman) tetap pakai urutan default lama (project > artikel > bundle_no).
+-- @Action = 'COUNT' juga mengembalikan breakdown per status (atas SEMUA baris yang cocok
+-- filter, bukan cuma satu halaman) -- dipakai badge ringkasan WIP di client tanpa round-trip
+-- terpisah.
 CREATE OR ALTER PROCEDURE SIS_Report_BundleWip
-    @ProjectId  INT = NULL,
-    @ArticleId  INT = NULL,
-    @DivisionId INT = NULL,
-    @Status     VARCHAR(20) = NULL
+    @Action        VARCHAR(10) = 'LIST',  -- LIST atau COUNT
+    @ProjectId     INT = NULL,
+    @ArticleId     INT = NULL,
+    @DivisionId    INT = NULL,
+    @Status        VARCHAR(20) = NULL,
+    @PageNumber    INT = 1,
+    @PageSize      INT = 10,
+    @SortColumn    VARCHAR(50) = NULL,
+    @SortDirection VARCHAR(4) = 'asc'
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    ;WITH Base AS (
+    IF @Action = 'COUNT'
+    BEGIN
+        ;WITH Base AS (
+            SELECT
+                b.bundle_id,
+                a.article_id,
+                p.project_id,
+                ll.workflow_log_id AS last_log_id,
+                ll.received_at AS last_received_at,
+                ll.target_division_id AS last_target_division_id,
+                fbs.division_id AS first_bundle_division_id
+            FROM bundles b
+            INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
+            INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
+            OUTER APPLY (
+                SELECT TOP 1 awl.workflow_log_id, awl.received_at, awl.target_division_id
+                FROM article_workflow_logs awl
+                INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                WHERE awl.bundle_id = b.bundle_id AND awl.deleted_at IS NULL
+                ORDER BY aw.sort_order DESC, awl.created_at DESC
+            ) ll
+            OUTER APPLY (
+                SELECT TOP 1 aw2.division_id
+                FROM article_workflows aw2
+                WHERE aw2.article_id = b.article_id AND aw2.deleted_at IS NULL AND aw2.requires_bundle = 1
+                ORDER BY aw2.sort_order ASC
+            ) fbs
+            WHERE b.deleted_at IS NULL
+        ),
+        Classified AS (
+            SELECT *,
+                CASE
+                    WHEN last_log_id IS NULL THEN 'BELUM_MULAI'
+                    WHEN last_received_at IS NULL AND last_target_division_id IS NOT NULL THEN 'TRANSIT'
+                    WHEN last_received_at IS NOT NULL AND last_target_division_id IS NOT NULL THEN 'DIKERJAKAN'
+                    ELSE 'SELESAI'
+                END AS status_calc,
+                CASE
+                    WHEN last_log_id IS NULL THEN first_bundle_division_id
+                    WHEN last_target_division_id IS NOT NULL THEN last_target_division_id
+                    ELSE NULL
+                END AS posisi_division_id
+            FROM Base
+        )
         SELECT
-            b.bundle_id, b.serial, b.bundle_no, p.bundle_letter, b.qty,
-            a.article_id, a.article_name,
-            p.project_id, p.project_name,
-            spd.size_name,
-            ISNULL(b.resource_person_name, rr.resource_name) AS tailor_name,
-            ll.workflow_log_id AS last_log_id,
-            ll.received_at AS last_received_at,
-            ll.target_division_id AS last_target_division_id,
-            ll.created_at AS last_created_at,
-            law.step_name AS last_step_name,
-            fbs.division_id AS first_bundle_division_id,
-            fbs.step_name AS first_bundle_step_name
-        FROM bundles b
-        INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
-        INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
-        INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
-        INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
-        LEFT JOIN resources rr ON rr.resource_id = b.resource_id
-        OUTER APPLY (
-            SELECT TOP 1 awl.workflow_log_id, awl.article_workflow_id, awl.received_at,
-                         awl.target_division_id, awl.created_at
-            FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE awl.bundle_id = b.bundle_id AND awl.deleted_at IS NULL
-            ORDER BY aw.sort_order DESC, awl.created_at DESC
-        ) ll
-        LEFT JOIN article_workflows law ON law.article_workflow_id = ll.article_workflow_id
-        OUTER APPLY (
-            SELECT TOP 1 aw2.division_id, aw2.step_name
-            FROM article_workflows aw2
-            WHERE aw2.article_id = b.article_id AND aw2.deleted_at IS NULL AND aw2.requires_bundle = 1
-            ORDER BY aw2.sort_order ASC
-        ) fbs
-        WHERE b.deleted_at IS NULL
-    ),
-    Classified AS (
-        SELECT *,
-            CASE
-                WHEN last_log_id IS NULL THEN 'BELUM_MULAI'
-                WHEN last_received_at IS NULL AND last_target_division_id IS NOT NULL THEN 'TRANSIT'
-                WHEN last_received_at IS NOT NULL AND last_target_division_id IS NOT NULL THEN 'DIKERJAKAN'
-                ELSE 'SELESAI'
-            END AS status_calc,
-            CASE
-                WHEN last_log_id IS NULL THEN first_bundle_division_id
-                WHEN last_target_division_id IS NOT NULL THEN last_target_division_id
-                ELSE NULL
-            END AS posisi_division_id,
-            CASE WHEN last_log_id IS NULL THEN first_bundle_step_name ELSE last_step_name END AS step_name_calc,
-            CASE
-                WHEN last_log_id IS NULL THEN NULL
-                WHEN last_received_at IS NOT NULL THEN last_received_at
-                ELSE last_created_at
-            END AS updated_info
-        FROM Base
-    )
-    SELECT
-        c.bundle_id AS BundleId,
-        c.serial AS Serial,
-        c.bundle_no AS BundleNo,
-        c.bundle_letter AS BundleLetter,
-        c.project_name AS ProjectName,
-        c.article_name AS ArticleName,
-        c.size_name AS SizeName,
-        c.qty AS Qty,
-        c.status_calc AS Status,
-        pd.division_name AS PosisiDivisionName,
-        c.step_name_calc AS StepName,
-        c.tailor_name AS TailorName,
-        c.updated_info AS UpdatedInfo
-    FROM Classified c
-    LEFT JOIN divisions pd ON pd.division_id = c.posisi_division_id
-    WHERE (@ProjectId IS NULL OR c.project_id = @ProjectId)
-      AND (@ArticleId IS NULL OR c.article_id = @ArticleId)
-      AND (@DivisionId IS NULL OR c.posisi_division_id = @DivisionId)
-      AND (@Status IS NULL OR c.status_calc = @Status)
-    ORDER BY c.project_name ASC, c.article_name ASC, c.bundle_no ASC;
+            COUNT(*) AS TotalCount,
+            SUM(CASE WHEN c.status_calc = 'BELUM_MULAI' THEN 1 ELSE 0 END) AS BelumMulaiCount,
+            SUM(CASE WHEN c.status_calc = 'TRANSIT' THEN 1 ELSE 0 END) AS TransitCount,
+            SUM(CASE WHEN c.status_calc = 'DIKERJAKAN' THEN 1 ELSE 0 END) AS DikerjakanCount,
+            SUM(CASE WHEN c.status_calc = 'SELESAI' THEN 1 ELSE 0 END) AS SelesaiCount
+        FROM Classified c
+        WHERE (@ProjectId IS NULL OR c.project_id = @ProjectId)
+          AND (@ArticleId IS NULL OR c.article_id = @ArticleId)
+          AND (@DivisionId IS NULL OR c.posisi_division_id = @DivisionId)
+          AND (@Status IS NULL OR c.status_calc = @Status);
+    END
+    ELSE
+    BEGIN
+        DECLARE @OrderCol VARCHAR(50) = CASE @SortColumn
+            WHEN 'BundleNo' THEN 'c.bundle_no'
+            WHEN 'Serial' THEN 'c.serial'
+            WHEN 'ProjectName' THEN 'c.project_name'
+            WHEN 'ArticleName' THEN 'c.article_name'
+            WHEN 'SizeName' THEN 'c.size_name'
+            WHEN 'Qty' THEN 'c.qty'
+            WHEN 'StepName' THEN 'c.step_name_calc'
+            WHEN 'PosisiDivisionName' THEN 'pd.division_name'
+            WHEN 'Status' THEN 'c.status_calc'
+            WHEN 'QtyOk' THEN 'c.last_qty_done'
+            WHEN 'QtyReject' THEN 'c.last_qty_reject'
+            WHEN 'TailorName' THEN 'c.tailor_name'
+            WHEN 'UpdatedInfo' THEN 'c.updated_info'
+            ELSE 'c.project_name'
+        END;
+        DECLARE @Dir VARCHAR(4) = CASE WHEN @SortDirection = 'desc' THEN 'DESC' ELSE 'ASC' END;
+        -- Tanpa @SortColumn (kondisi awal halaman) tetap pakai urutan default lama (project >
+        -- artikel > bundle_no); kolom lain tiebreak ke bundle_id supaya OFFSET/FETCH stabil
+        -- antar halaman (kolom sort bisa punya nilai duplikat, mis. banyak bundle status sama).
+        DECLARE @Tiebreak VARCHAR(60) = CASE
+            WHEN @SortColumn IS NULL THEN ', c.article_name ASC, c.bundle_no ASC'
+            WHEN @OrderCol = 'c.bundle_no' THEN ''
+            ELSE ', c.bundle_id ASC'
+        END;
+
+        -- Fix: @OrderCol/@Dir/@Tiebreak (VARCHAR pendek) di-CAST ke NVARCHAR(MAX) sebelum
+        -- disambung ke @Sql -- lihat komentar sama di sp_Project_Select.sql (tanpa CAST,
+        -- @Sql bisa diam-diam terpotong 4000 karakter untuk kombinasi sort tertentu).
+        DECLARE @Sql NVARCHAR(MAX) = N'
+            ;WITH Base AS (
+                SELECT
+                    b.bundle_id, b.serial, b.bundle_no, p.bundle_letter, b.qty,
+                    a.article_id, a.article_name,
+                    p.project_id, p.project_name,
+                    spd.size_name,
+                    rr.resource_name AS tailor_name,
+                    emp.employee_name AS employee_name,
+                    ll.workflow_log_id AS last_log_id,
+                    ll.received_at AS last_received_at,
+                    ll.target_division_id AS last_target_division_id,
+                    ll.created_at AS last_created_at,
+                    law.step_name AS last_step_name,
+                    fbs.division_id AS first_bundle_division_id,
+                    fbs.step_name AS first_bundle_step_name,
+                    lastAgg.qty_done AS last_qty_done,
+                    lastAgg.qty_reject AS last_qty_reject
+                FROM bundles b
+                INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
+                INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
+                INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                LEFT JOIN resources rr ON rr.resource_id = b.resource_id
+                LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
+                OUTER APPLY (
+                    SELECT TOP 1 awl.workflow_log_id, awl.article_workflow_id, awl.received_at,
+                                 awl.target_division_id, awl.created_at
+                    FROM article_workflow_logs awl
+                    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                    WHERE awl.bundle_id = b.bundle_id AND awl.deleted_at IS NULL
+                    ORDER BY aw.sort_order DESC, awl.created_at DESC
+                ) ll
+                LEFT JOIN article_workflows law ON law.article_workflow_id = ll.article_workflow_id
+                OUTER APPLY (
+                    SELECT TOP 1 aw2.division_id, aw2.step_name
+                    FROM article_workflows aw2
+                    WHERE aw2.article_id = b.article_id AND aw2.deleted_at IS NULL AND aw2.requires_bundle = 1
+                    ORDER BY aw2.sort_order ASC
+                ) fbs
+                OUTER APPLY (
+                    SELECT ISNULL(SUM(l2.qty_ok), 0) AS qty_done,
+                           ISNULL(SUM(l2.qty_reject_print + l2.qty_reject_fabric + l2.qty_reject_sewing + l2.qty_reject_rework + l2.qty_lost), 0) AS qty_reject
+                    FROM article_workflow_logs l2
+                    WHERE l2.bundle_id = b.bundle_id AND l2.article_workflow_id = ll.article_workflow_id AND l2.deleted_at IS NULL
+                ) lastAgg
+                WHERE b.deleted_at IS NULL
+            ),
+            Classified AS (
+                SELECT *,
+                    CASE
+                        WHEN last_log_id IS NULL THEN ''BELUM_MULAI''
+                        WHEN last_received_at IS NULL AND last_target_division_id IS NOT NULL THEN ''TRANSIT''
+                        WHEN last_received_at IS NOT NULL AND last_target_division_id IS NOT NULL THEN ''DIKERJAKAN''
+                        ELSE ''SELESAI''
+                    END AS status_calc,
+                    CASE
+                        WHEN last_log_id IS NULL THEN first_bundle_division_id
+                        WHEN last_target_division_id IS NOT NULL THEN last_target_division_id
+                        ELSE NULL
+                    END AS posisi_division_id,
+                    CASE WHEN last_log_id IS NULL THEN first_bundle_step_name ELSE last_step_name END AS step_name_calc,
+                    CASE
+                        WHEN last_log_id IS NULL THEN NULL
+                        WHEN last_received_at IS NOT NULL THEN last_received_at
+                        ELSE last_created_at
+                    END AS updated_info
+                FROM Base
+            )
+            SELECT
+                c.bundle_id AS BundleId,
+                c.serial AS Serial,
+                c.bundle_no AS BundleNo,
+                c.bundle_letter AS BundleLetter,
+                c.project_name AS ProjectName,
+                c.article_name AS ArticleName,
+                c.size_name AS SizeName,
+                c.qty AS Qty,
+                c.status_calc AS Status,
+                pd.division_name AS PosisiDivisionName,
+                c.step_name_calc AS StepName,
+                c.tailor_name AS TailorName,
+                c.updated_info AS UpdatedInfo,
+                c.employee_name AS EmployeeName,
+                c.last_qty_done AS QtyOk,
+                c.last_qty_reject AS QtyReject
+            FROM Classified c
+            LEFT JOIN divisions pd ON pd.division_id = c.posisi_division_id
+            WHERE (@ProjectId IS NULL OR c.project_id = @ProjectId)
+              AND (@ArticleId IS NULL OR c.article_id = @ArticleId)
+              AND (@DivisionId IS NULL OR c.posisi_division_id = @DivisionId)
+              AND (@Status IS NULL OR c.status_calc = @Status)
+            ORDER BY ' + CAST(@OrderCol AS NVARCHAR(MAX)) + N' ' + CAST(@Dir AS NVARCHAR(MAX)) + CAST(@Tiebreak AS NVARCHAR(MAX)) + N'
+            OFFSET (@PageNumber - 1) * @PageSize ROWS
+            FETCH NEXT @PageSize ROWS ONLY;';
+
+        EXEC sp_executesql @Sql,
+            N'@ProjectId INT, @ArticleId INT, @DivisionId INT, @Status VARCHAR(20), @PageNumber INT, @PageSize INT',
+            @ProjectId, @ArticleId, @DivisionId, @Status, @PageNumber, @PageSize;
+    END
 END;
 GO
 
@@ -271,10 +391,11 @@ BEGIN
         a.article_name AS ArticleName,
         spd.size_name AS SizeName,
         b.qty AS Qty,
-        ISNULL(b.resource_person_name, r.resource_name) AS TailorName,
+        r.resource_name AS TailorName,
         @Status AS Status,
         pd.division_name AS PosisiDivisionName,
-        @StepNameCalc AS StepName
+        @StepNameCalc AS StepName,
+        emp.employee_name AS EmployeeName
     FROM bundles b
     INNER JOIN articles a ON a.article_id = b.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
@@ -282,10 +403,14 @@ BEGIN
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = b.resource_id
     LEFT JOIN divisions pd ON pd.division_id = @PosisiDivisionId
+    LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
     WHERE b.bundle_id = @BundleId;
 
     -- 2. Timeline
+    -- Prompt 36: Id (workflow_log_id) ditambahkan supaya tombol "Edit" (Super Admin) di tab
+    -- Riwayat bisa memicu modal edit per baris -- kolom murni tambahan.
     SELECT
+        awl.workflow_log_id AS Id,
         aw.step_name AS StepName,
         d.division_name AS DivisionName,
         td.division_name AS TargetDivisionName,

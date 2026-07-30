@@ -59,7 +59,11 @@ BEGIN
 
     -- Timeline khusus bundle ini (bukan digabung level artikel lagi) dipakai ulang untuk
     -- result set 1 & 2.
+    -- Prompt 36: Id (workflow_log_id) ditambahkan supaya client bisa memicu modal "Edit"
+    -- per baris timeline (fitur Super Admin, /b/{serial}) -- kolom murni tambahan, tidak
+    -- mengubah urutan/isi kolom lain.
     DECLARE @Timeline TABLE (
+        Id INT,
         ArticleWorkflowId INT, StepName VARCHAR(255), SortOrder INT,
         SizeName VARCHAR(255) NULL,
         DivisionName VARCHAR(255) NULL,
@@ -72,7 +76,7 @@ BEGIN
     );
 
     INSERT INTO @Timeline
-    SELECT aw.article_workflow_id, aw.step_name, aw.sort_order,
+    SELECT awl.workflow_log_id, aw.article_workflow_id, aw.step_name, aw.sort_order,
            spd.size_name,
            d.division_name,
            r.resource_name,
@@ -110,22 +114,24 @@ BEGIN
         a.style AS Style,
         a.color AS Color,
         p.project_name AS ProjectName,
-        ISNULL(r.resource_name, b.resource_person_name) AS Line,
+        r.resource_name AS Line,
         @LastStepName AS LastStepName,
         CASE WHEN @LastStepName IS NULL THEN NULL
              WHEN @LastReceivedAt IS NOT NULL THEN 'Diterima'
              ELSE 'Selesai' END AS LastStatus,
-        @LastDivisionName AS LastDivisionName
+        @LastDivisionName AS LastDivisionName,
+        emp.employee_name AS EmployeeName
     FROM bundles b
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     INNER JOIN articles a ON a.article_id = b.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
     LEFT JOIN resources r ON r.resource_id = b.resource_id
+    LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
     WHERE b.bundle_id = @BundleId;
 
     -- 2. Timeline lengkap
-    SELECT StepName, SortOrder, SizeName, DivisionName, ResourceName,
+    SELECT Id, StepName, SortOrder, SizeName, DivisionName, ResourceName,
            QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost, LogType,
            TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark
     FROM @Timeline

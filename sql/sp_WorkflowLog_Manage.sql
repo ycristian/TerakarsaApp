@@ -99,6 +99,10 @@
 --   validasi kuota QTY_EXCEED/QTY_SHORT (di luar cakupan Prompt 12e) -- nilai disimpan apa
 --   adanya, murni koreksi data sebelum diterima. Mengisi trio updated_at/updated_by/
 --   updated_by_resource_id (Prompt 12d) seperti UPDATE.
+-- Fix (pasca Prompt 34): auto-terima DIHITUNG ULANG di sini juga (lihat blok komentar Prompt
+-- 34 di bawah) -- kalau step @NewTargetDivisionId ber-auto_receive = 1, baris yang direvisi
+-- ini langsung diterima lagi dalam transaksi yang sama. Ini membalik larangan asli Prompt 34
+-- yang mengecualikan REVISE_HANDOVER.
 --
 -- Prompt 18 -- penguncian project: CREATE/UPDATE/RECEIVE/UNRECEIVE ditolak kalau project
 -- artikel bersangkutan berstatus manual (ON_HOLD/COMPLETED/CANCELLED) -- pesan RAISERROR
@@ -127,6 +131,17 @@
 -- SIS_Station_PendingReceives/PendingHandover & SIS_Bundle_ScanInfo).
 -- @ActingDivisionId (dari token stasiun) WAJIB = divisi step (divisi pemilik step tempat
 -- reject/hilang tercatat) -- hanya divisi itu yang boleh menyesuaikan.
+
+-- Prompt 34 -- auto-terima per step: step penerima (step hidup berikutnya, sort_order
+-- terkecil > step ini, division_id = target_division_id) bisa ber-flag article_workflows
+-- .auto_receive = 1 -- kalau ya, @Action = 'CREATE' langsung mengisi received_at/
+-- received_by_resource_id (= @ResourceId, pelaksana pengirim, boleh NULL)/received_remark
+-- ('Otomatis: auto-terima') pada baris yang sama, tanpa RECEIVE manual. Tidak retroaktif
+-- (hanya dihitung saat CREATE); RECEIVE/UNRECEIVE/UPDATE/CANCEL_HANDOVER/DELETE tidak
+-- berubah -- UNRECEIVE tetap bisa membatalkan baris auto-received. REVISE_HANDOVER awalnya
+-- juga dikecualikan, tapi lihat "Fix (pasca Prompt 34)" di atas action REVISE_HANDOVER --
+-- belakangan JUGA dihitung ulang (dibalik atas permintaan pengguna, skenario Batal
+-- Terima -> Revisi harus bisa auto-terima lagi).
 
 SET ANSI_NULLS ON;
 GO
@@ -217,16 +232,36 @@ BEGIN
             RETURN;
         END
 
+        -- Total 0 di semua kategori tidak boleh dikirim sebagai hasil (baris kosong tidak
+        -- pernah "diterima" -- lihat catatan qty_ok = 0 di sp_Bundle_ScanInfo.sql -- dan cuma
+        -- jadi sampah timeline/posisi bundle, mis. artefak migrasi Prompt 33 untuk B26-000561).
+        IF @QtyOk = 0 AND @QtyRejectPrint = 0 AND @QtyRejectFabric = 0 AND @QtyRejectSewing = 0
+           AND @QtyRejectRework = 0 AND @QtyLost = 0
+        BEGIN
+            RAISERROR('Total qty tidak boleh 0. Isi minimal satu kategori (OK/reject/hilang).', 16, 1);
+            RETURN;
+        END
+
         DECLARE @MaxSort INT;
         SELECT @MaxSort = MAX(sort_order) FROM article_workflows WHERE article_id = @ArticleId AND deleted_at IS NULL;
 
         -- Divisi tujuan terkunci sesuai urutan workflow: divisi step hidup berikutnya
         -- (NULL kalau step ini adalah step terakhir artikel -- tidak ada serah lanjutan).
-        DECLARE @ComputedTargetDivisionId INT;
-        SELECT TOP 1 @ComputedTargetDivisionId = division_id
+        -- Prompt 34: step penerima yang sama juga menentukan auto-terima -- kalau step
+        -- penerima itu ber-auto_receive = 1, baris ini langsung diterima saat insert.
+        DECLARE @ComputedTargetDivisionId INT, @ComputedTargetAutoReceive BIT;
+        SELECT TOP 1 @ComputedTargetDivisionId = division_id, @ComputedTargetAutoReceive = auto_receive
         FROM article_workflows
         WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @SortOrder
         ORDER BY sort_order ASC;
+
+        DECLARE @AutoReceivedAt DATETIME2 = NULL, @AutoReceivedByResourceId INT = NULL, @AutoReceivedRemark VARCHAR(500) = NULL;
+        IF ISNULL(@ComputedTargetAutoReceive, 0) = 1
+        BEGIN
+            SET @AutoReceivedAt = SYSDATETIME();
+            SET @AutoReceivedByResourceId = @ResourceId;
+            SET @AutoReceivedRemark = 'Otomatis: auto-terima';
+        END
 
         IF @RequiresBundle = 0
         BEGIN
@@ -351,12 +386,14 @@ BEGIN
         INSERT INTO article_workflow_logs (
             article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
             qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
-            remark, target_division_id, created_at, created_by
+            remark, target_division_id, received_at, received_by_resource_id, received_remark,
+            created_at, created_by
         )
         VALUES (
             @ArticleWorkflowId, @BundleId, @ArticleSizeId, @DivisionId, @ResourceId, NULL,
             @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
-            @Remark, @ComputedTargetDivisionId, SYSDATETIME(), @UserId
+            @Remark, @ComputedTargetDivisionId, @AutoReceivedAt, @AutoReceivedByResourceId, @AutoReceivedRemark,
+            SYSDATETIME(), @UserId
         );
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
@@ -438,6 +475,13 @@ BEGIN
            OR @QtyRejectRework < 0 OR @QtyLost < 0
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
+            RETURN;
+        END
+
+        IF @QtyOk = 0 AND @QtyRejectPrint = 0 AND @QtyRejectFabric = 0 AND @QtyRejectSewing = 0
+           AND @QtyRejectRework = 0 AND @QtyLost = 0
+        BEGIN
+            RAISERROR('Total qty tidak boleh 0. Isi minimal satu kategori (OK/reject/hilang).', 16, 1);
             RETURN;
         END
 
@@ -777,6 +821,20 @@ BEGIN
             RETURN;
         END
 
+        -- Fix (pasca Prompt 34): REVISE_HANDOVER kini JUGA memicu auto-terima -- kalau step
+        -- penerima (@NewTargetDivisionId) ber-auto_receive = 1, baris yang direvisi ini
+        -- langsung diterima lagi dalam transaksi yang sama. Kasus nyata: Trim membatalkan
+        -- terima (UNRECEIVE) baris QC yang salah input, QC perbaiki lewat Revisi -- baris
+        -- harus otomatis WIP lagi di Trim tanpa Trim menekan Terima manual kedua kalinya.
+        -- Tidak retroaktif ke baris lain -- hanya baris @Id ini, dalam transaksi ini saja.
+        -- Ini membalik larangan eksplisit di prompt_34_auto_receive.md ("REVISE_HANDOVER
+        -- TIDAK men-trigger auto-terima") atas permintaan pengguna setelah skenario ini
+        -- ditemukan di lapangan.
+        DECLARE @RevAutoReceive BIT = 0;
+        SELECT TOP 1 @RevAutoReceive = ISNULL(auto_receive, 0)
+        FROM article_workflows
+        WHERE article_id = @RevArticleId AND division_id = @NewTargetDivisionId AND deleted_at IS NULL;
+
         UPDATE article_workflow_logs
         SET qty_ok = @QtyOk,
             qty_reject_print = @QtyRejectPrint,
@@ -787,6 +845,9 @@ BEGIN
             remark = @Remark,
             target_division_id = @NewTargetDivisionId,
             resource_id = ISNULL(@ResourceId, resource_id),
+            received_at = CASE WHEN @RevAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
+            received_by_resource_id = CASE WHEN @RevAutoReceive = 1 THEN ISNULL(@ResourceId, resource_id) ELSE NULL END,
+            received_remark = CASE WHEN @RevAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
             updated_at = SYSDATETIME(),
             updated_by = @UserId,
             updated_by_resource_id = @UpdatedByResourceId
@@ -989,5 +1050,93 @@ BEGIN
         RAISERROR('Action tidak valid.', 16, 1);
         RETURN;
     END
+END;
+GO
+
+-- Fix: "Cetak Reject" -- cetak nota reject untuk SATU baris article_workflow_logs tertentu
+-- (per baris/per workflow, bukan per bundle atau agregat), dipakai tombol yang muncul di
+-- timeline BundleScanCard (station) dan tab Riwayat ReportBundle -- HANYA ditampilkan client
+-- kalau total reject+hilang baris itu > 0 (ditegakkan ulang di sini). Payload dirakit ulang
+-- dari data terkini article_workflow_logs (bukan dikirim client) -- pola sama dengan
+-- SIS_Bundle_ReprintLabel/SIS_Pack_ReprintLabel. @Copies (default 1) jumlah lembar dicetak.
+CREATE OR ALTER PROCEDURE SIS_WorkflowLog_PrintReject
+    @WorkflowLogId INT,
+    @Copies        INT = 1,
+    @UserId        INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM article_workflow_logs WHERE workflow_log_id = @WorkflowLogId AND deleted_at IS NULL)
+    BEGIN
+        RAISERROR('Baris log tidak ditemukan.', 16, 1);
+        RETURN;
+    END
+
+    IF @Copies IS NULL OR @Copies < 1
+    BEGIN
+        RAISERROR('Jumlah label harus minimal 1.', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (
+        SELECT 1 FROM article_workflow_logs
+        WHERE workflow_log_id = @WorkflowLogId AND deleted_at IS NULL
+          AND (qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost) > 0
+    )
+    BEGIN
+        RAISERROR('Baris ini tidak memiliki reject.', 16, 1);
+        RETURN;
+    END
+
+    -- Size baris ber-bundle melekat di bundles (asz2/spd2), baris non-bundle di
+    -- article_workflow_logs.article_size_id sendiri (asz/spd) -- pola sama dengan
+    -- SIS_Pack_Manage COALESCE size lookup.
+    DECLARE @Payload NVARCHAR(MAX) = (
+        SELECT
+            awl.workflow_log_id AS workflow_log_id,
+            bd.serial AS bundle_serial,
+            bd.bundle_no AS bundle_no,
+            pr.bundle_letter AS bundle_letter,
+            pr.project_name AS project_name,
+            a.article_name AS article_name,
+            COALESCE(spd.size_name, spd2.size_name) AS size_name,
+            aw.step_name AS step_name,
+            d.division_name AS division_name,
+            awl.qty_reject_print AS qty_reject_print,
+            awl.qty_reject_fabric AS qty_reject_fabric,
+            awl.qty_reject_sewing AS qty_reject_sewing,
+            awl.qty_reject_rework AS qty_reject_rework,
+            awl.qty_lost AS qty_lost,
+            awl.remark AS remark,
+            r.resource_name AS resource_name,
+            awl.created_at AS created_at
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        INNER JOIN articles a ON a.article_id = aw.article_id
+        INNER JOIN projects pr ON pr.project_id = a.project_id
+        LEFT JOIN bundles bd ON bd.bundle_id = awl.bundle_id
+        LEFT JOIN divisions d ON d.division_id = awl.division_id
+        LEFT JOIN resources r ON r.resource_id = awl.resource_id
+        LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
+        LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+        LEFT JOIN article_sizes asz2 ON asz2.article_size_id = bd.article_size_id
+        LEFT JOIN size_pack_details spd2 ON spd2.size_pack_detail_id = asz2.size_pack_detail_id
+        WHERE awl.workflow_log_id = @WorkflowLogId
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+    );
+
+    DECLARE @Copy INT = 0;
+    DECLARE @LastPrintJobId INT;
+    WHILE @Copy < @Copies
+    BEGIN
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+        VALUES ('REJECT_NOTE', @WorkflowLogId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+
+        SET @LastPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
+        SET @Copy += 1;
+    END
+
+    SELECT @LastPrintJobId AS NewPrintJobId;
 END;
 GO

@@ -71,7 +71,7 @@ public class Worker : BackgroundService
 
     private async Task ProcessJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
-        if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL")
+        if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL" && job.JobType != "REJECT_NOTE")
         {
             Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung.");
             await ReportSafeAsync(job.PrintJobId, false, "Job type belum didukung.", ct);
@@ -87,6 +87,12 @@ public class Worker : BackgroundService
                 var packPayload = TsplBuilder.ParsePackLabelPayload(job.Payload);
                 serial = packPayload.Serial;
                 tspl = TsplBuilder.BuildPackLabel(packPayload);
+            }
+            else if (job.JobType == "REJECT_NOTE")
+            {
+                var rejectPayload = TsplBuilder.ParseRejectNotePayload(job.Payload);
+                serial = rejectPayload.BundleSerial ?? $"WL#{rejectPayload.WorkflowLogId}";
+                tspl = TsplBuilder.BuildRejectNote(rejectPayload);
             }
             else
             {

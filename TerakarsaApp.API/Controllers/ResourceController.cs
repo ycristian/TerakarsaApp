@@ -14,10 +14,12 @@ namespace TerakarsaApp.API.Controllers;
 public class ResourceController : ControllerBase
 {
     private readonly ResourceService _resourceService;
+    private readonly EmployeeService _employeeService;
 
-    public ResourceController(ResourceService resourceService)
+    public ResourceController(ResourceService resourceService, EmployeeService employeeService)
     {
         _resourceService = resourceService;
+        _employeeService = employeeService;
     }
 
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -42,6 +44,18 @@ public class ResourceController : ControllerBase
         var resource = await _resourceService.GetByIdAsync(id);
         if (resource is null) return NotFound();
         return Ok(resource);
+    }
+
+    // Prompt 32: dropdown "Penjahit" (employee) cascading di bawah dropdown Line di
+    // BundleManager.razor -- module SAMA dengan active-by-division di atas (MASTER_RESOURCE)
+    // supaya user yang sudah bisa pilih Line juga bisa pilih penjahitnya, tanpa perlu
+    // MASTER_EMPLOYEE. Route di-override ke luar "api/resource" karena ini secara konsep
+    // lookup employee, bukan resource.
+    [HttpGet("~/api/employees/lookup")]
+    public async Task<IActionResult> GetEmployeeLookup([FromQuery] int resourceId)
+    {
+        var result = await _employeeService.GetActiveByResourceAsync(resourceId);
+        return Ok(result);
     }
 
     [HttpPost]

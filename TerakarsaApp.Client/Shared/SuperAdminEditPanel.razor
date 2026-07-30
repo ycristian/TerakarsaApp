@@ -1,0 +1,409 @@
+@* Prompt 36: modal "Edit Log" (per baris timeline) & "Edit Bundle" (info bundle) untuk user
+   SUPER_ADMIN, dipakai bersama oleh /b/{serial} (lewat BundleScanCard) dan /report-bundle
+   (tab Riwayat) -- satu komponen, jangan diduplikasi ke masing-masing halaman. Lihat
+   SIS_SuperAdmin_Manage @Action = 'EDIT_LOG'/'EDIT_BUNDLE'. *@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Resources
+@using TerakarsaApp.Shared.SuperAdmin
+@inject SuperAdminApiService SuperAdminApi
+
+@if (showLogModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Log — @(logInfo?.StepName ?? "")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseLogModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (logInfo is null)
+                    {
+                        @if (!string.IsNullOrEmpty(logLoadError))
+                        {
+                            <div class="alert alert-danger mb-0">@logLoadError</div>
+                        }
+                        else
+                        {
+                            <p class="mb-0">Memuat...</p>
+                        }
+                    }
+                    else
+                    {
+                        @if (logInfo.LogType == "ADJUSTMENT")
+                        {
+                            <div class="alert alert-info py-2">
+                                Baris penyesuaian: jumlah keenam qty di bawah harus tetap 0.
+                            </div>
+                        }
+
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="form-label">Qty OK</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyOk" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Reject Print</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyRejectPrint" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Reject Bahan</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyRejectFabric" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Reject Jahit</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyRejectSewing" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Reject Rework</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyRejectRework" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Hilang</label>
+                                <input type="number" class="form-control form-control-lg" @bind="logForm.QtyLost" />
+                            </div>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Pelaksana</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="logResourceOptions" Value="@(logForm.ResourceId ?? 0)"
+                                              ValueChanged="@((int v) => logForm.ResourceId = v > 0 ? v : null)"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari pelaksana..." />
+                        </div>
+
+                        <div class="form-text mb-2">
+                            Masuk: @logInfo.QtyMasuk
+                            @if (logInfo.LowerBound is not null)
+                            {
+                                <text> • Batas bawah (total step berikutnya): @logInfo.LowerBound</text>
+                            }
+                        </div>
+
+                        <label class="form-label">Catatan</label>
+                        <textarea class="form-control" rows="2" @bind="logForm.Remark"></textarea>
+
+                        @if (!string.IsNullOrEmpty(logError) && logError.StartsWith("QTY_EXCEED|"))
+                        {
+                            <div class="alert alert-warning mt-2 mb-0">
+                                <p class="mb-2">@(logError["QTY_EXCEED|".Length..])</p>
+                                <p class="mb-2">Yakin tetap simpan?</p>
+                                <button class="btn btn-warning btn-sm" disabled="@isSavingLog" @onclick="ConfirmSaveLogExceed">Ya, tetap simpan</button>
+                            </div>
+                        }
+                        else if (!string.IsNullOrEmpty(logError))
+                        {
+                            <div class="alert alert-danger mt-2 mb-0">@logError</div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseLogModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@(isSavingLog || logInfo is null)" @onclick="SaveLog">
+                        @(isSavingLog ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showBundleModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Bundle — @(bundleDetail?.Bundle.Serial ?? "")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBundleModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (bundleDetail is null)
+                    {
+                        @if (!string.IsNullOrEmpty(bundleLoadError))
+                        {
+                            <div class="alert alert-danger mb-0">@bundleLoadError</div>
+                        }
+                        else
+                        {
+                            <p class="mb-0">Memuat...</p>
+                        }
+                    }
+                    else
+                    {
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="form-label">Ukuran</label>
+                                <select class="form-select" @bind="bundleForm.ArticleSizeId">
+                                    @foreach (var s in bundleDetail.SizeOptions)
+                                    {
+                                        <option value="@s.Id">@s.SizeName</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Qty</label>
+                                <input type="number" min="1" class="form-control" @bind="bundleForm.Qty" />
+                            </div>
+                        </div>
+
+                        <div class="form-text mb-2">Batas bawah (total step berikutnya): @bundleDetail.Bundle.LowerBound</div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Line</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="bundleResourceOptions" Value="@(bundleForm.ResourceId ?? 0)" ValueChanged="HandleBundleResourceChanged"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari line..." />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Penjahit</label>
+                            <SearchableSelect TItem="EmployeeLookupDto" Items="bundleEmployeeOptions" Value="@(bundleForm.EmployeeId ?? 0)"
+                                              ValueChanged="@((int v) => bundleForm.EmployeeId = v > 0 ? v : null)"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Disabled="@((bundleForm.ResourceId ?? 0) <= 0)"
+                                              Placeholder="Cari penjahit..." />
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(bundleError))
+                        {
+                            <div class="alert alert-danger mt-2 mb-0">@bundleError</div>
+                        }
+
+                        @if (offerReprint)
+                        {
+                            <div class="alert alert-warning mt-2 d-flex justify-content-between align-items-center mb-0">
+                                <span>Ukuran/qty berubah — label lama tidak lagi sesuai.</span>
+                                <button class="btn btn-sm btn-outline-dark" disabled="@isReprinting" @onclick="ReprintBundle">
+                                    @(isReprinting ? "Mencetak..." : "Cetak Ulang")
+                                </button>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseBundleModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@(isSavingBundle || bundleDetail is null)" @onclick="SaveBundle">
+                        @(isSavingBundle ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // Dipanggil parent supaya bisa refresh data (timeline/riwayat) setelah simpan sukses.
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    // --- Edit Log ---
+    private bool showLogModal = false;
+    private int logId;
+    private SuperAdminLogEditInfoDto? logInfo;
+    private SuperAdminEditLogRequest logForm = new();
+    private List<ResourceLookupDto> logResourceOptions = new();
+    private bool isSavingLog = false;
+    private string logError = string.Empty;
+    // Fix: pesan kalau GetLogEditInfoAsync gagal (404/exception) -- tanpa ini modal diam
+    // di "Memuat..." selamanya, tidak ada petunjuk apa yang salah.
+    private string logLoadError = string.Empty;
+
+    public async Task OpenEditLogAsync(int workflowLogId)
+    {
+        logId = workflowLogId;
+        logInfo = null;
+        logError = string.Empty;
+        logLoadError = string.Empty;
+        showLogModal = true;
+        // Dipanggil dari parent lewat @ref (bukan event UI di markup komponen ini) --
+        // Blazor tidak otomatis me-render ulang komponen ini, jadi StateHasChanged manual
+        // wajib di sini (tampilkan "Memuat...") dan lagi setelah data datang di bawah.
+        StateHasChanged();
+
+        try
+        {
+            logInfo = await SuperAdminApi.GetLogEditInfoAsync(workflowLogId);
+        }
+        catch (Exception ex)
+        {
+            logLoadError = $"Gagal memuat data log: {ex.Message}";
+        }
+
+        if (logInfo is null)
+        {
+            if (string.IsNullOrEmpty(logLoadError))
+                logLoadError = "Log tidak ditemukan.";
+            StateHasChanged();
+            return;
+        }
+
+        logForm = new SuperAdminEditLogRequest
+        {
+            QtyOk = logInfo.QtyOk,
+            QtyRejectPrint = logInfo.QtyRejectPrint,
+            QtyRejectFabric = logInfo.QtyRejectFabric,
+            QtyRejectSewing = logInfo.QtyRejectSewing,
+            QtyRejectRework = logInfo.QtyRejectRework,
+            QtyLost = logInfo.QtyLost,
+            ResourceId = logInfo.ResourceId,
+            Remark = logInfo.Remark
+        };
+
+        logResourceOptions = await SuperAdminApi.GetResourcesByDivisionAsync(logInfo.DivisionId);
+        StateHasChanged();
+    }
+
+    private void CloseLogModal()
+    {
+        showLogModal = false;
+    }
+
+    private Task SaveLog() => DoSaveLog(false);
+    private Task ConfirmSaveLogExceed() => DoSaveLog(true);
+
+    private async Task DoSaveLog(bool confirmExceed)
+    {
+        logError = string.Empty;
+
+        // Fix: cek dulu di klien (server tetap menegakkan ulang) supaya user tidak perlu
+        // round-trip untuk kesalahan input yang jelas.
+        if (logInfo?.LogType != "ADJUSTMENT"
+            && logForm.QtyOk == 0 && logForm.QtyRejectPrint == 0 && logForm.QtyRejectFabric == 0
+            && logForm.QtyRejectSewing == 0 && logForm.QtyRejectRework == 0 && logForm.QtyLost == 0)
+        {
+            logError = "Total qty tidak boleh 0. Isi minimal satu kategori (OK/reject/hilang).";
+            return;
+        }
+
+        if (logForm.ResourceId is null or <= 0)
+        {
+            logError = "Pelaksana wajib diisi.";
+            return;
+        }
+
+        isSavingLog = true;
+
+        logForm.ConfirmExceed = confirmExceed;
+        var result = await SuperAdminApi.EditLogAsync(logId, logForm);
+        isSavingLog = false;
+
+        if (result.Success)
+        {
+            showLogModal = false;
+            await OnSaved.InvokeAsync();
+        }
+        else
+        {
+            logError = result.Error;
+        }
+    }
+
+    // --- Edit Bundle ---
+    private bool showBundleModal = false;
+    private int bundleId;
+    private SuperAdminBundleDetailDto? bundleDetail;
+    private SuperAdminEditBundleRequest bundleForm = new();
+    private List<ResourceLookupDto> bundleResourceOptions = new();
+    private List<EmployeeLookupDto> bundleEmployeeOptions = new();
+    private bool isSavingBundle = false;
+    private string bundleError = string.Empty;
+    // Fix: pesan kalau GetBundleDetailAsync gagal (404/exception) -- sama alasan dengan
+    // logLoadError di atas.
+    private string bundleLoadError = string.Empty;
+    private bool offerReprint = false;
+    private bool isReprinting = false;
+
+    public async Task OpenEditBundleAsync(int id)
+    {
+        bundleId = id;
+        bundleDetail = null;
+        bundleError = string.Empty;
+        bundleLoadError = string.Empty;
+        offerReprint = false;
+        showBundleModal = true;
+        // Dipanggil dari parent lewat @ref -- lihat catatan StateHasChanged di OpenEditLogAsync.
+        StateHasChanged();
+
+        try
+        {
+            bundleDetail = await SuperAdminApi.GetBundleDetailAsync(id);
+        }
+        catch (Exception ex)
+        {
+            bundleLoadError = $"Gagal memuat data bundle: {ex.Message}";
+        }
+
+        if (bundleDetail is null)
+        {
+            if (string.IsNullOrEmpty(bundleLoadError))
+                bundleLoadError = "Bundle tidak ditemukan.";
+            StateHasChanged();
+            return;
+        }
+
+        bundleForm = new SuperAdminEditBundleRequest
+        {
+            ArticleSizeId = bundleDetail.Bundle.ArticleSizeId,
+            Qty = bundleDetail.Bundle.Qty,
+            ResourceId = bundleDetail.Bundle.ResourceId,
+            EmployeeId = bundleDetail.Bundle.EmployeeId
+        };
+
+        if (bundleDetail.Bundle.LineDivisionId is not null)
+            bundleResourceOptions = await SuperAdminApi.GetResourcesByDivisionAsync(bundleDetail.Bundle.LineDivisionId.Value);
+
+        bundleEmployeeOptions = bundleForm.ResourceId is > 0
+            ? await SuperAdminApi.GetEmployeesByResourceAsync(bundleForm.ResourceId.Value)
+            : new();
+        StateHasChanged();
+    }
+
+    private void CloseBundleModal()
+    {
+        showBundleModal = false;
+    }
+
+    private async Task HandleBundleResourceChanged(int resourceId)
+    {
+        bundleForm.ResourceId = resourceId > 0 ? resourceId : null;
+        bundleForm.EmployeeId = null;
+        bundleEmployeeOptions = resourceId > 0 ? await SuperAdminApi.GetEmployeesByResourceAsync(resourceId) : new();
+    }
+
+    private async Task SaveBundle()
+    {
+        if (bundleDetail is null) return;
+
+        isSavingBundle = true;
+        bundleError = string.Empty;
+
+        var sizeOrQtyChanged = bundleForm.ArticleSizeId != bundleDetail.Bundle.ArticleSizeId
+            || bundleForm.Qty != bundleDetail.Bundle.Qty;
+
+        var result = await SuperAdminApi.EditBundleAsync(bundleId, bundleForm);
+        isSavingBundle = false;
+
+        if (result.Success)
+        {
+            offerReprint = sizeOrQtyChanged;
+            bundleDetail = await SuperAdminApi.GetBundleDetailAsync(bundleId);
+            await OnSaved.InvokeAsync();
+
+            if (!offerReprint)
+                showBundleModal = false;
+        }
+        else
+        {
+            bundleError = result.Error;
+        }
+    }
+
+    private async Task ReprintBundle()
+    {
+        isReprinting = true;
+        await SuperAdminApi.ReprintBundleAsync(bundleId);
+        isReprinting = false;
+        offerReprint = false;
+        showBundleModal = false;
+    }
+}

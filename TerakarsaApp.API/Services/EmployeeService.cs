@@ -59,6 +59,18 @@ public class EmployeeService
         return result.Items;
     }
 
+    // Prompt 32: dropdown "Penjahit" cascading di bawah dropdown Line/resource.
+    public async Task<List<EmployeeLookupDto>> GetActiveByResourceAsync(int resourceId)
+    {
+        var resourceIdParam = new SqlParameter("@ResourceId", resourceId);
+
+        return await _db.Database
+            .SqlQueryRaw<EmployeeLookupDto>(
+                "EXEC SIS_Employee_GetActiveByResource @ResourceId = @ResourceId",
+                resourceIdParam)
+            .ToListAsync();
+    }
+
     public async Task<EmployeeDto?> GetByIdAsync(int id)
     {
         var idParam = new SqlParameter("@Id", id);
@@ -73,7 +85,7 @@ public class EmployeeService
     public async Task<(bool Success, string Error)> CreateAsync(EmployeeCreateRequest request, int userId)
     {
         var actionParam = new SqlParameter("@Action", "CREATE");
-        var codeParam = new SqlParameter("@EmployeeCode", request.EmployeeCode);
+        var codeParam = new SqlParameter("@EmployeeCode", (object?)request.EmployeeCode ?? DBNull.Value);
         var nameParam = new SqlParameter("@EmployeeName", request.EmployeeName);
         var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);
@@ -98,7 +110,7 @@ public class EmployeeService
     {
         var actionParam = new SqlParameter("@Action", "UPDATE");
         var idParam = new SqlParameter("@Id", request.Id);
-        var codeParam = new SqlParameter("@EmployeeCode", request.EmployeeCode);
+        var codeParam = new SqlParameter("@EmployeeCode", (object?)request.EmployeeCode ?? DBNull.Value);
         var nameParam = new SqlParameter("@EmployeeName", request.EmployeeName);
         var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);

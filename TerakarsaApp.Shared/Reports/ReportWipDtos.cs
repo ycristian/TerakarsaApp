@@ -50,6 +50,8 @@ public class DivisionWipBundleDto
     public string SizeName { get; set; } = string.Empty;
     public int QtyOk { get; set; }
     public string? TailorName { get; set; }
+    // Prompt 32: penjahit dari master employees, diutamakan di atas TailorName (fallback lama).
+    public string? EmployeeName { get; set; }
     public string? StepName { get; set; }
     public DateTime EventAt { get; set; }
     public string? ReceivedByResourceName { get; set; }

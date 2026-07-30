@@ -482,9 +482,12 @@ GO
 
 -- Cetak ulang label: insert baris print_jobs baru, payload dirakit ulang dari data terkini
 -- (qty aktual terbaru bila sudah dikonfirmasi, badge PLAN/AKTUAL menyesuaikan).
+-- Fix: @Copies (default 1) -- jumlah lembar yang dicetak, pola sama dengan
+-- SIS_Bundle_ReprintLabel @Copies.
 CREATE OR ALTER PROCEDURE SIS_Pack_ReprintLabel
     @PackId        INT,
     @PublicBaseUrl VARCHAR(255) = NULL,
+    @Copies        INT = 1,
     @UserId        INT
 AS
 BEGIN
@@ -493,6 +496,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM packs WHERE pack_id = @PackId AND deleted_at IS NULL)
     BEGIN
         RAISERROR('Karung tidak ditemukan.', 16, 1);
+        RETURN;
+    END
+
+    IF @Copies IS NULL OR @Copies < 1
+    BEGIN
+        RAISERROR('Jumlah label harus minimal 1.', 16, 1);
         RETURN;
     END
 
@@ -521,9 +530,17 @@ BEGIN
         FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
     );
 
-    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-    VALUES ('PACK_LABEL', @PackId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+    DECLARE @Copy INT = 0;
+    DECLARE @LastPrintJobId INT;
+    WHILE @Copy < @Copies
+    BEGIN
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+        VALUES ('PACK_LABEL', @PackId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
 
-    SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
+        SET @LastPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
+        SET @Copy += 1;
+    END
+
+    SELECT @LastPrintJobId AS NewPrintJobId;
 END;
 GO

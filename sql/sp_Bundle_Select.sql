@@ -28,16 +28,19 @@ BEGIN
         b.sort_order AS SortOrder,
         b.resource_id AS ResourceId,
         r.resource_name AS ResourceName,
-        b.resource_person_name AS ResourcePersonName,
+        b.remarks AS Remarks,
         pj.LabelStatus AS LabelStatus,
         pj.PrintedAt AS PrintedAt,
-        b.created_at AS CreatedAt
+        b.created_at AS CreatedAt,
+        b.employee_id AS EmployeeId,
+        e.employee_name AS EmployeeName
     FROM bundles b
     INNER JOIN articles a ON a.article_id = b.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = b.resource_id
+    LEFT JOIN employees e ON e.employee_id = b.employee_id AND e.deleted_at IS NULL
     OUTER APPLY (
         SELECT TOP 1 pj2.[status] AS LabelStatus, pj2.printed_at AS PrintedAt
         FROM print_jobs pj2

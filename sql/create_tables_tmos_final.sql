@@ -177,7 +177,9 @@ CREATE TABLE employees(
    constraint FK_employees_resources foreign key references resources(resource_id),
  position_id int not null
    constraint FK_employees_positions foreign key references positions(position_id),
- employee_code varchar(30) not null,
+ employee_code varchar(30) null,    -- Prompt 35: boleh kosong -- penjahit yang belum
+                                     -- terdaftar kode tapi sudah mulai kerja bisa didaftar
+                                     -- dulu, kode diisi menyusul lewat Edit
  employee_name varchar(150) not null,
  join_date date null,
  created_at datetime2 not null default sysdatetime(),
@@ -375,6 +377,7 @@ CREATE TABLE workflow_template_steps(
    constraint FK_wts_divisions foreign key references divisions(division_id),
  sort_order int not null default 0,
  requires_bundle bit not null default 1,     -- 0 = step boleh log tanpa bundle (mis. Cutting)
+ auto_receive bit not null default 0,       -- serah ke step ini otomatis diterima (received_at terisi saat insert log)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -403,6 +406,7 @@ CREATE TABLE article_workflows(
    constraint FK_aw_divisions foreign key references divisions(division_id),
  sort_order int not null default 0,
  requires_bundle bit not null default 1,     -- salinan dari template step
+ auto_receive bit not null default 0,       -- salinan dari template step; selalu 0 utk step Bundling implisit
  is_bundling bit not null default 0,         -- step Bundling implisit (disisipkan sistem saat APPLY, bukan dari template)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
@@ -426,7 +430,11 @@ CREATE TABLE bundles(
  sort_order int not null default 0,
  resource_id int null
    constraint FK_bundles_resources foreign key references resources(resource_id),
- resource_person_name varchar(150) null,    -- nama penjahit
+ employee_id int null    -- Prompt 32: penjahit dari master employees, menggantikan resource_person_name lama
+   constraint FK_bundles_employees foreign key references employees(employee_id),
+ remarks varchar(500) null,    -- Prompt 35: dulu resource_person_name (nama penjahit teks bebas,
+                                -- DEPRECATED sejak Prompt 32) -- di-rename & direpurpose jadi catatan
+                                -- bebas bundle, diisi/diedit langsung lewat BundleManager.razor
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -748,7 +756,7 @@ CREATE UNIQUE INDEX UX_cost_components_code   ON cost_components(cost_component_
 CREATE UNIQUE INDEX UX_movement_types_code    ON material_movement_types(movement_type_code) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_adj_types_code         ON material_adjustment_types(adjustment_type_code) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_adj_reasons_code       ON material_adjustment_reasons(adjustment_reason_code) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX UX_employees_code         ON employees(employee_code)           WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_employees_code         ON employees(employee_code)           WHERE deleted_at IS NULL AND employee_code IS NOT NULL;
 CREATE UNIQUE INDEX UX_materials_code         ON materials(material_code)           WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_materials_sku          ON materials(sku)                     WHERE deleted_at IS NULL AND sku IS NOT NULL;
 CREATE UNIQUE INDEX UX_workflow_templates_code ON workflow_templates(workflow_code) WHERE deleted_at IS NULL;

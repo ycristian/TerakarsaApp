@@ -2,6 +2,9 @@
 -- Mutasi (create/update/delete) ada di sp_SizePack_Manage.sql (SIS_SizePack_Manage).
 -- GetById hanya mengembalikan header (EF SqlQueryRaw hanya baca 1 result set);
 -- detail diambil terpisah lewat SIS_SizePackDetail_GetBySizePack.
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
 SET ANSI_NULLS ON;
 GO
@@ -25,9 +28,14 @@ BEGIN
         FROM size_packs sp
         LEFT JOIN buyers b ON b.buyer_id = sp.buyer_id
         WHERE sp.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR sp.size_pack_name LIKE '%' + @SearchTerm + '%'
-               OR b.buyer_name LIKE '%' + @SearchTerm + '%');
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') tok
+                WHERE tok.value <> ''
+                  AND NOT (
+                        sp.size_pack_name LIKE '%' + tok.value + '%'
+                     OR b.buyer_name LIKE '%' + tok.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -48,9 +56,14 @@ BEGIN
             FROM size_packs sp
             LEFT JOIN buyers b ON b.buyer_id = sp.buyer_id
             WHERE sp.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR sp.size_pack_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR b.buyer_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
+                    WHERE tok.value <> ''''
+                      AND NOT (
+                            sp.size_pack_name LIKE ''%'' + tok.value + ''%''
+                         OR b.buyer_name LIKE ''%'' + tok.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';

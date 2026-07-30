@@ -23,6 +23,17 @@
 -- menyembunyikan COMPLETED/CANCELLED (hanya NOT_STARTED/STARTED/ON_GOING/ON_HOLD)
 -- supaya project selesai/batal tidak membanjiri daftar; harus pilih status itu secara
 -- eksplisit lewat dropdown utk melihatnya.
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
+--
+-- Fix: @OrderCol/@Dir/@Tiebreak (VARCHAR pendek) di-CAST ke NVARCHAR(MAX) sebelum
+-- disambung ke @Sql. Tanpa CAST, SQL Server menghitung tipe hasil concat dari panjang
+-- DEKLARASI variable non-MAX (bukan isi aktualnya) -- kalau hasil hitungan itu <= 4000,
+-- seluruh @Sql (walau variabelnya NVARCHAR(MAX)) diam-diam TERPOTONG 4000 karakter,
+-- memutus query di tengah OFFSET/FETCH (mis. jadi 'FETCH NEXT @Pag' -> error "Must
+-- declare the scalar variable" atau "Incorrect syntax"). Hanya muncul untuk kombinasi
+-- @SortColumn/@SortDirection tertentu yang membuat panjang @Sql pas di ambang 4000.
 
 SET ANSI_NULLS ON;
 GO
@@ -58,10 +69,15 @@ BEGIN
                         THEN 'STARTED' ELSE 'NOT_STARTED' END AS DerivedStatus
         ) ds
         WHERE p.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR p.project_name LIKE '%' + @SearchTerm + '%'
-               OR p.no_po LIKE '%' + @SearchTerm + '%'
-               OR b.buyer_name LIKE '%' + @SearchTerm + '%')
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') s
+                WHERE s.value <> ''
+                  AND NOT (
+                        p.project_name LIKE '%' + s.value + '%'
+                     OR p.no_po LIKE '%' + s.value + '%'
+                     OR b.buyer_name LIKE '%' + s.value + '%'
+                  )
+              ))
           AND (
                 (@Status IS NOT NULL AND ds.DerivedStatus = @Status)
                 OR (@Status IS NULL AND ds.DerivedStatus IN ('NOT_STARTED', 'STARTED', 'ON_GOING', 'ON_HOLD'))
@@ -130,15 +146,20 @@ BEGIN
                 ) sz
             ) prog
             WHERE p.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR p.project_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR p.no_po LIKE ''%'' + @SearchTerm + ''%''
-                   OR b.buyer_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') s
+                    WHERE s.value <> ''''
+                      AND NOT (
+                            p.project_name LIKE ''%'' + s.value + ''%''
+                         OR p.no_po LIKE ''%'' + s.value + ''%''
+                         OR b.buyer_name LIKE ''%'' + s.value + ''%''
+                      )
+                  ))
               AND (
                     (@Status IS NOT NULL AND ds.DerivedStatus = @Status)
                     OR (@Status IS NULL AND ds.DerivedStatus IN (''NOT_STARTED'', ''STARTED'', ''ON_GOING'', ''ON_HOLD''))
                   )
-            ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
+            ORDER BY ' + CAST(@OrderCol AS NVARCHAR(MAX)) + N' ' + CAST(@Dir AS NVARCHAR(MAX)) + CAST(@Tiebreak AS NVARCHAR(MAX)) + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
 

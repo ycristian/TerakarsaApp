@@ -98,9 +98,19 @@
 --   BundleCount/TotalBundleQty/TotalOrderQty untuk teks ringkas di kartu. SIS_Station_Counts
 --   DikerjakanCount diperluas sejalan (requires_bundle = 0 OR is_bundling = 1).
 --   SIS_Station_PendingHandover kini juga membawa ArticleId, IsBundling, dan data penjahit
---   bundle (BundleResourceId/BundleResourceName/BundleResourcePersonName, DIBEDAKAN dari
+--   bundle (BundleResourceId/BundleResourceName/BundleRemarks, DIBEDAKAN dari
 --   ResourceName yang di baris Bundling berarti pelaksana BUNDLING, bukan penjahit) --
 --   dipakai tombol Edit bundle di tab OUT (menggantikan Revisi/Batal Serah utk baris ini).
+--
+-- Fix: SIS_Station_InProgress kini juga membawa Remarks (bundles.remarks, Prompt 35) supaya
+--   pencarian teks di tab WIP bisa menyaring lewat catatan bebas bundle, bukan cuma
+--   project/artikel/step/serial. SIS_Station_ActiveWork (kedua cabang UNION) kini membawa
+--   WorkStartedAt -- dipakai default urutan tab WIP (waktu diterima/dikerjakan paling baru di
+--   atas, flat tanpa grouping project): waktu terakhir ADA aktivitas relevan kartu ini, yaitu
+--   yang TERBARU antara (a) received_at baris log step SEBELUMNYA yang mengantarkan pekerjaan
+--   ke step ini, dan (b) created_at baris log step ini sendiri (kalau sudah pernah dicicil).
+--   NULL kalau step ini belum tersentuh sama sekali (step pertama artikel, belum ada input) --
+--   client menaruhnya paling bawah.
 
 SET ANSI_NULLS ON;
 GO
@@ -205,6 +215,23 @@ BEGIN
                CAST(NULL AS INT) AS TotalBundleQty,
                CAST(NULL AS INT) AS TotalOrderQty,
                CAST(NULL AS NVARCHAR(MAX)) AS StockCuttingJson,
+               (
+                   SELECT MAX(ts) FROM (
+                       SELECT MAX(pr.received_at) AS ts
+                       FROM article_workflow_logs pr
+                       INNER JOIN article_workflows aw_prev ON aw_prev.article_workflow_id = pr.article_workflow_id
+                       WHERE aw_prev.article_id = aw.article_id AND aw_prev.deleted_at IS NULL
+                         AND aw_prev.sort_order = (
+                             SELECT MAX(aw_p2.sort_order) FROM article_workflows aw_p2
+                             WHERE aw_p2.article_id = aw.article_id AND aw_p2.deleted_at IS NULL AND aw_p2.sort_order < aw.sort_order
+                         )
+                         AND pr.received_at IS NOT NULL AND pr.deleted_at IS NULL
+                       UNION ALL
+                       SELECT MAX(self.created_at) AS ts
+                       FROM article_workflow_logs self
+                       WHERE self.article_workflow_id = aw.article_workflow_id AND self.deleted_at IS NULL
+                   ) x
+               ) AS WorkStartedAt,
                aw.sort_order AS SortOrder
         FROM article_workflows aw
         INNER JOIN articles a ON a.article_id = aw.article_id
@@ -304,6 +331,24 @@ BEGIN
                    ORDER BY spd6.sort_order
                    FOR JSON PATH
                ) AS StockCuttingJson,
+               (
+                   SELECT MAX(ts) FROM (
+                       SELECT MAX(pr.received_at) AS ts
+                       FROM article_workflow_logs pr
+                       INNER JOIN article_workflows aw_prev ON aw_prev.article_workflow_id = pr.article_workflow_id
+                       WHERE aw_prev.article_id = aw.article_id AND aw_prev.deleted_at IS NULL
+                         AND aw_prev.sort_order = (
+                             SELECT MAX(aw_p2.sort_order) FROM article_workflows aw_p2
+                             WHERE aw_p2.article_id = aw.article_id AND aw_p2.deleted_at IS NULL AND aw_p2.sort_order < aw.sort_order
+                         )
+                         AND pr.received_at IS NOT NULL AND pr.deleted_at IS NULL
+                       UNION ALL
+                       SELECT MAX(bun.created_at) AS ts
+                       FROM bundles bun
+                       INNER JOIN article_sizes asz7 ON asz7.article_size_id = bun.article_size_id
+                       WHERE asz7.article_id = aw.article_id AND bun.deleted_at IS NULL
+                   ) x
+               ) AS WorkStartedAt,
                aw.sort_order AS SortOrder
         FROM article_workflows aw
         INNER JOIN articles a ON a.article_id = aw.article_id
@@ -387,12 +432,17 @@ BEGIN
                WHERE aw3.article_id = a.article_id AND aw3.deleted_at IS NULL
                FOR JSON PATH
            ) AS TargetDivisionOptionsJson,
-           -- Prompt 24: data penjahit BUNDLE (bundles.resource_id/resource_person_name) --
+           -- Prompt 24: data penjahit BUNDLE (bundles.resource_id/employee_id) --
            -- DIBEDAKAN dari ResourceName di atas yang untuk baris Bundling berarti pelaksana
            -- bundling (awl.resource_id), bukan penjahit. Dipakai prefill modal Edit bundle.
+           -- Prompt 35: BundleRemarks (dulu BundleResourcePersonName/resource_person_name) --
+           -- catatan bebas bundle, dikirim balik apa adanya saat submit Edit dari station
+           -- (tidak ada input editor di station, hanya BundleManager.razor admin).
            b.resource_id AS BundleResourceId,
            bres.resource_name AS BundleResourceName,
-           b.resource_person_name AS BundleResourcePersonName
+           b.remarks AS BundleRemarks,
+           b.employee_id AS BundleEmployeeId,
+           bemp.employee_name AS BundleEmployeeName
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -403,6 +453,7 @@ BEGIN
     LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     LEFT JOIN resources r ON r.resource_id = awl.resource_id
     LEFT JOIN resources bres ON bres.resource_id = b.resource_id
+    LEFT JOIN employees bemp ON bemp.employee_id = b.employee_id AND bemp.deleted_at IS NULL
     WHERE awl.division_id = @DivisionId
       AND awl.deleted_at IS NULL
       AND (
@@ -495,7 +546,9 @@ BEGIN
             a.article_id, a.article_name, a.style, a.color,
             p.project_name, p.no_po,
             spd.size_name,
-            ISNULL(b.resource_person_name, rr.resource_name) AS tailor_name,
+            rr.resource_name AS tailor_name,
+            emp.employee_name AS employee_name,
+            b.remarks AS remarks,
             b.resource_id AS bundle_resource_id,
             rr.division_id AS bundle_resource_division_id
         FROM bundles b
@@ -504,6 +557,7 @@ BEGIN
         INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
         INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
         LEFT JOIN resources rr ON rr.resource_id = b.resource_id
+        LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
         WHERE b.deleted_at IS NULL
     ),
     -- Fix (susulan): step FRONTIER per bundle -- step ber-bundle PERTAMA (sort_order
@@ -553,6 +607,8 @@ BEGIN
         bs.size_name AS SizeName,
         bs.qty AS Qty,
         bs.tailor_name AS TailorName,
+        bs.employee_name AS EmployeeName,
+        bs.remarks AS Remarks,
         lr.received_at AS ReceivedAt,
         fr.ArticleWorkflowId AS NextArticleWorkflowId,
         fr.StepName AS NextStepName,

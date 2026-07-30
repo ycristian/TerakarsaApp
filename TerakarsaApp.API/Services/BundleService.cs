@@ -28,7 +28,7 @@ public class BundleService
     private class BundleCreateResultRow
     {
         public int NewId { get; set; }
-        // Prompt 24: nullable -- NULL kalau @SkipPrintJob = 1.
+        // Fix: nullable -- NULL kalau @PrintCopies = 0.
         public int? NewPrintJobId { get; set; }
         public int NewBundleNo { get; set; }
         public string? NewBundleLetter { get; set; }
@@ -72,18 +72,19 @@ public class BundleService
         var articleSizeIdParam = new SqlParameter("@ArticleSizeId", request.ArticleSizeId);
         var qtyParam = new SqlParameter("@Qty", request.Qty);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
-        var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var remarksParam = new SqlParameter("@Remarks", (object?)request.Remarks ?? DBNull.Value);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
         var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
-        var skipPrintJobParam = new SqlParameter("@SkipPrintJob", !request.AutoPrint);
+        var printCopiesParam = new SqlParameter("@PrintCopies", request.PrintCopies);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<BundleCreateResultRow>(
-                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @SkipPrintJob = @SkipPrintJob, @UserId = @UserId",
-                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, resourcePersonNameParam, publicBaseUrlParam, bundlingResourceIdParam, skipPrintJobParam, userIdParam)
+                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Remarks = @Remarks, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @PrintCopies = @PrintCopies, @UserId = @UserId",
+                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, employeeIdParam, remarksParam, publicBaseUrlParam, bundlingResourceIdParam, printCopiesParam, userIdParam)
                 .ToListAsync();
 
             var row = result.First();
@@ -102,15 +103,16 @@ public class BundleService
         var qtyParam = new SqlParameter("@Qty", request.Qty);
         var articleSizeIdParam = new SqlParameter("@ArticleSizeId", (object?)request.ArticleSizeId ?? DBNull.Value);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
-        var resourcePersonNameParam = new SqlParameter("@ResourcePersonName", (object?)request.ResourcePersonName ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var remarksParam = new SqlParameter("@Remarks", (object?)request.Remarks ?? DBNull.Value);
         var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @ResourcePersonName = @ResourcePersonName, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
-                actionParam, idParam, qtyParam, articleSizeIdParam, resourceIdParam, resourcePersonNameParam, bundlingResourceIdParam, userIdParam);
+                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @Qty = @Qty, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Remarks = @Remarks, @BundlingResourceId = @BundlingResourceId, @UserId = @UserId",
+                actionParam, idParam, qtyParam, articleSizeIdParam, resourceIdParam, employeeIdParam, remarksParam, bundlingResourceIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -177,6 +179,7 @@ public class BundleService
                 LastStepName = reader.IsDBNull(reader.GetOrdinal("LastStepName")) ? null : reader.GetString(reader.GetOrdinal("LastStepName")),
                 LastStatus = reader.IsDBNull(reader.GetOrdinal("LastStatus")) ? null : reader.GetString(reader.GetOrdinal("LastStatus")),
                 LastDivisionName = reader.IsDBNull(reader.GetOrdinal("LastDivisionName")) ? null : reader.GetString(reader.GetOrdinal("LastDivisionName")),
+                EmployeeName = reader.IsDBNull(reader.GetOrdinal("EmployeeName")) ? null : reader.GetString(reader.GetOrdinal("EmployeeName")),
             };
 
             await reader.NextResultAsync();
@@ -185,6 +188,7 @@ public class BundleService
             {
                 timeline.Add(new BundleScanTimelineDto
                 {
+                    Id = reader.GetInt32(reader.GetOrdinal("Id")),
                     StepName = reader.GetString(reader.GetOrdinal("StepName")),
                     SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
                     SizeName = reader.IsDBNull(reader.GetOrdinal("SizeName")) ? null : reader.GetString(reader.GetOrdinal("SizeName")),
@@ -309,18 +313,19 @@ public class BundleService
         }).ToList();
     }
 
-    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int bundleId, int userId)
+    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int bundleId, int copies, int userId)
     {
         var bundleIdParam = new SqlParameter("@BundleId", bundleId);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
+        var copiesParam = new SqlParameter("@Copies", copies);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
-                    bundleIdParam, publicBaseUrlParam, userIdParam)
+                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @UserId = @UserId",
+                    bundleIdParam, publicBaseUrlParam, copiesParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }

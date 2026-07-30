@@ -280,7 +280,7 @@ else
                             <label class="form-label mb-0">Steps</label>
                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddWorkflowRow">+ Tambah Baris</button>
                         </div>
-                        <div class="table-responsive mb-3">
+                        <div class="mb-3">
                             <table class="table table-bordered border mb-0">
                                 <thead>
                                     <tr>
@@ -289,6 +289,7 @@ else
                                         <th style="width: 22%;">Divisi</th>
                                         <th style="width: 12%;">Urutan</th>
                                         <th style="width: 13%;">Butuh Bundle</th>
+                                        <th style="width: 13%;">Auto Terima</th>
                                         <th style="width: 60px;"></th>
                                     </tr>
                                 </thead>
@@ -319,6 +320,9 @@ else
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" checked disabled title="Butuh bundle" />
                                                 </td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" disabled title="Auto terima (tidak berlaku utk step Bundling)" />
+                                                </td>
                                                 <td></td>
                                             </tr>
                                         }
@@ -336,6 +340,9 @@ else
                                                 <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                                </td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" @bind="row.AutoReceive" title="Auto terima" />
                                                 </td>
                                                 <td class="text-center">
                                                     <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
@@ -439,7 +446,7 @@ else
                                                     }
                                                     else if (log.ReceivedAt is not null)
                                                     {
-                                                        <span class="badge bg-success">Diterima @log.ReceivedAt.Value.ToString("dd/MM HH:mm") oleh @(log.ReceivedByResourceName ?? "-")</span>
+                                                        <span class="badge bg-success">Diterima @log.ReceivedAt.Value.ToString("dd/MM HH:mm") oleh @(log.ReceivedByResourceName ?? (log.ReceivedRemark == "Otomatis: auto-terima" ? "Otomatis" : "-"))</span>
                                                     }
                                                     else
                                                     {
@@ -916,7 +923,8 @@ else
                 StepName = s.StepName,
                 DivisionId = s.DivisionId,
                 SortOrder = s.SortOrder,
-                RequiresBundle = s.RequiresBundle
+                RequiresBundle = s.RequiresBundle,
+                AutoReceive = s.AutoReceive
             }).ToList();
             bundlingSteps = workflow.Steps.Where(s => s.IsBundling).ToList();
         }
@@ -1007,7 +1015,8 @@ else
                 StepName = r.StepName,
                 DivisionId = r.DivisionId,
                 SortOrder = r.SortOrder,
-                RequiresBundle = r.RequiresBundle
+                RequiresBundle = r.RequiresBundle,
+                AutoReceive = r.AutoReceive
             }).ToList()
         });
 
@@ -1055,6 +1064,7 @@ else
         public int DivisionId { get; set; }
         public int SortOrder { get; set; }
         public bool RequiresBundle { get; set; } = true;
+        public bool AutoReceive { get; set; }
     }
 
     private class WorkflowDisplayItem

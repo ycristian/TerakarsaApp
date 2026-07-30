@@ -1,6 +1,8 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using TerakarsaApp.API.Data;
+using TerakarsaApp.Shared.Employees;
+using TerakarsaApp.Shared.Resources;
 using TerakarsaApp.Shared.SuperAdmin;
 using TerakarsaApp.Shared.WorkflowLogs;
 
@@ -12,11 +14,25 @@ namespace TerakarsaApp.API.Services;
 public class SuperAdminService
 {
     private readonly AppDbContext _db;
+    // Prompt 36: dropdown Line/Penjahit modal Edit Bundle & Pelaksana modal Edit Log --
+    // proxy tipis ke service yang sudah ada (bukan duplikasi SP), diekspos di sini supaya
+    // user SUPER_ADMIN-only (tanpa module MASTER_RESOURCE/MASTER_EMPLOYEE) tetap bisa isi
+    // dropdown-nya -- lihat SuperAdminController untuk alasan routing.
+    private readonly ResourceService _resourceService;
+    private readonly EmployeeService _employeeService;
 
-    public SuperAdminService(AppDbContext db)
+    public SuperAdminService(AppDbContext db, ResourceService resourceService, EmployeeService employeeService)
     {
         _db = db;
+        _resourceService = resourceService;
+        _employeeService = employeeService;
     }
+
+    public Task<List<ResourceLookupDto>> GetResourcesByDivisionAsync(int divisionId) =>
+        _resourceService.GetActiveByDivisionAsync(divisionId);
+
+    public Task<List<EmployeeLookupDto>> GetEmployeesByResourceAsync(int resourceId) =>
+        _employeeService.GetActiveByResourceAsync(resourceId);
 
     public async Task<List<SuperAdminBundleSearchResultDto>> SearchBundlesAsync(string? search)
     {
@@ -62,6 +78,12 @@ public class SuperAdminService
                 ArticleName = reader.GetString(reader.GetOrdinal("ArticleName")),
                 Style = reader.IsDBNull(reader.GetOrdinal("Style")) ? null : reader.GetString(reader.GetOrdinal("Style")),
                 Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? null : reader.GetString(reader.GetOrdinal("Color")),
+                ResourceId = reader.IsDBNull(reader.GetOrdinal("ResourceId")) ? null : reader.GetInt32(reader.GetOrdinal("ResourceId")),
+                ResourceName = reader.IsDBNull(reader.GetOrdinal("ResourceName")) ? null : reader.GetString(reader.GetOrdinal("ResourceName")),
+                EmployeeId = reader.IsDBNull(reader.GetOrdinal("EmployeeId")) ? null : reader.GetInt32(reader.GetOrdinal("EmployeeId")),
+                EmployeeName = reader.IsDBNull(reader.GetOrdinal("EmployeeName")) ? null : reader.GetString(reader.GetOrdinal("EmployeeName")),
+                LineDivisionId = reader.IsDBNull(reader.GetOrdinal("LineDivisionId")) ? null : reader.GetInt32(reader.GetOrdinal("LineDivisionId")),
+                LowerBound = reader.GetInt32(reader.GetOrdinal("LowerBound")),
             };
 
             await reader.NextResultAsync();
@@ -205,6 +227,73 @@ public class SuperAdminService
             await _db.Database.ExecuteSqlRawAsync(
                 "EXEC SIS_SuperAdmin_Manage @Action = @Action, @WorkflowLogId = @WorkflowLogId, @DeleteReason = @DeleteReason, @UserId = @UserId",
                 actionParam, workflowLogIdParam, reasonParam, userIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    // Prompt 36: detail 1 baris log untuk modal "Edit Log" (/b/{serial}, /report-bundle
+    // Riwayat) -- termasuk QtyMasuk/LowerBound (lihat SIS_SuperAdmin_LogEditInfo).
+    public async Task<SuperAdminLogEditInfoDto?> GetLogEditInfoAsync(int workflowLogId)
+    {
+        var idParam = new SqlParameter("@WorkflowLogId", workflowLogId);
+
+        var result = await _db.Database
+            .SqlQueryRaw<SuperAdminLogEditInfoDto>(
+                "EXEC SIS_SuperAdmin_LogEditInfo @WorkflowLogId = @WorkflowLogId", idParam)
+            .ToListAsync();
+
+        return result.FirstOrDefault();
+    }
+
+    public async Task<(bool Success, string Error)> EditLogAsync(int workflowLogId, SuperAdminEditLogRequest request, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "EDIT_LOG");
+        var workflowLogIdParam = new SqlParameter("@WorkflowLogId", workflowLogId);
+        var qtyOkParam = new SqlParameter("@QtyOk", request.QtyOk);
+        var qtyRejectPrintParam = new SqlParameter("@QtyRejectPrint", request.QtyRejectPrint);
+        var qtyRejectFabricParam = new SqlParameter("@QtyRejectFabric", request.QtyRejectFabric);
+        var qtyRejectSewingParam = new SqlParameter("@QtyRejectSewing", request.QtyRejectSewing);
+        var qtyRejectReworkParam = new SqlParameter("@QtyRejectRework", request.QtyRejectRework);
+        var qtyLostParam = new SqlParameter("@QtyLost", request.QtyLost);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
+        var remarkParam = new SqlParameter("@Remark", (object?)request.Remark ?? DBNull.Value);
+        var confirmExceedParam = new SqlParameter("@ConfirmExceed", request.ConfirmExceed);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_SuperAdmin_Manage @Action = @Action, @WorkflowLogId = @WorkflowLogId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @ResourceId = @ResourceId, @Remark = @Remark, @ConfirmExceed = @ConfirmExceed, @UserId = @UserId",
+                actionParam, workflowLogIdParam, qtyOkParam, qtyRejectPrintParam, qtyRejectFabricParam,
+                qtyRejectSewingParam, qtyRejectReworkParam, qtyLostParam, resourceIdParam, remarkParam,
+                confirmExceedParam, userIdParam);
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    public async Task<(bool Success, string Error)> EditBundleAsync(int bundleId, SuperAdminEditBundleRequest request, int userId)
+    {
+        var actionParam = new SqlParameter("@Action", "EDIT_BUNDLE");
+        var bundleIdParam = new SqlParameter("@BundleId", bundleId);
+        var articleSizeIdParam = new SqlParameter("@ArticleSizeId", request.ArticleSizeId);
+        var qtyParam = new SqlParameter("@Qty", request.Qty);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC SIS_SuperAdmin_Manage @Action = @Action, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @UserId = @UserId",
+                actionParam, bundleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, employeeIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

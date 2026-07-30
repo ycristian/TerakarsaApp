@@ -13,6 +13,10 @@
 -- workflow_template_steps atau dari payload @Steps (client tidak mengenalnya). SAVE
 -- mengecualikan baris ini dari deteksi "dihapus user" dan dari update/insert manual,
 -- lalu menyisipkan/menghapus/mereposisi ulang secara terpisah setelah operasi user selesai.
+--
+-- Prompt 34 -- auto_receive per step: APPLY menyalin dari workflow_template_steps seperti
+-- kolom lain; SAVE menerima AutoReceive di JSON @Steps seperti RequiresBundle. Step Bundling
+-- implisit selalu auto_receive = 0 (default kolom, tidak pernah diisi eksplisit di sini).
 
 SET ANSI_NULLS ON;
 GO
@@ -76,8 +80,8 @@ BEGIN
 
         BEGIN TRAN;
         BEGIN TRY
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, created_at, created_by)
-            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, SYSDATETIME(), @UserId
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
+            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, wts.auto_receive, SYSDATETIME(), @UserId
             FROM workflow_template_steps wts
             WHERE wts.workflow_template_id = @WorkflowTemplateId AND wts.deleted_at IS NULL;
 
@@ -143,6 +147,7 @@ BEGIN
                 aw.division_id = j.DivisionId,
                 aw.sort_order = j.SortOrder,
                 aw.requires_bundle = j.RequiresBundle,
+                aw.auto_receive = ISNULL(j.AutoReceive, 0),
                 aw.updated_at = SYSDATETIME(),
                 aw.updated_by = @UserId
             FROM article_workflows aw
@@ -152,26 +157,18 @@ BEGIN
                     StepName       VARCHAR(150) '$.StepName',
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
-                    RequiresBundle BIT          '$.RequiresBundle'
+                    RequiresBundle BIT          '$.RequiresBundle',
+                    AutoReceive    BIT          '$.AutoReceive'
                 ) j ON j.Id = aw.article_workflow_id
             WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL;
 
-            -- Baris tanpa Id -> insert baru, workflow_template_id = NULL (step manual)
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, created_at, created_by)
-            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, SYSDATETIME(), @UserId
-            FROM OPENJSON(@Steps)
-                WITH (
-                    Id             INT          '$.Id',
-                    StepName       VARCHAR(150) '$.StepName',
-                    DivisionId     INT          '$.DivisionId',
-                    SortOrder      INT          '$.SortOrder',
-                    RequiresBundle BIT          '$.RequiresBundle'
-                ) j
-            WHERE j.Id IS NULL;
-
             -- Baris lama yang sudah tidak ada di JSON -> soft delete (sudah lolos guard log di
             -- atas). is_bundling = 1 dikecualikan -- baris itu memang tidak pernah ada di JSON,
-            -- bukan berarti "dihapus user" (dikelola terpisah di bawah).
+            -- bukan berarti "dihapus user" (dikelola terpisah di bawah). HARUS dijalankan
+            -- SEBELUM insert baris baru di bawah -- baris baru belum punya Id di JSON
+            -- (Id null) sehingga kalau insert duluan, baris itu langsung cocok "tidak ada
+            -- di JSON" dan ikut ke-soft-delete pada transaksi yang sama (bug lama:
+            -- created_at == deleted_at persis pada baris yang baru ditambahkan).
             UPDATE aw
             SET aw.deleted_at = SYSDATETIME(),
                 aw.deleted_by = @UserId
@@ -181,6 +178,20 @@ BEGIN
                   SELECT 1 FROM OPENJSON(@Steps) WITH (Id INT '$.Id') j
                   WHERE j.Id = aw.article_workflow_id
               );
+
+            -- Baris tanpa Id -> insert baru, workflow_template_id = NULL (step manual)
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
+            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
+            FROM OPENJSON(@Steps)
+                WITH (
+                    Id             INT          '$.Id',
+                    StepName       VARCHAR(150) '$.StepName',
+                    DivisionId     INT          '$.DivisionId',
+                    SortOrder      INT          '$.SortOrder',
+                    RequiresBundle BIT          '$.RequiresBundle',
+                    AutoReceive    BIT          '$.AutoReceive'
+                ) j
+            WHERE j.Id IS NULL;
 
             -- Prompt 17: kelola step Bundling implisit sesuai hasil akhir step user di atas.
             DECLARE @SaveHasBundleAfter BIT = CASE WHEN EXISTS (

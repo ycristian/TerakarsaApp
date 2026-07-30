@@ -8,6 +8,7 @@
 @using TerakarsaApp.Shared.Reports
 @inject ReportBundleApiService ReportApi
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
 
 <PageTitle>Laporan Bundle</PageTitle>
 
@@ -82,17 +83,17 @@ else
                         </select>
                     </div>
                     <div class="col-md-1">
-                        <button class="btn btn-primary w-100" disabled="@isLoadingWip" @onclick="LoadWip">Terapkan</button>
+                        <button class="btn btn-primary w-100" disabled="@isLoadingWip" @onclick="ApplyWipFilter">Terapkan</button>
                     </div>
                 </div>
 
-                @if (!isLoadingWip && wipResults.Count > 0)
+                @if (!isLoadingWip && wipPagedResult.TotalCount > 0)
                 {
                     <div class="d-flex flex-wrap gap-2 mb-3">
-                        <span class="badge bg-secondary">Belum Mulai: @WipCount("BELUM_MULAI")</span>
-                        <span class="badge bg-warning">Transit: @WipCount("TRANSIT")</span>
-                        <span class="badge bg-info">Dikerjakan: @WipCount("DIKERJAKAN")</span>
-                        <span class="badge bg-success">Selesai: @WipCount("SELESAI")</span>
+                        <span class="badge bg-secondary">Belum Mulai: @wipPagedResult.BelumMulaiCount</span>
+                        <span class="badge bg-warning">Transit: @wipPagedResult.TransitCount</span>
+                        <span class="badge bg-info">Dikerjakan: @wipPagedResult.DikerjakanCount</span>
+                        <span class="badge bg-success">Selesai: @wipPagedResult.SelesaiCount</span>
                     </div>
                 }
 
@@ -100,31 +101,36 @@ else
                 {
                     <p class="mb-0">Memuat data...</p>
                 }
-                else if (wipResults.Count == 0)
+                else if (wipPagedResult.Items.Count == 0)
                 {
                     <p class="text-muted mb-0">Tidak ada bundle yang cocok dengan filter.</p>
                 }
                 else
                 {
+                    <div class="d-flex justify-content-end mb-2">
+                        <PageSizeSelector PageSize="wipPageSize" PageSizeChanged="HandleWipPageSizeChange" />
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-bordered border text-nowrap mb-0">
                             <thead>
                                 <tr>
-                                    <th>Bundle No</th>
-                                    <th>Serial</th>
-                                    <th>Project</th>
-                                    <th>Artikel</th>
-                                    <th>Size</th>
-                                    <th>Qty</th>
-                                    <th>Step</th>
-                                    <th>Posisi</th>
-                                    <th>Status</th>
-                                    <th>Penjahit</th>
-                                    <th>Waktu</th>
+                                    <SortableHeader Label="Bundle No" Column="BundleNo" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Serial" Column="Serial" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Project" Column="ProjectName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Artikel" Column="ArticleName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Size" Column="SizeName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Qty" Column="Qty" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Step" Column="StepName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Posisi" Column="PosisiDivisionName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Status" Column="Status" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Qty Done" Column="QtyOk" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Reject" Column="QtyReject" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Penjahit" Column="TailorName" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
+                                    <SortableHeader Label="Waktu" Column="UpdatedInfo" CurrentColumn="wipSortColumn" CurrentDirection="wipSortDirection" OnSort="ToggleWipSort" />
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var item in wipResults)
+                                @foreach (var item in wipPagedResult.Items)
                                 {
                                     <tr role="button" @onclick="() => OpenHistoryFromWip(item)">
                                         <td>@BundleDisplay.Format(item.BundleLetter, item.BundleNo)</td>
@@ -136,12 +142,17 @@ else
                                         <td>@(item.StepName ?? "-")</td>
                                         <td>@(item.PosisiDivisionName ?? "-")</td>
                                         <td><span class="badge @StatusBadgeClass(item.Status)">@StatusLabel(item.Status)</span></td>
-                                        <td>@(item.TailorName ?? "-")</td>
+                                        <td class="@(item.QtyOk > 0 ? "text-success" : "")">@item.QtyOk</td>
+                                        <td class="@(item.QtyReject > 0 ? "text-danger" : "")">@item.QtyReject</td>
+                                        <td>@BundleDisplay.FormatPenjahit(item.TailorName, item.EmployeeName)</td>
                                         <td>@(item.UpdatedInfo?.ToString("dd/MM/yyyy HH:mm") ?? "-")</td>
                                     </tr>
                                 }
                             </tbody>
                         </table>
+                    </div>
+                    <div class="mt-2">
+                        <TablePagination PageNumber="wipCurrentPage" PageSize="wipPageSize" TotalCount="wipPagedResult.TotalCount" TotalPages="wipPagedResult.TotalPages" PageNumberChanged="ChangeWipPage" />
                     </div>
                 }
             }
@@ -270,19 +281,30 @@ else
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <div>
                                     <h2 class="mb-0">No. @BundleDisplay.Format(h.BundleLetter, h.BundleNo)</h2>
-                                    <p class="text-muted mb-0">@h.Serial</p>
+                                    <p class="text-muted mb-0">
+                                        @h.Serial
+                                        <a class="btn btn-sm btn-outline-secondary ms-1" title="Buka halaman scan bundle" target="_blank" href="@($"/b/{h.Serial}")"><i class="fe fe-external-link"></i></a>
+                                    </p>
                                 </div>
                                 <div class="text-end">
                                     <h4 class="mb-0">@h.Qty <small class="text-muted">pcs</small></h4>
                                     <span class="badge bg-secondary">@h.SizeName</span>
+                                    @if (isSuperAdmin)
+                                    {
+                                        <div>
+                                            <button class="btn btn-outline-dark btn-sm mt-2" @onclick="() => editPanel!.OpenEditBundleAsync(h.BundleId)">
+                                                <i class="fe fe-edit-2"></i> Edit Bundle
+                                            </button>
+                                        </div>
+                                    }
                                 </div>
                             </div>
                             <hr />
                             <p class="mb-1"><strong>@h.ArticleName</strong></p>
                             <p class="text-muted mb-1">@h.ProjectName</p>
-                            @if (!string.IsNullOrEmpty(h.TailorName))
+                            @if (!string.IsNullOrEmpty(h.TailorName) || !string.IsNullOrEmpty(h.EmployeeName))
                             {
-                                <p class="mb-1">Penjahit: <strong>@h.TailorName</strong></p>
+                                <p class="mb-1">Penjahit: <strong>@BundleDisplay.FormatPenjahit(h.TailorName, h.EmployeeName)</strong></p>
                             }
                             <p class="mb-0">
                                 Posisi: <strong>@(h.StepName ?? "-")</strong>
@@ -313,7 +335,17 @@ else
                                                     <strong>@t.StepName</strong>
                                                     @(t.DivisionName is not null ? $"— {t.DivisionName}" : "")
                                                 </span>
-                                                <span class="text-muted">Selesai @t.CreatedAt.ToString("dd/MM/yyyy HH:mm") @(t.CreatedByName is not null ? $"({t.CreatedByName})" : "")</span>
+                                                <span class="text-muted">
+                                                    Selesai @t.CreatedAt.ToString("dd/MM/yyyy HH:mm") @(t.CreatedByName is not null ? $"({t.CreatedByName})" : "")
+                                                    @if (t.QtyReject > 0)
+                                                    {
+                                                        <button class="btn btn-sm p-0 ms-2" title="Cetak Reject" disabled="@(printRejectBusyId == t.Id)" @onclick="() => PrintReject(t.Id)"><i class="fe fe-printer text-danger"></i></button>
+                                                    }
+                                                    @if (isSuperAdmin)
+                                                    {
+                                                        <button class="btn btn-outline-secondary btn-sm p-0 ms-2" title="Edit" @onclick="() => editPanel!.OpenEditLogAsync(t.Id)"><i class="fe fe-edit"></i></button>
+                                                    }
+                                                </span>
                                             </div>
                                             @if (t.QtyOk > 0 || t.QtyReject > 0 || !string.IsNullOrEmpty(t.PelaksanaName) || !string.IsNullOrEmpty(t.Remark) || !string.IsNullOrEmpty(t.TargetDivisionName))
                                             {
@@ -343,13 +375,17 @@ else
                                             @if (t.ReceivedAt is not null)
                                             {
                                                 <small class="text-success d-block">
-                                                    Diterima @t.ReceivedAt.Value.ToString("dd/MM/yyyy HH:mm") @(t.ReceivedByResourceName is not null ? $"oleh {t.ReceivedByResourceName}" : "")
+                                                    Diterima @t.ReceivedAt.Value.ToString("dd/MM/yyyy HH:mm") oleh @(t.ReceivedByResourceName ?? (t.ReceivedRemark == "Otomatis: auto-terima" ? "Otomatis" : ""))
                                                     @(!string.IsNullOrEmpty(t.ReceivedRemark) ? $"— {t.ReceivedRemark}" : "")
                                                 </small>
                                             }
                                         </li>
                                     }
                                 </ul>
+                            }
+                            @if (!string.IsNullOrEmpty(printRejectFeedback))
+                            {
+                                <div class="small mt-2 @(printRejectFeedback.StartsWith("Nota") ? "text-success" : "text-danger")">@printRejectFeedback</div>
                             }
                         </div>
                     </div>
@@ -434,11 +470,33 @@ else
             }
         </div>
     </div>
+
+    <SuperAdminEditPanel @ref="editPanel" OnSaved="RefreshHistoryAsync" />
 }
 
 @code {
     private bool? hasAccess = null;
     private string activeTab = "wip";
+    // Prompt 36: tombol Edit/Edit Bundle (Super Admin) di tab Riwayat -- lihat
+    // SuperAdminEditPanel.razor (dipakai bersama dengan /b/{serial}).
+    private bool isSuperAdmin = false;
+    private SuperAdminEditPanel? editPanel;
+
+    // Fix: "Cetak Reject" -- tombol per baris timeline Riwayat, hanya tampil kalau baris itu
+    // punya reject > 0 (server menegakkan ulang di SIS_WorkflowLog_PrintReject).
+    private int? printRejectBusyId;
+    private string printRejectFeedback = string.Empty;
+
+    private async Task PrintReject(int workflowLogId)
+    {
+        printRejectBusyId = workflowLogId;
+        printRejectFeedback = string.Empty;
+
+        var (success, error) = await ReportApi.PrintRejectAsync(workflowLogId);
+
+        printRejectBusyId = null;
+        printRejectFeedback = success ? "Nota reject masuk antrian cetak." : error;
+    }
 
     private List<ProjectDto> projects = new();
     private List<DivisionDto> divisions = new();
@@ -449,8 +507,13 @@ else
     private int wipDivisionId;
     private string wipStatus = string.Empty;
     private List<ArticleListItemDto> wipArticles = new();
-    private List<BundleWipDto> wipResults = new();
+    private BundleWipPagedResult wipPagedResult = new();
     private bool isLoadingWip = false;
+    // Fix: order-by-klik-header + pagination -- state sama dengan pola Project.razor.
+    private int wipCurrentPage = 1;
+    private int wipPageSize = 10;
+    private string? wipSortColumn;
+    private string wipSortDirection = "asc";
 
     // --- Progres ---
     private int progressProjectId;
@@ -554,14 +617,15 @@ else
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "REPORT_BUNDLE");
+        // Prompt 36: tombol Edit/Edit Bundle di tab Riwayat -- module REPORT_BUNDLE saja
+        // TIDAK cukup, wajib SUPER_ADMIN juga.
+        isSuperAdmin = state.User.HasClaim("module", "SUPER_ADMIN");
 
         if (hasAccess != true) return;
 
         projects = await ReportApi.GetProjectsAsync();
         divisions = await ReportApi.GetDivisionsAsync();
     }
-
-    private int WipCount(string status) => wipResults.Count(r => r.Status == status);
 
     private static string StatusLabel(string status) => status switch
     {
@@ -595,12 +659,53 @@ else
     private async Task LoadWip()
     {
         isLoadingWip = true;
-        wipResults = await ReportApi.GetWipAsync(
-            wipProjectId > 0 ? wipProjectId : null,
-            wipArticleId > 0 ? wipArticleId : null,
-            wipDivisionId > 0 ? wipDivisionId : null,
-            string.IsNullOrEmpty(wipStatus) ? null : wipStatus);
+        wipPagedResult = await ReportApi.GetWipAsync(new BundleWipPagedRequest
+        {
+            ProjectId = wipProjectId > 0 ? wipProjectId : null,
+            ArticleId = wipArticleId > 0 ? wipArticleId : null,
+            DivisionId = wipDivisionId > 0 ? wipDivisionId : null,
+            Status = string.IsNullOrEmpty(wipStatus) ? null : wipStatus,
+            PageNumber = wipCurrentPage,
+            PageSize = wipPageSize,
+            SortColumn = wipSortColumn,
+            SortDirection = wipSortDirection
+        });
         isLoadingWip = false;
+    }
+
+    // Fix: "Terapkan" (ganti filter) selalu balik ke halaman 1 -- filter baru bisa punya
+    // total baris yang beda, halaman lama belum tentu valid lagi.
+    private async Task ApplyWipFilter()
+    {
+        wipCurrentPage = 1;
+        await LoadWip();
+    }
+
+    private async Task ToggleWipSort(string column)
+    {
+        if (wipSortColumn == column)
+            wipSortDirection = wipSortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            wipSortColumn = column;
+            wipSortDirection = "asc";
+        }
+        wipCurrentPage = 1;
+        await LoadWip();
+    }
+
+    private async Task HandleWipPageSizeChange(int newSize)
+    {
+        wipPageSize = newSize;
+        wipCurrentPage = 1;
+        await LoadWip();
+    }
+
+    private async Task ChangeWipPage(int page)
+    {
+        if (page < 1 || page > wipPagedResult.TotalPages) return;
+        wipCurrentPage = page;
+        await LoadWip();
     }
 
     private async Task LoadProgress()
@@ -662,10 +767,26 @@ else
         historyResult = result;
     }
 
+    // Fix: klik baris WIP -- pindah ke tab Riwayat SEPERTI SEBELUMNYA, DAN sekalian buka
+    // /b/{serial} (halaman scan publik) di tab browser baru (pola sama dengan tombol
+    // "external-link" di header Riwayat).
     private async Task OpenHistoryFromWip(BundleWipDto item)
     {
         activeTab = "riwayat";
         historySerial = item.Serial;
         await SearchHistoryBySerial();
+        await JS.InvokeVoidAsync("open", $"/b/{item.Serial}", "_blank");
+    }
+
+    // Prompt 36: refresh hasil pencarian Riwayat setelah modal Edit Log/Edit Bundle
+    // (Super Admin) sukses simpan -- pakai serial bundle yang sedang tampil, terlepas dari
+    // form pencarian mana yang dipakai user (serial atau project + no. bundle).
+    private async Task RefreshHistoryAsync()
+    {
+        if (historyResult?.Header is null) return;
+
+        var (success, error, result) = await ReportApi.GetHistoryAsync(historyResult.Header.Serial, null, null);
+        if (success) historyResult = result;
+        else historyError = error;
     }
 }

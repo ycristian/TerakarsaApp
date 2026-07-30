@@ -19,6 +19,44 @@ public class BundleWipDto
     public string? StepName { get; set; }
     public string? TailorName { get; set; }
     public DateTime? UpdatedInfo { get; set; }
+    // Prompt 32: penjahit dari master employees, diutamakan di atas TailorName (fallback lama).
+    public string? EmployeeName { get; set; }
+    // Fix: hasil (qty done) dan reject TOTAL di step/divisi TERAKHIR bundle ini (posisi saat
+    // ini) -- diagregasi dari SEMUA baris log step itu (bisa lebih dari satu, baris susulan
+    // Prompt 14b). 0/0 kalau bundle belum mulai (BELUM_MULAI, belum ada log sama sekali).
+    public int QtyOk { get; set; }
+    public int QtyReject { get; set; }
+}
+
+// Fix: order-by-klik-header + pagination di tab WIP -- pola sama dengan ProjectPagedRequest/
+// ProjectPagedResult (lihat TerakarsaApp.Shared/Projects/ProjectModels.cs), dikonsumsi lewat
+// POST api/report-bundle/wip (bukan lagi GET query string, lihat ReportBundleController).
+public class BundleWipPagedRequest
+{
+    public int? ProjectId { get; set; }
+    public int? ArticleId { get; set; }
+    public int? DivisionId { get; set; }
+    public string? Status { get; set; }
+    public int PageNumber { get; set; } = 1;
+    public int PageSize { get; set; } = 10;
+    public string? SortColumn { get; set; }
+    public string SortDirection { get; set; } = "asc";
+}
+
+public class BundleWipPagedResult
+{
+    public List<BundleWipDto> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int PageNumber { get; set; }
+    public int PageSize { get; set; }
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+    // Fix: breakdown per status atas SELURUH baris yang cocok filter (bukan cuma halaman ini)
+    // -- dipakai badge ringkasan WIP, dihitung sekali lewat query yang sama dengan TotalCount
+    // (SIS_Report_BundleWip @Action = 'COUNT') supaya tidak perlu round-trip terpisah.
+    public int BelumMulaiCount { get; set; }
+    public int TransitCount { get; set; }
+    public int DikerjakanCount { get; set; }
+    public int SelesaiCount { get; set; }
 }
 
 public class ArticleProgressBundleStepDto
@@ -81,10 +119,15 @@ public class BundleHistoryHeaderDto
     public string Status { get; set; } = string.Empty;
     public string? PosisiDivisionName { get; set; }
     public string? StepName { get; set; }
+    // Prompt 32: penjahit dari master employees, diutamakan di atas TailorName (fallback lama).
+    public string? EmployeeName { get; set; }
 }
 
 public class BundleHistoryTimelineDto
 {
+    // Prompt 36: workflow_log_id -- dipakai tombol "Edit" per baris timeline (fitur Super
+    // Admin di tab Riwayat).
+    public int Id { get; set; }
     public string StepName { get; set; } = string.Empty;
     public string? DivisionName { get; set; }
     public string? TargetDivisionName { get; set; }

@@ -1,5 +1,8 @@
 -- Pengambilan data resource_types (SELECT saja, tidak menyentuh data).
 -- Mutasi (create/update/delete) ada di sp_ResourceType_Manage.sql (SIS_ResourceType_Manage).
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
 SET ANSI_NULLS ON;
 GO
@@ -22,9 +25,14 @@ BEGIN
         SELECT COUNT(*) AS TotalCount
         FROM resource_types
         WHERE deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR resource_type_code LIKE '%' + @SearchTerm + '%'
-               OR resource_type_name LIKE '%' + @SearchTerm + '%');
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') tok
+                WHERE tok.value <> ''
+                  AND NOT (
+                        resource_type_code LIKE '%' + tok.value + '%'
+                     OR resource_type_name LIKE '%' + tok.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -43,9 +51,14 @@ BEGIN
                    updated_at AS UpdatedAt, updated_by AS UpdatedBy
             FROM resource_types
             WHERE deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR resource_type_code LIKE ''%'' + @SearchTerm + ''%''
-                   OR resource_type_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
+                    WHERE tok.value <> ''''
+                      AND NOT (
+                            resource_type_code LIKE ''%'' + tok.value + ''%''
+                         OR resource_type_name LIKE ''%'' + tok.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';

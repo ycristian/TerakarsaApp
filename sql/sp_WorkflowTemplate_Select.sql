@@ -24,9 +24,14 @@ BEGIN
         SELECT COUNT(*) AS TotalCount
         FROM workflow_templates wt
         WHERE wt.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR wt.workflow_code LIKE '%' + @SearchTerm + '%'
-               OR wt.workflow_name LIKE '%' + @SearchTerm + '%');
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') s
+                WHERE s.value <> ''
+                  AND NOT (
+                        wt.workflow_code LIKE '%' + s.value + '%'
+                     OR wt.workflow_name LIKE '%' + s.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -46,9 +51,14 @@ BEGIN
                    wt.updated_at AS UpdatedAt, wt.updated_by AS UpdatedBy
             FROM workflow_templates wt
             WHERE wt.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR wt.workflow_code LIKE ''%'' + @SearchTerm + ''%''
-                   OR wt.workflow_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') s
+                    WHERE s.value <> ''''
+                      AND NOT (
+                            wt.workflow_code LIKE ''%'' + s.value + ''%''
+                         OR wt.workflow_name LIKE ''%'' + s.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
@@ -83,7 +93,7 @@ BEGIN
 
     SELECT s.step_id AS Id, s.workflow_template_id AS WorkflowTemplateId,
            s.step_name AS StepName, s.division_id AS DivisionId, d.division_name AS DivisionName,
-           s.sort_order AS SortOrder, s.requires_bundle AS RequiresBundle
+           s.sort_order AS SortOrder, s.requires_bundle AS RequiresBundle, s.auto_receive AS AutoReceive
     FROM workflow_template_steps s
     INNER JOIN divisions d ON d.division_id = s.division_id
     WHERE s.workflow_template_id = @WorkflowTemplateId AND s.deleted_at IS NULL

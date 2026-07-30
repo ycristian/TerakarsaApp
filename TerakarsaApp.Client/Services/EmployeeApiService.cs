@@ -26,6 +26,14 @@ public class EmployeeApiService
         return await response.Content.ReadFromJsonAsync<List<EmployeeDto>>() ?? new();
     }
 
+    // Prompt 32: dropdown "Penjahit" cascading di bawah dropdown Line/resource.
+    public async Task<List<EmployeeLookupDto>> GetActiveByResourceAsync(int resourceId)
+    {
+        var response = await _http.GetAsync($"api/employees/lookup?resourceId={resourceId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<EmployeeLookupDto>>() ?? new();
+    }
+
     public async Task<(bool Success, string Error)> CreateAsync(EmployeeCreateRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/employee", request);

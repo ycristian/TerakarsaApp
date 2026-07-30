@@ -1,6 +1,9 @@
 -- Pengambilan data resources (SELECT saja, tidak menyentuh data).
 -- JOIN ke divisions dan resource_types karena resources punya 2 FK wajib.
 -- Mutasi (create/update/delete) ada di sp_Resource_Manage.sql (SIS_Resource_Manage).
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
 SET ANSI_NULLS ON;
 GO
@@ -25,10 +28,15 @@ BEGIN
         INNER JOIN divisions d ON d.division_id = r.division_id
         INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
         WHERE r.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR r.resource_name LIKE '%' + @SearchTerm + '%'
-               OR d.division_name LIKE '%' + @SearchTerm + '%'
-               OR rt.resource_type_name LIKE '%' + @SearchTerm + '%');
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') tok
+                WHERE tok.value <> ''
+                  AND NOT (
+                        r.resource_name LIKE '%' + tok.value + '%'
+                     OR d.division_name LIKE '%' + tok.value + '%'
+                     OR rt.resource_type_name LIKE '%' + tok.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -54,10 +62,15 @@ BEGIN
             INNER JOIN divisions d ON d.division_id = r.division_id
             INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
             WHERE r.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR r.resource_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR d.division_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR rt.resource_type_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
+                    WHERE tok.value <> ''''
+                      AND NOT (
+                            r.resource_name LIKE ''%'' + tok.value + ''%''
+                         OR d.division_name LIKE ''%'' + tok.value + ''%''
+                         OR rt.resource_type_name LIKE ''%'' + tok.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';

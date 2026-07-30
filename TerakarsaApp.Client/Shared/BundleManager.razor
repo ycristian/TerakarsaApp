@@ -7,6 +7,7 @@
 @using System.ComponentModel.DataAnnotations
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Employees
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.Resources
 @using Microsoft.AspNetCore.Components.Authorization
@@ -14,6 +15,7 @@
 @inject ArticleApiService ArticleApi
 @inject ProjectApiService ProjectApi
 @inject ResourceApiService ResourceApi
+@inject EmployeeApiService EmployeeApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
 
@@ -122,7 +124,7 @@ else
                                         <td><span class="badge @LabelBadgeClass(b.LabelStatus)">@LabelBadgeText(b.LabelStatus)</span></td>
                                         <td>
                                             <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(b)"><i class="fe fe-edit"></i></button>
-                                            <button class="btn btn-sm btn-outline-secondary me-1" title="Cetak Ulang" disabled="@(reprintingId == b.Id)" @onclick="() => HandleReprint(b)"><i class="fe fe-printer"></i></button>
+                                            <button class="btn btn-sm btn-outline-secondary me-1" title="Cetak Ulang" disabled="@(reprintingId == b.Id)" @onclick="() => OpenReprintConfirm(b)"><i class="fe fe-printer"></i></button>
                                             <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(b)"><i class="fe fe-trash-2"></i></button>
                                         </td>
                                     </tr>
@@ -157,19 +159,26 @@ else
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Penjahit (resource)</label>
-                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="addForm.ResourceId"
+                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" Value="addForm.ResourceId" ValueChanged="HandleAddResourceChanged"
                                               IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
                                               Placeholder="Cari resource..." />
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Nama Penjahit (bebas)</label>
-                            <input class="form-control" maxlength="150" @bind="addForm.ResourcePersonName" />
+                            <label class="form-label">Penjahit</label>
+                            <SearchableSelect TItem="EmployeeLookupDto" Items="addEmployeeOptions" @bind-Value="addForm.EmployeeId"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Disabled="@(addForm.ResourceId <= 0)"
+                                              Placeholder="Cari penjahit..." />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Pelaksana Bundling (opsional)</label>
                             <SearchableSelect TItem="ResourceLookupDto" Items="bundlingResourceOptions" @bind-Value="addForm.BundlingResourceId"
                                               IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
                                               AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Catatan (opsional)</label>
+                            <textarea class="form-control" rows="2" maxlength="500" @bind="addForm.Remarks"></textarea>
                         </div>
                         @if (!string.IsNullOrEmpty(addExceedMessage))
                         {
@@ -222,19 +231,26 @@ else
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Penjahit (resource)</label>
-                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" @bind-Value="editForm.ResourceId"
+                            <SearchableSelect TItem="ResourceLookupDto" Items="resourceOptions" Value="editForm.ResourceId" ValueChanged="HandleEditResourceChanged"
                                               IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
                                               AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Nama Penjahit (bebas)</label>
-                            <input class="form-control" maxlength="150" @bind="editForm.ResourcePersonName" />
+                            <label class="form-label">Penjahit</label>
+                            <SearchableSelect TItem="EmployeeLookupDto" Items="editEmployeeOptions" @bind-Value="editForm.EmployeeId"
+                                              IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Disabled="@(editForm.ResourceId <= 0)"
+                                              Placeholder="Cari penjahit..." />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Pelaksana Bundling (opsional)</label>
                             <SearchableSelect TItem="ResourceLookupDto" Items="bundlingResourceOptions" @bind-Value="editForm.BundlingResourceId"
                                               IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
                                               AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Catatan (opsional)</label>
+                            <textarea class="form-control" rows="2" maxlength="500" @bind="editForm.Remarks"></textarea>
                         </div>
                         @if (!string.IsNullOrEmpty(editExceedMessage))
                         {
@@ -266,6 +282,19 @@ else
             }
         </Message>
     </ConfirmDeleteModal>
+
+    <ConfirmDeleteModal Show="showReprintConfirm" Title="Cetak Ulang Label" ConfirmText="Cetak" BusyText="Mencetak..." ConfirmButtonClass="btn-primary"
+                         IsBusy="@(reprintingId == bundlePendingReprint?.Id)" OnConfirm="ConfirmReprint" OnCancel="CancelReprint">
+        <Message>
+            <p class="mb-2">Cetak ulang label "@bundlePendingReprint?.Serial"?</p>
+            <label class="form-label">Jumlah Label</label>
+            <input type="number" min="1" class="form-control" @bind="reprintCopies" />
+            @if (!string.IsNullOrEmpty(reprintError))
+            {
+                <div class="text-danger mt-2">@reprintError</div>
+            }
+        </Message>
+    </ConfirmDeleteModal>
 }
 
 @code {
@@ -280,6 +309,8 @@ else
     private List<BundleDto> bundles = new();
     private List<ResourceLookupDto> resourceOptions = new();
     private List<ResourceLookupDto> bundlingResourceOptions = new();
+    private List<EmployeeLookupDto> addEmployeeOptions = new();
+    private List<EmployeeLookupDto> editEmployeeOptions = new();
 
     private bool showCuttingBanner => summary.Count > 0 && summary[0].HasFirstBundleStep && !summary[0].IsFirstBundleStepReceived;
 
@@ -304,6 +335,11 @@ else
     private BundleDto? bundlePendingDelete;
 
     private int? reprintingId = null;
+    // Fix: modal konfirmasi Cetak Ulang -- user input jumlah label (default 1).
+    private bool showReprintConfirm = false;
+    private BundleDto? bundlePendingReprint;
+    private int reprintCopies = 1;
+    private string reprintError = string.Empty;
     private bool pendingBundleQrRender = false;
     private string publicBaseUrl = string.Empty;
 
@@ -371,6 +407,15 @@ else
             addForm.Qty = sizeInfo.BundleQty;
     }
 
+    // Prompt 32: dropdown "Penjahit" (employee) cascading ketat -- kosong/disabled selama
+    // line belum dipilih, reset pilihan saat line diganti.
+    private async Task HandleAddResourceChanged(int resourceId)
+    {
+        addForm.ResourceId = resourceId;
+        addForm.EmployeeId = 0;
+        addEmployeeOptions = resourceId > 0 ? await EmployeeApi.GetActiveByResourceAsync(resourceId) : new();
+    }
+
     private async Task HandleAddBundle()
     {
         addError = string.Empty;
@@ -392,12 +437,6 @@ else
         if (addForm.ResourceId <= 0)
         {
             addError = "Penjahit (resource) wajib dipilih.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(addForm.ResourcePersonName))
-        {
-            addError = "Nama penjahit wajib diisi.";
             return;
         }
 
@@ -427,8 +466,9 @@ else
             ArticleSizeId = addForm.ArticleSizeId,
             Qty = addForm.Qty,
             ResourceId = addForm.ResourceId > 0 ? addForm.ResourceId : null,
-            ResourcePersonName = string.IsNullOrWhiteSpace(addForm.ResourcePersonName) ? null : addForm.ResourcePersonName,
-            BundlingResourceId = addForm.BundlingResourceId > 0 ? addForm.BundlingResourceId : null
+            EmployeeId = addForm.EmployeeId > 0 ? addForm.EmployeeId : null,
+            BundlingResourceId = addForm.BundlingResourceId > 0 ? addForm.BundlingResourceId : null,
+            Remarks = addForm.Remarks
         });
 
         isSavingAdd = false;
@@ -446,7 +486,7 @@ else
         }
     }
 
-    private void OpenEditForm(BundleDto bundle)
+    private async Task OpenEditForm(BundleDto bundle)
     {
         editingBundle = bundle;
         editForm = new BundleEditFormModel
@@ -455,14 +495,25 @@ else
             Serial = bundle.Serial,
             Qty = bundle.Qty,
             ResourceId = bundle.ResourceId ?? 0,
-            ResourcePersonName = bundle.ResourcePersonName,
-            BundlingResourceId = bundlingResourceOptions.Count == 1 ? bundlingResourceOptions[0].Id : 0
+            EmployeeId = bundle.EmployeeId ?? 0,
+            BundlingResourceId = bundlingResourceOptions.Count == 1 ? bundlingResourceOptions[0].Id : 0,
+            Remarks = bundle.Remarks
         };
+        editEmployeeOptions = editForm.ResourceId > 0 ? await EmployeeApi.GetActiveByResourceAsync(editForm.ResourceId) : new();
         editError = string.Empty;
         editExceedMessage = string.Empty;
         copyMessage = string.Empty;
         showEditForm = true;
         pendingBundleQrRender = true;
+    }
+
+    // Prompt 32: dropdown "Penjahit" (employee) cascading ketat -- kosong/disabled selama
+    // line belum dipilih, reset pilihan saat line diganti.
+    private async Task HandleEditResourceChanged(int resourceId)
+    {
+        editForm.ResourceId = resourceId;
+        editForm.EmployeeId = 0;
+        editEmployeeOptions = resourceId > 0 ? await EmployeeApi.GetActiveByResourceAsync(resourceId) : new();
     }
 
     private async Task CloseEditForm()
@@ -499,12 +550,6 @@ else
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(editForm.ResourcePersonName))
-        {
-            editError = "Nama penjahit wajib diisi.";
-            return;
-        }
-
         if (editingBundle is not null)
         {
             var sizeInfo = summary.FirstOrDefault(s => s.ArticleSizeId == editingBundle.ArticleSizeId);
@@ -533,8 +578,9 @@ else
             Id = editForm.Id,
             Qty = editForm.Qty,
             ResourceId = editForm.ResourceId > 0 ? editForm.ResourceId : null,
-            ResourcePersonName = string.IsNullOrWhiteSpace(editForm.ResourcePersonName) ? null : editForm.ResourcePersonName,
-            BundlingResourceId = editForm.BundlingResourceId > 0 ? editForm.BundlingResourceId : null
+            EmployeeId = editForm.EmployeeId > 0 ? editForm.EmployeeId : null,
+            BundlingResourceId = editForm.BundlingResourceId > 0 ? editForm.BundlingResourceId : null,
+            Remarks = editForm.Remarks
         });
 
         isSavingEdit = false;
@@ -585,23 +631,40 @@ else
         }
     }
 
-    private async Task HandleReprint(BundleDto bundle)
+    private void OpenReprintConfirm(BundleDto bundle)
     {
-        reprintingId = bundle.Id;
-        var result = await BundleApi.ReprintAsync(bundle.Id);
-        reprintingId = null;
-
-        if (result.Success)
-            await LoadBundles();
+        bundlePendingReprint = bundle;
+        reprintCopies = 1;
+        reprintError = string.Empty;
+        showReprintConfirm = true;
     }
 
-    private static string FormatPenjahit(BundleDto b) => (b.ResourceName, b.ResourcePersonName) switch
+    private void CancelReprint()
     {
-        ({ Length: > 0 } resource, { Length: > 0 } person) => $"{resource} - {person}",
-        ({ Length: > 0 } resource, _) => resource,
-        (_, { Length: > 0 } person) => person,
-        _ => "-"
-    };
+        showReprintConfirm = false;
+        bundlePendingReprint = null;
+    }
+
+    private async Task ConfirmReprint()
+    {
+        if (bundlePendingReprint is null || reprintCopies < 1) return;
+
+        reprintingId = bundlePendingReprint.Id;
+        var result = await BundleApi.ReprintAsync(bundlePendingReprint.Id, reprintCopies);
+        reprintingId = null;
+
+        if (!result.Success)
+        {
+            reprintError = result.Error;
+            return;
+        }
+
+        showReprintConfirm = false;
+        bundlePendingReprint = null;
+        await LoadBundles();
+    }
+
+    private static string FormatPenjahit(BundleDto b) => BundleDisplay.FormatPenjahit(b.ResourceName, b.EmployeeName);
 
     private static string LabelBadgeClass(string? status) => status switch
     {
@@ -622,8 +685,9 @@ else
         public int ArticleSizeId { get; set; }
         public int Qty { get; set; }
         public int ResourceId { get; set; }
-        public string? ResourcePersonName { get; set; }
+        public int EmployeeId { get; set; }
         public int BundlingResourceId { get; set; }
+        public string? Remarks { get; set; }
     }
 
     public class BundleEditFormModel
@@ -632,7 +696,8 @@ else
         public string Serial { get; set; } = string.Empty;
         public int Qty { get; set; }
         public int ResourceId { get; set; }
-        public string? ResourcePersonName { get; set; }
+        public int EmployeeId { get; set; }
         public int BundlingResourceId { get; set; }
+        public string? Remarks { get; set; }
     }
 }

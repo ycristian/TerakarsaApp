@@ -118,11 +118,17 @@ public class StationPendingHandoverDto
     // Prompt 12e: opsi divisi tujuan utk form Revisi (REVISE_HANDOVER). Tidak dipakai untuk
     // baris IsLastStep.
     public List<DivisionOptionDto> TargetDivisionOptions { get; set; } = new();
-    // Prompt 24: data penjahit bundle (bundles.resource_id/resource_person_name), dipakai
+    // Prompt 24: data penjahit bundle (bundles.resource_id/employee_id), dipakai
     // prefill modal Edit bundle -- hanya relevan untuk baris IsBundling.
     public int? BundleResourceId { get; set; }
     public string? BundleResourceName { get; set; }
-    public string? BundleResourcePersonName { get; set; }
+    // Prompt 35: dulu BundleResourcePersonName -- direname & direpurpose jadi catatan bebas
+    // bundle. Tidak ada editor-nya di station; klien wajib mengirim balik nilai ini apa
+    // adanya saat submit Edit bundle (lihat StationBundleUpdateRequest.Remarks).
+    public string? BundleRemarks { get; set; }
+    // Prompt 32: penjahit dari master employees, diutamakan di atas BundleRemarks.
+    public int? BundleEmployeeId { get; set; }
+    public string? BundleEmployeeName { get; set; }
 }
 
 // Prompt 12e: tab "Dikerjakan" -- bundle sudah diterima divisi ini, belum ada baris step
@@ -146,6 +152,10 @@ public class StationInProgressDto
     public string? SizeName { get; set; }
     public int Qty { get; set; }
     public string? TailorName { get; set; }
+    // Prompt 32: penjahit dari master employees, diutamakan di atas TailorName (fallback lama).
+    public string? EmployeeName { get; set; }
+    // Fix: catatan bebas bundle (bundles.remarks, Prompt 35) -- dipakai pencarian teks tab WIP.
+    public string? Remarks { get; set; }
     public DateTime ReceivedAt { get; set; }
     public int? NextArticleWorkflowId { get; set; }
     public string? NextStepName { get; set; }
@@ -298,6 +308,9 @@ public class StationActiveWorkDto
     // Fix: sisa hasil Cutting yang sudah diterima divisi Bundling tapi belum dijadikan bundle,
     // PER SIZE (size dengan stock 0 tidak disertakan) -- lihat SIS_Station_ActiveWork.
     public List<StationBundleStockCuttingDto> StockCutting { get; set; } = new();
+    // Fix: waktu aktivitas terakhir kartu ini (received_at step sebelumnya, atau input step ini
+    // sendiri kalau sudah dicicil) -- dipakai default urutan tab WIP; NULL kalau belum tersentuh.
+    public DateTime? WorkStartedAt { get; set; }
 }
 
 public class StationActiveWorkSizeDto

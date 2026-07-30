@@ -27,17 +27,13 @@ public class ReportBundleApiService
         return sb.ToString();
     }
 
-    public async Task<List<BundleWipDto>> GetWipAsync(int? projectId, int? articleId, int? divisionId, string? status)
+    // Fix: order-by-klik-header + pagination -- POST + body (pola sama dengan
+    // ProjectApiService.GetPagedAsync), bukan lagi GET query string.
+    public async Task<BundleWipPagedResult> GetWipAsync(BundleWipPagedRequest request)
     {
-        var query = BuildQuery(
-            ("projectId", projectId?.ToString()),
-            ("articleId", articleId?.ToString()),
-            ("divisionId", divisionId?.ToString()),
-            ("status", status));
-
-        var response = await _http.GetAsync($"api/report-bundle/wip{query}");
+        var response = await _http.PostAsJsonAsync("api/report-bundle/wip", request);
         if (!response.IsSuccessStatusCode) return new();
-        return await response.Content.ReadFromJsonAsync<List<BundleWipDto>>() ?? new();
+        return await response.Content.ReadFromJsonAsync<BundleWipPagedResult>() ?? new();
     }
 
     public async Task<ArticleProgressResultDto> GetProgressAsync(int projectId)
@@ -71,6 +67,16 @@ public class ReportBundleApiService
 
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Bundle tidak ditemukan." : error.Trim('"'), null);
+    }
+
+    // Fix: "Cetak Reject" -- nota reject untuk satu baris log timeline (tab Riwayat), tombol
+    // client hanya tampil kalau baris itu punya reject > 0.
+    public async Task<(bool Success, string Error)> PrintRejectAsync(int workflowLogId, int copies = 1)
+    {
+        var response = await _http.PostAsync($"api/report-bundle/workflow-logs/{workflowLogId}/print-reject?copies={copies}", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak nota reject." : error.Trim('"'));
     }
 
     public async Task<List<ProjectDto>> GetProjectsAsync()

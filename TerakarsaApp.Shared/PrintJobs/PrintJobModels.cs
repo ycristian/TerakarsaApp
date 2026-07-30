@@ -69,8 +69,10 @@ public class BundleLabelPayload
     [JsonPropertyName("resource_name")]
     public string? ResourceName { get; set; }
 
-    [JsonPropertyName("resource_person_name")]
-    public string? ResourcePersonName { get; set; }
+    // Prompt 35: dulu resource_person_name (teks bebas) -- diganti employee_name (master
+    // employees), penjahit kini identitas ber-FK, bukan teks bebas.
+    [JsonPropertyName("employee_name")]
+    public string? EmployeeName { get; set; }
 
     [JsonPropertyName("started_at")]
     public DateTime StartedAt { get; set; }
@@ -106,4 +108,63 @@ public class PackLabelPayload
 
     [JsonPropertyName("is_confirmed")]
     public bool IsConfirmed { get; set; }
+}
+
+// Bentuk payload JSON print_jobs untuk job_type REJECT_NOTE (lihat
+// sql/sp_WorkflowLog_Manage.sql SIS_WorkflowLog_PrintReject, dirakit lewat FOR JSON PATH
+// dengan nama kolom snake_case -- cocokkan lewat JsonPropertyName). Satu baris
+// article_workflow_logs, bukan seluruh bundle -- tombol "Cetak Reject" di BundleScanCard/
+// ReportBundle hanya muncul kalau baris itu punya reject > 0.
+public class RejectNotePayload
+{
+    [JsonPropertyName("workflow_log_id")]
+    public int WorkflowLogId { get; set; }
+
+    [JsonPropertyName("bundle_serial")]
+    public string? BundleSerial { get; set; }
+
+    [JsonPropertyName("bundle_no")]
+    public int? BundleNo { get; set; }
+
+    [JsonPropertyName("bundle_letter")]
+    public string? BundleLetter { get; set; }
+
+    [JsonPropertyName("project_name")]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [JsonPropertyName("article_name")]
+    public string ArticleName { get; set; } = string.Empty;
+
+    [JsonPropertyName("size_name")]
+    public string? SizeName { get; set; }
+
+    [JsonPropertyName("step_name")]
+    public string StepName { get; set; } = string.Empty;
+
+    [JsonPropertyName("division_name")]
+    public string? DivisionName { get; set; }
+
+    [JsonPropertyName("qty_reject_print")]
+    public int QtyRejectPrint { get; set; }
+
+    [JsonPropertyName("qty_reject_fabric")]
+    public int QtyRejectFabric { get; set; }
+
+    [JsonPropertyName("qty_reject_sewing")]
+    public int QtyRejectSewing { get; set; }
+
+    [JsonPropertyName("qty_reject_rework")]
+    public int QtyRejectRework { get; set; }
+
+    [JsonPropertyName("qty_lost")]
+    public int QtyLost { get; set; }
+
+    [JsonPropertyName("remark")]
+    public string? Remark { get; set; }
+
+    [JsonPropertyName("resource_name")]
+    public string? ResourceName { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTime CreatedAt { get; set; }
 }

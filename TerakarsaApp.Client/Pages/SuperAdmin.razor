@@ -152,7 +152,7 @@ else
                 {
                     <div class="alert alert-success mt-3 mb-0 d-flex justify-content-between align-items-center">
                         <span>@bundleSuccessMessage</span>
-                        <button class="btn btn-sm btn-outline-success" disabled="@isReprinting" @onclick="ReprintLabel">
+                        <button class="btn btn-sm btn-outline-success" disabled="@isReprinting" @onclick="OpenReprintModal">
                             @(isReprinting ? "Mencetak..." : "Cetak Ulang Label")
                         </button>
                     </div>
@@ -309,6 +309,19 @@ else
     </div>
 }
 
+<ConfirmDeleteModal Show="showReprintModal" Title="Cetak Ulang Label" ConfirmText="Cetak" BusyText="Mencetak..." ConfirmButtonClass="btn-primary"
+                     IsBusy="isReprinting" OnConfirm="ConfirmReprintLabel" OnCancel="CloseReprintModal">
+    <Message>
+        <p class="mb-2">Cetak ulang label "@detail?.Bundle.Serial"?</p>
+        <label class="form-label">Jumlah Label</label>
+        <input type="number" min="1" class="form-control" @bind="reprintCopies" />
+        @if (!string.IsNullOrEmpty(reprintModalError))
+        {
+            <div class="text-danger mt-2">@reprintModalError</div>
+        }
+    </Message>
+</ConfirmDeleteModal>
+
 <ConfirmDeleteModal Show="showDeleteBundleModal" IsBusy="isDeletingBundle" OnConfirm="ConfirmDeleteBundle" OnCancel="CancelDeleteBundle">
     <Message>
         <p>Yakin ingin menghapus bundle "@detail?.Bundle.Serial"?</p>
@@ -358,6 +371,10 @@ else
     private string bundleError = string.Empty;
     private string bundleSuccessMessage = string.Empty;
     private bool isReprinting = false;
+    // Fix: modal konfirmasi Cetak Ulang -- user input jumlah label (default 1).
+    private bool showReprintModal = false;
+    private int reprintCopies = 1;
+    private string reprintModalError = string.Empty;
 
     private bool showDeleteBundleModal = false;
     private bool isDeletingBundle = false;
@@ -456,17 +473,35 @@ else
         }
     }
 
-    private async Task ReprintLabel()
+    private void OpenReprintModal()
     {
-        if (selectedBundleId is null) return;
+        reprintCopies = 1;
+        reprintModalError = string.Empty;
+        showReprintModal = true;
+    }
+
+    private void CloseReprintModal()
+    {
+        showReprintModal = false;
+    }
+
+    private async Task ConfirmReprintLabel()
+    {
+        if (selectedBundleId is null || reprintCopies < 1) return;
 
         isReprinting = true;
-        var result = await SuperAdminApi.ReprintBundleAsync(selectedBundleId.Value);
+        reprintModalError = string.Empty;
+        var result = await SuperAdminApi.ReprintBundleAsync(selectedBundleId.Value, reprintCopies);
         isReprinting = false;
 
-        bundleSuccessMessage = result.Success ? "Label baru masuk antrian cetak." : string.Empty;
         if (!result.Success)
-            bundleError = result.Error;
+        {
+            reprintModalError = result.Error;
+            return;
+        }
+
+        showReprintModal = false;
+        bundleSuccessMessage = "Label baru masuk antrian cetak.";
     }
 
     private void OpenDeleteBundleModal()

@@ -16,10 +16,14 @@ public class BundleDto
     public int SortOrder { get; set; }
     public int? ResourceId { get; set; }
     public string? ResourceName { get; set; }
-    public string? ResourcePersonName { get; set; }
+    // Prompt 35: dulu ResourcePersonName (nama penjahit teks bebas) -- direname & direpurpose
+    // jadi catatan bebas bundle, diisi/diedit lewat BundleManager.razor.
+    public string? Remarks { get; set; }
     public string? LabelStatus { get; set; }
     public DateTime? PrintedAt { get; set; }
     public DateTime CreatedAt { get; set; }
+    public int? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
 }
 
 public class BundleSizeSummaryDto
@@ -54,11 +58,15 @@ public class BundleCreateRequest
     public int ArticleSizeId { get; set; }
     public int Qty { get; set; }
     public int? ResourceId { get; set; }
-    public string? ResourcePersonName { get; set; }
+    // Prompt 32: penjahit dari master employees, menggantikan ResourcePersonName (teks bebas).
+    public int? EmployeeId { get; set; }
     public int? BundlingResourceId { get; set; }
-    // Prompt 24: checkbox "Cetak label otomatis" di station (default true; admin /bundles
-    // tidak mengirim field ini sehingga tetap berperilaku sama seperti sebelumnya).
-    public bool AutoPrint { get; set; } = true;
+    // Prompt 35: catatan bebas bundle, diisi/diedit lewat BundleManager.razor.
+    public string? Remarks { get; set; }
+    // Fix: dulu AutoPrint (bool checkbox "Cetak label otomatis"), sekarang jumlah label yang
+    // dicetak (default 1; admin /bundles tidak mengirim field ini sehingga tetap cetak 1x
+    // seperti perilaku lama). 0 = tidak cetak.
+    public int PrintCopies { get; set; } = 1;
 }
 
 // Prompt: "Print Label Cacat" -- muncul di BundleScanCard setelah Kirim Hasil dengan reject
@@ -75,18 +83,21 @@ public class BundleUpdateRequest
     public int Id { get; set; }
     public int Qty { get; set; }
     public int? ResourceId { get; set; }
-    public string? ResourcePersonName { get; set; }
+    // Prompt 32: penjahit dari master employees, menggantikan ResourcePersonName (teks bebas).
+    public int? EmployeeId { get; set; }
     public int? BundlingResourceId { get; set; }
     // Fix: opsional -- NULL berarti ukuran tidak diubah (dipakai admin /bundles yang belum
     // punya UI ganti ukuran); station selalu mengirim field ini lewat StationBundleUpdateRequest.
     public int? ArticleSizeId { get; set; }
+    // Prompt 35: catatan bebas bundle -- SP menulis ulang nilai ini apa adanya tiap UPDATE
+    // (editable di BundleManager.razor admin & modal Edit bundle station).
+    public string? Remarks { get; set; }
 }
 
 public class BundleCreateResult
 {
     public int Id { get; set; }
-    // Prompt 24: nullable -- NULL kalau @SkipPrintJob = 1 (checkbox "Cetak label otomatis"
-    // tidak dicentang di station).
+    // Fix: nullable -- NULL kalau PrintCopies = 0 (input "Jumlah Label" diisi 0 di station).
     public int? PrintJobId { get; set; }
     public int BundleNo { get; set; }
     public string? BundleLetter { get; set; }
@@ -95,8 +106,10 @@ public class BundleCreateResult
 
 // Prompt 24: "Buat Bundle" dari kartu WIP station Bundling -- ResourceId = operator sesi
 // (WAJIB, dikirim ke SP sebagai @BundlingResourceId); Tailor* = penjahit opsional (dikirim
-// sebagai @ResourceId/@ResourcePersonName di SIS_Bundle_Manage) -- nama field beda dari
+// sebagai @ResourceId/@EmployeeId di SIS_Bundle_Manage) -- nama field beda dari
 // BundleCreateRequest supaya semantik operator-sesi vs penjahit tidak tertukar.
+// Prompt 32: TailorPersonName (teks bebas) diganti TailorEmployeeId (master employees),
+// cascading di bawah TailorResourceId sama seperti BundleManager.razor.
 public class StationBundleCreateRequest
 {
     public int ArticleId { get; set; }
@@ -104,8 +117,12 @@ public class StationBundleCreateRequest
     public int Qty { get; set; }
     public int ResourceId { get; set; }
     public int? TailorResourceId { get; set; }
-    public string? TailorPersonName { get; set; }
-    public bool AutoPrint { get; set; } = true;
+    public int? TailorEmployeeId { get; set; }
+    // Fix: dulu AutoPrint (bool checkbox), sekarang jumlah label yang dicetak (default 1,
+    // input "Jumlah Label" di modal "Buat Bundle" station). 0 = tidak cetak.
+    public int PrintCopies { get; set; } = 1;
+    // Prompt 35: catatan bebas bundle, diisi opsional di modal "Buat Bundle" station.
+    public string? Remarks { get; set; }
 }
 
 // Prompt 24: Edit bundle dari tab OUT station Bundling.
@@ -116,7 +133,10 @@ public class StationBundleUpdateRequest
     public int ArticleSizeId { get; set; }
     public int ResourceId { get; set; }
     public int? TailorResourceId { get; set; }
-    public string? TailorPersonName { get; set; }
+    public int? TailorEmployeeId { get; set; }
+    // Prompt 35: catatan bebas bundle -- editable di modal Edit bundle station juga
+    // (lihat BundleUpdateRequest.Remarks, SP menulis ulang nilai ini apa adanya tiap UPDATE).
+    public string? Remarks { get; set; }
 }
 
 // --- Prompt 12: scan QR bundle (/station panel scan + halaman publik /b/{serial}) ---
@@ -138,10 +158,16 @@ public class BundleScanBundleDto
     public string? LastStepName { get; set; }
     public string? LastStatus { get; set; }
     public string? LastDivisionName { get; set; }
+    // Prompt 32: penjahit dari master employees -- ditampilkan sebagai tambahan di atas Line
+    // (yang tetap ResourceName, lihat SIS_Bundle_ScanInfo).
+    public string? EmployeeName { get; set; }
 }
 
 public class BundleScanTimelineDto
 {
+    // Prompt 36: workflow_log_id -- dipakai tombol "Edit" per baris timeline (fitur Super
+    // Admin di /b/{serial}).
+    public int Id { get; set; }
     public string StepName { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public string? SizeName { get; set; }

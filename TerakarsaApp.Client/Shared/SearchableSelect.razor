@@ -10,7 +10,7 @@
 
     @if (isOpen)
     {
-        <div class="dropdown-menu show w-100" style="max-height: 220px; overflow-y: auto; z-index: 1051;">
+        <div class="dropdown-menu show" style="min-width: 100%; width: max-content; max-width: min(90vw, 480px); max-height: 220px; overflow-y: auto; z-index: 1051;">
             @if (AllowNone)
             {
                 <button type="button" class="dropdown-item" @onmousedown="SelectNone" @onmousedown:preventDefault="true">@NoneLabel</button>

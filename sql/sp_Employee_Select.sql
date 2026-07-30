@@ -1,6 +1,10 @@
 -- Pengambilan data employees (SELECT saja, tidak menyentuh data).
 -- INNER JOIN divisions & positions (wajib diisi), LEFT JOIN resources (resource_id nullable).
 -- Mutasi (create/update/delete) ada di sp_Employee_Manage.sql (SIS_Employee_Manage).
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut -- tiap kata (dipisah spasi) dicek independen
+--   ke SEMUA kolom via STRING_SPLIT, baris cocok kalau SEMUA kata ketemu di SUATU kolom (boleh
+--   kolom berbeda per kata). Pola yang sama diterapkan ke semua SP list search lain di sistem.
 
 SET ANSI_NULLS ON;
 GO
@@ -26,11 +30,18 @@ BEGIN
         INNER JOIN positions p ON p.position_id = e.position_id
         LEFT JOIN resources r ON r.resource_id = e.resource_id
         WHERE e.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR e.employee_code LIKE '%' + @SearchTerm + '%'
-               OR e.employee_name LIKE '%' + @SearchTerm + '%'
-               OR d.division_name LIKE '%' + @SearchTerm + '%'
-               OR p.position_name LIKE '%' + @SearchTerm + '%');
+          -- Fix: pencarian antar-atribut -- tiap kata di @SearchTerm dicek independen ke
+          -- SEMUA kolom (boleh kolom berbeda per kata), baris cocok kalau SEMUA kata ketemu.
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') s
+                WHERE s.value <> ''
+                  AND NOT (
+                        e.employee_code LIKE '%' + s.value + '%'
+                     OR e.employee_name LIKE '%' + s.value + '%'
+                     OR d.division_name LIKE '%' + s.value + '%'
+                     OR p.position_name LIKE '%' + s.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -60,11 +71,16 @@ BEGIN
             INNER JOIN positions p ON p.position_id = e.position_id
             LEFT JOIN resources r ON r.resource_id = e.resource_id
             WHERE e.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR e.employee_code LIKE ''%'' + @SearchTerm + ''%''
-                   OR e.employee_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR d.division_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR p.position_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') s
+                    WHERE s.value <> ''''
+                      AND NOT (
+                            e.employee_code LIKE ''%'' + s.value + ''%''
+                         OR e.employee_name LIKE ''%'' + s.value + ''%''
+                         OR d.division_name LIKE ''%'' + s.value + ''%''
+                         OR p.position_name LIKE ''%'' + s.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
@@ -95,5 +111,21 @@ BEGIN
     INNER JOIN positions p ON p.position_id = e.position_id
     LEFT JOIN resources r ON r.resource_id = e.resource_id
     WHERE e.employee_id = @Id AND e.deleted_at IS NULL;
+END;
+GO
+
+-- Prompt 32: lookup employee hidup untuk dropdown "Penjahit" (cascading di bawah dropdown
+-- Line/resource) -- pola meniru SIS_Resource_GetActiveByDivision.
+CREATE OR ALTER PROCEDURE SIS_Employee_GetActiveByResource
+    @ResourceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT employee_id AS Id, employee_name AS EmployeeName, employee_code AS EmployeeCode
+    FROM employees
+    WHERE resource_id = @ResourceId
+      AND deleted_at IS NULL
+    ORDER BY employee_name ASC;
 END;
 GO

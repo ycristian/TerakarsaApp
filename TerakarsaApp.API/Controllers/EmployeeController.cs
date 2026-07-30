@@ -47,9 +47,6 @@ public class EmployeeController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] EmployeeCreateRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.EmployeeCode))
-            return BadRequest("Kode karyawan wajib diisi.");
-
         if (string.IsNullOrWhiteSpace(request.EmployeeName))
             return BadRequest("Nama karyawan wajib diisi.");
 
@@ -67,9 +64,6 @@ public class EmployeeController : ControllerBase
     [HttpPut]
     public async Task<IActionResult> Update([FromBody] EmployeeUpdateRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.EmployeeCode))
-            return BadRequest("Kode karyawan wajib diisi.");
-
         if (string.IsNullOrWhiteSpace(request.EmployeeName))
             return BadRequest("Nama karyawan wajib diisi.");
 

@@ -125,6 +125,7 @@ public class WorkflowLogService
         public int? TotalBundleQty { get; set; }
         public int? TotalOrderQty { get; set; }
         public string? StockCuttingJson { get; set; }
+        public DateTime? WorkStartedAt { get; set; }
         // Dipakai hanya utk ORDER BY di SQL (UNION ActiveWork + kartu Buat Bundle) -- tidak
         // diteruskan ke StationActiveWorkDto.
         public int SortOrder { get; set; }
@@ -166,7 +167,9 @@ public class WorkflowLogService
         public string? TargetDivisionOptionsJson { get; set; }
         public int? BundleResourceId { get; set; }
         public string? BundleResourceName { get; set; }
-        public string? BundleResourcePersonName { get; set; }
+        public string? BundleRemarks { get; set; }
+        public int? BundleEmployeeId { get; set; }
+        public string? BundleEmployeeName { get; set; }
     }
 
     public async Task<List<WorkflowLogDto>> ListByArticleAsync(int articleId)
@@ -261,7 +264,9 @@ public class WorkflowLogService
                 : JsonSerializer.Deserialize<List<DivisionOptionDto>>(row.TargetDivisionOptionsJson) ?? new(),
             BundleResourceId = row.BundleResourceId,
             BundleResourceName = row.BundleResourceName,
-            BundleResourcePersonName = row.BundleResourcePersonName
+            BundleRemarks = row.BundleRemarks,
+            BundleEmployeeId = row.BundleEmployeeId,
+            BundleEmployeeName = row.BundleEmployeeName
         }).ToList();
     }
 
@@ -297,7 +302,8 @@ public class WorkflowLogService
             TotalOrderQty = row.TotalOrderQty,
             StockCutting = string.IsNullOrEmpty(row.StockCuttingJson)
                 ? new()
-                : JsonSerializer.Deserialize<List<StationBundleStockCuttingDto>>(row.StockCuttingJson) ?? new()
+                : JsonSerializer.Deserialize<List<StationBundleStockCuttingDto>>(row.StockCuttingJson) ?? new(),
+            WorkStartedAt = row.WorkStartedAt
         }).ToList();
     }
 
@@ -567,6 +573,30 @@ public class WorkflowLogService
         catch (SqlException ex)
         {
             return (false, ex.Message);
+        }
+    }
+
+    // Fix: "Cetak Reject" -- nota reject untuk satu baris log (bukan seluruh bundle), lihat
+    // SIS_WorkflowLog_PrintReject. Dipakai dari StationDeviceController (station) dan
+    // ReportBundleController (JWT, tab Riwayat).
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintRejectAsync(int workflowLogId, int copies, int userId)
+    {
+        var idParam = new SqlParameter("@WorkflowLogId", workflowLogId);
+        var copiesParam = new SqlParameter("@Copies", copies);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_WorkflowLog_PrintReject @WorkflowLogId = @WorkflowLogId, @Copies = @Copies, @UserId = @UserId",
+                    idParam, copiesParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
         }
     }
 

@@ -24,8 +24,23 @@
 -- Fitur "batalkan status diterima" SENGAJA tidak dibuat -- sudah ada Batal Terima di stasiun
 -- (SIS_WorkflowLog_Manage action UNRECEIVE).
 --
--- Read: SIS_SuperAdmin_BundleSearch (@Search) dan SIS_SuperAdmin_BundleDetail (@BundleId) --
--- lihat masing-masing di bawah.
+-- Read: SIS_SuperAdmin_BundleSearch (@Search), SIS_SuperAdmin_BundleDetail (@BundleId) dan
+-- SIS_SuperAdmin_LogEditInfo (@WorkflowLogId) -- lihat masing-masing di bawah.
+--
+-- Prompt 36 -- fitur BARU "Edit Timeline & Info Bundle" di halaman /b/{serial} dan
+-- /report-bundle (tab Riwayat), dipakai user SUPER_ADMIN langsung dari tampilan bundle,
+-- BEDA dengan LOG_UPDATE/BUNDLE_UPDATE di atas (koreksi bebas tanpa validasi, dari panel
+-- /super-admin, TERMASUK bisa ubah serial/bundle_no) -- makanya action BARU, bukan
+-- perluasan LOG_UPDATE/BUNDLE_UPDATE:
+--   EDIT_LOG -- ubah qty (enam kategori) + pelaksana (resource_id) + remark baris log
+--     BER-BUNDLE hidup. WAJIB validasi arah bawah (hard block, TANPA override): total qty_ok
+--     baru step ini tidak boleh lebih kecil dari total step ber-bundle berikutnya (bundle
+--     sama). Arah atas (qty tidak boleh diam-diam melebihi qty masuk dari step sebelumnya /
+--     qty bundle) tetap pola QTY_EXCEED| + @ConfirmExceed, sama seperti SIS_WorkflowLog_Manage.
+--   EDIT_BUNDLE -- ubah ukuran/qty/line(resource_id)/penjahit(employee_id) bundle hidup,
+--     SEKALIGUS menyinkronkan qty_ok baris log Bundling bundle ini. Qty baru WAJIB validasi
+--     arah bawah yang sama (>= total step ber-bundle setelah Bundling). Serial & bundle_no
+--     TIDAK PERNAH disentuh aksi ini (beda dengan BUNDLE_UPDATE).
 
 SET ANSI_NULLS ON;
 GO
@@ -48,6 +63,12 @@ CREATE OR ALTER PROCEDURE SIS_SuperAdmin_Manage
     @QtyLost         INT = 0,
     @Remark          VARCHAR(500) = NULL,
     @DeleteReason    VARCHAR(255) = NULL,
+    -- Prompt 36: EDIT_LOG (pelaksana baris log) & EDIT_BUNDLE (line).
+    @ResourceId      INT = NULL,
+    -- Prompt 36: EDIT_BUNDLE (penjahit, pola cascading Prompt 32).
+    @EmployeeId      INT = NULL,
+    -- Prompt 36: EDIT_LOG arah atas (pola QTY_EXCEED| yang sudah ada).
+    @ConfirmExceed   BIT = 0,
     @UserId          INT
 AS
 BEGIN
@@ -220,6 +241,246 @@ BEGIN
             delete_reason = @DeleteReason
         WHERE workflow_log_id = @WorkflowLogId AND deleted_at IS NULL;
     END
+
+    ELSE IF @Action = 'EDIT_LOG'
+    BEGIN
+        DECLARE @EditArticleWorkflowId INT, @EditBundleId INT, @EditDivisionId INT,
+                @EditArticleId INT, @EditSortOrder INT, @EditLogType VARCHAR(15);
+        SELECT @EditArticleWorkflowId = awl.article_workflow_id, @EditBundleId = awl.bundle_id,
+               @EditDivisionId = awl.division_id, @EditArticleId = aw.article_id,
+               @EditSortOrder = aw.sort_order, @EditLogType = awl.log_type
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        WHERE awl.workflow_log_id = @WorkflowLogId AND awl.deleted_at IS NULL;
+
+        IF @EditArticleWorkflowId IS NULL
+        BEGIN
+            RAISERROR('Log tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @EditBundleId IS NULL
+        BEGIN
+            RAISERROR('Log ini bukan bagian dari bundle.', 16, 1);
+            RETURN;
+        END
+
+        IF @EditLogType = 'ADJUSTMENT'
+        BEGIN
+            IF @QtyOk < 0
+            BEGIN
+                RAISERROR('Qty OK tidak boleh negatif.', 16, 1);
+                RETURN;
+            END
+
+            DECLARE @EditAdjTotal INT = @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost;
+            IF @EditAdjTotal <> 0
+            BEGIN
+                RAISERROR('Baris penyesuaian: total keenam qty tetap harus 0.', 16, 1);
+                RETURN;
+            END
+        END
+        ELSE
+        BEGIN
+            IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+               OR @QtyRejectRework < 0 OR @QtyLost < 0
+            BEGIN
+                RAISERROR('Qty tidak boleh negatif.', 16, 1);
+                RETURN;
+            END
+
+            -- Fix: total keenam qty tidak boleh 0 (baris NORMAL) -- pola sama dengan
+            -- SIS_WorkflowLog_Manage CREATE/UPDATE. Baris ADJUSTMENT dikecualikan (invariannya
+            -- justru total HARUS 0, ditegakkan di atas).
+            IF @QtyOk = 0 AND @QtyRejectPrint = 0 AND @QtyRejectFabric = 0 AND @QtyRejectSewing = 0
+               AND @QtyRejectRework = 0 AND @QtyLost = 0
+            BEGIN
+                RAISERROR('Total qty tidak boleh 0. Isi minimal satu kategori (OK/reject/hilang).', 16, 1);
+                RETURN;
+            END
+        END
+
+        -- Fix: Pelaksana wajib diisi (beda dari LOG_UPDATE bebas di panel /super-admin).
+        IF @ResourceId IS NULL
+        BEGIN
+            RAISERROR('Pelaksana wajib diisi.', 16, 1);
+            RETURN;
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @ResourceId AND division_id = @EditDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Pelaksana tidak sesuai divisi step ini.', 16, 1);
+            RETURN;
+        END
+
+        -- Arah bawah (hard block, TANPA override): total qty_ok baru step ini (baris yang
+        -- diedit pakai nilai baru) tidak boleh < total step ber-bundle berikutnya (bundle sama).
+        DECLARE @EditNextArticleWorkflowId INT;
+        SELECT TOP 1 @EditNextArticleWorkflowId = article_workflow_id
+        FROM article_workflows
+        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @EditSortOrder
+        ORDER BY sort_order ASC;
+
+        IF @EditNextArticleWorkflowId IS NOT NULL
+        BEGIN
+            DECLARE @EditNewSumQtyOk INT, @EditNextTotal INT;
+            SELECT @EditNewSumQtyOk = ISNULL(SUM(qty_ok), 0)
+            FROM article_workflow_logs
+            WHERE article_workflow_id = @EditArticleWorkflowId AND bundle_id = @EditBundleId
+              AND deleted_at IS NULL AND workflow_log_id <> @WorkflowLogId;
+            SET @EditNewSumQtyOk = ISNULL(@EditNewSumQtyOk, 0) + @QtyOk;
+
+            SELECT @EditNextTotal = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
+            FROM article_workflow_logs
+            WHERE article_workflow_id = @EditNextArticleWorkflowId AND bundle_id = @EditBundleId AND deleted_at IS NULL;
+
+            IF @EditNewSumQtyOk < @EditNextTotal
+            BEGIN
+                RAISERROR('Qty step ini (%d) tidak boleh lebih kecil dari total step berikutnya (%d). Edit step berikutnya terlebih dahulu.', 16, 1, @EditNewSumQtyOk, @EditNextTotal);
+                RETURN;
+            END
+        END
+
+        -- Arah atas (boleh lewat konfirmasi @ConfirmExceed, pola QTY_EXCEED| sama dengan
+        -- SIS_WorkflowLog_Manage): total baru step ini tidak boleh diam-diam melebihi qty
+        -- masuk (qty_ok step ber-bundle sebelumnya, atau qty bundle kalau step ini Bundling).
+        DECLARE @EditPrevArticleWorkflowId INT;
+        SELECT TOP 1 @EditPrevArticleWorkflowId = article_workflow_id
+        FROM article_workflows
+        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @EditSortOrder
+        ORDER BY sort_order DESC;
+
+        DECLARE @EditQtyMasuk INT;
+        IF @EditPrevArticleWorkflowId IS NOT NULL
+            SELECT @EditQtyMasuk = ISNULL(SUM(qty_ok), 0)
+            FROM article_workflow_logs
+            WHERE article_workflow_id = @EditPrevArticleWorkflowId AND bundle_id = @EditBundleId AND deleted_at IS NULL;
+        ELSE
+            SELECT @EditQtyMasuk = qty FROM bundles WHERE bundle_id = @EditBundleId;
+
+        SET @EditQtyMasuk = ISNULL(@EditQtyMasuk, 0);
+
+        DECLARE @EditQtySudahExcl INT;
+        SELECT @EditQtySudahExcl = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
+        FROM article_workflow_logs
+        WHERE article_workflow_id = @EditArticleWorkflowId AND bundle_id = @EditBundleId
+          AND deleted_at IS NULL AND workflow_log_id <> @WorkflowLogId;
+
+        DECLARE @EditNewTotalThis INT = @EditQtySudahExcl + @QtyOk + @QtyRejectPrint + @QtyRejectFabric + @QtyRejectSewing + @QtyRejectRework + @QtyLost;
+
+        IF @ConfirmExceed = 0 AND @EditNewTotalThis > @EditQtyMasuk
+        BEGIN
+            RAISERROR('QTY_EXCEED|Total melebihi qty masuk step ini (masuk %d, sudah tercatat %d).', 16, 1, @EditQtyMasuk, @EditQtySudahExcl);
+            RETURN;
+        END
+
+        UPDATE article_workflow_logs
+        SET qty_ok = @QtyOk,
+            qty_reject_print = @QtyRejectPrint,
+            qty_reject_fabric = @QtyRejectFabric,
+            qty_reject_sewing = @QtyRejectSewing,
+            qty_reject_rework = @QtyRejectRework,
+            qty_lost = @QtyLost,
+            resource_id = @ResourceId,
+            remark = @Remark,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
+        WHERE workflow_log_id = @WorkflowLogId AND deleted_at IS NULL;
+    END
+
+    ELSE IF @Action = 'EDIT_BUNDLE'
+    BEGIN
+        DECLARE @EbArticleId INT;
+        SELECT @EbArticleId = article_id FROM bundles WHERE bundle_id = @BundleId AND deleted_at IS NULL;
+
+        IF @EbArticleId IS NULL
+        BEGIN
+            RAISERROR('Bundle tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @ArticleSizeId IS NULL OR NOT EXISTS (
+            SELECT 1 FROM article_sizes
+            WHERE article_size_id = @ArticleSizeId AND article_id = @EbArticleId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Ukuran tidak sesuai dengan artikel bundle ini.', 16, 1);
+            RETURN;
+        END
+
+        IF @Qty IS NULL OR @Qty <= 0
+        BEGIN
+            RAISERROR('Qty bundle harus lebih dari 0.', 16, 1);
+            RETURN;
+        END
+
+        -- Line/penjahit, pola cascading Prompt 32 (validasi hanya kalau @EmployeeId diisi).
+        IF @EmployeeId IS NOT NULL
+        BEGIN
+            IF @ResourceId IS NULL
+            BEGIN
+                RAISERROR('Pilih line terlebih dahulu.', 16, 1);
+                RETURN;
+            END
+
+            IF NOT EXISTS (
+                SELECT 1 FROM employees
+                WHERE employee_id = @EmployeeId AND resource_id = @ResourceId AND deleted_at IS NULL
+            )
+            BEGIN
+                RAISERROR('Penjahit bukan anggota line ini.', 16, 1);
+                RETURN;
+            END
+        END
+
+        -- Arah bawah (hard block, TANPA override): qty bundle baru tidak boleh lebih kecil
+        -- dari total step ber-bundle setelah Bundling (bundle ini).
+        DECLARE @EbBundlingArticleWorkflowId INT, @EbBundlingSortOrder INT;
+        SELECT @EbBundlingArticleWorkflowId = article_workflow_id, @EbBundlingSortOrder = sort_order
+        FROM article_workflows
+        WHERE article_id = @EbArticleId AND deleted_at IS NULL AND is_bundling = 1;
+
+        DECLARE @EbNextArticleWorkflowId INT;
+        IF @EbBundlingArticleWorkflowId IS NOT NULL
+            SELECT TOP 1 @EbNextArticleWorkflowId = article_workflow_id
+            FROM article_workflows
+            WHERE article_id = @EbArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @EbBundlingSortOrder
+            ORDER BY sort_order ASC;
+
+        IF @EbNextArticleWorkflowId IS NOT NULL
+        BEGIN
+            DECLARE @EbNextTotal INT;
+            SELECT @EbNextTotal = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
+            FROM article_workflow_logs
+            WHERE article_workflow_id = @EbNextArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
+
+            IF @Qty < @EbNextTotal
+            BEGIN
+                RAISERROR('Qty bundle (%d) tidak boleh lebih kecil dari total step berikutnya (%d). Edit step berikutnya terlebih dahulu.', 16, 1, @Qty, @EbNextTotal);
+                RETURN;
+            END
+        END
+
+        UPDATE bundles
+        SET article_size_id = @ArticleSizeId,
+            qty = @Qty,
+            resource_id = @ResourceId,
+            employee_id = @EmployeeId,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
+        WHERE bundle_id = @BundleId AND deleted_at IS NULL;
+
+        -- Qty bundle mengalir ke qty_ok log Bundling (Prompt 17) -- sinkron dalam transaksi
+        -- (implisit, statement tunggal) yang sama.
+        UPDATE awl
+        SET awl.qty_ok = @Qty,
+            awl.updated_at = SYSDATETIME(),
+            awl.updated_by = @UserId
+        FROM article_workflow_logs awl
+        WHERE awl.article_workflow_id = @EbBundlingArticleWorkflowId AND awl.bundle_id = @BundleId AND awl.deleted_at IS NULL;
+    END
     ELSE
     BEGIN
         RAISERROR('Action tidak valid.', 16, 1);
@@ -270,8 +531,9 @@ BEGIN
 END;
 GO
 
--- Detail satu bundle untuk panel /super-admin: info bundle, opsi ukuran artikel (dropdown
--- Edit Bundle), dan semua log hidup bundle ini (tabel log + tombol Edit/Hapus). 3 result set.
+-- Detail satu bundle untuk panel /super-admin DAN modal "Edit Bundle" Prompt 36 (/b/{serial},
+-- /report-bundle Riwayat): info bundle, opsi ukuran artikel, dan semua log hidup bundle ini.
+-- 3 result set.
 CREATE OR ALTER PROCEDURE SIS_SuperAdmin_BundleDetail
     @BundleId INT
 AS
@@ -279,6 +541,10 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Result set 1: info bundle.
+    -- Prompt 36: ResourceId/ResourceName (line) + EmployeeId/EmployeeName (penjahit) + kolom
+    -- pendukung modal Edit Bundle -- LineDivisionId (divisi step ber-bundle PERTAMA setelah
+    -- Bundling, dipakai fetch dropdown Line) dan LowerBound (total step ber-bundle setelah
+    -- Bundling -- batas bawah qty bundle, lihat SIS_SuperAdmin_Manage EDIT_BUNDLE).
     SELECT
         b.bundle_id AS BundleId,
         b.article_id AS ArticleId,
@@ -291,12 +557,34 @@ BEGIN
         p.project_name AS ProjectName,
         a.article_name AS ArticleName,
         a.style AS Style,
-        a.color AS Color
+        a.color AS Color,
+        b.resource_id AS ResourceId,
+        r.resource_name AS ResourceName,
+        b.employee_id AS EmployeeId,
+        emp.employee_name AS EmployeeName,
+        lineaw.division_id AS LineDivisionId,
+        ISNULL((
+            SELECT SUM(awl2.qty_ok + awl2.qty_reject_print + awl2.qty_reject_fabric + awl2.qty_reject_sewing + awl2.qty_reject_rework + awl2.qty_lost)
+            FROM article_workflow_logs awl2
+            WHERE awl2.article_workflow_id = lineaw.article_workflow_id AND awl2.bundle_id = b.bundle_id AND awl2.deleted_at IS NULL
+        ), 0) AS LowerBound
     FROM bundles b
     INNER JOIN articles a ON a.article_id = b.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+    LEFT JOIN resources r ON r.resource_id = b.resource_id
+    LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
+    OUTER APPLY (
+        SELECT TOP 1 aw1.article_workflow_id, aw1.division_id
+        FROM article_workflows aw1
+        WHERE aw1.article_id = b.article_id AND aw1.deleted_at IS NULL AND aw1.requires_bundle = 1
+          AND aw1.sort_order > (
+              SELECT sort_order FROM article_workflows
+              WHERE article_id = b.article_id AND deleted_at IS NULL AND is_bundling = 1
+          )
+        ORDER BY aw1.sort_order ASC
+    ) lineaw
     WHERE b.bundle_id = @BundleId AND b.deleted_at IS NULL;
 
     -- Result set 2: opsi ukuran artikel bundle ini (dropdown Edit Bundle).
@@ -340,5 +628,74 @@ BEGIN
     LEFT JOIN resources ur ON ur.resource_id = awl.updated_by_resource_id
     WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
     ORDER BY aw.sort_order ASC, awl.created_at ASC;
+END;
+GO
+
+-- Prompt 36: detail 1 baris log untuk modal "Edit Log" (/b/{serial}, /report-bundle Riwayat) --
+-- termasuk QtyMasuk (arah atas) dan LowerBound (arah bawah, batas hard block EDIT_LOG) supaya
+-- client bisa tampilkan baris info "Masuk: X • Batas bawah: Y" sebelum submit.
+CREATE OR ALTER PROCEDURE SIS_SuperAdmin_LogEditInfo
+    @WorkflowLogId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @ArticleWorkflowId INT, @BundleId INT, @DivisionId INT, @ArticleId INT, @SortOrder INT;
+    SELECT @ArticleWorkflowId = awl.article_workflow_id, @BundleId = awl.bundle_id,
+           @DivisionId = awl.division_id, @ArticleId = aw.article_id, @SortOrder = aw.sort_order
+    FROM article_workflow_logs awl
+    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+    WHERE awl.workflow_log_id = @WorkflowLogId AND awl.deleted_at IS NULL;
+
+    -- Fix: TIDAK bare RETURN di sini kalau log tidak ditemukan -- itu membuat SP tidak
+    -- mengembalikan result set SAMA SEKALI, dan EF Core (SqlQueryRaw) gagal dengan error
+    -- "required column was not present" karena skema kolom tidak pernah terkirim. SELECT
+    -- di bawah sengaja tetap jalan (JOIN-nya sendiri otomatis menghasilkan 0 baris kalau
+    -- log tidak ditemukan/sudah dihapus), supaya GetLogEditInfoAsync bisa membedakan
+    -- "0 baris" (FirstOrDefault -> null, wajar) dari error.
+    DECLARE @NextArticleWorkflowId INT;
+    SELECT TOP 1 @NextArticleWorkflowId = article_workflow_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @SortOrder
+    ORDER BY sort_order ASC;
+
+    DECLARE @PrevArticleWorkflowId INT;
+    SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
+    ORDER BY sort_order DESC;
+
+    DECLARE @QtyMasuk INT;
+    IF @PrevArticleWorkflowId IS NOT NULL
+        SELECT @QtyMasuk = ISNULL(SUM(qty_ok), 0)
+        FROM article_workflow_logs
+        WHERE article_workflow_id = @PrevArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
+    ELSE
+        SELECT @QtyMasuk = qty FROM bundles WHERE bundle_id = @BundleId;
+
+    DECLARE @LowerBound INT = NULL;
+    IF @NextArticleWorkflowId IS NOT NULL
+        SELECT @LowerBound = ISNULL(SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost), 0)
+        FROM article_workflow_logs
+        WHERE article_workflow_id = @NextArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL;
+
+    SELECT
+        awl.workflow_log_id AS Id,
+        aw.step_name AS StepName,
+        awl.log_type AS LogType,
+        awl.division_id AS DivisionId,
+        awl.resource_id AS ResourceId,
+        awl.qty_ok AS QtyOk,
+        awl.qty_reject_print AS QtyRejectPrint,
+        awl.qty_reject_fabric AS QtyRejectFabric,
+        awl.qty_reject_sewing AS QtyRejectSewing,
+        awl.qty_reject_rework AS QtyRejectRework,
+        awl.qty_lost AS QtyLost,
+        awl.remark AS Remark,
+        ISNULL(@QtyMasuk, 0) AS QtyMasuk,
+        @LowerBound AS LowerBound
+    FROM article_workflow_logs awl
+    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+    WHERE awl.workflow_log_id = @WorkflowLogId AND awl.deleted_at IS NULL;
 END;
 GO

@@ -133,7 +133,8 @@ BEGIN
             a.article_name,
             p.project_name,
             spd.size_name,
-            ISNULL(b.resource_person_name, rr.resource_name) AS tailor_name,
+            rr.resource_name AS tailor_name,
+            emp.employee_name AS employee_name,
             ll.article_workflow_id, ll.qty_ok, ll.target_division_id, ll.received_at,
             ll.received_by_resource_id, ll.created_at,
             law.step_name
@@ -143,6 +144,7 @@ BEGIN
         INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
         INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
         LEFT JOIN resources rr ON rr.resource_id = b.resource_id
+        LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
         OUTER APPLY (
             SELECT TOP 1 awl.article_workflow_id, awl.qty_ok, awl.target_division_id,
                          awl.received_at, awl.received_by_resource_id, awl.created_at
@@ -167,6 +169,7 @@ BEGIN
         l.size_name AS SizeName,
         l.qty_ok AS QtyOk,
         l.tailor_name AS TailorName,
+        l.employee_name AS EmployeeName,
         l.step_name AS StepName,
         CASE WHEN @Mode = 'DIKERJAKAN' THEN l.received_at ELSE l.created_at END AS EventAt,
         CASE WHEN @Mode = 'DIKERJAKAN' THEN rrn.resource_name ELSE NULL END AS ReceivedByResourceName

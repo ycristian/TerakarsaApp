@@ -3,6 +3,9 @@
 -- Token penuh TIDAK pernah dikembalikan lewat SP di file ini -- admin hanya melihat status
 -- pairing (paired_at/pairing_code_expires_at); station_token hanya dikembalikan oleh
 -- SIS_Station_Manage saat CREATE/CLAIM_PAIRING.
+--
+-- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
+-- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
 SET ANSI_NULLS ON;
 GO
@@ -26,10 +29,15 @@ BEGIN
         FROM stations s
         INNER JOIN divisions d ON d.division_id = s.division_id
         WHERE s.deleted_at IS NULL
-          AND (@SearchTerm IS NULL
-               OR s.station_code LIKE '%' + @SearchTerm + '%'
-               OR s.station_name LIKE '%' + @SearchTerm + '%'
-               OR d.division_name LIKE '%' + @SearchTerm + '%');
+          AND (@SearchTerm IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@SearchTerm, ' ') tok
+                WHERE tok.value <> ''
+                  AND NOT (
+                        s.station_code LIKE '%' + tok.value + '%'
+                     OR s.station_name LIKE '%' + tok.value + '%'
+                     OR d.division_name LIKE '%' + tok.value + '%'
+                  )
+              ));
     END
     ELSE
     BEGIN
@@ -59,10 +67,15 @@ BEGIN
             INNER JOIN divisions d ON d.division_id = s.division_id
             LEFT JOIN resources r ON r.resource_id = s.default_resource_id
             WHERE s.deleted_at IS NULL
-              AND (@SearchTerm IS NULL
-                   OR s.station_code LIKE ''%'' + @SearchTerm + ''%''
-                   OR s.station_name LIKE ''%'' + @SearchTerm + ''%''
-                   OR d.division_name LIKE ''%'' + @SearchTerm + ''%'')
+              AND (@SearchTerm IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
+                    WHERE tok.value <> ''''
+                      AND NOT (
+                            s.station_code LIKE ''%'' + tok.value + ''%''
+                         OR s.station_name LIKE ''%'' + tok.value + ''%''
+                         OR d.division_name LIKE ''%'' + tok.value + ''%''
+                      )
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + @Tiebreak + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';

@@ -124,6 +124,14 @@ else
     }
 }
 
+<style>
+    .sortable-th {
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+</style>
+
 @if (showModal)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
@@ -133,7 +141,7 @@ else
                     <h5 class="modal-title">@modalTitle</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"></button>
                 </div>
-                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <div class="modal-body">
                     @if (isLoadingModal)
                     {
                         <p class="mb-0">Memuat data...</p>
@@ -152,24 +160,6 @@ else
                             <div class="col-md-6">
                                 <input type="text" class="form-control" placeholder="Cari bundle no, serial, project, artikel, penjahit..." @bind="modalSearch" @bind:event="oninput" />
                             </div>
-                            <div class="col-md-4">
-                                <select class="form-select" @bind="modalSortField">
-                                    <option value="BundleNo">Urutkan: Bundle No</option>
-                                    <option value="Serial">Urutkan: Serial</option>
-                                    <option value="ProjectName">Urutkan: Project</option>
-                                    <option value="ArticleName">Urutkan: Artikel</option>
-                                    <option value="SizeName">Urutkan: Size</option>
-                                    <option value="QtyOk">Urutkan: Pcs</option>
-                                    <option value="TailorName">Urutkan: Penjahit</option>
-                                    <option value="StepName">Urutkan: Step Asal</option>
-                                    <option value="EventAt">Urutkan: @(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <button type="button" class="btn btn-outline-secondary w-100" @onclick="() => modalSortAsc = !modalSortAsc">
-                                    <i class="fe @ModalSortIconClass me-1"></i>@(modalSortAsc ? "Asc" : "Desc")
-                                </button>
-                            </div>
                         </div>
 
                         @if (FilteredAndSortedModalBundles().Count == 0)
@@ -178,19 +168,19 @@ else
                         }
                         else
                         {
-                            <div class="table-responsive">
+                            <div class="table-responsive" style="max-height: 60vh; overflow: auto;">
                                 <table class="table table-bordered border text-nowrap mb-0">
-                                    <thead>
+                                    <thead class="sticky-top bg-white">
                                         <tr>
-                                            <th>Bundle No</th>
-                                            <th>Serial</th>
-                                            <th>Project</th>
-                                            <th>Artikel</th>
-                                            <th>Size</th>
-                                            <th>Pcs</th>
-                                            <th>Penjahit</th>
-                                            <th>Step Asal</th>
-                                            <th>@(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")</th>
+                                            <th class="sortable-th" @onclick='() => SortBy("BundleNo")'>Bundle No<i class="fe @SortIconClass("BundleNo") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("Serial")'>Serial<i class="fe @SortIconClass("Serial") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("ProjectName")'>Project<i class="fe @SortIconClass("ProjectName") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("ArticleName")'>Artikel<i class="fe @SortIconClass("ArticleName") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("SizeName")'>Size<i class="fe @SortIconClass("SizeName") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("QtyOk")'>Pcs<i class="fe @SortIconClass("QtyOk") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("TailorName")'>Penjahit<i class="fe @SortIconClass("TailorName") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("StepName")'>Step Asal<i class="fe @SortIconClass("StepName") ms-1"></i></th>
+                                            <th class="sortable-th" @onclick='() => SortBy("EventAt")'>@(modalMode == "DIKERJAKAN" ? "Diterima" : "Terkirim")<i class="fe @SortIconClass("EventAt") ms-1"></i></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -203,7 +193,7 @@ else
                                                 <td>@b.ArticleName</td>
                                                 <td>@b.SizeName</td>
                                                 <td>@b.QtyOk</td>
-                                                <td>@(b.TailorName ?? "-")</td>
+                                                <td>@BundleDisplay.FormatPenjahit(b.TailorName, b.EmployeeName)</td>
                                                 <td>@(b.StepName ?? "-")</td>
                                                 <td>@FormatDateTime(b.EventAt) (@Umur(b.EventAt))</td>
                                             </tr>
@@ -238,7 +228,7 @@ else
     private string modalError = string.Empty;
     private List<DivisionWipBundleDto> modalBundles = new();
     private string modalSearch = string.Empty;
-    private string modalSortField = "BundleNo";
+    private string modalSortField = "TailorName";
     private bool modalSortAsc = true;
 
     protected override async Task OnInitializedAsync()
@@ -338,7 +328,21 @@ else
         isLoadingModal = false;
     }
 
-    private string ModalSortIconClass => modalSortAsc ? "fe-arrow-up" : "fe-arrow-down";
+    private void SortBy(string field)
+    {
+        if (modalSortField == field)
+        {
+            modalSortAsc = !modalSortAsc;
+        }
+        else
+        {
+            modalSortField = field;
+            modalSortAsc = true;
+        }
+    }
+
+    private string SortIconClass(string field) =>
+        modalSortField != field ? "fe-chevron-down text-muted opacity-25" : (modalSortAsc ? "fe-arrow-up" : "fe-arrow-down");
 
     private void CloseModal()
     {
@@ -351,15 +355,19 @@ else
 
         if (!string.IsNullOrWhiteSpace(modalSearch))
         {
-            var term = modalSearch.Trim();
-            query = query.Where(b =>
-                b.BundleNo.ToString().Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                b.Serial.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                b.ProjectName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                b.ArticleName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                b.SizeName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                (b.TailorName ?? "").Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                (b.StepName ?? "").Contains(term, StringComparison.OrdinalIgnoreCase));
+            // Fix: pencarian antar-atribut -- tiap kata dipisah spasi dicek independen ke SEMUA
+            // field (boleh field berbeda per kata), baris cocok kalau SEMUA kata ketemu di
+            // suatu field. Lihat StationDevice.razor MatchesWipSearch untuk pola yang sama.
+            var tokens = modalSearch.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            query = query.Where(b => tokens.All(t =>
+                b.BundleNo.ToString().Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                b.Serial.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                b.ProjectName.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                b.ArticleName.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                b.SizeName.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                (b.TailorName ?? "").Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                (b.EmployeeName ?? "").Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                (b.StepName ?? "").Contains(t, StringComparison.OrdinalIgnoreCase)));
         }
 
         Func<DivisionWipBundleDto, object> keySelector = modalSortField switch
@@ -369,7 +377,7 @@ else
             "ArticleName" => b => b.ArticleName,
             "SizeName" => b => b.SizeName,
             "QtyOk" => b => b.QtyOk,
-            "TailorName" => b => b.TailorName ?? string.Empty,
+            "TailorName" => b => BundleDisplay.FormatPenjahit(b.TailorName, b.EmployeeName),
             "StepName" => b => b.StepName ?? string.Empty,
             "EventAt" => b => b.EventAt,
             _ => b => b.BundleNo,

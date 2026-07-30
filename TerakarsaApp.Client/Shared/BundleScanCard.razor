@@ -20,13 +20,19 @@
                 </h4>
                 @if (AllowReprint)
                 {
-                    <button class="btn btn-outline-secondary btn-sm mt-2" disabled="@reprintBusy" @onclick="HandleReprintClick">
+                    <button class="btn btn-outline-secondary btn-sm mt-2" disabled="@reprintBusy" @onclick="OpenReprintModal">
                         <i class="fe fe-printer"></i> Cetak Ulang
                     </button>
                     @if (!string.IsNullOrEmpty(reprintFeedback))
                     {
                         <div class="small mt-1 @(reprintFeedback == "Label masuk antrian cetak." ? "text-success" : "text-danger")">@reprintFeedback</div>
                     }
+                }
+                @if (IsSuperAdmin)
+                {
+                    <button class="btn btn-outline-dark btn-sm mt-2 ms-1" @onclick="() => OnEditBundleRequested.InvokeAsync()">
+                        <i class="fe fe-edit-2"></i> Edit Bundle
+                    </button>
                 }
             </div>
         </div>
@@ -35,9 +41,9 @@
 
         <p class="mb-1"><strong>@Info.Bundle.ArticleName</strong> @Info.Bundle.Style @Info.Bundle.Color</p>
         <p class="text-muted mb-1">@Info.Bundle.ProjectName</p>
-        @if (!string.IsNullOrEmpty(Info.Bundle.Line))
+        @if (!string.IsNullOrEmpty(Info.Bundle.Line) || !string.IsNullOrEmpty(Info.Bundle.EmployeeName))
         {
-            <p class="mb-1">Line: <strong>@Info.Bundle.Line</strong></p>
+            <p class="mb-1">Line: <strong>@BundleDisplay.FormatPenjahit(Info.Bundle.Line, Info.Bundle.EmployeeName)</strong></p>
         }
         <p class="mb-3">
             Posisi terakhir: <strong>@Info.Bundle.LastStepName</strong>
@@ -64,7 +70,17 @@
                                 <span class="badge bg-warning text-dark ms-1">Penyesuaian</span>
                             }
                         </span>
-                        <span class="text-muted">@t.CreatedAt.ToString("dd/MM HH:mm")</span>
+                        <span class="text-muted">
+                            @t.CreatedAt.ToString("dd/MM HH:mm")
+                            @if (AllowReprint && TotalReject(t) > 0)
+                            {
+                                <button class="btn btn-sm p-0 ms-2" title="Cetak Reject" disabled="@(printRejectBusyId == t.Id)" @onclick="() => PrintReject(t.Id)"><i class="fe fe-printer text-danger"></i></button>
+                            }
+                            @if (IsSuperAdmin)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm p-0 ms-2" title="Edit" @onclick="() => OnEditLogRequested.InvokeAsync(t.Id)"><i class="fe fe-edit"></i></button>
+                            }
+                        </span>
                     </div>
                     @if (t.QtyOk > 0 || t.QtyRejectPrint != 0 || t.QtyRejectFabric != 0 || t.QtyRejectSewing != 0 || t.QtyRejectRework != 0 || t.QtyLost != 0 || !string.IsNullOrEmpty(t.TargetDivisionName) || !string.IsNullOrEmpty(t.ResourceName))
                     {
@@ -106,7 +122,7 @@
                     @if (t.ReceivedAt is not null)
                     {
                         <small class="text-success d-block">
-                            Diterima @t.ReceivedAt.Value.ToString("dd/MM HH:mm") @(t.ReceivedByResourceName is not null ? $"oleh {t.ReceivedByResourceName}" : "")
+                            Diterima @t.ReceivedAt.Value.ToString("dd/MM HH:mm") oleh @(t.ReceivedByResourceName ?? (t.ReceivedRemark == "Otomatis: auto-terima" ? "Otomatis" : ""))
                             @(!string.IsNullOrEmpty(t.ReceivedRemark) ? $"— {t.ReceivedRemark}" : "")
                         </small>
                     }
@@ -118,6 +134,10 @@
             <button class="btn btn-link btn-sm p-0 mb-3" @onclick="() => showFullTimeline = !showFullTimeline">
                 @(showFullTimeline ? "Sembunyikan" : $"Lihat semua ({Info.Timeline.Count})")
             </button>
+        }
+        @if (!string.IsNullOrEmpty(printRejectFeedback))
+        {
+            <div class="small mb-2 @(printRejectFeedback.StartsWith("Nota") ? "text-success" : "text-danger")">@printRejectFeedback</div>
         }
 
         @if (!ReadOnly)
@@ -415,6 +435,33 @@
     </div>
 }
 
+@if (showReprintModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cetak Ulang Label</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReprintModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Cetak ulang label @Info.Bundle.Serial.</p>
+                    <label class="form-label">Jumlah Label</label>
+                    <input type="number" min="1" class="form-control form-control-lg" @bind="reprintCopies" />
+                    @if (!string.IsNullOrEmpty(reprintModalError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@reprintModalError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseReprintModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@(reprintBusy || reprintCopies < 1)" @onclick="SubmitReprint">Cetak</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (showCompleteModal)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
@@ -519,28 +566,78 @@
     // Prompt 24: Cetak Ulang -- hanya masuk akal saat ada token stasiun (endpoint reprint
     // butuh header X-Station-Token); halaman publik /b/{serial} tanpa token mengirim false.
     [Parameter] public bool AllowReprint { get; set; }
+    // Prompt 36: tombol "Edit"/"Edit Bundle" (Super Admin) -- HANYA dikirim true dari
+    // BundleScanPublic.razor (/b/{serial}) untuk user login web ber-modul SUPER_ADMIN.
+    // Panel scan /station TIDAK PERNAH mengirim true (operator station tidak dapat fitur ini).
+    [Parameter] public bool IsSuperAdmin { get; set; }
+    [Parameter] public EventCallback<int> OnEditLogRequested { get; set; }
+    [Parameter] public EventCallback OnEditBundleRequested { get; set; }
 
     private bool showFullTimeline = false;
     private bool showReceiveNote = false;
     private string receiveNoteText = string.Empty;
     private bool reprintBusy = false;
     private string reprintFeedback = string.Empty;
+    // Fix: modal konfirmasi Cetak Ulang -- user input jumlah label (default 1), ganti dari
+    // JS confirm() polos.
+    private bool showReprintModal = false;
+    private int reprintCopies = 1;
+    private string reprintModalError = string.Empty;
 
-    private async Task HandleReprintClick()
+    private void OpenReprintModal()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Cetak ulang label {Info.Bundle.Serial}?");
-        if (!confirmed) return;
+        reprintCopies = 1;
+        reprintModalError = string.Empty;
+        showReprintModal = true;
+    }
+
+    private void CloseReprintModal()
+    {
+        showReprintModal = false;
+    }
+
+    private async Task SubmitReprint()
+    {
+        if (reprintCopies < 1) return;
 
         reprintBusy = true;
+        reprintModalError = string.Empty;
         reprintFeedback = string.Empty;
 
-        var (success, error) = await StationApi.ReprintBundleAsync(Info.Bundle.BundleId);
+        var (success, error) = await StationApi.ReprintBundleAsync(Info.Bundle.BundleId, reprintCopies);
 
         reprintBusy = false;
-        reprintFeedback = success ? "Label masuk antrian cetak." : error;
+
+        if (!success)
+        {
+            reprintModalError = error;
+            return;
+        }
+
+        showReprintModal = false;
+        reprintFeedback = "Label masuk antrian cetak.";
     }
 
     private BundleScanTimelineDto? PendingReceive => Info.Timeline.LastOrDefault(t => t.ReceivedAt is null);
+
+    // Fix: "Cetak Reject" -- tombol per baris timeline, hanya tampil kalau baris itu punya
+    // reject/hilang > 0 (server menegakkan ulang di SIS_WorkflowLog_PrintReject).
+    private static int TotalReject(BundleScanTimelineDto t) =>
+        t.QtyRejectPrint + t.QtyRejectFabric + t.QtyRejectSewing + t.QtyRejectRework + t.QtyLost;
+
+    private int? printRejectBusyId;
+    private string printRejectFeedback = string.Empty;
+
+    private async Task PrintReject(int workflowLogId)
+    {
+        printRejectBusyId = workflowLogId;
+        printRejectFeedback = string.Empty;
+
+        var (success, error) = await StationApi.PrintRejectAsync(workflowLogId);
+
+        printRejectBusyId = null;
+        printRejectFeedback = success ? "Nota reject masuk antrian cetak." : error;
+    }
 
     // Prompt 28: baris ADJUSTMENT boleh bernilai negatif (mutasi) -- tampilkan tanda +/- di
     // timeline supaya jelas arah mutasinya; baris NORMAL tetap tampil polos (selalu >= 0).

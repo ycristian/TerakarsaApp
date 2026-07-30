@@ -171,6 +171,7 @@ else
                                         <th class="text-end">Menunggu QC</th>
                                         <th class="text-end">WIP</th>
                                         <th class="text-end">Reject</th>
+                                        <th>Detail Reject</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -188,7 +189,8 @@ else
                                             <td class="text-end">@Fmt(row.QtyDone)</td>
                                             <td class="text-end @(row.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(row.QtyMenungguQc)</td>
                                             <td class="text-end @(row.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(row.QtyWip)</td>
-                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(row.QtyReject)</td>
+                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@FmtReject(row.QtyReject)</td>
+                                            <td>@(row.RejectDetail ?? "-")</td>
                                         </tr>
                                     }
                                     <tr class="fw-bold table-light">
@@ -200,7 +202,8 @@ else
                                         <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyDone))</td>
                                         <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyMenungguQc))</td>
                                         <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyWip))</td>
-                                        <td class="text-end">@Fmt(result.Agg.Sum(a => a.QtyReject))</td>
+                                        <td class="text-end">@FmtReject(result.Agg.Sum(a => a.QtyReject))</td>
+                                        <td>@FormatRejectDetail(result.Agg.Sum(a => a.QtyRejectPrint), result.Agg.Sum(a => a.QtyRejectFabric), result.Agg.Sum(a => a.QtyRejectSewing), result.Agg.Sum(a => a.QtyRejectRework), result.Agg.Sum(a => a.QtyLost))</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -229,6 +232,7 @@ else
                                         <th class="text-end">Menunggu QC</th>
                                         <th class="text-end">WIP</th>
                                         <th class="text-end">Reject</th>
+                                        <th>Detail Reject</th>
                                         <th></th>
                                     </tr>
                                 </thead>
@@ -242,7 +246,8 @@ else
                                             <td class="text-end">@Fmt(row.QtyDone)</td>
                                             <td class="text-end @(row.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(row.QtyMenungguQc)</td>
                                             <td class="text-end @(row.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(row.QtyWip)</td>
-                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(row.QtyReject)</td>
+                                            <td class="text-end @(row.QtyReject > 0 ? "text-danger fw-semibold" : "")">@FmtReject(row.QtyReject)</td>
+                                            <td>@row.RejectDetail</td>
                                             <td>
                                                 <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenBundleModal(tab!, row)">Lihat</button>
                                             </td>
@@ -253,7 +258,8 @@ else
                                         <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyDone))</td>
                                         <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyMenungguQc))</td>
                                         <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyWip))</td>
-                                        <td class="text-end">@Fmt(articleRows.Sum(r => r.QtyReject))</td>
+                                        <td class="text-end">@FmtReject(articleRows.Sum(r => r.QtyReject))</td>
+                                        <td>@FormatRejectDetail(rows.Sum(r => r.QtyRejectPrint), rows.Sum(r => r.QtyRejectFabric), rows.Sum(r => r.QtyRejectSewing), rows.Sum(r => r.QtyRejectRework), rows.Sum(r => r.QtyLost))</td>
                                         <td></td>
                                     </tr>
                                 </tbody>
@@ -289,6 +295,7 @@ else
                                     <th class="text-end">Menunggu QC</th>
                                     <th class="text-end">WIP</th>
                                     <th class="text-end">Reject</th>
+                                    <th>Detail Reject</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -300,7 +307,8 @@ else
                                         <td class="text-end">@Fmt(r.QtyDone)</td>
                                         <td class="text-end @(r.QtyMenungguQc > 0 ? "text-primary fw-semibold" : "")">@Fmt(r.QtyMenungguQc)</td>
                                         <td class="text-end @(r.QtyWip > 0 ? "text-warning fw-semibold" : "")">@Fmt(r.QtyWip)</td>
-                                        <td class="text-end @(r.QtyReject > 0 ? "text-danger fw-semibold" : "")">@Fmt(r.QtyReject)</td>
+                                        <td class="text-end @(r.QtyReject > 0 ? "text-danger fw-semibold" : "")">@FmtReject(r.QtyReject)</td>
+                                        <td>@(r.RejectDetail ?? "-")</td>
                                     </tr>
                                 }
                             </tbody>
@@ -371,6 +379,7 @@ else
         public int QtyMenungguQc { get; set; }
         public int QtyWip { get; set; }
         public int QtyReject { get; set; }
+        public string RejectDetail { get; set; } = "-";
     }
 
     protected override async Task OnInitializedAsync()
@@ -487,7 +496,9 @@ else
                 QtyDone = g.Sum(x => x.QtyDone),
                 QtyMenungguQc = g.Sum(x => x.QtyMenungguQc),
                 QtyWip = g.Sum(x => x.QtyWip),
-                QtyReject = g.Sum(x => x.QtyReject)
+                QtyReject = g.Sum(x => x.QtyReject),
+                RejectDetail = FormatRejectDetail(g.Sum(x => x.QtyRejectPrint), g.Sum(x => x.QtyRejectFabric),
+                    g.Sum(x => x.QtyRejectSewing), g.Sum(x => x.QtyRejectRework), g.Sum(x => x.QtyLost))
             })
             .OrderBy(r => r.PoNumber)
             .ThenBy(r => r.ArticleName)
@@ -508,6 +519,23 @@ else
 
     private static string Fmt(int n) => n.ToString("N0", CultureInfo.GetCultureInfo("id-ID"));
 
+    // Kolom Reject (total + breakdown) tampil "-" kalau 0 supaya tabel yang mostly-0 lebih
+    // gampang dibaca -- kolom lain (Done/Menunggu QC/WIP) tetap tampil "0" seperti biasa.
+    private static string FmtReject(int n) => n == 0 ? "-" : Fmt(n);
+
+    // Detail Reject = ringkasan teks kategori yang qty > 0 saja, urut qty terbesar dulu --
+    // dipakai utk baris Total/ringkasan artikel yang dihitung ulang di C# (baris SQL langsung
+    // pakai row.RejectDetail dari STRING_AGG di sp_Report_Produksi.sql).
+    private static string FormatRejectDetail(int print, int fabric, int sewing, int rework, int lost)
+    {
+        var parts = new (string Label, int Qty)[]
+        {
+            ("Print", print), ("Fabric", fabric), ("Sewing", sewing), ("Rework", rework), ("Hilang", lost)
+        };
+        var text = string.Join(", ", parts.Where(p => p.Qty > 0).OrderByDescending(p => p.Qty).Select(p => $"{p.Label}: {Fmt(p.Qty)}"));
+        return text.Length == 0 ? "-" : text;
+    }
+
     // Export ke Excel = CSV (dipisah ";", cocok default locale id-ID) lewat JS interop
     // downloadFileFromBytes yang sudah ada (dipakai jg oleh ProjectEdit.razor buat attachment).
     // Mengekspor data tabel yang SEDANG tampil (tab Semua -> Agg; tab pelaksana -> ringkasan
@@ -527,8 +555,9 @@ else
             var tab = pelaksanaTabs.FirstOrDefault(t => t.Key == activeTabKey);
             if (tab is null) return;
 
-            var rows = ArticleSummaryFor(RowsForTab(tab));
-            csv = BuildArticleSummaryCsv(rows, tab.PelaksanaName);
+            var detailRows = RowsForTab(tab);
+            var rows = ArticleSummaryFor(detailRows);
+            csv = BuildArticleSummaryCsv(rows, detailRows, tab.PelaksanaName);
             fileNameSuffix = tab.PelaksanaName;
         }
 
@@ -544,37 +573,44 @@ else
     private string BuildAggCsv()
     {
         var sb = new StringBuilder();
-        AppendCsvLine(sb, "Resource", "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject");
+        AppendCsvLine(sb, "Resource", "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject",
+            "Detail Reject");
 
         foreach (var row in result.Agg)
         {
             AppendCsvLine(sb,
                 row.LineResourceName, row.PoNumber ?? "-", row.PoName, row.ArticleName,
-                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString());
+                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString(),
+                row.RejectDetail ?? "-");
         }
 
         AppendCsvLine(sb, "TOTAL", "", "", "",
             result.Agg.Sum(a => a.QtyDone).ToString(), result.Agg.Sum(a => a.QtyMenungguQc).ToString(),
-            result.Agg.Sum(a => a.QtyWip).ToString(), result.Agg.Sum(a => a.QtyReject).ToString());
+            result.Agg.Sum(a => a.QtyWip).ToString(), result.Agg.Sum(a => a.QtyReject).ToString(),
+            FormatRejectDetail(result.Agg.Sum(a => a.QtyRejectPrint), result.Agg.Sum(a => a.QtyRejectFabric),
+                result.Agg.Sum(a => a.QtyRejectSewing), result.Agg.Sum(a => a.QtyRejectRework), result.Agg.Sum(a => a.QtyLost)));
 
         return sb.ToString();
     }
 
-    private static string BuildArticleSummaryCsv(List<ArticleSummaryRow> rows, string pelaksanaName)
+    private static string BuildArticleSummaryCsv(List<ArticleSummaryRow> rows, List<ProduksiDetailRowDto> detailRows, string pelaksanaName)
     {
         var sb = new StringBuilder();
-        AppendCsvLine(sb, "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject");
+        AppendCsvLine(sb, "No PO", "Nama PO", "Article", "Qty Done", "Menunggu QC", "WIP", "Reject", "Detail Reject");
 
         foreach (var row in rows)
         {
             AppendCsvLine(sb,
                 row.PoNumber ?? "-", row.PoName, row.ArticleName,
-                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString());
+                row.QtyDone.ToString(), row.QtyMenungguQc.ToString(), row.QtyWip.ToString(), row.QtyReject.ToString(),
+                row.RejectDetail);
         }
 
         AppendCsvLine(sb, $"Total {pelaksanaName}", "", "",
             rows.Sum(r => r.QtyDone).ToString(), rows.Sum(r => r.QtyMenungguQc).ToString(),
-            rows.Sum(r => r.QtyWip).ToString(), rows.Sum(r => r.QtyReject).ToString());
+            rows.Sum(r => r.QtyWip).ToString(), rows.Sum(r => r.QtyReject).ToString(),
+            FormatRejectDetail(detailRows.Sum(r => r.QtyRejectPrint), detailRows.Sum(r => r.QtyRejectFabric),
+                detailRows.Sum(r => r.QtyRejectSewing), detailRows.Sum(r => r.QtyRejectRework), detailRows.Sum(r => r.QtyLost)));
 
         return sb.ToString();
     }

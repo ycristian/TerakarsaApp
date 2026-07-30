@@ -189,18 +189,19 @@ public class PackService
         }
     }
 
-    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int packId, int userId)
+    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int packId, int copies, int userId)
     {
         var packIdParam = new SqlParameter("@PackId", packId);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
+        var copiesParam = new SqlParameter("@Copies", copies);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Pack_ReprintLabel @PackId = @PackId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
-                    packIdParam, publicBaseUrlParam, userIdParam)
+                    "EXEC SIS_Pack_ReprintLabel @PackId = @PackId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @UserId = @UserId",
+                    packIdParam, publicBaseUrlParam, copiesParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }

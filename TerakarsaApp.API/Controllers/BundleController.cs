@@ -80,9 +80,11 @@ public class BundleController : ControllerBase
     }
 
     [HttpPost("bundles/{id:int}/reprint")]
-    public async Task<IActionResult> Reprint(int id)
+    public async Task<IActionResult> Reprint(int id, [FromQuery] int copies = 1)
     {
-        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, CurrentUserId);
+        if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
+
+        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, CurrentUserId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }

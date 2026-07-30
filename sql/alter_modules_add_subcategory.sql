@@ -2,6 +2,10 @@
 -- di sidebar: Category (header section) > SubCategory (grup collapsible, opsional) > Name (halaman).
 -- Module tanpa SubCategory tetap tampil flat langsung di bawah Category, seperti sebelumnya.
 -- Idempotent: aman dijalankan berulang, tidak menghapus data yang sudah ada.
+--
+-- Fix: @Search (action GET/COUNT) kini pencarian antar-atribut (tiap kata dipisah spasi
+-- dicek independen ke SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di
+-- sp_Employee_Select.sql.
 
 IF COL_LENGTH('Modules', 'SubCategory') IS NULL
 BEGIN
@@ -46,7 +50,11 @@ BEGIN
         DECLARE @Sql NVARCHAR(MAX) = N'
             SELECT Id, Code, Name, Category, SubCategory, Route, Icon, SortOrder, IsActive, CreatedAt
             FROM Modules
-            WHERE (@Search IS NULL OR Name LIKE ''%'' + @Search + ''%'' OR Code LIKE ''%'' + @Search + ''%'')
+            WHERE (@Search IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM STRING_SPLIT(@Search, '' '') tok
+                    WHERE tok.value <> ''''
+                      AND NOT (Name LIKE ''%'' + tok.value + ''%'' OR Code LIKE ''%'' + tok.value + ''%'')
+                  ))
             ORDER BY ' + @OrderCol + N' ' + @Dir + N', Id ASC
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
@@ -60,7 +68,11 @@ BEGIN
     BEGIN
         SELECT COUNT(*) AS TotalCount
         FROM Modules
-        WHERE (@Search IS NULL OR Name LIKE '%' + @Search + '%' OR Code LIKE '%' + @Search + '%');
+        WHERE (@Search IS NULL OR NOT EXISTS (
+                SELECT 1 FROM STRING_SPLIT(@Search, ' ') tok
+                WHERE tok.value <> ''
+                  AND NOT (Name LIKE '%' + tok.value + '%' OR Code LIKE '%' + tok.value + '%')
+              ));
     END
 
     ELSE IF @Action = 'GET_BY_USER'

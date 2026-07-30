@@ -10,6 +10,7 @@ public class ArticleWorkflowStepDto
     public string DivisionName { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public bool RequiresBundle { get; set; } = true;
+    public bool AutoReceive { get; set; }
     public bool IsBundling { get; set; }
 }
 
@@ -28,6 +29,7 @@ public class ArticleWorkflowStepRequest
     public int DivisionId { get; set; }
     public int SortOrder { get; set; }
     public bool RequiresBundle { get; set; } = true;
+    public bool AutoReceive { get; set; }
 }
 
 public class ArticleWorkflowApplyRequest

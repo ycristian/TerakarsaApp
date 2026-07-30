@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Resources;
@@ -65,6 +66,15 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
     }
 
+    // Prompt 32: dropdown "Penjahit" (employee) cascading di bawah dropdown Line, menggantikan
+    // input teks bebas di modal Buat Bundle/Edit Bundle.
+    public async Task<List<EmployeeLookupDto>> GetEmployeesByResourceAsync(int resourceId)
+    {
+        var response = await _http.GetAsync($"api/station/employees/{resourceId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<EmployeeLookupDto>>() ?? new();
+    }
+
     // Prompt 24: ringkasan per size untuk modal "Buat Bundle".
     public async Task<List<BundleSizeSummaryDto>> GetBundlingSummaryAsync(int articleId)
     {
@@ -106,9 +116,10 @@ public class StationDeviceApiService
     }
 
     // Prompt 24: Cetak Ulang label -- dipakai semua kartu bundle di station + BundleScanCard.
-    public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId)
+    // Fix: copies (default 1) -- jumlah label yang dicetak, diisi user lewat modal konfirmasi.
+    public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId, int copies = 1)
     {
-        var response = await _http.PostAsync($"api/station/bundles/{bundleId}/reprint", null);
+        var response = await _http.PostAsync($"api/station/bundles/{bundleId}/reprint?copies={copies}", null);
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));
@@ -122,6 +133,16 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak label cacat." : error.Trim('"'));
+    }
+
+    // Fix: "Cetak Reject" -- nota reject untuk satu baris log timeline (BundleScanCard),
+    // tombol client hanya tampil kalau baris itu punya reject > 0.
+    public async Task<(bool Success, string Error)> PrintRejectAsync(int workflowLogId, int copies = 1)
+    {
+        var response = await _http.PostAsync($"api/station/logs/{workflowLogId}/print-reject?copies={copies}", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak nota reject." : error.Trim('"'));
     }
 
     // Prompt 22b: resourceId = operator sesi saat ini, dipakai server untuk filter antrian
@@ -335,9 +356,9 @@ public class StationDeviceApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan konfirmasi." : error.Trim('"'));
     }
 
-    public async Task<(bool Success, string Error)> ReprintPackAsync(int packId)
+    public async Task<(bool Success, string Error)> ReprintPackAsync(int packId, int copies = 1)
     {
-        var response = await _http.PostAsync($"api/station/packing/packs/{packId}/reprint", null);
+        var response = await _http.PostAsync($"api/station/packing/packs/{packId}/reprint?copies={copies}", null);
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));

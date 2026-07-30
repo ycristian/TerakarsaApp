@@ -17,6 +17,12 @@ public class ProduksiAggRowDto
     public int QtyMenungguQc { get; set; }
     public int QtyWip { get; set; }
     public int QtyReject { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    public string? RejectDetail { get; set; }
 }
 
 public class ProduksiDetailRowDto
@@ -37,6 +43,12 @@ public class ProduksiDetailRowDto
     public int QtyMenungguQc { get; set; }
     public int QtyWip { get; set; }
     public int QtyReject { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+    public string? RejectDetail { get; set; }
 }
 
 public class ProduksiSummaryDto

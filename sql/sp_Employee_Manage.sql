@@ -22,9 +22,14 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Prompt 35: employee_code boleh kosong (penjahit yang belum punya kode tapi sudah mulai
+    -- kerja bisa didaftar dulu) -- string kosong/whitespace dinormalisasi jadi NULL supaya
+    -- konsisten dengan index unik filtered (UX_employees_code, WHERE employee_code IS NOT NULL).
+    SET @EmployeeCode = NULLIF(LTRIM(RTRIM(@EmployeeCode)), '');
+
     IF @Action = 'CREATE'
     BEGIN
-        IF EXISTS (SELECT 1 FROM employees WHERE employee_code = @EmployeeCode AND deleted_at IS NULL)
+        IF @EmployeeCode IS NOT NULL AND EXISTS (SELECT 1 FROM employees WHERE employee_code = @EmployeeCode AND deleted_at IS NULL)
         BEGIN
             RAISERROR('Kode karyawan "%s" sudah digunakan.', 16, 1, @EmployeeCode);
             RETURN;
@@ -38,7 +43,7 @@ BEGIN
 
     ELSE IF @Action = 'UPDATE'
     BEGIN
-        IF EXISTS (
+        IF @EmployeeCode IS NOT NULL AND EXISTS (
             SELECT 1 FROM employees
             WHERE employee_code = @EmployeeCode AND deleted_at IS NULL AND employee_id <> @Id
         )

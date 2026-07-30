@@ -49,14 +49,15 @@ BEGIN
 
             DECLARE @NewTemplateId INT = CAST(SCOPE_IDENTITY() AS INT);
 
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, created_at, created_by)
-            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, SYSDATETIME(), @UserId
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
+            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     StepName       VARCHAR(150) '$.StepName',
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
-                    RequiresBundle BIT          '$.RequiresBundle'
+                    RequiresBundle BIT          '$.RequiresBundle',
+                    AutoReceive    BIT          '$.AutoReceive'
                 ) j;
 
             COMMIT TRAN;
@@ -107,6 +108,7 @@ BEGIN
                 wts.division_id = j.DivisionId,
                 wts.sort_order = j.SortOrder,
                 wts.requires_bundle = j.RequiresBundle,
+                wts.auto_receive = ISNULL(j.AutoReceive, 0),
                 wts.updated_at = SYSDATETIME(),
                 wts.updated_by = @UserId
             FROM workflow_template_steps wts
@@ -116,24 +118,16 @@ BEGIN
                     StepName       VARCHAR(150) '$.StepName',
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
-                    RequiresBundle BIT          '$.RequiresBundle'
+                    RequiresBundle BIT          '$.RequiresBundle',
+                    AutoReceive    BIT          '$.AutoReceive'
                 ) j ON j.Id = wts.step_id
             WHERE wts.workflow_template_id = @Id AND wts.deleted_at IS NULL;
 
-            -- Baris tanpa Id -> insert baru
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, created_at, created_by)
-            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, SYSDATETIME(), @UserId
-            FROM OPENJSON(@Steps)
-                WITH (
-                    Id             INT          '$.Id',
-                    StepName       VARCHAR(150) '$.StepName',
-                    DivisionId     INT          '$.DivisionId',
-                    SortOrder      INT          '$.SortOrder',
-                    RequiresBundle BIT          '$.RequiresBundle'
-                ) j
-            WHERE j.Id IS NULL;
-
-            -- Baris lama yang sudah tidak ada di JSON -> soft delete
+            -- Baris lama yang sudah tidak ada di JSON -> soft delete. HARUS dijalankan
+            -- SEBELUM insert baris baru di bawah -- baris baru belum punya Id di JSON
+            -- (Id null) sehingga kalau insert duluan, baris itu langsung cocok "tidak
+            -- ada di JSON" dan ikut ke-soft-delete pada transaksi yang sama (bug lama:
+            -- created_at == deleted_at persis pada baris yang baru ditambahkan).
             UPDATE wts
             SET wts.deleted_at = SYSDATETIME(),
                 wts.deleted_by = @UserId
@@ -143,6 +137,20 @@ BEGIN
                   SELECT 1 FROM OPENJSON(@Steps) WITH (Id INT '$.Id') j
                   WHERE j.Id = wts.step_id
               );
+
+            -- Baris tanpa Id -> insert baru
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
+            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
+            FROM OPENJSON(@Steps)
+                WITH (
+                    Id             INT          '$.Id',
+                    StepName       VARCHAR(150) '$.StepName',
+                    DivisionId     INT          '$.DivisionId',
+                    SortOrder      INT          '$.SortOrder',
+                    RequiresBundle BIT          '$.RequiresBundle',
+                    AutoReceive    BIT          '$.AutoReceive'
+                ) j
+            WHERE j.Id IS NULL;
 
             COMMIT TRAN;
         END TRY

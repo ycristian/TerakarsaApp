@@ -1,5 +1,6 @@
 @page "/b/{Serial}"
 @layout TerakarsaApp.Client.Layout.BlankLayout
+@using Microsoft.AspNetCore.Components.Authorization
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
@@ -8,6 +9,7 @@
 @inject PublicBundleApiService PublicApi
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>Bundle @Serial</PageTitle>
 
@@ -31,7 +33,7 @@ else
             <button class="btn btn-primary btn-sm" @onclick="() => showQrScanner = true">
                 <i class="fe fe-camera"></i> Scan QR
             </button>
-            @if (!hasStationToken)
+            @if (!hasStationToken || stationScanFailed)
             {
                 <a href="/station" class="btn btn-outline-secondary btn-sm" title="Pengaturan Stasiun">
                     <i class="fe fe-settings"></i> Atur Perangkat sebagai Stasiun
@@ -43,6 +45,14 @@ else
     @if (!string.IsNullOrEmpty(qrScanError))
     {
         <div class="alert alert-danger mb-2">@qrScanError</div>
+    }
+
+    @if (stationScanFailed)
+    {
+        <div class="alert alert-warning mb-2">
+            Sesi perangkat stasiun ini tidak valid/kedaluwarsa — menampilkan tampilan hanya-baca.
+            Buka <a href="/station">/station</a> untuk pasang ulang perangkat kalau perlu Terima/Kirim Hasil di sini.
+        </div>
     }
 
     @if (hasStationToken && station is not null)
@@ -66,19 +76,23 @@ else
         </div>
     }
 
-    @if (hasStationToken)
+    @if (hasStationToken && !stationScanFailed)
     {
         @if (operatorId is null)
         {
             <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
         }
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
-                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true" />
+                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true"
+                        IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested" />
     }
     else
     {
-        <BundleScanCard Info="scanInfo!" ReadOnly="true" AllowReprint="false" />
+        <BundleScanCard Info="scanInfo!" ReadOnly="true" AllowReprint="false"
+                        IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested" />
     }
+
+    <SuperAdminEditPanel @ref="editPanel" OnSaved="Rescan" />
 
     @if (wip.Count > 0)
     {
@@ -152,6 +166,12 @@ else
     private bool notFound = false;
     private string? loadError;
     private bool hasStationToken = false;
+    // Fix: true kalau ada stationToken di localStorage TAPI panggilan ber-token itu gagal
+    // (401/dst -- token stale/invalid/revoked, mis. station sudah dihapus/di-pairing ulang).
+    // Dipakai supaya UI tidak menampilkan tombol aksi stasiun yang pasti gagal (Terima/Kirim
+    // Hasil/dst juga pakai token yang sama), dan supaya user tahu kenapa halaman jadi
+    // hanya-baca alih-alih diam-diam gagal.
+    private bool stationScanFailed = false;
     private StationMeDto? station;
     private BundleScanInfoDto? scanInfo;
     private List<ArticleWipStepDto> wip = new();
@@ -161,6 +181,14 @@ else
     private string? operatorName;
     private bool showLogoutConfirm = false;
     private bool isLoggingOut = false;
+
+    // Prompt 36: tombol Edit/Edit Bundle (Super Admin) -- HANYA untuk user login web
+    // ber-modul SUPER_ADMIN, independen dari token stasiun/operator sesi di halaman ini.
+    private bool isSuperAdmin = false;
+    private SuperAdminEditPanel? editPanel;
+
+    private Task HandleEditLogRequested(int workflowLogId) => editPanel!.OpenEditLogAsync(workflowLogId);
+    private Task HandleEditBundleRequested() => editPanel!.OpenEditBundleAsync(scanInfo!.Bundle.BundleId);
 
     // Scan QR lewat kamera -- QR selalu berisi URL absolut ({PublicBaseUrl}/b/{serial}
     // atau /pack/{serial}); hasilnya dinavigasi client-side (NavigationManager, TANPA
@@ -193,6 +221,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        isSuperAdmin = state.User.HasClaim("module", "SUPER_ADMIN");
+
         try
         {
             await LoadBundleAsync();
@@ -227,6 +258,11 @@ else
         if (hasStationToken)
         {
             station = await StationApi.GetMeAsync();
+            // Fix: GetMeAsync murni cek validitas token (tidak tergantung serial/bundle) --
+            // null di sini artinya token stale/invalid/revoked, sinyal paling akurat untuk
+            // "device ini SEHARUSNYA stasiun tapi sesinya rusak" (beda dari device publik
+            // biasa yang memang tidak pernah punya token).
+            stationScanFailed = station is null;
 
             var savedOperatorId = await JS.InvokeAsync<string?>("localStorage.getItem", "stationOperatorId");
             var hasSavedOperator = int.TryParse(savedOperatorId, out var opId);
@@ -255,6 +291,11 @@ else
             scanInfo = await StationApi.ScanAsync(Serial, operatorId);
             var publicDetail = await PublicApi.GetBundleAsync(Serial);
             wip = publicDetail?.Wip ?? new();
+            // Fix: token stasiun stale/invalid/revoked bikin ScanAsync gagal (401/dst,
+            // dikembalikan sebagai null oleh StationDeviceApiService) -- itu BUKAN berarti
+            // bundle-nya tidak ada. Jatuh balik ke hasil publik (read-only) supaya device
+            // dengan token rusak tetap bisa lihat bundle, bukan salah bilang "tidak ditemukan".
+            scanInfo ??= publicDetail?.ScanInfo;
         }
         else
         {
@@ -269,9 +310,18 @@ else
 
     private async Task Rescan()
     {
+        if (hasStationToken)
+        {
+            station = await StationApi.GetMeAsync();
+            stationScanFailed = station is null;
+        }
+
         scanInfo = await StationApi.ScanAsync(Serial, operatorId);
         var publicDetail = await PublicApi.GetBundleAsync(Serial);
         wip = publicDetail?.Wip ?? new();
+        // Fix: sama seperti LoadBundleAsync -- token stasiun gagal tidak boleh menutupi
+        // bundle yang sebenarnya ada.
+        scanInfo ??= publicDetail?.ScanInfo;
         notFound = scanInfo is null;
     }
 

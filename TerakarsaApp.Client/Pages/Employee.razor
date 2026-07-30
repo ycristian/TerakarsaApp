@@ -83,7 +83,7 @@ else
                         @foreach (var e in pagedResult.Items)
                         {
                             <tr>
-                                <td>@e.EmployeeCode</td>
+                                <td>@(string.IsNullOrEmpty(e.EmployeeCode) ? "-" : e.EmployeeCode)</td>
                                 <td>@e.EmployeeName</td>
                                 <td>@e.DivisionName</td>
                                 <td>@e.PositionName</td>
@@ -119,9 +119,10 @@ else
                         <ValidationSummary class="text-danger mb-3" />
 
                         <div class="mb-3">
-                            <label class="form-label">Kode Karyawan</label>
+                            <label class="form-label">Kode Karyawan (opsional)</label>
                             <InputText class="form-control" @bind-Value="formModel.EmployeeCode" />
                             <ValidationMessage For="@(() => formModel.EmployeeCode)" class="text-danger" />
+                            <div class="form-text">Boleh dikosongkan dulu kalau kode belum ada, isi menyusul lewat Edit.</div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Karyawan</label>
@@ -399,9 +400,8 @@ else
     {
         public int Id { get; set; }
 
-        [Required(ErrorMessage = "Kode karyawan wajib diisi.")]
         [StringLength(30, ErrorMessage = "Kode karyawan maksimal 30 karakter.")]
-        public string EmployeeCode { get; set; } = string.Empty;
+        public string? EmployeeCode { get; set; }
 
         [Required(ErrorMessage = "Nama karyawan wajib diisi.")]
         [StringLength(150, ErrorMessage = "Nama karyawan maksimal 150 karakter.")]

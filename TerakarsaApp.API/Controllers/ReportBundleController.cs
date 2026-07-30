@@ -1,8 +1,10 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TerakarsaApp.API.Authorization;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Projects;
+using TerakarsaApp.Shared.Reports;
 
 namespace TerakarsaApp.API.Controllers;
 
@@ -20,23 +22,30 @@ public class ReportBundleController : ControllerBase
     private readonly ProjectService _projectService;
     private readonly ArticleService _articleService;
     private readonly DivisionService _divisionService;
+    private readonly WorkflowLogService _workflowLogService;
 
     public ReportBundleController(
         ReportBundleService reportBundleService,
         ProjectService projectService,
         ArticleService articleService,
-        DivisionService divisionService)
+        DivisionService divisionService,
+        WorkflowLogService workflowLogService)
     {
         _reportBundleService = reportBundleService;
         _projectService = projectService;
         _articleService = articleService;
         _divisionService = divisionService;
+        _workflowLogService = workflowLogService;
     }
 
-    [HttpGet("report-bundle/wip")]
-    public async Task<IActionResult> GetWip([FromQuery] int? projectId, [FromQuery] int? articleId, [FromQuery] int? divisionId, [FromQuery] string? status)
+    private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    // Fix: order-by-klik-header + pagination -- POST + body (pola sama dengan
+    // ProjectController "paged", bukan lagi GET query string).
+    [HttpPost("report-bundle/wip")]
+    public async Task<IActionResult> GetWip([FromBody] BundleWipPagedRequest request)
     {
-        var result = await _reportBundleService.GetWipAsync(projectId, articleId, divisionId, status);
+        var result = await _reportBundleService.GetWipAsync(request);
         return Ok(result);
     }
 
@@ -67,6 +76,18 @@ public class ReportBundleController : ControllerBase
 
         if (!success) return BadRequest(error);
         return Ok(result);
+    }
+
+    // Fix: "Cetak Reject" -- nota reject untuk satu baris log timeline (tab Riwayat), tombol
+    // client hanya tampil kalau baris itu punya reject > 0 (SP menegakkan ulang).
+    [HttpPost("report-bundle/workflow-logs/{id:int}/print-reject")]
+    public async Task<IActionResult> PrintReject(int id, [FromQuery] int copies = 1)
+    {
+        if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
+
+        var (success, error, printJobId) = await _workflowLogService.PrintRejectAsync(id, copies, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
     }
 
     // --- Pemilih filter: Project, Artikel, Divisi ---

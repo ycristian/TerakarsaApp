@@ -37,6 +37,12 @@ public static class TsplBuilder
             ?? throw new InvalidDataException("Payload PACK_LABEL kosong atau tidak valid.");
     }
 
+    public static RejectNotePayload ParseRejectNotePayload(string payloadJson)
+    {
+        return JsonSerializer.Deserialize<RejectNotePayload>(payloadJson)
+            ?? throw new InvalidDataException("Payload REJECT_NOTE kosong atau tidak valid.");
+    }
+
     public static byte[] BuildBundleLabel(BundleLabelPayload data)
     {
         using var stream = new MemoryStream();
@@ -101,8 +107,8 @@ public static class TsplBuilder
 
         Write($"BAR {RightColX},162,{RightEdge - RightColX},3\r\n");
         
-        Write(Text(RightColX, 174, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 200, "2", 1, 1, "> " + data.ResourcePersonName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 174, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 200, "2", 1, 1, "> " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
         Write(Text(RightColX, 225, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
         Write(Text(RightColX, 240, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
 
@@ -180,6 +186,85 @@ public static class TsplBuilder
 
         var badgeText = data.IsConfirmed ? "AKTUAL" : "PLAN";
         Write(Text(RightAlignX(RightEdge, "2", 1, badgeText), 216, "2", 1, 1, badgeText));
+
+        Write("PRINT 1,1\r\n");
+        return stream.ToArray();
+    }
+
+    // Nota reject 6x4cm, kanvas sama dengan BUNDLE_LABEL/PACK_LABEL -- dicetak untuk SATU
+    // baris article_workflow_logs (bukan seluruh bundle), tombol "Cetak Reject" di
+    // BundleScanCard/ReportBundle Riwayat, hanya tampil di client kalau baris itu punya
+    // reject > 0. Tanpa QR -- nota internal, bukan sesuatu yang perlu discan ulang.
+    public static byte[] BuildRejectNote(RejectNotePayload data)
+    {
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        Write("SIZE 60 mm, 40 mm\r\n");
+        Write("GAP 3 mm, 0\r\n");
+        Write("DIRECTION 1\r\n");
+        Write("CLS\r\n");
+
+        const int leftX = 14;
+        const int rightEdge = 466;
+
+        const string title = "CATATAN REJECT";
+        Write(Text(CenterAlignX((leftX + rightEdge) / 2, "3", 1, title), 10, "3", 1, 1, title));
+        Write($"BAR {leftX},44,{rightEdge - leftX},2\r\n");
+
+        var bundleLine = string.IsNullOrEmpty(data.BundleSerial)
+            ? Sanitize(data.ProjectName).ToUpperInvariant()
+            : (string.IsNullOrEmpty(data.BundleLetter) ? $"No. {data.BundleNo}" : $"No. {data.BundleLetter}-{data.BundleNo}") + " - " + Sanitize(data.BundleSerial);
+        Write(Text(leftX, 52, "2", 1, 1, TruncateToFit(bundleLine, 30, "2", 1, rightEdge - leftX)));
+
+        var articleLine = Sanitize(data.ArticleName).ToUpperInvariant() + (string.IsNullOrEmpty(data.SizeName) ? "" : $" - {data.SizeName}");
+        Write(Text(leftX, 76, "1", 1, 1, TruncateToFit(articleLine, 40, "1", 1, rightEdge - leftX)));
+
+        var stepText = Sanitize(data.StepName).ToUpperInvariant() + (string.IsNullOrEmpty(data.DivisionName) ? "" : $" ({data.DivisionName})");
+        var stepLine = TruncateToFit(stepText, 32, "2", 1, rightEdge - leftX);
+        // TSPL tidak punya bold bawaan -- disimulasikan dengan cetak ganda digeser 1 dot
+        // horizontal (double-strike), pola sama dengan remark di BuildBundleLabel.
+        Write(Text(leftX, 96, "2", 1, 1, stepLine));
+        Write(Text(leftX + 1, 96, "2", 1, 1, stepLine));
+
+        Write($"BAR {leftX},128,{rightEdge - leftX},2\r\n");
+
+        var y = 136;
+        void RejectLine(string label, int qty)
+        {
+            if (qty == 0) return;
+            Write(Text(leftX, y, "2", 1, 1, $"{label}: {qty}"));
+            y += 22;
+        }
+        RejectLine("Print", data.QtyRejectPrint);
+        RejectLine("Bahan", data.QtyRejectFabric);
+        RejectLine("Jahit", data.QtyRejectSewing);
+        RejectLine("Rework", data.QtyRejectRework);
+        RejectLine("Hilang", data.QtyLost);
+
+        var total = data.QtyRejectPrint + data.QtyRejectFabric + data.QtyRejectSewing + data.QtyRejectRework + data.QtyLost;
+        var totalText = $"TOTAL: {total}";
+        Write(Text(leftX, y + 2, "2", 1, 1, totalText));
+        Write(Text(leftX + 1, y + 2, "2", 1, 1, totalText));
+        y += 26;
+
+        if (!string.IsNullOrWhiteSpace(data.Remark))
+        {
+            var remarkText = TruncateToFit(Sanitize(data.Remark), 40, "1", 1, rightEdge - leftX);
+            Write(Text(leftX, y, "1", 1, 1, remarkText));
+        }
+
+        Write($"BAR {leftX},290,{rightEdge - leftX},2\r\n");
+
+        var resourceText = Sanitize(data.ResourceName ?? "-").ToUpperInvariant();
+        Write(Text(leftX, 298, "1", 1, 1, resourceText));
+
+        var dateText = data.CreatedAt.ToString("dd/MM/yyyy HH:mm");
+        Write(Text(RightAlignX(rightEdge, "1", 1, dateText), 298, "1", 1, 1, dateText));
 
         Write("PRINT 1,1\r\n");
         return stream.ToArray();
