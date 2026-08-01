@@ -161,6 +161,11 @@ public class BundleScanBundleDto
     // Prompt 32: penjahit dari master employees -- ditampilkan sebagai tambahan di atas Line
     // (yang tetap ResourceName, lihat SIS_Bundle_ScanInfo).
     public string? EmployeeName { get; set; }
+    // Prompt 39: resource pasangan (counterpart_resource_id) dari line asal bundle, HANYA
+    // kalau resource itu hidup, aktif, dan milik divisi station pemanggil -- NULL kalau
+    // tidak memenuhi. Dipakai client sebagai nilai awal form "Pelaksana" di Kirim Hasil,
+    // murni saran UI (lihat BundleScanCard).
+    public int? SuggestedResourceId { get; set; }
 }
 
 public class BundleScanTimelineDto

@@ -1,0 +1,406 @@
+.tv-setup-wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.tv-root {
+    --tv-track: #D3D1C7;
+    --tv-green: #1D9E75;
+    --tv-green-text: #0F6E56;
+    --tv-yellow: #BA7517;
+    --tv-yellow-text: #854F0B;
+    --tv-red: #E24B4A;
+    --tv-red-text: #A32D2D;
+    --tv-bg: #F5F4F0;
+    --tv-card-bg: #FFFFFF;
+    --tv-border: #E3E1D9;
+    --tv-muted: #78766D;
+    --tv-text: #1F1E1A;
+
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--tv-bg);
+    color: var(--tv-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 14px 20px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.tv-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.tv-header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.tv-title {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.tv-date {
+    font-size: 16px;
+    color: var(--tv-muted);
+}
+
+.tv-date-input {
+    width: 150px;
+}
+
+.tv-legend {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--tv-muted);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.tv-swatch {
+    display: inline-block;
+    width: 18px;
+    height: 5px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.tv-header-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--tv-muted);
+}
+
+.tv-top-grid {
+    display: grid;
+    gap: 10px;
+    flex: 0 0 auto;
+    margin-bottom: 10px;
+}
+
+.tv-card {
+    background: var(--tv-card-bg);
+    border: 1px solid var(--tv-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.tv-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.tv-card-name {
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.tv-card-hours {
+    color: var(--tv-muted);
+    font-weight: 400;
+    font-size: 16px;
+}
+
+.tv-card-main {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.tv-card-qty {
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.tv-card-sub {
+    font-size: 13px;
+    color: var(--tv-muted);
+}
+
+.tv-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    width: fit-content;
+}
+
+.tv-badge-muted {
+    background: #E4E2DA;
+    color: #6B6A63;
+}
+
+.tv-bar-wrap {
+    position: relative;
+    height: 8px;
+    border-radius: 4px;
+    margin: 4px 0;
+    background: transparent;
+}
+
+.tv-bar-wrap-sm {
+    height: 9px;
+    min-width: 120px;
+    display: inline-block;
+    vertical-align: middle;
+    margin: 0 6px 4px 0;
+    width: calc(100% - 40px);
+}
+
+.tv-bar-track {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--tv-track);
+}
+
+.tv-bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+}
+
+.tv-green-bg {
+    background: var(--tv-green);
+}
+
+.tv-yellow-bg {
+    background: var(--tv-yellow);
+}
+
+.tv-red-bg {
+    background: var(--tv-red);
+}
+
+.tv-bar-track-only {
+    background: var(--tv-track);
+}
+
+.tv-bar-label {
+    display: inline-block;
+    min-width: 40px;
+    text-align: right;
+    font-size: 0.85em;
+    font-weight: 500;
+    vertical-align: middle;
+}
+
+.tv-card-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.tv-green-text {
+    color: var(--tv-green-text);
+}
+
+.tv-yellow-text {
+    color: var(--tv-yellow-text);
+}
+
+.tv-red-text {
+    color: var(--tv-red-text);
+}
+
+.tv-muted-text {
+    color: var(--tv-muted);
+}
+
+.tv-card-foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 16px;
+    color: var(--tv-muted);
+    margin-top: 2px;
+}
+
+.tv-bottom-panels {
+    flex: 0 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: min-content;
+    align-items: start;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.tv-panel {
+    background: var(--tv-card-bg);
+    border: 1px solid var(--tv-border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.tv-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.tv-panel-sub {
+    font-size: 16px;
+    color: var(--tv-muted);
+    margin-bottom: 4px;
+}
+
+.tv-line-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+    font-size: clamp(16px, 2vh, 20px);
+}
+
+.tv-line-table thead th {
+    text-align: right;
+    color: var(--tv-muted);
+    font-weight: 500;
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-line-table thead th:first-child,
+.tv-line-table tbody td:first-child {
+    text-align: left;
+}
+
+.tv-line-table thead th:nth-child(2),
+.tv-line-table thead th:nth-child(3),
+.tv-line-table thead th:nth-child(5),
+.tv-line-table thead th:nth-child(6),
+.tv-line-table thead th:nth-child(7),
+.tv-line-table tbody td:nth-child(2),
+.tv-line-table tbody td:nth-child(3),
+.tv-line-table tbody td:nth-child(5),
+.tv-line-table tbody td:nth-child(6),
+.tv-line-table tbody td:nth-child(7) {
+    text-align: center;
+}
+
+.tv-line-table tbody tr {
+    border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-line-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.tv-line-table tbody td {
+    text-align: right;
+    padding: 5px 8px;
+}
+
+/* Kolom Progress (ke-4) -- ekstra padding bawah supaya bar tidak ketutupan garis
+   pembatas baris di bawahnya. */
+.tv-line-table td:nth-child(4) {
+    padding-bottom: 12px;
+}
+
+/* Line & Selisih tumbuh mengikuti isi teks -- tidak pernah terpotong, walau di-zoom. */
+.tv-line-table td:first-child,
+.tv-line-table td:nth-child(8) {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.tv-line-table td:nth-child(8) {
+    font-size: 0.75em;
+}
+
+.tv-selisih-qty,
+.tv-selisih-pct {
+    display: block;
+}
+
+/* WIP & Rjk (kolom ke-9,10) -- font lebih kecil, angka sekunder di samping Selisih. */
+.tv-col-wip-reject {
+    font-size: 0.75em;
+    white-space: nowrap;
+}
+
+.tv-row-total {
+    font-weight: 700;
+    border-top: 2px solid var(--tv-border) !important;
+}
+
+/* Org, OK, Target, org/jam, Sisa (kolom ke-2,3,5,6,7) -- sesempit mungkin, angka
+   tidak pernah wrap. */
+.tv-col-num {
+    width: 1%;
+}
+
+.tv-line-table td:nth-child(2),
+.tv-line-table td:nth-child(3),
+.tv-line-table td:nth-child(5),
+.tv-line-table td:nth-child(6),
+.tv-line-table td:nth-child(7) {
+    white-space: nowrap;
+}
+
+.tv-col-progress {
+    width: 25%;
+}
+
+.tv-override {
+    display: block;
+    font-size: 0.75em;
+    color: var(--tv-muted);
+    font-weight: 400;
+}
+
+.tv-panel-foot {
+    font-size: 16px;
+    color: var(--tv-muted);
+    margin-top: 4px;
+    flex: 0 0 auto;
+}
+
+@media (prefers-color-scheme: dark) {
+    .tv-root {
+        --tv-bg: #171613;
+        --tv-card-bg: #221F1B;
+        --tv-border: #34322C;
+        --tv-muted: #9B988D;
+        --tv-text: #F2F1EC;
+        --tv-badge-muted-bg: #34322C;
+    }
+
+    .tv-badge-muted {
+        background: #34322C;
+        color: #B9B6AA;
+    }
+}

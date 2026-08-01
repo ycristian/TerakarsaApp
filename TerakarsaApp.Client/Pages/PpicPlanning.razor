@@ -1,0 +1,598 @@
+@page "/ppic-planning"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.DailyPlans
+@using TerakarsaApp.Shared.WorkSchedules
+@using Microsoft.AspNetCore.Components.Authorization
+@inject DailyPlanApiService DailyPlanApi
+
+<PageTitle>Planning Harian</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Planning Harian</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Planning Harian</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="alert alert-info">
+        Nilai jam &amp; target yang terisi otomatis berasal dari setting default dan <strong>belum tersimpan</strong>
+        sampai tombol Simpan pada kartu masing-masing divisi ditekan.
+    </div>
+
+    @if (selectedDate.Date < DateTime.Today)
+    {
+        <div class="alert alert-warning py-2">
+            Anda membuka tanggal yang sudah lewat. Rencana tetap bisa disimpan/diubah.
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(copyResultMessage))
+    {
+        <div class="alert alert-success py-2">@copyResultMessage</div>
+    }
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="PrevDay"><i class="fe fe-chevron-left"></i></button>
+            <input type="date" class="form-control" style="width:170px;" @bind="selectedDate" @bind:after="LoadAsync" />
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NextDay"><i class="fe fe-chevron-right"></i></button>
+        </div>
+        <div class="text-muted">
+            @(divisionCards.Count(c => c.IsSaved)) dari @(divisionCards.Count) divisi sudah disimpan
+        </div>
+        <button class="btn btn-outline-primary btn-sm" @onclick="OpenCopyModal">Salin dari tanggal lain…</button>
+    </div>
+
+    @if (isLoading)
+    {
+        <p>Memuat data...</p>
+    }
+    else if (divisionCards.Count == 0)
+    {
+        <p>Tidak ada divisi yang tampil di dashboard.</p>
+    }
+    else
+    {
+        RenderFragment<DivisionCardViewModel> CardTemplate = card =>
+            @<div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <strong>@card.DivisionName</strong>
+                        <span class="badge @(card.DashboardMode == "RESOURCE" ? "bg-info" : "bg-primary") ms-2">
+                            @(card.DashboardMode == "RESOURCE" ? "Per Line" : "Per Divisi")
+                        </span>
+                        @if (card.IsSaved)
+                        {
+                            <span class="badge bg-success ms-1">Tersimpan @(card.UpdatedAt?.ToString("HH:mm"))</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary ms-1">Belum disimpan</span>
+                        }
+                    </div>
+                    @if (card.IsSaved)
+                    {
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => HandleDeletePlan(card)">Hapus Rencana</button>
+                    }
+                </div>
+                <div class="card-body">
+                    <div class="row g-2 mb-3 align-items-end">
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Jam Masuk</label>
+                            <input type="time" class="form-control form-control-sm" @bind="card.StartTime" disabled="@card.IsHoliday" />
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Target Pulang</label>
+                            <input type="time" class="form-control form-control-sm" @bind="card.EndTime" disabled="@card.IsHoliday" />
+                        </div>
+                        <div class="col-auto">
+                            <span class="text-muted small">@EffectiveHoursText(card)</span>
+                        </div>
+                    </div>
+
+                    @if (card.DashboardMode == "DIVISION")
+                    {
+                        <div class="row g-2 mb-2 align-items-end">
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Jumlah Orang</label>
+                                <input type="number" min="0" class="form-control form-control-sm" @bind="card.Headcount" disabled="@card.IsHoliday" />
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Target/Orang</label>
+                                <input type="number" min="0" class="form-control form-control-sm" @bind="card.TargetPerPerson" disabled="@card.IsHoliday" />
+                            </div>
+                            <div class="col-auto">
+                                <span class="fw-bold">Total Target: @((card.Headcount ?? 0) * (card.TargetPerPerson ?? 0))</span>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-2 mb-2 align-items-end">
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Isi semua Jumlah Orang</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" min="0" class="form-control" @bind="card.BulkHeadcountInput" />
+                                    <button class="btn btn-outline-secondary" @onclick="() => ApplyBulkHeadcount(card)" disabled="@card.IsHoliday">Terapkan</button>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Isi semua Target/Orang</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" min="0" class="form-control" @bind="card.BulkTargetInput" />
+                                    <button class="btn btn-outline-secondary" @onclick="() => ApplyBulkTarget(card)" disabled="@card.IsHoliday">Terapkan</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered mb-2">
+                                <thead>
+                                    <tr>
+                                        <th>Line</th>
+                                        <th style="width:110px;">Jumlah Orang</th>
+                                        <th style="width:110px;">Target/Orang</th>
+                                        <th>Total</th>
+                                        <th style="min-width:220px;">Override Jam</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var res in card.Resources)
+                                    {
+                                        <tr>
+                                            <td>@res.ResourceName</td>
+                                            <td><input type="number" min="0" class="form-control form-control-sm" @bind="res.Headcount" disabled="@card.IsHoliday" /></td>
+                                            <td><input type="number" min="0" class="form-control form-control-sm" @bind="res.TargetPerPerson" disabled="@card.IsHoliday" /></td>
+                                            <td>@((res.Headcount ?? 0) * (res.TargetPerPerson ?? 0))</td>
+                                            <td>
+                                                @if (res.ShowOverrideEdit)
+                                                {
+                                                    <div class="d-flex gap-1 align-items-center">
+                                                        <input type="time" class="form-control form-control-sm" @bind="res.StartTime" disabled="@card.IsHoliday" />
+                                                        <input type="time" class="form-control form-control-sm" @bind="res.EndTime" disabled="@card.IsHoliday" />
+                                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => res.ShowOverrideEdit = false">OK</button>
+                                                    </div>
+                                                }
+                                                else if (res.StartTime.HasValue && res.EndTime.HasValue)
+                                                {
+                                                    <span>@res.StartTime.Value.ToString("HH:mm")–@res.EndTime.Value.ToString("HH:mm")</span>
+                                                    <button class="btn btn-sm btn-link p-0 ms-1" title="Ubah" @onclick="() => res.ShowOverrideEdit = true"><i class="fe fe-edit"></i></button>
+                                                    <button class="btn btn-sm btn-link text-danger p-0 ms-1" title="Hapus override" @onclick="() => ClearOverride(res)"><i class="fe fe-x"></i></button>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => res.ShowOverrideEdit = true" disabled="@card.IsHoliday">Atur</button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr class="fw-bold">
+                                        <td>Total</td>
+                                        <td>@card.Resources.Sum(r => r.Headcount ?? 0)</td>
+                                        <td>-</td>
+                                        <td>@card.Resources.Sum(r => (r.Headcount ?? 0) * (r.TargetPerPerson ?? 0))</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(card.ErrorMessage))
+                    {
+                        <div class="alert alert-danger py-2">@card.ErrorMessage</div>
+                    }
+
+                    <div class="d-flex justify-content-between align-items-center">
+                        <button class="btn btn-primary" @onclick="() => SaveCard(card)" disabled="@card.IsSaving">
+                            @(card.IsSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" checked="@card.IsHoliday"
+                                   @onchange="e => { card.IsHoliday = (bool)e.Value!; }" />
+                            <label class="form-check-label">Libur</label>
+                        </div>
+                    </div>
+                </div>
+            </div>;
+
+        <div class="row">
+            @foreach (var card in divisionCards.Where(c => c.DashboardMode == "RESOURCE"))
+            {
+                <div class="col-12 col-lg-6 mb-3">
+                    @CardTemplate(card)
+                </div>
+            }
+        </div>
+
+        <div class="row">
+            @foreach (var card in divisionCards.Where(c => c.DashboardMode != "RESOURCE"))
+            {
+                <div class="col-12 col-lg-6 mb-3">
+                    @CardTemplate(card)
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (showCopyModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Salin dari Tanggal Lain</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseCopyModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2">
+                        Divisi yang sudah punya rencana pada tanggal tujuan (@selectedDate.ToString("dd/MM/yyyy")) tidak akan ditimpa.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Salin dari tanggal</label>
+                        <input type="date" class="form-control" @bind="copySourceDate" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(copyErrorMessage))
+                    {
+                        <div class="alert alert-danger">@copyErrorMessage</div>
+                    }
+                    <button type="button" class="btn btn-primary w-100" @onclick="HandleCopy" disabled="@isCopying">
+                        @(isCopying ? "Menyalin..." : "Salin")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeletingPlan" OnConfirm="ConfirmDeletePlan" OnCancel="CancelDeletePlan">
+    <Message>Yakin ingin menghapus rencana divisi "@deleteCardPendingDelete?.DivisionName" untuk tanggal @selectedDate.ToString("dd/MM/yyyy")?</Message>
+</ConfirmDeleteModal>
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading = true;
+    private DateTime selectedDate = DateTime.Today;
+    private List<DivisionCardViewModel> divisionCards = new();
+    private List<WorkBreakDto> breaks = new();
+
+    private bool showCopyModal;
+    private DateTime copySourceDate = DateTime.Today.AddDays(-1);
+    private bool isCopying;
+    private string copyErrorMessage = string.Empty;
+    private string copyResultMessage = string.Empty;
+
+    private bool showDeleteConfirm;
+    private bool isDeletingPlan;
+    private DivisionCardViewModel? deleteCardPendingDelete;
+
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "PPIC_PLANNING");
+
+        if (hasAccess == true)
+            await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        var result = await DailyPlanApi.GetByDateAsync(selectedDate);
+        breaks = result.Breaks;
+
+        divisionCards = result.Divisions.Select(d => new DivisionCardViewModel
+        {
+            DivisionId = d.DivisionId,
+            DivisionName = d.DivisionName,
+            DashboardMode = d.DashboardMode,
+            DefaultTargetPerPerson = d.DefaultTargetPerPerson,
+            IsSaved = d.IsSaved,
+            DailyDivisionPlanId = d.DailyDivisionPlanId,
+            IsHoliday = d.IsHoliday,
+            StartTime = d.StartTime.HasValue ? TimeOnly.FromTimeSpan(d.StartTime.Value) : null,
+            EndTime = d.EndTime.HasValue ? TimeOnly.FromTimeSpan(d.EndTime.Value) : null,
+            Headcount = d.Headcount,
+            TargetPerPerson = d.TargetPerPerson,
+            Remark = d.Remark,
+            UpdatedAt = d.UpdatedAt,
+            SavedByName = d.SavedByName,
+            Resources = result.Resources
+                .Where(r => r.DivisionId == d.DivisionId)
+                .Select(r => new ResourceRowViewModel
+                {
+                    ResourceId = r.ResourceId,
+                    ResourceName = r.ResourceName,
+                    Headcount = r.Headcount,
+                    TargetPerPerson = r.TargetPerPerson,
+                    StartTime = r.StartTime.HasValue ? TimeOnly.FromTimeSpan(r.StartTime.Value) : null,
+                    EndTime = r.EndTime.HasValue ? TimeOnly.FromTimeSpan(r.EndTime.Value) : null,
+                    Remark = r.Remark
+                }).ToList()
+        }).OrderBy(c => c.DashboardMode == "RESOURCE" ? 0 : 1).ToList();
+
+        isLoading = false;
+    }
+
+    private async Task PrevDay()
+    {
+        selectedDate = selectedDate.AddDays(-1);
+        await LoadAsync();
+    }
+
+    private async Task NextDay()
+    {
+        selectedDate = selectedDate.AddDays(1);
+        await LoadAsync();
+    }
+
+    private int ComputeEffectiveMinutes(TimeOnly start, TimeOnly end, List<WorkBreakDto> breakList)
+    {
+        var totalMinutes = (end.ToTimeSpan() - start.ToTimeSpan()).TotalMinutes;
+        foreach (var b in breakList)
+        {
+            var breakStart = TimeOnly.FromTimeSpan(b.StartTime);
+            var breakEnd = TimeOnly.FromTimeSpan(b.EndTime);
+            var overlapStart = start > breakStart ? start : breakStart;
+            var overlapEnd = end < breakEnd ? end : breakEnd;
+            if (overlapEnd > overlapStart)
+                totalMinutes -= (overlapEnd.ToTimeSpan() - overlapStart.ToTimeSpan()).TotalMinutes;
+        }
+        return (int)Math.Max(totalMinutes, 0);
+    }
+
+    private string EffectiveHoursText(DivisionCardViewModel card)
+    {
+        if (card.IsHoliday) return "Libur";
+        if (!card.StartTime.HasValue || !card.EndTime.HasValue || card.EndTime <= card.StartTime) return "-";
+
+        var start = card.StartTime.Value;
+        var end = card.EndTime.Value;
+        var minutes = ComputeEffectiveMinutes(start, end, breaks);
+        var hours = minutes / 60;
+        var mins = minutes % 60;
+
+        var overlapping = breaks
+            .Where(b => TimeOnly.FromTimeSpan(b.StartTime) < end && TimeOnly.FromTimeSpan(b.EndTime) > start)
+            .Select(b => $"{b.StartTime.ToString(@"hh\:mm")}–{b.EndTime.ToString(@"hh\:mm")}")
+            .ToList();
+
+        var breakText = overlapping.Count > 0 ? $" — istirahat {string.Join(", ", overlapping)}" : string.Empty;
+        return mins > 0 ? $"{hours} jam {mins} menit efektif{breakText}" : $"{hours} jam efektif{breakText}";
+    }
+
+    private void ApplyBulkTarget(DivisionCardViewModel card)
+    {
+        if (card.BulkTargetInput is null) return;
+        foreach (var res in card.Resources) res.TargetPerPerson = card.BulkTargetInput;
+    }
+
+    private void ApplyBulkHeadcount(DivisionCardViewModel card)
+    {
+        if (card.BulkHeadcountInput is null) return;
+        foreach (var res in card.Resources) res.Headcount = card.BulkHeadcountInput;
+    }
+
+    private void ClearOverride(ResourceRowViewModel res)
+    {
+        res.StartTime = null;
+        res.EndTime = null;
+        res.ShowOverrideEdit = false;
+    }
+
+    private async Task SaveCard(DivisionCardViewModel card)
+    {
+        card.ErrorMessage = string.Empty;
+
+        if (!card.IsHoliday)
+        {
+            if (!card.StartTime.HasValue || !card.EndTime.HasValue || card.EndTime <= card.StartTime)
+            {
+                card.ErrorMessage = "Jam pulang harus lebih besar dari jam masuk.";
+                return;
+            }
+
+            if (card.DashboardMode == "DIVISION")
+            {
+                if (card.Headcount is null || card.Headcount < 0)
+                {
+                    card.ErrorMessage = "Jumlah orang wajib diisi.";
+                    return;
+                }
+                if (card.TargetPerPerson is null || card.TargetPerPerson < 0)
+                {
+                    card.ErrorMessage = "Target per orang wajib diisi.";
+                    return;
+                }
+            }
+            else
+            {
+                if (card.Resources.Count == 0)
+                {
+                    card.ErrorMessage = "Divisi ini belum punya line/resource aktif.";
+                    return;
+                }
+
+                foreach (var res in card.Resources)
+                {
+                    if (res.Headcount is null || res.Headcount < 0)
+                    {
+                        card.ErrorMessage = $"Jumlah orang wajib diisi untuk semua line ({res.ResourceName}).";
+                        return;
+                    }
+                    if (res.TargetPerPerson is null || res.TargetPerPerson < 0)
+                    {
+                        card.ErrorMessage = $"Target per orang wajib diisi untuk semua line ({res.ResourceName}).";
+                        return;
+                    }
+                    if (res.StartTime.HasValue != res.EndTime.HasValue)
+                    {
+                        card.ErrorMessage = $"Jam override tidak lengkap untuk line {res.ResourceName}.";
+                        return;
+                    }
+                    if (res.StartTime.HasValue && res.EndTime.HasValue && res.EndTime <= res.StartTime)
+                    {
+                        card.ErrorMessage = $"Jam override tidak valid untuk line {res.ResourceName}.";
+                        return;
+                    }
+                }
+            }
+        }
+
+        card.IsSaving = true;
+
+        var request = new SaveDailyPlanRequest
+        {
+            PlanDate = selectedDate,
+            IsHoliday = card.IsHoliday,
+            StartTime = card.IsHoliday ? null : card.StartTime?.ToTimeSpan(),
+            EndTime = card.IsHoliday ? null : card.EndTime?.ToTimeSpan(),
+            Headcount = !card.IsHoliday && card.DashboardMode == "DIVISION" ? card.Headcount : null,
+            TargetPerPerson = !card.IsHoliday && card.DashboardMode == "DIVISION" ? card.TargetPerPerson : null,
+            Remark = card.Remark,
+            Resources = !card.IsHoliday && card.DashboardMode == "RESOURCE"
+                ? card.Resources.Select(r => new DailyPlanResourceSaveDto
+                {
+                    ResourceId = r.ResourceId,
+                    Headcount = r.Headcount ?? 0,
+                    TargetPerPerson = r.TargetPerPerson ?? 0,
+                    StartTime = r.StartTime?.ToTimeSpan(),
+                    EndTime = r.EndTime?.ToTimeSpan(),
+                    Remark = r.Remark
+                }).ToList()
+                : new()
+        };
+
+        var result = await DailyPlanApi.SaveAsync(card.DivisionId, selectedDate, request);
+
+        card.IsSaving = false;
+
+        if (result.Success)
+        {
+            card.IsSaved = true;
+            card.UpdatedAt = DateTime.Now;
+        }
+        else
+        {
+            card.ErrorMessage = result.Error;
+        }
+    }
+
+    private void HandleDeletePlan(DivisionCardViewModel card)
+    {
+        deleteCardPendingDelete = card;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDeletePlan()
+    {
+        showDeleteConfirm = false;
+        deleteCardPendingDelete = null;
+    }
+
+    private async Task ConfirmDeletePlan()
+    {
+        if (deleteCardPendingDelete is null) return;
+
+        isDeletingPlan = true;
+        var success = await DailyPlanApi.DeleteAsync(deleteCardPendingDelete.DivisionId, selectedDate);
+        isDeletingPlan = false;
+
+        showDeleteConfirm = false;
+        deleteCardPendingDelete = null;
+
+        if (success)
+            await LoadAsync();
+    }
+
+    private void OpenCopyModal()
+    {
+        copySourceDate = selectedDate.AddDays(-1);
+        copyErrorMessage = string.Empty;
+        copyResultMessage = string.Empty;
+        showCopyModal = true;
+    }
+
+    private void CloseCopyModal()
+    {
+        showCopyModal = false;
+    }
+
+    private async Task HandleCopy()
+    {
+        isCopying = true;
+        copyErrorMessage = string.Empty;
+
+        var result = await DailyPlanApi.CopyAsync(copySourceDate, selectedDate);
+
+        isCopying = false;
+
+        if (result.Success)
+        {
+            showCopyModal = false;
+            copyResultMessage = $"{result.CopiedCount} divisi berhasil disalin.";
+            await LoadAsync();
+        }
+        else
+        {
+            copyErrorMessage = result.Error;
+        }
+    }
+
+    public class DivisionCardViewModel
+    {
+        public int DivisionId { get; set; }
+        public string DivisionName { get; set; } = string.Empty;
+        public string DashboardMode { get; set; } = "DIVISION";
+        public int DefaultTargetPerPerson { get; set; }
+        public bool IsSaved { get; set; }
+        public int? DailyDivisionPlanId { get; set; }
+        public bool IsHoliday { get; set; }
+        public TimeOnly? StartTime { get; set; }
+        public TimeOnly? EndTime { get; set; }
+        public int? Headcount { get; set; }
+        public int? TargetPerPerson { get; set; }
+        public string? Remark { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public string? SavedByName { get; set; }
+        public List<ResourceRowViewModel> Resources { get; set; } = new();
+        public bool IsSaving { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+        public int? BulkTargetInput { get; set; }
+        public int? BulkHeadcountInput { get; set; }
+    }
+
+    public class ResourceRowViewModel
+    {
+        public int ResourceId { get; set; }
+        public string ResourceName { get; set; } = string.Empty;
+        public int? Headcount { get; set; }
+        public int? TargetPerPerson { get; set; }
+        public TimeOnly? StartTime { get; set; }
+        public TimeOnly? EndTime { get; set; }
+        public string? Remark { get; set; }
+        public bool ShowOverrideEdit { get; set; }
+    }
+}

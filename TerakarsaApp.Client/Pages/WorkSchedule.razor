@@ -1,0 +1,465 @@
+@page "/work-schedule"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.WorkSchedules
+@using Microsoft.AspNetCore.Components.Authorization
+@inject WorkScheduleApiService WorkScheduleApi
+
+<PageTitle>Jam Kerja & Target</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Jam Kerja & Target Default</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Jam Kerja & Target</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="alert alert-info">
+        Nilai di halaman ini hanya dipakai sebagai isian awal (prefill) di Planning Harian PPIC.
+        Dashboard target selalu memakai angka yang sudah di-save PPIC untuk tanggal bersangkutan,
+        bukan nilai default di sini.
+    </div>
+
+    @if (isLoading)
+    {
+        <p>Memuat data...</p>
+    }
+    else
+    {
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="card-title">Jam Kerja per Divisi</h3>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th style="min-width:140px;">Divisi</th>
+                                @foreach (var dow in DaysOfWeek)
+                                {
+                                    <th class="text-center" style="min-width:170px;">@DayLabel(dow)</th>
+                                }
+                                <th style="min-width:130px;">Target Default<br />(pcs/orang/hari)</th>
+                                <th style="min-width:190px;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in divisionRows)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@row.DivisionName</strong>
+                                    </td>
+                                    @foreach (var day in row.Days)
+                                    {
+                                        <td>
+                                            <div class="form-check mb-1">
+                                                <input type="checkbox" class="form-check-input" checked="@day.IsWorkingDay"
+                                                       @onchange="e => { day.IsWorkingDay = (bool)e.Value!; }" />
+                                                <label class="form-check-label">Kerja</label>
+                                            </div>
+                                            <input type="time" class="form-control form-control-sm mb-1" @bind="day.StartTime" disabled="@(!day.IsWorkingDay)" />
+                                            <input type="time" class="form-control form-control-sm" @bind="day.EndTime" disabled="@(!day.IsWorkingDay)" />
+                                        </td>
+                                    }
+                                    <td>
+                                        <input type="number" min="0" class="form-control form-control-sm" @bind="row.DefaultTargetPerPerson" />
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-secondary mb-1 w-100" @onclick="() => CopyFirstDayToAll(row)" disabled="@row.IsSaving">
+                                            Salin ke semua hari
+                                        </button>
+                                        <button class="btn btn-sm btn-primary w-100" @onclick="() => SaveRow(row)" disabled="@row.IsSaving">
+                                            @(row.IsSaving ? "Menyimpan..." : "Simpan")
+                                        </button>
+                                        @if (!string.IsNullOrEmpty(row.ErrorMessage))
+                                        {
+                                            <div class="text-danger small mt-1">@row.ErrorMessage</div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="card-title">Jam Istirahat</h3>
+                <button class="btn btn-primary btn-sm" @onclick="OpenCreateBreakForm">+ Tambah Istirahat</button>
+            </div>
+            <div class="card-body">
+                @if (breaks.Count == 0)
+                {
+                    <p>Belum ada jam istirahat.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-bordered border text-nowrap mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Nama</th>
+                                    <th>Hari</th>
+                                    <th>Jam Mulai</th>
+                                    <th>Jam Selesai</th>
+                                    <th>Urutan</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var b in breaks)
+                                {
+                                    <tr>
+                                        <td>@b.BreakName</td>
+                                        <td>@(b.DayOfWeek is null ? "Semua Hari" : DayLabel(b.DayOfWeek.Value))</td>
+                                        <td>@b.StartTime.ToString(@"hh\:mm")</td>
+                                        <td>@b.EndTime.ToString(@"hh\:mm")</td>
+                                        <td>@b.SortOrder</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditBreakForm(b)"><i class="fe fe-edit"></i></button>
+                                            <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDeleteBreak(b)"><i class="fe fe-trash-2"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@if (showBreakForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditBreakMode ? "Edit Istirahat" : "Tambah Istirahat")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseBreakForm"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="breakFormModel" OnValidSubmit="HandleBreakSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Nama Istirahat</label>
+                            <InputText class="form-control" @bind-Value="breakFormModel.BreakName" />
+                            <ValidationMessage For="@(() => breakFormModel.BreakName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Hari</label>
+                            <InputSelect class="form-select" @bind-Value="breakFormModel.DayOfWeek">
+                                <option value="0">-- Semua Hari --</option>
+                                @foreach (var dow in DaysOfWeek)
+                                {
+                                    <option value="@dow">@DayLabel(dow)</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Jam Mulai</label>
+                            <input type="time" class="form-control" @bind="breakFormModel.StartTime" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Jam Selesai</label>
+                            <input type="time" class="form-control" @bind="breakFormModel.EndTime" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Urutan</label>
+                            <InputNumber class="form-control" @bind-Value="breakFormModel.SortOrder" />
+                        </div>
+                        @if (!string.IsNullOrEmpty(breakErrorMessage))
+                        {
+                            <div class="alert alert-danger">@breakErrorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSavingBreak">
+                            @(isSavingBreak ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeletingBreak" OnConfirm="ConfirmDeleteBreak" OnCancel="CancelDeleteBreak">
+    <Message>Yakin ingin menghapus istirahat "@breakPendingDelete?.BreakName"?</Message>
+</ConfirmDeleteModal>
+
+@code {
+    private static readonly int[] DaysOfWeek = { 1, 2, 3, 4, 5, 6, 7 };
+
+    private bool? hasAccess = null;
+    private bool isLoading = true;
+    private List<DivisionRowViewModel> divisionRows = new();
+    private List<WorkBreakDto> breaks = new();
+
+    private bool showBreakForm = false;
+    private bool isEditBreakMode = false;
+    private bool isSavingBreak = false;
+    private string breakErrorMessage = string.Empty;
+    private BreakFormModel breakFormModel = new();
+
+    private bool showDeleteConfirm = false;
+    private bool isDeletingBreak = false;
+    private WorkBreakDto? breakPendingDelete;
+
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "SETTING_JAM_KERJA");
+
+        if (hasAccess == true)
+            await LoadAll();
+    }
+
+    private async Task LoadAll()
+    {
+        isLoading = true;
+
+        var defaults = await WorkScheduleApi.GetDefaultsAsync();
+        divisionRows = defaults.Select(BuildRow).ToList();
+
+        breaks = await WorkScheduleApi.GetBreaksAsync();
+
+        isLoading = false;
+    }
+
+    private static DivisionRowViewModel BuildRow(WorkScheduleDivisionDto division)
+    {
+        var row = new DivisionRowViewModel
+        {
+            DivisionId = division.Id,
+            DivisionName = division.DivisionName,
+            DefaultTargetPerPerson = division.DefaultTargetPerPerson
+        };
+
+        foreach (var dow in DaysOfWeek)
+        {
+            var existing = division.Days.FirstOrDefault(d => d.DayOfWeek == dow);
+            row.Days.Add(existing is not null
+                ? new DayEditModel
+                {
+                    DayOfWeek = dow,
+                    IsWorkingDay = existing.IsWorkingDay,
+                    StartTime = TimeOnly.FromTimeSpan(existing.StartTime),
+                    EndTime = TimeOnly.FromTimeSpan(existing.EndTime)
+                }
+                : new DayEditModel
+                {
+                    DayOfWeek = dow,
+                    IsWorkingDay = dow != 7,
+                    StartTime = new TimeOnly(8, 0),
+                    EndTime = new TimeOnly(20, 0)
+                });
+        }
+
+        return row;
+    }
+
+    private void CopyFirstDayToAll(DivisionRowViewModel row)
+    {
+        var first = row.Days.First();
+        foreach (var day in row.Days.Skip(1))
+        {
+            day.StartTime = first.StartTime;
+            day.EndTime = first.EndTime;
+        }
+    }
+
+    private async Task SaveRow(DivisionRowViewModel row)
+    {
+        row.IsSaving = true;
+        row.ErrorMessage = string.Empty;
+
+        var request = new SaveDivisionScheduleRequest
+        {
+            DivisionId = row.DivisionId,
+            DefaultTargetPerPerson = row.DefaultTargetPerPerson,
+            Days = row.Days.Select(d => new WorkScheduleDaySaveDto
+            {
+                DayOfWeek = d.DayOfWeek,
+                IsWorkingDay = d.IsWorkingDay,
+                StartTime = d.StartTime.ToTimeSpan(),
+                EndTime = d.EndTime.ToTimeSpan()
+            }).ToList()
+        };
+
+        var result = await WorkScheduleApi.SaveDivisionScheduleAsync(row.DivisionId, request);
+
+        row.IsSaving = false;
+        if (!result.Success)
+            row.ErrorMessage = result.Error;
+    }
+
+    private static string DayLabel(int dayOfWeek) => dayOfWeek switch
+    {
+        1 => "Senin",
+        2 => "Selasa",
+        3 => "Rabu",
+        4 => "Kamis",
+        5 => "Jumat",
+        6 => "Sabtu",
+        7 => "Minggu",
+        _ => "-"
+    };
+
+    private void OpenCreateBreakForm()
+    {
+        isEditBreakMode = false;
+        breakFormModel = new BreakFormModel();
+        breakErrorMessage = string.Empty;
+        showBreakForm = true;
+    }
+
+    private void OpenEditBreakForm(WorkBreakDto b)
+    {
+        isEditBreakMode = true;
+        breakFormModel = new BreakFormModel
+        {
+            Id = b.Id,
+            BreakName = b.BreakName,
+            DayOfWeek = b.DayOfWeek ?? 0,
+            StartTime = TimeOnly.FromTimeSpan(b.StartTime),
+            EndTime = TimeOnly.FromTimeSpan(b.EndTime),
+            SortOrder = b.SortOrder
+        };
+        breakErrorMessage = string.Empty;
+        showBreakForm = true;
+    }
+
+    private void CloseBreakForm()
+    {
+        showBreakForm = false;
+    }
+
+    private async Task HandleBreakSubmit()
+    {
+        isSavingBreak = true;
+        breakErrorMessage = string.Empty;
+
+        var startTime = breakFormModel.StartTime.ToTimeSpan();
+        var endTime = breakFormModel.EndTime.ToTimeSpan();
+        var dayOfWeek = breakFormModel.DayOfWeek == 0 ? (int?)null : breakFormModel.DayOfWeek;
+
+        (bool Success, string Error) result;
+        if (isEditBreakMode)
+        {
+            result = await WorkScheduleApi.UpdateBreakAsync(new WorkBreakUpdateRequest
+            {
+                Id = breakFormModel.Id,
+                BreakName = breakFormModel.BreakName,
+                DayOfWeek = dayOfWeek,
+                StartTime = startTime,
+                EndTime = endTime,
+                SortOrder = breakFormModel.SortOrder
+            });
+        }
+        else
+        {
+            result = await WorkScheduleApi.CreateBreakAsync(new WorkBreakCreateRequest
+            {
+                BreakName = breakFormModel.BreakName,
+                DayOfWeek = dayOfWeek,
+                StartTime = startTime,
+                EndTime = endTime,
+                SortOrder = breakFormModel.SortOrder
+            });
+        }
+
+        isSavingBreak = false;
+
+        if (result.Success)
+        {
+            showBreakForm = false;
+            breaks = await WorkScheduleApi.GetBreaksAsync();
+        }
+        else
+        {
+            breakErrorMessage = result.Error;
+        }
+    }
+
+    private void HandleDeleteBreak(WorkBreakDto b)
+    {
+        breakPendingDelete = b;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDeleteBreak()
+    {
+        showDeleteConfirm = false;
+        breakPendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteBreak()
+    {
+        if (breakPendingDelete is null) return;
+
+        isDeletingBreak = true;
+        var success = await WorkScheduleApi.DeleteBreakAsync(breakPendingDelete.Id);
+        isDeletingBreak = false;
+
+        showDeleteConfirm = false;
+        breakPendingDelete = null;
+
+        if (success)
+            breaks = await WorkScheduleApi.GetBreaksAsync();
+    }
+
+    public class DivisionRowViewModel
+    {
+        public int DivisionId { get; set; }
+        public string DivisionName { get; set; } = string.Empty;
+        public int DefaultTargetPerPerson { get; set; }
+        public List<DayEditModel> Days { get; set; } = new();
+        public bool IsSaving { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+    }
+
+    public class DayEditModel
+    {
+        public int DayOfWeek { get; set; }
+        public bool IsWorkingDay { get; set; } = true;
+        public TimeOnly StartTime { get; set; } = new(8, 0);
+        public TimeOnly EndTime { get; set; } = new(20, 0);
+    }
+
+    public class BreakFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Nama istirahat wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama istirahat maksimal 150 karakter.")]
+        public string BreakName { get; set; } = string.Empty;
+
+        public int DayOfWeek { get; set; } = 0;
+        public TimeOnly StartTime { get; set; } = new(12, 0);
+        public TimeOnly EndTime { get; set; } = new(13, 0);
+        public int SortOrder { get; set; }
+    }
+}

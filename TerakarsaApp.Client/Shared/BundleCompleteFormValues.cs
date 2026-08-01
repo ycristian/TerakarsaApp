@@ -16,4 +16,9 @@ public class BundleCompleteFormValues
     public bool ConfirmExceed { get; set; }
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini.
     public bool ConfirmShort { get; set; }
+    // Prompt 39: hanya terisi dari form "Kirim Hasil" (COMPLETE) saat BundleScanCard
+    // menampilkan dropdown pelaksana (SuggestedResourceId terisi + station tidak
+    // terkunci) -- pemanggil pakai ini kalau ada, fallback ke resource sesi kalau NULL.
+    // TIDAK dipakai untuk EDIT (UPDATE tidak pernah mengubah resource_id).
+    public int? ResourceId { get; set; }
 }

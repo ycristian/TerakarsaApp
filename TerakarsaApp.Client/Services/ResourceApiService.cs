@@ -26,6 +26,16 @@ public class ResourceApiService
         return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
     }
 
+    // Prompt 39: dropdown "Resource Pasangan" -- resource aktif di luar divisi yang
+    // sedang dipilih. divisionId null (belum ada divisi dipilih) -> semua resource aktif.
+    public async Task<List<ResourceCounterpartOptionDto>> GetActiveExceptDivisionAsync(int? divisionId)
+    {
+        var query = divisionId is > 0 ? $"?divisionId={divisionId}" : string.Empty;
+        var response = await _http.GetAsync($"api/resource/active-except-division{query}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ResourceCounterpartOptionDto>>() ?? new();
+    }
+
     public async Task<(bool Success, string Error)> CreateAsync(ResourceCreateRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/resource", request);

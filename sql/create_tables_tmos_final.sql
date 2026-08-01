@@ -44,12 +44,17 @@ CREATE TABLE divisions(
  division_id int primary key identity(1,1),
  division_code varchar(30) not null,
  division_name varchar(150) not null,
+ show_in_dashboard bit not null default 1,          -- Prompt 36: tampil di dashboard TV atau tidak
+ dashboard_mode varchar(20) not null default 'DIVISION',  -- DIVISION | RESOURCE
+ dashboard_sort_order int not null default 0,       -- urutan kartu di dashboard
+ default_target_per_person int not null default 0,  -- pcs/orang/hari, untuk prefill PPIC
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
  updated_by int null,
  deleted_at datetime2 null,
- deleted_by int null
+ deleted_by int null,
+ constraint CK_divisions_dashboard_mode check (dashboard_mode in ('DIVISION', 'RESOURCE'))
 );
 
 CREATE TABLE positions(
@@ -161,6 +166,12 @@ CREATE TABLE resources(
    constraint FK_resources_resource_types foreign key references resource_types(resource_type_id),
  resource_name varchar(150) not null,
  is_active bit not null default 1,
+ include_in_dashboard bit not null default 1,       -- Prompt 36: ikut dihitung & ditampilkan di dashboard
+ counterpart_resource_id int null                   -- Prompt 39: resource pasangan di divisi lanjutan (mis.
+   constraint FK_resources_counterpart                -- Line A1 di Sewing -> Trim A1 di Buang Benang). Dipakai
+   foreign key references resources(resource_id),     -- auto-terima untuk mengisi received_by_resource_id dengan
+                                                        -- resource divisi penerima, dan sebagai saran pelaksana
+                                                        -- di station. Satu arah, opsional.
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -744,6 +755,111 @@ CREATE TABLE pack_items(
 );
 GO
 
+-- ============ 9c. JAM KERJA & TARGET DEFAULT ============
+-- Prompt 36: fondasi dashboard target harian. Nilai di sini HANYA dipakai untuk prefill
+-- form Planning Harian PPIC (Prompt 37) dan fallback tampilan bila PPIC belum input --
+-- dashboard TV (Prompt 38) selalu memakai angka yang sudah di-save PPIC.
+
+CREATE TABLE work_schedule_defaults(
+ work_schedule_default_id int primary key identity(1,1),
+ division_id int not null
+   constraint FK_wsd_divisions foreign key references divisions(division_id),
+ day_of_week tinyint not null,              -- 1 = Senin ... 7 = Minggu
+ is_working_day bit not null default 1,     -- 0 = libur default (mis. Minggu)
+ start_time time(0) not null,
+ end_time time(0) not null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ constraint CK_wsd_day_of_week check (day_of_week between 1 and 7)
+);
+
+CREATE TABLE work_break_defaults(
+ work_break_default_id int primary key identity(1,1),
+ break_name varchar(150) not null,          -- mis. 'Istirahat Siang'
+ day_of_week tinyint null,                  -- NULL = berlaku semua hari
+ start_time time(0) not null,
+ end_time time(0) not null,
+ sort_order int not null default 0,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ constraint CK_wbd_day_of_week check (day_of_week is null or day_of_week between 1 and 7)
+);
+GO
+
+-- ============ 9d. PLANNING HARIAN PPIC ============
+-- Prompt 37: rencana kerja harian per divisi (+ per resource bila dashboard_mode =
+-- RESOURCE), dasar dashboard target TV (Prompt 38). Setting default (9c) hanya prefill --
+-- baris di sini adalah satu-satunya data yang dianggap "sudah direncanakan".
+
+CREATE TABLE daily_division_plans(
+ daily_division_plan_id int primary key identity(1,1),
+ plan_date date not null,
+ division_id int not null
+   constraint FK_ddp_divisions foreign key references divisions(division_id),
+ is_holiday bit not null default 0,         -- 1 = divisi libur pada tanggal ini
+ start_time time(0) null,                   -- NULL bila libur
+ end_time time(0) null,
+ headcount int null,                        -- dipakai bila dashboard_mode = DIVISION
+ target_per_person int null,                -- dipakai bila dashboard_mode = DIVISION
+ remark varchar(500) null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+CREATE TABLE daily_resource_plans(
+ daily_resource_plan_id int primary key identity(1,1),
+ daily_division_plan_id int not null
+   constraint FK_drp_daily_division_plans foreign key references daily_division_plans(daily_division_plan_id),
+ resource_id int not null
+   constraint FK_drp_resources foreign key references resources(resource_id),
+ headcount int not null default 0,
+ target_per_person int not null default 0,
+ start_time time(0) null,                   -- override; NULL = ikut jam divisi
+ end_time time(0) null,                     -- override; NULL = ikut jam divisi
+ remark varchar(500) null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
+-- ============ 9e. DASHBOARD TARGET HARIAN (TOKEN KIOSK) ============
+-- Prompt 38: token akses layar TV lantai produksi (read-only, tanpa login). Berbeda dari
+-- stations -- tabel ini TIDAK terikat divisi, boleh ada banyak token aktif bersamaan.
+
+CREATE TABLE dashboard_tokens(
+ dashboard_token_id int primary key identity(1,1),
+ token_name varchar(150) not null,          -- mis. 'TV Line Jahit 1'
+ dashboard_token varchar(64) not null,      -- GUID tanpa strip, digenerate server
+ is_active bit not null default 1,
+ refresh_interval_minutes int not null default 30,  -- harus habis membagi 60
+
+ last_seen_at datetime2 null,               -- diperbarui saat token dipakai
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ constraint CK_dashboard_tokens_refresh_interval check (refresh_interval_minutes in (5, 10, 15, 20, 30, 60))
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
 
@@ -768,10 +884,16 @@ CREATE UNIQUE INDEX UX_stations_code          ON stations(station_code)         
 CREATE UNIQUE INDEX UX_stations_token         ON stations(station_token)            WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_stations_pairing_code  ON stations(pairing_code)             WHERE pairing_code IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_packs_serial           ON packs(serial)                      WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_wsd_division_day       ON work_schedule_defaults(division_id, day_of_week) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_ddp_date_division       ON daily_division_plans(plan_date, division_id) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_drp_plan_resource       ON daily_resource_plans(daily_division_plan_id, resource_id) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_dashboard_tokens_token  ON dashboard_tokens(dashboard_token) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_dashboard_tokens_name   ON dashboard_tokens(token_name) WHERE deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
 
+CREATE INDEX IX_ddp_plan_date       ON daily_division_plans(plan_date) WHERE deleted_at IS NULL;
 CREATE INDEX IX_movement_stock      ON material_movement(stock_id)  WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_bundle          ON article_workflow_logs(bundle_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_article_workflow ON article_workflow_logs(article_workflow_id) WHERE deleted_at IS NULL;

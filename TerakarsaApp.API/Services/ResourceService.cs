@@ -58,6 +58,19 @@ public class ResourceService
             .ToListAsync();
     }
 
+    // Prompt 39: dropdown "Resource Pasangan" -- resource aktif di luar divisi yang
+    // sedang dipilih di form. divisionId null (belum ada divisi dipilih) kembalikan semua.
+    public async Task<List<ResourceCounterpartOptionDto>> GetActiveExceptDivisionAsync(int? divisionId)
+    {
+        var excludeDivisionIdParam = new SqlParameter("@ExcludeDivisionId", (object?)divisionId ?? DBNull.Value);
+
+        return await _db.Database
+            .SqlQueryRaw<ResourceCounterpartOptionDto>(
+                "EXEC SIS_Resource_GetActiveExceptDivision @ExcludeDivisionId = @ExcludeDivisionId",
+                excludeDivisionIdParam)
+            .ToListAsync();
+    }
+
     public async Task<ResourceDto?> GetByIdAsync(int id)
     {
         var idParam = new SqlParameter("@Id", id);
@@ -76,13 +89,15 @@ public class ResourceService
         var resourceTypeIdParam = new SqlParameter("@ResourceTypeId", request.ResourceTypeId);
         var nameParam = new SqlParameter("@ResourceName", request.ResourceName);
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
+        var includeInDashboardParam = new SqlParameter("@IncludeInDashboard", request.IncludeInDashboard);
+        var counterpartResourceIdParam = new SqlParameter("@CounterpartResourceId", (object?)request.CounterpartResourceId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Resource_Manage @Action = @Action, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @UserId = @UserId",
-                actionParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, userIdParam);
+                "EXEC SIS_Resource_Manage @Action = @Action, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @UserId = @UserId",
+                actionParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -99,13 +114,15 @@ public class ResourceService
         var resourceTypeIdParam = new SqlParameter("@ResourceTypeId", request.ResourceTypeId);
         var nameParam = new SqlParameter("@ResourceName", request.ResourceName);
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
+        var includeInDashboardParam = new SqlParameter("@IncludeInDashboard", request.IncludeInDashboard);
+        var counterpartResourceIdParam = new SqlParameter("@CounterpartResourceId", (object?)request.CounterpartResourceId ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Resource_Manage @Action = @Action, @Id = @Id, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @UserId = @UserId",
-                actionParam, idParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, userIdParam);
+                "EXEC SIS_Resource_Manage @Action = @Action, @Id = @Id, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @UserId = @UserId",
+                actionParam, idParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

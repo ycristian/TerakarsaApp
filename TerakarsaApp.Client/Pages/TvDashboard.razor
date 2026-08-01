@@ -1,0 +1,463 @@
+@page "/tv-dashboard"
+@page "/tv-dashboard/{Token}"
+@layout TerakarsaApp.Client.Layout.BlankLayout
+@using System.Globalization
+@using TerakarsaApp.Client.Auth
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Dashboards
+@inject DashboardApiService DashboardApi
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Dashboard Target Harian</PageTitle>
+
+@if (isLoadingSetup)
+{
+    <div class="tv-setup-wrap">
+        <p class="text-center fs-4 mt-5">Memuat...</p>
+    </div>
+}
+else if (me is null)
+{
+    <div class="tv-setup-wrap">
+        <div class="card mt-5">
+            <div class="card-body">
+                <h3 class="card-title mb-3">Aktivasi Dashboard TV</h3>
+                <p class="text-muted">Tempelkan token yang diberikan admin, atau buka link lengkap yang sudah dibagikan.</p>
+                <div class="mb-3">
+                    <input class="form-control form-control-lg" placeholder="Tempel token..." @bind="tokenInput" @bind:event="oninput" />
+                </div>
+                @if (!string.IsNullOrEmpty(setupError))
+                {
+                    <div class="alert alert-danger">@setupError</div>
+                }
+                <button class="btn btn-primary btn-lg w-100" disabled="@isValidating" @onclick="HandleActivateSubmit">
+                    @(isValidating ? "Memeriksa..." : "Aktifkan")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="tv-root">
+        <div class="tv-header">
+            <div class="tv-header-left">
+                <span class="tv-title">Target Harian</span>
+                <span class="tv-date">@FormatIndonesianDate(selectedDate)</span>
+                <input type="date" class="form-control form-control-sm tv-date-input" @bind="selectedDate" @bind:after="HandleDateChanged" />
+            </div>
+            <div class="tv-legend">
+                <span><i class="tv-swatch" style="background:var(--tv-track)"></i>seharusnya (jam berjalan)</span>
+                <span><i class="tv-swatch" style="background:var(--tv-green)"></i>surplus</span>
+                <span><i class="tv-swatch" style="background:var(--tv-yellow)"></i>defisit &lt;10%</span>
+                <span><i class="tv-swatch" style="background:var(--tv-red)"></i>defisit &ge;10%</span>
+            </div>
+            <div class="tv-header-right">
+                <span>Update terakhir @(lastUpdated?.ToString("HH:mm") ?? "-")</span>
+                <span>&middot; Berikutnya @(nextRefreshAt?.ToString("HH:mm") ?? "-")</span>
+                <button class="btn btn-sm btn-outline-secondary" title="Refresh manual" @onclick="HandleManualRefresh" disabled="@isRefreshing">
+                    <i class="fe fe-refresh-cw"></i>
+                </button>
+            </div>
+        </div>
+
+        @if (data is null)
+        {
+            <p class="text-muted">Memuat data...</p>
+        }
+        else
+        {
+            var divisionCards = data.Divisions.Where(d => d.DashboardMode == "DIVISION").ToList();
+            var resourcePanels = data.Divisions.Where(d => d.DashboardMode == "RESOURCE").ToList();
+
+            <div class="tv-top-grid" style="grid-template-columns: repeat(@Math.Max(divisionCards.Count, 1), 1fr);">
+                @foreach (var card in divisionCards)
+                {
+                    <div class="tv-card">
+                        <div class="tv-card-head">
+                            <span class="tv-card-name">@card.DivisionName</span>
+                            <span class="tv-card-hours">@FormatHours(card.StartTime, card.EndTime)</span>
+                        </div>
+
+                        @if (card.IsHoliday)
+                        {
+                            <div class="tv-badge tv-badge-muted mt-2">Libur</div>
+                        }
+                        else
+                        {
+                            <div class="tv-card-main">
+                                <span class="tv-card-qty">@FormatQty(card.QtyOk)</span>
+                                @if (card.HasTarget)
+                                {
+                                    <span class="tv-card-sub">/ @FormatQty(card.TargetTotal ?? 0) &middot; @(card.Headcount ?? 0) org</span>
+                                }
+                                else
+                                {
+                                    <span class="tv-card-sub">&middot; @(card.Headcount ?? 0) org</span>
+                                }
+                            </div>
+
+                            @if (!card.HasPlan)
+                            {
+                                <div class="tv-badge tv-badge-muted">Belum di-set</div>
+                            }
+                            else if (card.HasTarget)
+                            {
+                                <div class="tv-bar-wrap">
+                                    <div class="tv-bar-track" style="width:@ClampPercent(card.ExpectedPercent)%;"></div>
+                                    <div class="tv-bar-fill @StatusColorClass(card.DiffPercent)" style="width:@ClampPercent(card.ActualPercent)%;"></div>
+                                </div>
+                                <div class="tv-card-row">
+                                    <span class="@StatusTextClass(card.DiffPercent)">Selisih @FormatDiff(card.DiffQty, card.DiffPercent)</span>
+                                    <span class="@StatusTextClass(card.DiffPercent)">@FormatPercent(card.ActualPercent)</span>
+                                </div>
+                            }
+
+                            <div class="tv-card-foot">
+                                <span>@FormatRate(card.OutputPerPersonPerHour) org/jam &middot; sisa @FormatQty(card.RemainingQty ?? 0)</span>
+                                <span>Transit @FormatQty(card.Transit) &middot; WIP @FormatQty(card.Wip) &middot; Rjk @FormatQty(card.QtyReject)</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="tv-bottom-panels">
+                @foreach (var panel in resourcePanels)
+                {
+                    var lines = data.Resources.Where(r => r.DivisionId == panel.DivisionId).ToList();
+
+                    <div class="tv-panel">
+                        <div class="tv-panel-head">
+                            <div>
+                                <span class="tv-card-name">@panel.DivisionName</span>
+                                @if (panel.IsHoliday)
+                                {
+                                    <span class="tv-badge tv-badge-muted ms-2">Libur</span>
+                                }
+                                else if (!panel.HasPlan)
+                                {
+                                    <span class="tv-badge tv-badge-muted ms-2">Belum di-set</span>
+                                }
+                            </div>
+                            <span class="tv-card-hours">@FormatHours(panel.StartTime, panel.EndTime)</span>
+                        </div>
+                        <div class="tv-panel-sub">
+                            @FormatQty(panel.QtyOk) / @FormatQty(panel.TargetTotal ?? 0) &middot; @FormatPercent(panel.ActualPercent)
+                        </div>
+
+                        <table class="tv-line-table">
+                            <colgroup>
+                                <col class="tv-col-line" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-progress" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-selisih" />
+                                <col class="tv-col-num" />
+                                <col class="tv-col-num" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>Line</th>
+                                    <th>Org</th>
+                                    <th>OK</th>
+                                    <th>Progress</th>
+                                    <th>Target</th>
+                                    <th>org/jam</th>
+                                    <th>Sisa</th>
+                                    <th>Selisih</th>
+                                    <th>WIP</th>
+                                    <th>Rjk</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in lines)
+                                {
+                                    <tr>
+                                        <td>
+                                            @line.ResourceName
+                                            @if (line.HasTimeOverride)
+                                            {
+                                                <span class="tv-override">@FormatHours(line.StartTime, line.EndTime)</span>
+                                            }
+                                        </td>
+                                        <td>@(line.Headcount ?? 0)</td>
+                                        <td>@FormatQty(line.QtyOk)</td>
+                                        <td>
+                                            @if (line.HasTarget)
+                                            {
+                                                <div class="tv-bar-wrap tv-bar-wrap-sm">
+                                                    <div class="tv-bar-track" style="width:@ClampPercent(line.ExpectedPercent)%;"></div>
+                                                    <div class="tv-bar-fill @StatusColorClass(line.DiffPercent)" style="width:@ClampPercent(line.ActualPercent)%;"></div>
+                                                    <span class="tv-bar-label @StatusTextClass(line.DiffPercent)">@FormatPercent(line.ActualPercent)</span>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <span>-</span>
+                                            }
+                                        </td>
+                                        <td>@FormatQty(line.TargetTotal ?? 0)</td>
+                                        <td>@FormatRate(line.OutputPerPersonPerHour)</td>
+                                        <td>@FormatQty(line.RemainingQty ?? 0)</td>
+                                        <td class="@StatusTextClass(line.DiffPercent)">
+                                            <span class="tv-selisih-qty">@FormatDiffQty(line.DiffQty)</span>
+                                            <span class="tv-selisih-pct">@FormatDiffPercentOnly(line.DiffPercent)</span>
+                                        </td>
+                                        <td class="tv-col-wip-reject">@FormatQty(line.Wip)</td>
+                                        <td class="tv-col-wip-reject">@FormatQty(line.QtyReject)</td>
+                                    </tr>
+                                }
+                                <tr class="tv-row-total">
+                                    <td>TOTAL</td>
+                                    <td>@(panel.Headcount ?? 0)</td>
+                                    <td>@FormatQty(panel.QtyOk)</td>
+                                    <td>
+                                        @if (panel.HasTarget)
+                                        {
+                                            <div class="tv-bar-wrap tv-bar-wrap-sm">
+                                                <div class="tv-bar-track" style="width:@ClampPercent(panel.ExpectedPercent)%;"></div>
+                                                <div class="tv-bar-fill @StatusColorClass(panel.DiffPercent)" style="width:@ClampPercent(panel.ActualPercent)%;"></div>
+                                                <span class="tv-bar-label @StatusTextClass(panel.DiffPercent)">@FormatPercent(panel.ActualPercent)</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span>-</span>
+                                        }
+                                    </td>
+                                    <td>@FormatQty(panel.TargetTotal ?? 0)</td>
+                                    <td>@FormatRate(panel.OutputPerPersonPerHour)</td>
+                                    <td>@FormatQty(panel.RemainingQty ?? 0)</td>
+                                    <td class="@StatusTextClass(panel.DiffPercent)">
+                                        <span class="tv-selisih-qty">@FormatDiffQty(panel.DiffQty)</span>
+                                        <span class="tv-selisih-pct">@FormatDiffPercentOnly(panel.DiffPercent)</span>
+                                    </td>
+                                    <td class="tv-col-wip-reject">@FormatQty(panel.Wip)</td>
+                                    <td class="tv-col-wip-reject">@FormatQty(panel.QtyReject)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="tv-panel-foot">
+                            WIP total @FormatQty(lines.Sum(l => l.Wip)) &middot; Reject @FormatQty(lines.Sum(l => l.QtyReject))
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Token { get; set; }
+
+    private static readonly CultureInfo IdCulture = CultureInfo.GetCultureInfo("id-ID");
+
+    private bool isLoadingSetup = true;
+    private bool isValidating = false;
+    private bool isRefreshing = false;
+    private string tokenInput = string.Empty;
+    private string setupError = string.Empty;
+
+    private DashboardMeDto? me;
+    private DashboardTargetHarianResult? data;
+    private DateTime selectedDate = DateTime.Today;
+    private DateTime? lastUpdated;
+    private DateTime? nextRefreshAt;
+
+    private System.Threading.Timer? refreshTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoadingSetup = true;
+
+        if (!string.IsNullOrWhiteSpace(Token))
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", DashboardTokenHandler.TokenKey, Token.Trim());
+            Nav.NavigateTo("/tv-dashboard", replace: true);
+        }
+
+        var existingToken = await JS.InvokeAsync<string?>("localStorage.getItem", DashboardTokenHandler.TokenKey);
+        if (string.IsNullOrWhiteSpace(existingToken))
+        {
+            isLoadingSetup = false;
+            return;
+        }
+
+        await ActivateAsync();
+    }
+
+    private async Task ActivateAsync()
+    {
+        var (success, result) = await DashboardApi.GetMeAsync();
+        if (!success || result is null)
+        {
+            await JS.InvokeVoidAsync("localStorage.removeItem", DashboardTokenHandler.TokenKey);
+            setupError = "Token dashboard tidak berlaku. Minta link baru ke admin.";
+            me = null;
+            isLoadingSetup = false;
+            return;
+        }
+
+        me = result;
+        setupError = string.Empty;
+        isLoadingSetup = false;
+
+        await LoadDataAsync();
+        ScheduleNextRefresh();
+    }
+
+    private async Task HandleActivateSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(tokenInput))
+        {
+            setupError = "Token wajib diisi.";
+            return;
+        }
+
+        isValidating = true;
+        await JS.InvokeVoidAsync("localStorage.setItem", DashboardTokenHandler.TokenKey, tokenInput.Trim());
+        tokenInput = string.Empty;
+
+        await ActivateAsync();
+        isValidating = false;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        var (success, result) = await DashboardApi.GetTargetHarianAsync(selectedDate);
+        if (!success || result is null)
+        {
+            await HandleTokenRejected();
+            return;
+        }
+
+        data = result;
+        lastUpdated = DateTime.Now;
+    }
+
+    private async Task HandleTokenRejected()
+    {
+        refreshTimer?.Dispose();
+        refreshTimer = null;
+        await JS.InvokeVoidAsync("localStorage.removeItem", DashboardTokenHandler.TokenKey);
+        me = null;
+        data = null;
+        setupError = "Token dashboard tidak berlaku. Minta link baru ke admin.";
+    }
+
+    private async Task HandleDateChanged()
+    {
+        await LoadDataAsync();
+    }
+
+    // Tombol refresh manual: memuat ulang data, TIDAK menggeser jadwal auto-refresh berikutnya.
+    private async Task HandleManualRefresh()
+    {
+        isRefreshing = true;
+        await LoadDataAsync();
+        isRefreshing = false;
+    }
+
+    // Selaras jam dinding: dipanggil ulang setiap kali auto-refresh terjadi (bukan interval
+    // tetap sejak halaman dibuka), supaya semua TV dengan interval sama refresh di menit yang
+    // sama persis. menitBerikut = ((menitSekarang / interval) + 1) * interval.
+    private void ScheduleNextRefresh()
+    {
+        refreshTimer?.Dispose();
+
+        var interval = me?.RefreshIntervalMinutes ?? 30;
+        var now = DateTime.Now;
+        var nextMinuteMark = ((now.Minute / interval) + 1) * interval;
+        var nextTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0).AddMinutes(nextMinuteMark);
+        var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 3000));
+        var delay = (nextTime - now) + jitter;
+        if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
+
+        nextRefreshAt = nextTime;
+
+        refreshTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadDataAsync();
+                ScheduleNextRefresh();
+                StateHasChanged();
+            });
+        }, null, delay, Timeout.InfiniteTimeSpan);
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
+    }
+
+    private static string FormatIndonesianDate(DateTime date)
+    {
+        var days = new[] { "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu" };
+        var months = new[] { "", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des" };
+        return $"{days[(int)date.DayOfWeek]}, {date.Day:00} {months[date.Month]} {date.Year}";
+    }
+
+    private static string FormatHours(TimeSpan? start, TimeSpan? end)
+    {
+        if (start is null || end is null) return "-";
+        return $"{start.Value:hh\\:mm}–{end.Value:hh\\:mm}";
+    }
+
+    private static string FormatQty(int n) => n.ToString("N0", IdCulture);
+
+    private static string FormatPercent(double? p) => p is null ? "-" : $"{Math.Round(p.Value)}%";
+
+    private static string FormatRate(double? r) => r is null ? "-" : r.Value.ToString("0.0", IdCulture);
+
+    private static double ClampPercent(double? p)
+    {
+        if (p is null) return 0;
+        return Math.Clamp(p.Value, 0, 100);
+    }
+
+    private static string FormatDiff(int? diffQty, double? diffPercent)
+    {
+        if (diffQty is null || diffPercent is null) return "-";
+        var qtySign = diffQty >= 0 ? "+" : "−";
+        var pctSign = diffPercent >= 0 ? "+" : "−";
+        return $"{qtySign}{Math.Abs(diffQty.Value):N0} ({pctSign}{Math.Round(Math.Abs(diffPercent.Value))}%)";
+    }
+
+    private static string FormatDiffQty(int? diffQty)
+    {
+        if (diffQty is null) return "-";
+        var qtySign = diffQty >= 0 ? "+" : "−";
+        return $"{qtySign}{Math.Abs(diffQty.Value):N0}";
+    }
+
+    private static string FormatDiffPercentOnly(double? diffPercent)
+    {
+        if (diffPercent is null) return "";
+        var pctSign = diffPercent >= 0 ? "+" : "−";
+        return $"({pctSign}{Math.Round(Math.Abs(diffPercent.Value))}%)";
+    }
+
+    // Hijau = selisih >= 0 (surplus). Kuning = defisit < 10 poin persen. Merah = defisit >= 10 poin.
+    private static string StatusColorClass(double? diffPercent)
+    {
+        if (diffPercent is null) return "tv-bar-track-only";
+        if (diffPercent >= 0) return "tv-green-bg";
+        if (diffPercent > -10) return "tv-yellow-bg";
+        return "tv-red-bg";
+    }
+
+    private static string StatusTextClass(double? diffPercent)
+    {
+        if (diffPercent is null) return "tv-muted-text";
+        if (diffPercent >= 0) return "tv-green-text";
+        if (diffPercent > -10) return "tv-yellow-text";
+        return "tv-red-text";
+    }
+}

@@ -9,14 +9,24 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_Division_Manage
-    @Action       VARCHAR(20),
-    @Id           INT = NULL,
-    @DivisionCode VARCHAR(30) = NULL,
-    @DivisionName VARCHAR(150) = NULL,
-    @UserId       INT = NULL
+    @Action                   VARCHAR(20),
+    @Id                       INT = NULL,
+    @DivisionCode             VARCHAR(30) = NULL,
+    @DivisionName             VARCHAR(150) = NULL,
+    @ShowInDashboard          BIT = 1,
+    @DashboardMode            VARCHAR(20) = 'DIVISION',
+    @DashboardSortOrder       INT = 0,
+    @DefaultTargetPerPerson   INT = 0,
+    @UserId                   INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF @DashboardMode NOT IN ('DIVISION', 'RESOURCE')
+    BEGIN
+        RAISERROR('Mode dashboard hanya boleh DIVISION atau RESOURCE.', 16, 1);
+        RETURN;
+    END
 
     IF @Action = 'CREATE'
     BEGIN
@@ -26,8 +36,8 @@ BEGIN
             RETURN;
         END
 
-        INSERT INTO divisions (division_code, division_name, created_at, created_by)
-        VALUES (@DivisionCode, @DivisionName, SYSDATETIME(), @UserId);
+        INSERT INTO divisions (division_code, division_name, show_in_dashboard, dashboard_mode, dashboard_sort_order, default_target_per_person, created_at, created_by)
+        VALUES (@DivisionCode, @DivisionName, @ShowInDashboard, @DashboardMode, @DashboardSortOrder, @DefaultTargetPerPerson, SYSDATETIME(), @UserId);
 
         SELECT SCOPE_IDENTITY() AS NewId;
     END
@@ -46,6 +56,10 @@ BEGIN
         UPDATE divisions
         SET division_code = @DivisionCode,
             division_name = @DivisionName,
+            show_in_dashboard = @ShowInDashboard,
+            dashboard_mode = @DashboardMode,
+            dashboard_sort_order = @DashboardSortOrder,
+            default_target_per_person = @DefaultTargetPerPerson,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE division_id = @Id AND deleted_at IS NULL;

@@ -1,6 +1,7 @@
 @* Kartu hasil scan bundle — dipakai di panel Scan /station (aksi kontekstual aktif)
    dan halaman publik /b/{serial} (ReadOnly=true, tanpa tombol aksi). *@
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.WorkflowLogs
 @using TerakarsaApp.Client.Services
 @inject StationDeviceApiService StationApi
@@ -509,6 +510,15 @@
                         <div class="form-text mb-2">Masuk: @completeQuotaInfo.QtyMasuk &middot; Tercatat: @completeQuotaInfo.QtySudah &middot; Sisa: @completeQuotaInfo.Sisa</div>
                     }
 
+                    @if (ShowResourceSuggestion)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Pelaksana</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="ResourceOptions" @bind-Value="completeResourceId"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)" Placeholder="Cari resource..." />
+                        </div>
+                    }
+
                     <div class="mb-2">
                         <label class="form-label">Divisi Tujuan</label>
                         <div class="form-control form-control-lg bg-light">
@@ -572,6 +582,13 @@
     [Parameter] public bool IsSuperAdmin { get; set; }
     [Parameter] public EventCallback<int> OnEditLogRequested { get; set; }
     [Parameter] public EventCallback OnEditBundleRequested { get; set; }
+
+    // Prompt 39: dropdown "Pelaksana" opsional di form Kirim Hasil -- hanya tampil kalau
+    // Info.Bundle.SuggestedResourceId terisi DAN station tidak terkunci (AllowResourceChange).
+    // Station terkunci tetap dipaksa ActiveResourceId (default_resource_id), saran diabaikan.
+    [Parameter] public List<ResourceLookupDto> ResourceOptions { get; set; } = new();
+    [Parameter] public int? ActiveResourceId { get; set; }
+    [Parameter] public bool AllowResourceChange { get; set; } = true;
 
     private bool showFullTimeline = false;
     private bool showReceiveNote = false;
@@ -653,6 +670,9 @@
     private string completeRemark = string.Empty;
     private string completeRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? completeQuotaInfo;
+    // Prompt 39: hanya relevan/ditampilkan kalau ShowResourceSuggestion true.
+    private int completeResourceId;
+    private bool ShowResourceSuggestion => AllowResourceChange && Info.Bundle.SuggestedResourceId is not null;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -666,6 +686,7 @@
     private void OpenCompleteModal()
     {
         completeRemarkError = string.Empty;
+        completeResourceId = ShowResourceSuggestion ? Info.Bundle.SuggestedResourceId!.Value : (ActiveResourceId ?? 0);
         showCompleteModal = true;
     }
 
@@ -708,7 +729,8 @@
             QtyLost = completeQtyLost,
             Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark,
             ConfirmExceed = confirmExceed,
-            ConfirmShort = confirmShort
+            ConfirmShort = confirmShort,
+            ResourceId = completeResourceId > 0 ? completeResourceId : null
         });
 
         if (string.IsNullOrEmpty(ActionError))

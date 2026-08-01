@@ -42,6 +42,14 @@ builder.Services.AddHttpClient<TerakarsaApp.Client.Services.StationDeviceApiServ
 })
 .AddHttpMessageHandler<TerakarsaApp.Client.Auth.StationTokenHandler>();
 
+builder.Services.AddScoped<TerakarsaApp.Client.Auth.DashboardTokenHandler>();
+
+builder.Services.AddHttpClient<TerakarsaApp.Client.Services.DashboardApiService>(client =>
+{
+    client.BaseAddress = new Uri(apiBaseUrl);
+})
+.AddHttpMessageHandler<TerakarsaApp.Client.Auth.DashboardTokenHandler>();
+
 builder.Services.AddScoped<AuthApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProductApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.UserApiService>();
@@ -68,5 +76,8 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportBundleApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportWipApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportProduksiApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.SuperAdminApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkScheduleApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.DailyPlanApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.DashboardTokenApiService>();
 
 await builder.Build().RunAsync();

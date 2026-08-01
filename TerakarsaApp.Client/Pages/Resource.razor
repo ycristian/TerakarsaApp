@@ -72,6 +72,8 @@ else
                             <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Tipe Resource" Column="ResourceTypeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Status</th>
+                            <th>Dashboard</th>
+                            <th>Pasangan</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -87,6 +89,17 @@ else
                                         @(r.IsActive ? "Aktif" : "Nonaktif")
                                     </span>
                                 </td>
+                                <td>
+                                    @if (r.IncludeInDashboard)
+                                    {
+                                        <span class="badge bg-info">Ikut Dashboard</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Tidak</span>
+                                    }
+                                </td>
+                                <td>@(r.CounterpartResourceName ?? "-")</td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(r)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(r)"><i class="fe fe-trash-2"></i></button>
@@ -118,7 +131,7 @@ else
 
                         <div class="mb-3">
                             <label class="form-label">Divisi</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId">
+                            <InputSelect class="form-select" @bind-Value="formModel.DivisionId" @bind-Value:after="OnDivisionChanged">
                                 <option value="0">-- Pilih Divisi --</option>
                                 @foreach (var d in divisionOptions)
                                 {
@@ -126,6 +139,13 @@ else
                                 }
                             </InputSelect>
                             <ValidationMessage For="@(() => formModel.DivisionId)" class="text-danger" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Resource Pasangan (opsional)</label>
+                            <SearchableSelect TItem="ResourceCounterpartOptionDto" Items="counterpartOptions"
+                                              @bind-Value="formModel.CounterpartResourceId"
+                                              IdSelector="@(o => o.Id)" TextSelector="@(o => $"{o.ResourceName} ({o.DivisionName})")"
+                                              AllowNone="true" NoneLabel="- Tidak ada -" Placeholder="Cari resource..." />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Tipe Resource</label>
@@ -146,6 +166,10 @@ else
                         <div class="mb-3 form-check">
                             <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
                             <label class="form-check-label">Aktif</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.IncludeInDashboard" />
+                            <label class="form-check-label">Ikut Dashboard</label>
                         </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
@@ -180,6 +204,7 @@ else
     private ResourceDto? resourcePendingDelete;
     private List<DivisionDto> divisionOptions = new();
     private List<ResourceTypeDto> resourceTypeOptions = new();
+    private List<ResourceCounterpartOptionDto> counterpartOptions = new();
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -256,15 +281,16 @@ else
         await LoadResources();
     }
 
-    private void OpenCreateForm()
+    private async Task OpenCreateForm()
     {
         isEditMode = false;
         formModel = new ResourceFormModel();
         errorMessage = string.Empty;
+        counterpartOptions = await ResourceApi.GetActiveExceptDivisionAsync(null);
         showForm = true;
     }
 
-    private void OpenEditForm(ResourceDto resource)
+    private async Task OpenEditForm(ResourceDto resource)
     {
         isEditMode = true;
         formModel = new ResourceFormModel
@@ -273,10 +299,25 @@ else
             DivisionId = resource.DivisionId,
             ResourceTypeId = resource.ResourceTypeId,
             ResourceName = resource.ResourceName,
-            IsActive = resource.IsActive
+            IsActive = resource.IsActive,
+            IncludeInDashboard = resource.IncludeInDashboard,
+            CounterpartResourceId = resource.CounterpartResourceId ?? 0
         };
         errorMessage = string.Empty;
+        counterpartOptions = await ResourceApi.GetActiveExceptDivisionAsync(resource.DivisionId);
         showForm = true;
+    }
+
+    // Prompt 39: dropdown Pasangan mengikuti Divisi yang sedang dipilih (pasangan wajib
+    // beda divisi) -- reload opsi & reset pilihan yang jadi tidak valid.
+    private async Task OnDivisionChanged()
+    {
+        counterpartOptions = formModel.DivisionId > 0
+            ? await ResourceApi.GetActiveExceptDivisionAsync(formModel.DivisionId)
+            : await ResourceApi.GetActiveExceptDivisionAsync(null);
+
+        if (formModel.CounterpartResourceId > 0 && !counterpartOptions.Any(o => o.Id == formModel.CounterpartResourceId))
+            formModel.CounterpartResourceId = 0;
     }
 
     private void CloseForm()
@@ -298,7 +339,9 @@ else
                 DivisionId = formModel.DivisionId,
                 ResourceTypeId = formModel.ResourceTypeId,
                 ResourceName = formModel.ResourceName,
-                IsActive = formModel.IsActive
+                IsActive = formModel.IsActive,
+                IncludeInDashboard = formModel.IncludeInDashboard,
+                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null
             });
         }
         else
@@ -308,7 +351,9 @@ else
                 DivisionId = formModel.DivisionId,
                 ResourceTypeId = formModel.ResourceTypeId,
                 ResourceName = formModel.ResourceName,
-                IsActive = formModel.IsActive
+                IsActive = formModel.IsActive,
+                IncludeInDashboard = formModel.IncludeInDashboard,
+                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null
             });
         }
 
@@ -367,5 +412,7 @@ else
         public string ResourceName { get; set; } = string.Empty;
 
         public bool IsActive { get; set; } = true;
+        public bool IncludeInDashboard { get; set; } = true;
+        public int CounterpartResourceId { get; set; }
     }
 }

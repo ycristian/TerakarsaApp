@@ -1,0 +1,490 @@
+@page "/dashboard-tokens"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Dashboards
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@inject DashboardTokenApiService DashboardTokenApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<PageTitle>Dashboard TV</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Dashboard TV</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Dashboard TV</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="alert alert-info">
+    Token ada di dalam URL agar bisa disalin sekali ke browser TV. Ini disengaja dan aman karena
+    layar kiosk read-only (tidak ada aksi mutasi), token tidak memberi akses ke data selain
+    agregat dashboard, dan token bisa dicabut kapan saja per perangkat.
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center gap-3">
+        <button class="btn btn-primary" @onclick="OpenCreateForm">
+            + Tambah TV
+        </button>
+        <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+    </div>
+
+    <div style="width: 300px;">
+        <input class="form-control" placeholder="Cari nama TV..."
+               @bind="searchTerm" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (pagedResult.Items.Count == 0)
+{
+    <p>Belum ada TV terdaftar.</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Daftar TV</h3>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered border text-nowrap mb-0">
+                    <thead>
+                        <tr>
+                            <SortableHeader Label="Nama TV" Column="TokenName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Token</th>
+                            <SortableHeader Label="Interval Refresh" Column="RefreshIntervalMinutes" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Status" Column="IsActive" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <SortableHeader Label="Terakhir Aktif" Column="LastSeenAt" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in pagedResult.Items)
+                        {
+                            <tr>
+                                <td>@t.TokenName</td>
+                                <td><code>@t.TokenPreview</code></td>
+                                <td>@t.RefreshIntervalMinutes menit</td>
+                                <td>
+                                    <span class="badge @(t.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(t.IsActive ? "Aktif" : "Nonaktif")
+                                    </span>
+                                </td>
+                                <td>@(t.LastSeenAt?.ToString("dd/MM HH:mm") ?? "Belum pernah")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-secondary me-1" title="Salin Link" @onclick="() => CopyLink(t)"><i class="fe fe-link"></i></button>
+                                    <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(t)"><i class="fe fe-edit"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" title="Generate Ulang Token" @onclick="() => HandleRegenerate(t)"><i class="fe fe-refresh-cw"></i></button>
+                                    <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(t)"><i class="fe fe-trash-2"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="pagedResult.TotalCount" TotalPages="pagedResult.TotalPages" PageNumberChanged="ChangePage" />
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(linkCopiedFeedback))
+{
+    <div class="alert alert-success mt-3 mb-0">@linkCopiedFeedback</div>
+}
+}
+
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit TV" : "Tambah TV")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseForm"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="formModel" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger mb-3" />
+
+                        <div class="mb-3">
+                            <label class="form-label">Nama TV</label>
+                            <InputText class="form-control" @bind-Value="formModel.TokenName" placeholder="mis. TV Line Jahit 1" />
+                            <ValidationMessage For="@(() => formModel.TokenName)" class="text-danger" />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Interval Refresh</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.RefreshIntervalMinutes">
+                                <option value="5">5 menit</option>
+                                <option value="10">10 menit</option>
+                                <option value="15">15 menit</option>
+                                <option value="20">20 menit</option>
+                                <option value="30">30 menit</option>
+                                <option value="60">60 menit</option>
+                            </InputSelect>
+                        </div>
+                        <div class="form-text mb-3">@RefreshScheduleText(formModel.RefreshIntervalMinutes)</div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
+                            <label class="form-check-label">Aktif</label>
+                        </div>
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-danger">@errorMessage</div>
+                        }
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showLinkModal && linkResult is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Link TV Siap Dipakai</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseLinkModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted">Buka link ini di browser TV. Setelah aktivasi, URL akan otomatis dibersihkan dari layar TV.</p>
+                    <div class="input-group mb-2">
+                        <input class="form-control" readonly value="@linkResult.Link" />
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyLinkResult">
+                            @(linkResultCopied ? "Tersalin!" : "Salin")
+                        </button>
+                        <a class="btn btn-outline-secondary" title="Buka" target="_blank" href="@linkResult.Link"><i class="fe fe-external-link"></i></a>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" @onclick="CloseLinkModal">Selesai</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+    <Message>Yakin ingin menghapus TV "@tokenPendingDelete?.TokenName"?</Message>
+</ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="showRegenerateConfirm" IsBusy="isRegenerating" OnConfirm="ConfirmRegenerate" OnCancel="CancelRegenerate"
+                     Title="Generate Ulang Token" ConfirmText="Ya, Generate Ulang" ConfirmButtonClass="btn-warning">
+    <Message>
+        Token lama untuk "@tokenPendingRegenerate?.TokenName" akan langsung mati. TV yang masih
+        memakai link lama akan berhenti dan kembali ke layar aktivasi. Lanjutkan?
+    </Message>
+</ConfirmDeleteModal>
+
+@code {
+    private DashboardTokenPagedResult pagedResult = new();
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showForm = false;
+    private bool isEditMode = false;
+    private bool? hasAccess = null;
+    private string errorMessage = string.Empty;
+    private TokenFormModel formModel = new();
+
+    private bool showDeleteConfirm = false;
+    private bool isDeleting = false;
+    private DashboardTokenDto? tokenPendingDelete;
+
+    private bool showRegenerateConfirm = false;
+    private bool isRegenerating = false;
+    private DashboardTokenDto? tokenPendingRegenerate;
+
+    private bool showLinkModal = false;
+    private DashboardTokenCreateResult? linkResult;
+    private bool linkResultCopied = false;
+
+    private string linkCopiedFeedback = string.Empty;
+
+    private string searchTerm = string.Empty;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string? sortColumn;
+    private string sortDirection = "asc";
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "DASHBOARD_TARGET");
+
+        if (hasAccess == true)
+            await LoadTokens();
+    }
+
+    private async Task LoadTokens()
+    {
+        isLoading = true;
+        pagedResult = await DashboardTokenApi.GetPagedAsync(new DashboardTokenPagedRequest
+        {
+            Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadTokens();
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadTokens();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadTokens();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > pagedResult.TotalPages) return;
+        currentPage = page;
+        await LoadTokens();
+    }
+
+    private static string RefreshScheduleText(int interval)
+    {
+        var minutes = new List<string>();
+        for (var m = 0; m < 60; m += interval)
+            minutes.Add($":{m:00}");
+        return "Refresh tiap menit " + string.Join(", ", minutes);
+    }
+
+    private void OpenCreateForm()
+    {
+        isEditMode = false;
+        formModel = new TokenFormModel();
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void OpenEditForm(DashboardTokenDto token)
+    {
+        isEditMode = true;
+        formModel = new TokenFormModel
+        {
+            Id = token.Id,
+            TokenName = token.TokenName,
+            RefreshIntervalMinutes = token.RefreshIntervalMinutes,
+            IsActive = token.IsActive
+        };
+        errorMessage = string.Empty;
+        showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        linkCopiedFeedback = string.Empty;
+
+        if (isEditMode)
+        {
+            var result = await DashboardTokenApi.UpdateAsync(new DashboardTokenUpdateRequest
+            {
+                Id = formModel.Id,
+                TokenName = formModel.TokenName,
+                RefreshIntervalMinutes = formModel.RefreshIntervalMinutes,
+                IsActive = formModel.IsActive
+            });
+
+            isSaving = false;
+
+            if (result.Success)
+            {
+                showForm = false;
+                await LoadTokens();
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+        else
+        {
+            var result = await DashboardTokenApi.CreateAsync(new DashboardTokenCreateRequest
+            {
+                TokenName = formModel.TokenName,
+                RefreshIntervalMinutes = formModel.RefreshIntervalMinutes,
+                IsActive = formModel.IsActive
+            });
+
+            isSaving = false;
+
+            if (result.Success && result.Result is not null)
+            {
+                showForm = false;
+                await LoadTokens();
+                OpenLinkModal(result.Result);
+            }
+            else
+            {
+                errorMessage = result.Error;
+            }
+        }
+    }
+
+    private void OpenLinkModal(DashboardTokenCreateResult result)
+    {
+        linkResult = result;
+        linkResultCopied = false;
+        showLinkModal = true;
+    }
+
+    private void CloseLinkModal()
+    {
+        showLinkModal = false;
+        linkResult = null;
+    }
+
+    private async Task CopyLinkResult()
+    {
+        if (linkResult is null) return;
+        await JS.InvokeVoidAsync("copyToClipboard", linkResult.Link);
+        linkResultCopied = true;
+    }
+
+    private async Task CopyLink(DashboardTokenDto token)
+    {
+        linkCopiedFeedback = string.Empty;
+        var link = await DashboardTokenApi.GetLinkAsync(token.Id);
+        if (link is null)
+        {
+            linkCopiedFeedback = "Gagal mengambil link.";
+            return;
+        }
+
+        await JS.InvokeVoidAsync("copyToClipboard", link);
+        linkCopiedFeedback = $"Link untuk \"{token.TokenName}\" tersalin.";
+    }
+
+    private void HandleDelete(DashboardTokenDto token)
+    {
+        tokenPendingDelete = token;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        tokenPendingDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (tokenPendingDelete is null) return;
+
+        isDeleting = true;
+        var success = await DashboardTokenApi.DeleteAsync(tokenPendingDelete.Id);
+        isDeleting = false;
+
+        showDeleteConfirm = false;
+        tokenPendingDelete = null;
+
+        if (success)
+            await LoadTokens();
+    }
+
+    private void HandleRegenerate(DashboardTokenDto token)
+    {
+        tokenPendingRegenerate = token;
+        showRegenerateConfirm = true;
+    }
+
+    private void CancelRegenerate()
+    {
+        showRegenerateConfirm = false;
+        tokenPendingRegenerate = null;
+    }
+
+    private async Task ConfirmRegenerate()
+    {
+        if (tokenPendingRegenerate is null) return;
+
+        isRegenerating = true;
+        var result = await DashboardTokenApi.RegenerateAsync(tokenPendingRegenerate.Id);
+        isRegenerating = false;
+
+        showRegenerateConfirm = false;
+        tokenPendingRegenerate = null;
+
+        if (result.Success && result.Result is not null)
+        {
+            await LoadTokens();
+            OpenLinkModal(result.Result);
+        }
+    }
+
+    public class TokenFormModel
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Nama TV wajib diisi.")]
+        [StringLength(150, ErrorMessage = "Nama TV maksimal 150 karakter.")]
+        public string TokenName { get; set; } = string.Empty;
+
+        public int RefreshIntervalMinutes { get; set; } = 30;
+        public bool IsActive { get; set; } = true;
+    }
+}

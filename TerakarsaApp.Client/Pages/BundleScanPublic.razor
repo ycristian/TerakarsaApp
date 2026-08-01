@@ -4,6 +4,7 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.Stations
 @inject StationDeviceApiService StationApi
 @inject PublicBundleApiService PublicApi
@@ -84,7 +85,8 @@ else
         }
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
                         OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true"
-                        IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested" />
+                        IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested"
+                        ResourceOptions="resourceOptions" ActiveResourceId="operatorId" AllowResourceChange="@(station?.AllowResourceChange ?? true)" />
     }
     else
     {
@@ -179,6 +181,8 @@ else
     private string actionError = string.Empty;
     private int? operatorId;
     private string? operatorName;
+    // Prompt 39: opsi dropdown "Pelaksana" (Kirim Hasil) -- resource aktif divisi station ini.
+    private List<ResourceLookupDto> resourceOptions = new();
     private bool showLogoutConfirm = false;
     private bool isLoggingOut = false;
 
@@ -296,6 +300,9 @@ else
             // bundle-nya tidak ada. Jatuh balik ke hasil publik (read-only) supaya device
             // dengan token rusak tetap bisa lihat bundle, bukan salah bilang "tidak ditemukan".
             scanInfo ??= publicDetail?.ScanInfo;
+
+            if (!stationScanFailed)
+                resourceOptions = await StationApi.GetResourcesAsync();
         }
         else
         {
@@ -370,7 +377,9 @@ else
         {
             ArticleWorkflowId = scanInfo.Action.ActionArticleWorkflowId.Value,
             BundleId = scanInfo.Bundle.BundleId,
-            ResourceId = operatorId.Value,
+            // Prompt 39: pakai override dari dropdown "Pelaksana" (BundleScanCard) kalau ada
+            // (SuggestedResourceId + station tidak terkunci) -- fallback resource sesi operator.
+            ResourceId = values.ResourceId ?? operatorId.Value,
             QtyOk = values.QtyOk,
             QtyRejectPrint = values.QtyRejectPrint,
             QtyRejectFabric = values.QtyRejectFabric,

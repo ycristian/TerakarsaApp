@@ -142,6 +142,12 @@
 -- juga dikecualikan, tapi lihat "Fix (pasca Prompt 34)" di atas action REVISE_HANDOVER --
 -- belakangan JUGA dihitung ulang (dibalik atas permintaan pengguna, skenario Batal
 -- Terima -> Revisi harus bisa auto-terima lagi).
+--
+-- Prompt 39: received_by_resource_id pada baris auto-terima (CREATE saja, bukan
+-- REVISE_HANDOVER) kini resource PASANGAN (resources.counterpart_resource_id) dari
+-- resource pengirim, bukan resource pengirim itu sendiri -- lihat blok komentar di
+-- action CREATE. Contoh: Line A1 (Sewing/QC) auto-terima ke Buang Benang -> penerima
+-- dicatat Trim A1, bukan Line A1.
 
 SET ANSI_NULLS ON;
 GO
@@ -259,8 +265,26 @@ BEGIN
         IF ISNULL(@ComputedTargetAutoReceive, 0) = 1
         BEGIN
             SET @AutoReceivedAt = SYSDATETIME();
-            SET @AutoReceivedByResourceId = @ResourceId;
             SET @AutoReceivedRemark = 'Otomatis: auto-terima';
+
+            -- Prompt 39: penerima auto-terima memakai resource PASANGAN dari resource
+            -- pengirim (mis. Trim A1 untuk pengirim Line A1) kalau ada -- fallback ke
+            -- resource pengirim (perilaku lama) bila pengirim NULL, tidak punya pasangan,
+            -- atau pasangannya ternyata bukan milik divisi tujuan (data tidak konsisten).
+            -- Auto-terima TIDAK BOLEH gagal karena mapping kosong/salah.
+            DECLARE @AutoCounterpartResourceId INT = NULL, @AutoCounterpartDivisionId INT = NULL;
+            IF @ResourceId IS NOT NULL
+            BEGIN
+                SELECT @AutoCounterpartResourceId = r.counterpart_resource_id, @AutoCounterpartDivisionId = cp.division_id
+                FROM resources r
+                LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
+                WHERE r.resource_id = @ResourceId;
+            END
+
+            IF @AutoCounterpartResourceId IS NOT NULL AND @AutoCounterpartDivisionId = @ComputedTargetDivisionId
+                SET @AutoReceivedByResourceId = @AutoCounterpartResourceId;
+            ELSE
+                SET @AutoReceivedByResourceId = @ResourceId;
         END
 
         IF @RequiresBundle = 0

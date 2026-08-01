@@ -180,6 +180,7 @@ public class BundleService
                 LastStatus = reader.IsDBNull(reader.GetOrdinal("LastStatus")) ? null : reader.GetString(reader.GetOrdinal("LastStatus")),
                 LastDivisionName = reader.IsDBNull(reader.GetOrdinal("LastDivisionName")) ? null : reader.GetString(reader.GetOrdinal("LastDivisionName")),
                 EmployeeName = reader.IsDBNull(reader.GetOrdinal("EmployeeName")) ? null : reader.GetString(reader.GetOrdinal("EmployeeName")),
+                SuggestedResourceId = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceId")) ? null : reader.GetInt32(reader.GetOrdinal("SuggestedResourceId")),
             };
 
             await reader.NextResultAsync();

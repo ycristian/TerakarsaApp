@@ -5,6 +5,10 @@ public class DivisionDto
     public int Id { get; set; }
     public string DivisionCode { get; set; } = string.Empty;
     public string DivisionName { get; set; } = string.Empty;
+    public bool ShowInDashboard { get; set; } = true;
+    public string DashboardMode { get; set; } = "DIVISION";
+    public int DashboardSortOrder { get; set; }
+    public int DefaultTargetPerPerson { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -15,6 +19,10 @@ public class DivisionCreateRequest
 {
     public string DivisionCode { get; set; } = string.Empty;
     public string DivisionName { get; set; } = string.Empty;
+    public bool ShowInDashboard { get; set; } = true;
+    public string DashboardMode { get; set; } = "DIVISION";
+    public int DashboardSortOrder { get; set; }
+    public int DefaultTargetPerPerson { get; set; }
 }
 
 public class DivisionUpdateRequest
@@ -22,6 +30,10 @@ public class DivisionUpdateRequest
     public int Id { get; set; }
     public string DivisionCode { get; set; } = string.Empty;
     public string DivisionName { get; set; } = string.Empty;
+    public bool ShowInDashboard { get; set; } = true;
+    public string DashboardMode { get; set; } = "DIVISION";
+    public int DashboardSortOrder { get; set; }
+    public int DefaultTargetPerPerson { get; set; }
 }
 
 public class DivisionPagedRequest

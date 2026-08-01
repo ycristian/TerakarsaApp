@@ -4,6 +4,10 @@
 --
 -- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
 -- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
+--
+-- Prompt 39: counterpart_resource_id + nama resource pasangan -- LEFT JOIN filter
+-- deleted_at IS NULL DI KLAUSA ON (bukan WHERE) supaya baris utama tidak ikut hilang
+-- kalau pasangannya sudah dihapus.
 
 SET ANSI_NULLS ON;
 GO
@@ -56,11 +60,14 @@ BEGIN
                    r.division_id AS DivisionId, d.division_name AS DivisionName,
                    r.resource_type_id AS ResourceTypeId, rt.resource_type_name AS ResourceTypeName,
                    r.resource_name AS ResourceName, r.is_active AS IsActive,
+                   r.include_in_dashboard AS IncludeInDashboard,
+                   r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
                    r.created_at AS CreatedAt, r.created_by AS CreatedBy,
                    r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
             FROM resources r
             INNER JOIN divisions d ON d.division_id = r.division_id
             INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
+            LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
             WHERE r.deleted_at IS NULL
               AND (@SearchTerm IS NULL OR NOT EXISTS (
                     SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
@@ -92,11 +99,14 @@ BEGIN
            r.division_id AS DivisionId, d.division_name AS DivisionName,
            r.resource_type_id AS ResourceTypeId, rt.resource_type_name AS ResourceTypeName,
            r.resource_name AS ResourceName, r.is_active AS IsActive,
+           r.include_in_dashboard AS IncludeInDashboard,
+           r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
            r.created_at AS CreatedAt, r.created_by AS CreatedBy,
            r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
     FROM resources r
     INNER JOIN divisions d ON d.division_id = r.division_id
     INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
+    LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
     WHERE r.resource_id = @Id AND r.deleted_at IS NULL;
 END;
 GO
@@ -115,5 +125,27 @@ BEGIN
       AND is_active = 1
       AND deleted_at IS NULL
     ORDER BY resource_name ASC;
+END;
+GO
+
+-- Prompt 39: dropdown "Resource Pasangan" di form Master Resource -- resource aktif DI
+-- LUAR divisi yang sedang dipilih di form (pasangan wajib beda divisi, ditegakkan lagi
+-- di SIS_Resource_Manage). @ExcludeDivisionId boleh NULL (belum ada divisi dipilih) --
+-- kembalikan semua resource aktif dalam kasus itu, client tetap reset pilihan yang jadi
+-- tidak valid saat divisi dipilih.
+CREATE OR ALTER PROCEDURE SIS_Resource_GetActiveExceptDivision
+    @ExcludeDivisionId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT r.resource_id AS Id, r.resource_name AS ResourceName,
+           r.division_id AS DivisionId, d.division_name AS DivisionName
+    FROM resources r
+    INNER JOIN divisions d ON d.division_id = r.division_id
+    WHERE r.is_active = 1
+      AND r.deleted_at IS NULL
+      AND (@ExcludeDivisionId IS NULL OR r.division_id <> @ExcludeDivisionId)
+    ORDER BY d.division_name ASC, r.resource_name ASC;
 END;
 GO

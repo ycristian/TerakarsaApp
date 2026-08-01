@@ -32,6 +32,13 @@
 --      dikunci otomatis oleh SIS_WorkflowLog_Manage kalau COMPLETE ini dikirim (dipakai
 --      client hanya untuk ditampilkan sebagai default terkunci, bukan pilihan bebas).
 --
+-- Prompt 39: SuggestedResourceId (result set 1) -- counterpart_resource_id dari
+-- bundles.resource_id (line asal bundle), HANYA kalau resource pasangan itu hidup, aktif,
+-- dan division_id = @DivisionId (divisi station pemanggil). NULL kalau tidak memenuhi
+-- (termasuk @DivisionId NULL/pengunjung publik). Dipakai client sebagai nilai awal form
+-- "Pelaksana" saat Kirim Hasil -- murni saran UI, operator tetap bisa mengganti, dan
+-- server tidak memaksakan nilai ini (lihat SIS_WorkflowLog_Manage).
+--
 -- Aturan kepemilikan ikut sp_WorkflowLog_Manage.sql (SIS_WorkflowLog_Manage).
 
 SET ANSI_NULLS ON;
@@ -120,7 +127,10 @@ BEGIN
              WHEN @LastReceivedAt IS NOT NULL THEN 'Diterima'
              ELSE 'Selesai' END AS LastStatus,
         @LastDivisionName AS LastDivisionName,
-        emp.employee_name AS EmployeeName
+        emp.employee_name AS EmployeeName,
+        CASE WHEN cp.resource_id IS NOT NULL AND cp.is_active = 1 AND cp.deleted_at IS NULL
+                  AND cp.division_id = @DivisionId
+             THEN cp.resource_id ELSE NULL END AS SuggestedResourceId
     FROM bundles b
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
@@ -128,6 +138,7 @@ BEGIN
     INNER JOIN projects p ON p.project_id = a.project_id
     LEFT JOIN resources r ON r.resource_id = b.resource_id
     LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
+    LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id
     WHERE b.bundle_id = @BundleId;
 
     -- 2. Timeline lengkap

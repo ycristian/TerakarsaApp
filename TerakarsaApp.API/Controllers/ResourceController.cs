@@ -38,6 +38,15 @@ public class ResourceController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 39: dropdown "Resource Pasangan" -- resource aktif di luar divisi yang
+    // sedang dipilih. divisionId null/0 (belum ada divisi dipilih) -> semua resource aktif.
+    [HttpGet("active-except-division")]
+    public async Task<IActionResult> GetActiveExceptDivision([FromQuery] int? divisionId)
+    {
+        var result = await _resourceService.GetActiveExceptDivisionAsync(divisionId is > 0 ? divisionId : null);
+        return Ok(result);
+    }
+
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
     {

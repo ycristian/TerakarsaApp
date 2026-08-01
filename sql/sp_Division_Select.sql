@@ -47,6 +47,8 @@ BEGIN
 
         DECLARE @Sql NVARCHAR(MAX) = N'
             SELECT division_id AS Id, division_code AS DivisionCode, division_name AS DivisionName,
+                   show_in_dashboard AS ShowInDashboard, dashboard_mode AS DashboardMode,
+                   dashboard_sort_order AS DashboardSortOrder, default_target_per_person AS DefaultTargetPerPerson,
                    created_at AS CreatedAt, created_by AS CreatedBy,
                    updated_at AS UpdatedAt, updated_by AS UpdatedBy
             FROM divisions
@@ -77,6 +79,8 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT division_id AS Id, division_code AS DivisionCode, division_name AS DivisionName,
+           show_in_dashboard AS ShowInDashboard, dashboard_mode AS DashboardMode,
+           dashboard_sort_order AS DashboardSortOrder, default_target_per_person AS DefaultTargetPerPerson,
            created_at AS CreatedAt, created_by AS CreatedBy,
            updated_at AS UpdatedAt, updated_by AS UpdatedBy
     FROM divisions

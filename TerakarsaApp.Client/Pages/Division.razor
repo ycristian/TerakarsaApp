@@ -66,6 +66,7 @@ else
                         <tr>
                             <SortableHeader Label="Kode" Column="DivisionCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Nama Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Dashboard</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -75,6 +76,18 @@ else
                             <tr>
                                 <td>@d.DivisionCode</td>
                                 <td>@d.DivisionName</td>
+                                <td>
+                                    @if (!d.ShowInDashboard)
+                                    {
+                                        <span class="badge bg-secondary" title="Tidak tampil di dashboard"><i class="fe fe-eye-off"></i></span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge @(d.DashboardMode == "RESOURCE" ? "bg-info" : "bg-primary")">
+                                            @(d.DashboardMode == "RESOURCE" ? "Per Resource" : "Per Divisi")
+                                        </span>
+                                    }
+                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(d)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(d)"><i class="fe fe-trash-2"></i></button>
@@ -113,6 +126,25 @@ else
                             <label class="form-label">Nama Divisi</label>
                             <InputText class="form-control" @bind-Value="formModel.DivisionName" />
                             <ValidationMessage For="@(() => formModel.DivisionName)" class="text-danger" />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.ShowInDashboard" />
+                            <label class="form-check-label">Tampilkan di Dashboard</label>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Mode Dashboard</label>
+                            <InputSelect class="form-select" @bind-Value="formModel.DashboardMode">
+                                <option value="DIVISION">Per Divisi</option>
+                                <option value="RESOURCE">Per Resource</option>
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Urutan Dashboard</label>
+                            <InputNumber class="form-control" @bind-Value="formModel.DashboardSortOrder" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Target Default (pcs/orang/hari)</label>
+                            <InputNumber class="form-control" @bind-Value="formModel.DefaultTargetPerPerson" />
                         </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
@@ -232,7 +264,11 @@ else
         {
             Id = division.Id,
             DivisionCode = division.DivisionCode,
-            DivisionName = division.DivisionName
+            DivisionName = division.DivisionName,
+            ShowInDashboard = division.ShowInDashboard,
+            DashboardMode = division.DashboardMode,
+            DashboardSortOrder = division.DashboardSortOrder,
+            DefaultTargetPerPerson = division.DefaultTargetPerPerson
         };
         errorMessage = string.Empty;
         showForm = true;
@@ -255,7 +291,11 @@ else
             {
                 Id = formModel.Id,
                 DivisionCode = formModel.DivisionCode,
-                DivisionName = formModel.DivisionName
+                DivisionName = formModel.DivisionName,
+                ShowInDashboard = formModel.ShowInDashboard,
+                DashboardMode = formModel.DashboardMode,
+                DashboardSortOrder = formModel.DashboardSortOrder,
+                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson
             });
         }
         else
@@ -263,7 +303,11 @@ else
             result = await DivisionApi.CreateAsync(new DivisionCreateRequest
             {
                 DivisionCode = formModel.DivisionCode,
-                DivisionName = formModel.DivisionName
+                DivisionName = formModel.DivisionName,
+                ShowInDashboard = formModel.ShowInDashboard,
+                DashboardMode = formModel.DashboardMode,
+                DashboardSortOrder = formModel.DashboardSortOrder,
+                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson
             });
         }
 
@@ -318,5 +362,10 @@ else
         [Required(ErrorMessage = "Nama divisi wajib diisi.")]
         [StringLength(150, ErrorMessage = "Nama divisi maksimal 150 karakter.")]
         public string DivisionName { get; set; } = string.Empty;
+
+        public bool ShowInDashboard { get; set; } = true;
+        public string DashboardMode { get; set; } = "DIVISION";
+        public int DashboardSortOrder { get; set; }
+        public int DefaultTargetPerPerson { get; set; }
     }
 }

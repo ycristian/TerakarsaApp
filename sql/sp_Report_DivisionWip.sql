@@ -20,15 +20,15 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
--- A. Ringkasan per divisi -- dua result set (Dikerjakan per resource, Belum diterima per divisi).
--- @ProjectId (opsional, ditambahkan bersama dropdown filter project di /wip-dashboard):
--- NULL = semua project (perilaku lama tidak berubah).
-CREATE OR ALTER PROCEDURE SIS_Report_DivisionWip
-    @ProjectId INT = NULL
+-- "Log terakhir" tiap bundle hidup (proyek berjalan, target_division_id NOT NULL) -- inti
+-- definisi WIP yang dipakai di seluruh file ini, DAN dipakai ulang oleh
+-- SIS_Report_DivisionWipTotals (Prompt 38, Dashboard Target Harian) supaya definisi WIP
+-- tidak pernah ditulis dua kali secara terpisah. @ProjectId = NULL berarti semua project.
+CREATE OR ALTER FUNCTION fn_BundleLastLog(@ProjectId INT)
+RETURNS TABLE
 AS
-BEGIN
-    SET NOCOUNT ON;
-
+RETURN
+(
     SELECT
         b.bundle_id,
         ll.target_division_id,
@@ -38,7 +38,6 @@ BEGIN
         ll.created_at,
         p.project_name,
         a.article_name
-    INTO #LastLog
     FROM bundles b
     INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
     INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
@@ -53,7 +52,20 @@ BEGIN
     WHERE b.deleted_at IS NULL
       AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
       AND ll.target_division_id IS NOT NULL
-      AND (@ProjectId IS NULL OR p.project_id = @ProjectId);
+      AND (@ProjectId IS NULL OR p.project_id = @ProjectId)
+);
+GO
+
+-- A. Ringkasan per divisi -- dua result set (Dikerjakan per resource, Belum diterima per divisi).
+-- @ProjectId (opsional, ditambahkan bersama dropdown filter project di /wip-dashboard):
+-- NULL = semua project (perilaku lama tidak berubah).
+CREATE OR ALTER PROCEDURE SIS_Report_DivisionWip
+    @ProjectId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT * INTO #LastLog FROM fn_BundleLastLog(@ProjectId);
 
     -- Result set 1: Dikerjakan, agregat per (divisi, resource penerima).
     SELECT
@@ -104,6 +116,42 @@ BEGIN
     ORDER BY d.division_name ASC;
 
     DROP TABLE #LastLog;
+END;
+GO
+
+-- A2. Total WIP per (divisi, resource penerima) -- TANPA breakdown artikel/JSON, TANPA
+-- filter project (dashboard mengagregasi seluruh project berjalan). Dipakai oleh
+-- SIS_Dashboard_TargetHarian (Prompt 38) lewat INSERT ... EXEC, supaya definisi WIP
+-- (fn_BundleLastLog di atas) tidak disalin ulang ke SP lain.
+CREATE OR ALTER PROCEDURE SIS_Report_DivisionWipTotals
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        target_division_id AS DivisionId,
+        received_by_resource_id AS ResourceId,
+        SUM(qty_ok) AS TotalPcs
+    FROM fn_BundleLastLog(NULL)
+    WHERE received_at IS NOT NULL
+    GROUP BY target_division_id, received_by_resource_id;
+END;
+GO
+
+-- A3. Total transit (belum diterima) per divisi tujuan -- TANPA breakdown resource (belum
+-- ada penerima), TANPA filter project. Dipakai oleh SIS_Dashboard_TargetHarian (Prompt 39)
+-- lewat INSERT ... EXEC, symmetric dengan SIS_Report_DivisionWipTotals di atas.
+CREATE OR ALTER PROCEDURE SIS_Report_DivisionTransitTotals
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        target_division_id AS DivisionId,
+        SUM(qty_ok) AS TotalPcs
+    FROM fn_BundleLastLog(NULL)
+    WHERE received_at IS NULL
+    GROUP BY target_division_id;
 END;
 GO
 
