@@ -161,11 +161,15 @@ public class BundleScanBundleDto
     // Prompt 32: penjahit dari master employees -- ditampilkan sebagai tambahan di atas Line
     // (yang tetap ResourceName, lihat SIS_Bundle_ScanInfo).
     public string? EmployeeName { get; set; }
-    // Prompt 39: resource pasangan (counterpart_resource_id) dari line asal bundle, HANYA
-    // kalau resource itu hidup, aktif, dan milik divisi station pemanggil -- NULL kalau
-    // tidak memenuhi. Dipakai client sebagai nilai awal form "Pelaksana" di Kirim Hasil,
-    // murni saran UI (lihat BundleScanCard).
+    // Prompt 39/40: saran AUTO-LOGIN operator sesi stasiun -- kaskade 4 sumber
+    // (LINE_BUNDLE/PENERIMA/COUNTERPART/RIWAYAT, lihat SIS_Bundle_ScanInfo), semua kandidat
+    // sudah difilter hidup + aktif + milik divisi station pemanggil. NULL kalau tidak ada yang
+    // cocok (termasuk @DivisionId NULL/pengunjung publik). Dipakai client BundleScanPublic
+    // untuk mengganti operator sesi (station tidak terkunci) -- lihat SuggestedResourceSource.
     public int? SuggestedResourceId { get; set; }
+    public string? SuggestedResourceName { get; set; }
+    // "LINE_BUNDLE" | "PENERIMA" | "COUNTERPART" | "RIWAYAT" | null.
+    public string? SuggestedResourceSource { get; set; }
 }
 
 public class BundleScanTimelineDto
@@ -220,6 +224,19 @@ public class BundleScanActionDto
     // menampilkan tombol "Penyesuaian" di BundleScanCard. Detail saldo per step ada di
     // BundleScanInfoDto.AdjustSteps.
     public bool AllowedAdjust { get; set; }
+
+    // --- Prompt 40: info penerima untuk form "Kirim Hasil", hanya terisi kalau AllowedAction
+    // = "COMPLETE" dan ada step tujuan. NULL kalau tidak relevan (termasuk pengunjung publik). ---
+    // auto_receive step tujuan.
+    public bool? NextAutoReceive { get; set; }
+    // Counterpart dari resource yang AKAN mencatat baris ini (operator sesi/Pelaksana saat
+    // ini), valid terhadap NextDivisionId -- murni pratinjau, nilai final dihitung ulang
+    // server saat submit. NULL bila tidak ada.
+    public int? NextCounterpartResourceId { get; set; }
+    public string? NextCounterpartResourceName { get; set; }
+    // True HANYA kalau NextAutoReceive = true DAN counterpart NULL -- client WAJIB tampilkan
+    // dropdown "Diterima Oleh" dan mewajibkan pilihan sebelum submit.
+    public bool? ReceiverPickerRequired { get; set; }
 }
 
 // Prompt 28: saldo reject/hilang per step ber-bundle milik divisi pemanggil untuk bundle ini

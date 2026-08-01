@@ -360,11 +360,24 @@ public class StationDeviceController : ControllerBase
             ActingDivisionId = CurrentStation.DivisionId,
             ConfirmExceed = request.ConfirmExceed,
             ConfirmShort = request.ConfirmShort,
-            ActingAllowResourceChange = CurrentStation.AllowResourceChange
+            ActingAllowResourceChange = CurrentStation.AllowResourceChange,
+            // Prompt 40: penerima manual dipilih operator pengirim -- diteruskan apa adanya,
+            // SP satu-satunya penjaga (hanya dipakai kalau step tujuan auto_receive = 1 dan
+            // counterpart pengirim tidak valid).
+            AutoReceiveResourceId = request.AutoReceiveResourceId
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
         return Ok();
+    }
+
+    // Prompt 40: dropdown "Diterima Oleh ({divisi tujuan})" wajib di form Kirim Hasil ketika
+    // ReceiverPickerRequired = true (lihat SIS_Bundle_ScanInfo).
+    [HttpGet("receiver-options")]
+    public async Task<IActionResult> GetReceiverOptions([FromQuery] int articleWorkflowId, [FromQuery] int? bundleId)
+    {
+        var result = await _workflowLogService.GetReceiverOptionsAsync(articleWorkflowId, bundleId);
+        return Ok(result);
     }
 
     // Prompt 28: panel Penyesuaian di /b/{serial} -- mutasi qty reject/hilang -> reject/hilang

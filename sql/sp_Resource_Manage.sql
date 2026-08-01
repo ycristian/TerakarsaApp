@@ -2,9 +2,14 @@
 -- ada di procedure terpisah: sp_Resource_Select.sql (SIS_Resource_GetAll / SIS_Resource_GetById).
 -- Tidak ada kolom kode/unique index di resources, jadi tidak ada pengecekan duplikat.
 --
--- Prompt 39: @CounterpartResourceId -- resource pasangan di divisi lanjutan (opsional).
+-- Prompt 39/40: @CounterpartResourceId -- resource pasangan di divisi lanjutan (opsional).
 -- Nilai dipakai apa adanya (BUKAN ISNULL ke nilai lama) -- user harus bisa mengosongkan
 -- pasangan lewat UI, baik CREATE maupun UPDATE.
+--
+-- Prompt 40: pengecualian khusus UPDATE -- kalau @DivisionId yang diubah kebetulan jadi SAMA
+-- dengan divisi @CounterpartResourceId yang dikirim, jangan gagalkan UPDATE (data lain di form
+-- tetap harus tersimpan) -- kosongkan counterpart_resource_id secara diam-diam saja. CREATE
+-- tetap menolak keras (resource baru, tidak ada data lama yang perlu diselamatkan).
 
 SET ANSI_NULLS ON;
 GO
@@ -33,20 +38,25 @@ BEGIN
 
         IF @CounterpartDivisionId IS NULL
         BEGIN
-            RAISERROR('Resource pasangan tidak ditemukan.', 16, 1);
+            RAISERROR('Counterpart tidak ditemukan.', 16, 1);
             RETURN;
         END
 
-        IF @Action = 'UPDATE' AND @CounterpartResourceId = @Id
+        IF @CounterpartResourceId = @Id
         BEGIN
-            RAISERROR('Resource pasangan tidak boleh diri sendiri.', 16, 1);
+            RAISERROR('Counterpart tidak boleh resource itu sendiri.', 16, 1);
             RETURN;
         END
 
         IF @CounterpartDivisionId = @DivisionId
         BEGIN
-            RAISERROR('Resource pasangan harus dari divisi lain.', 16, 1);
-            RETURN;
+            IF @Action = 'UPDATE'
+                SET @CounterpartResourceId = NULL;
+            ELSE
+            BEGIN
+                RAISERROR('Counterpart harus resource dari divisi lain.', 16, 1);
+                RETURN;
+            END
         END
     END
 

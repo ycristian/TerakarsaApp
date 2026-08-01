@@ -148,6 +148,27 @@
 -- resource pengirim, bukan resource pengirim itu sendiri -- lihat blok komentar di
 -- action CREATE. Contoh: Line A1 (Sewing/QC) auto-terima ke Buang Benang -> penerima
 -- dicatat Trim A1, bukan Line A1.
+--
+-- Prompt 40 -- diperbaiki lagi, MENGGANTIKAN fallback Prompt 39 di atas: counterpart
+-- Prompt 39 tadinya cuma "kalau ada, kalau tidak fallback ke pengirim" -- itu salah data
+-- (received_by_resource_id akhirnya berisi resource divisi ASAL, bukan divisi TUJUAN,
+-- merusak Laporan Produksi Prompt 30). Sekarang:
+--   1. Counterpart valid (terisi, resource hidup + is_active = 1 + division_id = divisi
+--      tujuan) -- SELALU dipakai, @AutoReceiveResourceId (baru) diabaikan total.
+--   2. Counterpart tidak valid & @AutoReceiveResourceId NULL -- CREATE DITOLAK ('Penerima
+--      wajib dipilih karena step tujuan menerima otomatis.'). Step ber-auto_receive memang
+--      dirancang tanpa serah terima manual, jadi penerima harus pasti saat dikirim.
+--   3. Counterpart tidak valid & @AutoReceiveResourceId terisi -- divalidasi hidup +
+--      is_active = 1 + division_id = divisi tujuan, lalu dipakai.
+-- received_by_resource_id TIDAK PERNAH LAGI diisi resource pengirim (@ResourceId) dalam
+-- kondisi apa pun -- beda mendasar dari fallback Prompt 39.
+--
+-- Prompt 40 SS7 -- "penerima mengikat pelaksana": begitu sebuah bundle di divisi ini sudah
+-- attribusikan received_by_resource_id (baris masuk dari step sebelumnya), HANYA resource itu
+-- yang boleh mencatat hasil (CREATE) untuk bundle ini di divisi yang sama -- resource lain
+-- ditolak keras ('Bundle ini atas nama {Nama}. Batalkan penerimaan dulu bila salah orang.'),
+-- berlaku untuk SEMUA step ber-bundle (termasuk step station pertama), lihat blok komentar
+-- di action CREATE.
 
 SET ANSI_NULLS ON;
 GO
@@ -178,7 +199,10 @@ CREATE OR ALTER PROCEDURE SIS_WorkflowLog_Manage
     @ConfirmShort        BIT = 0,
     @NewTargetDivisionId INT = NULL,
     @ActingAllowResourceChange BIT = NULL,
-    @TargetDivisionId    INT = NULL     -- Prompt 28: hanya dipakai @Action = 'ADJUST'
+    @TargetDivisionId    INT = NULL,    -- Prompt 28: hanya dipakai @Action = 'ADJUST'
+    @AutoReceiveResourceId INT = NULL   -- Prompt 40: penerima manual (dipilih operator pengirim)
+                                         -- dipakai HANYA saat @Action = 'CREATE', step tujuan
+                                         -- auto_receive = 1, DAN counterpart pengirim tidak valid.
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -267,24 +291,42 @@ BEGIN
             SET @AutoReceivedAt = SYSDATETIME();
             SET @AutoReceivedRemark = 'Otomatis: auto-terima';
 
-            -- Prompt 39: penerima auto-terima memakai resource PASANGAN dari resource
-            -- pengirim (mis. Trim A1 untuk pengirim Line A1) kalau ada -- fallback ke
-            -- resource pengirim (perilaku lama) bila pengirim NULL, tidak punya pasangan,
-            -- atau pasangannya ternyata bukan milik divisi tujuan (data tidak konsisten).
-            -- Auto-terima TIDAK BOLEH gagal karena mapping kosong/salah.
-            DECLARE @AutoCounterpartResourceId INT = NULL, @AutoCounterpartDivisionId INT = NULL;
+            -- Prompt 40: counterpart valid (definisi tetap -- terisi, resource hidup,
+            -- is_active = 1, division_id = divisi tujuan) SELALU didahulukan. Kalau tidak
+            -- valid, @AutoReceiveResourceId (pilihan manual operator pengirim) WAJIB ada dan
+            -- valid -- tidak ada lagi fallback ke resource pengirim (lihat komentar besar
+            -- di atas file).
+            DECLARE @AutoCounterpartResourceId INT = NULL;
             IF @ResourceId IS NOT NULL
             BEGIN
-                SELECT @AutoCounterpartResourceId = r.counterpart_resource_id, @AutoCounterpartDivisionId = cp.division_id
+                SELECT @AutoCounterpartResourceId = cp.resource_id
                 FROM resources r
-                LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
-                WHERE r.resource_id = @ResourceId;
+                INNER JOIN resources cp ON cp.resource_id = r.counterpart_resource_id
+                WHERE r.resource_id = @ResourceId AND cp.deleted_at IS NULL AND cp.is_active = 1
+                  AND cp.division_id = @ComputedTargetDivisionId;
             END
 
-            IF @AutoCounterpartResourceId IS NOT NULL AND @AutoCounterpartDivisionId = @ComputedTargetDivisionId
+            IF @AutoCounterpartResourceId IS NOT NULL
                 SET @AutoReceivedByResourceId = @AutoCounterpartResourceId;
+            ELSE IF @AutoReceiveResourceId IS NULL
+            BEGIN
+                RAISERROR('Penerima wajib dipilih karena step tujuan menerima otomatis.', 16, 1);
+                RETURN;
+            END
             ELSE
-                SET @AutoReceivedByResourceId = @ResourceId;
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM resources
+                    WHERE resource_id = @AutoReceiveResourceId AND deleted_at IS NULL AND is_active = 1
+                      AND division_id = @ComputedTargetDivisionId
+                )
+                BEGIN
+                    RAISERROR('Penerima bukan resource aktif di divisi tujuan.', 16, 1);
+                    RETURN;
+                END
+
+                SET @AutoReceivedByResourceId = @AutoReceiveResourceId;
+            END
         END
 
         IF @RequiresBundle = 0
@@ -354,6 +396,28 @@ BEGIN
             )
             BEGIN
                 RAISERROR('Bundle belum diterima divisi ini.', 16, 1);
+                RETURN;
+            END
+
+            -- Prompt 40 SS7: "penerima mengikat pelaksana" -- baris MASUK bundle ini ke divisi
+            -- ini (step sebelumnya, target_division_id = @DivisionId, sudah diterima) sudah
+            -- attribusikan received_by_resource_id -- hanya resource itu yang boleh mencatat
+            -- hasil (CREATE) untuk bundle ini di divisi ini. Berlaku utk SEMUA step ber-bundle
+            -- (termasuk step station pertama), penegakan WAJIB di SP (bukan sekadar sembunyikan
+            -- tombol UI) -- lihat SIS_Bundle_ScanInfo utk sisi tampilan (AllowedAction = NONE).
+            DECLARE @IncomingReceivedByResourceId INT, @IncomingReceivedByName VARCHAR(255);
+            SELECT TOP 1 @IncomingReceivedByResourceId = awl_in.received_by_resource_id,
+                         @IncomingReceivedByName = rin.resource_name
+            FROM article_workflow_logs awl_in
+            LEFT JOIN resources rin ON rin.resource_id = awl_in.received_by_resource_id
+            WHERE awl_in.article_workflow_id = @PrevArticleWorkflowId AND awl_in.bundle_id = @BundleId
+              AND awl_in.received_at IS NOT NULL AND awl_in.target_division_id = @DivisionId
+              AND awl_in.deleted_at IS NULL AND awl_in.received_by_resource_id IS NOT NULL
+            ORDER BY awl_in.created_at DESC;
+
+            IF @IncomingReceivedByResourceId IS NOT NULL AND (@ResourceId IS NULL OR @IncomingReceivedByResourceId <> @ResourceId)
+            BEGIN
+                RAISERROR('Bundle ini atas nama %s. Batalkan penerimaan dulu bila salah orang.', 16, 1, @IncomingReceivedByName);
                 RETURN;
             END
 
@@ -854,10 +918,28 @@ BEGIN
         -- Ini membalik larangan eksplisit di prompt_34_auto_receive.md ("REVISE_HANDOVER
         -- TIDAK men-trigger auto-terima") atas permintaan pengguna setelah skenario ini
         -- ditemukan di lapangan.
+        --
+        -- Prompt 40: received_by_resource_id di sini TIDAK BOLEH LAGI jatuh ke resource
+        -- pengirim (ISNULL ke resource_id) -- REVISE_HANDOVER tidak punya form penerima manual,
+        -- jadi kalau counterpart pengirim tidak valid, baris ini DIBIARKAN tidak diterima
+        -- (received_at/received_by_resource_id/received_remark tetap NULL) -- turun ke alur
+        -- RECEIVE manual biasa di divisi tujuan, bukan sekadar bergaransi dengan resource asal.
         DECLARE @RevAutoReceive BIT = 0;
         SELECT TOP 1 @RevAutoReceive = ISNULL(auto_receive, 0)
         FROM article_workflows
         WHERE article_id = @RevArticleId AND division_id = @NewTargetDivisionId AND deleted_at IS NULL;
+
+        DECLARE @RevResourceId INT = ISNULL(@ResourceId, (SELECT resource_id FROM article_workflow_logs WHERE workflow_log_id = @Id));
+        DECLARE @RevCounterpartResourceId INT = NULL;
+        IF @RevAutoReceive = 1 AND @RevResourceId IS NOT NULL
+        BEGIN
+            SELECT @RevCounterpartResourceId = cp.resource_id
+            FROM resources r
+            INNER JOIN resources cp ON cp.resource_id = r.counterpart_resource_id
+            WHERE r.resource_id = @RevResourceId AND cp.deleted_at IS NULL AND cp.is_active = 1
+              AND cp.division_id = @NewTargetDivisionId;
+        END
+        DECLARE @RevWillAutoReceive BIT = CASE WHEN @RevAutoReceive = 1 AND @RevCounterpartResourceId IS NOT NULL THEN 1 ELSE 0 END;
 
         UPDATE article_workflow_logs
         SET qty_ok = @QtyOk,
@@ -869,9 +951,9 @@ BEGIN
             remark = @Remark,
             target_division_id = @NewTargetDivisionId,
             resource_id = ISNULL(@ResourceId, resource_id),
-            received_at = CASE WHEN @RevAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
-            received_by_resource_id = CASE WHEN @RevAutoReceive = 1 THEN ISNULL(@ResourceId, resource_id) ELSE NULL END,
-            received_remark = CASE WHEN @RevAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
+            received_at = CASE WHEN @RevWillAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
+            received_by_resource_id = CASE WHEN @RevWillAutoReceive = 1 THEN @RevCounterpartResourceId ELSE NULL END,
+            received_remark = CASE WHEN @RevWillAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
             updated_at = SYSDATETIME(),
             updated_by = @UserId,
             updated_by_resource_id = @UpdatedByResourceId

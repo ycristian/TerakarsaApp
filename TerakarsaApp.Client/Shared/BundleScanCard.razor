@@ -526,6 +526,25 @@
                         </div>
                     </div>
 
+                    @if (Info.Action.ReceiverPickerRequired == true)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Diterima Oleh (@Info.Action.NextDivisionName)</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="receiverOptions" @bind-Value="completeAutoReceiveResourceId"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)" Placeholder="Cari resource..." />
+                            @if (completeAutoReceiveResourceId <= 0)
+                            {
+                                <div class="text-danger small mt-1">Penerima wajib dipilih.</div>
+                            }
+                        </div>
+                    }
+                    else if (Info.Action.NextAutoReceive == true && !string.IsNullOrEmpty(Info.Action.NextCounterpartResourceName))
+                    {
+                        <div class="alert alert-info py-2 mb-2">
+                            Otomatis diterima oleh <strong>@Info.Action.NextCounterpartResourceName</strong>.
+                        </div>
+                    }
+
                     <label class="form-label">Catatan (wajib jika ada reject)</label>
                     <textarea class="form-control mb-2" rows="2" @bind="completeRemark"></textarea>
                     @if (!string.IsNullOrEmpty(completeRemarkError))
@@ -556,7 +575,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseCompleteModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@Busy" @onclick="SubmitComplete">Kirim Hasil</button>
+                    <button class="btn btn-primary" disabled="@(Busy || (Info.Action.ReceiverPickerRequired == true && completeAutoReceiveResourceId <= 0))" @onclick="SubmitComplete">Kirim Hasil</button>
                 </div>
             </div>
         </div>
@@ -673,6 +692,11 @@
     // Prompt 39: hanya relevan/ditampilkan kalau ShowResourceSuggestion true.
     private int completeResourceId;
     private bool ShowResourceSuggestion => AllowResourceChange && Info.Bundle.SuggestedResourceId is not null;
+    // Prompt 40: dropdown "Diterima Oleh" wajib kalau ReceiverPickerRequired = true (step
+    // tujuan auto_receive = 1 tapi counterpart pengirim tidak valid) -- sekali pakai per
+    // pengiriman, TIDAK sticky antar bundle.
+    private List<ResourceLookupDto> receiverOptions = new();
+    private int completeAutoReceiveResourceId;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -683,10 +707,14 @@
 
     private bool showCompleteModal = false;
 
-    private void OpenCompleteModal()
+    private async Task OpenCompleteModal()
     {
         completeRemarkError = string.Empty;
         completeResourceId = ShowResourceSuggestion ? Info.Bundle.SuggestedResourceId!.Value : (ActiveResourceId ?? 0);
+        completeAutoReceiveResourceId = 0;
+        receiverOptions = Info.Action.ReceiverPickerRequired == true && Info.Action.ActionArticleWorkflowId is not null
+            ? await StationApi.GetReceiverOptionsAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
+            : new();
         showCompleteModal = true;
     }
 
@@ -730,7 +758,8 @@
             Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark,
             ConfirmExceed = confirmExceed,
             ConfirmShort = confirmShort,
-            ResourceId = completeResourceId > 0 ? completeResourceId : null
+            ResourceId = completeResourceId > 0 ? completeResourceId : null,
+            AutoReceiveResourceId = completeAutoReceiveResourceId > 0 ? completeAutoReceiveResourceId : null
         });
 
         if (string.IsNullOrEmpty(ActionError))

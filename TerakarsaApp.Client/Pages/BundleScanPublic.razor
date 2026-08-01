@@ -64,6 +64,10 @@ else
                     <h4 class="mb-0">@station.StationName <span class="text-muted fs-6">(@station.DivisionName)</span></h4>
                     <p class="mb-0 text-muted">
                         Operator: <strong class="text-dark">@(operatorName ?? "-")</strong>
+                        @if (autoLoginApplied)
+                        {
+                            <span class="badge bg-info ms-1">Operator otomatis: @operatorName</span>
+                        }
                     </p>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
@@ -181,6 +185,11 @@ else
     private string actionError = string.Empty;
     private int? operatorId;
     private string? operatorName;
+    // Prompt 40: true kalau operator sesi baru saja diganti otomatis berdasarkan saran scan
+    // (badge "Operator otomatis"). Hanya dievaluasi sekali per scan bundle baru (LoadBundleAsync),
+    // TIDAK di Rescan -- supaya pergantian manual (via /station) tidak langsung tertimpa lagi
+    // saat halaman ini refresh/rescan bundle yang SAMA.
+    private bool autoLoginApplied = false;
     // Prompt 39: opsi dropdown "Pelaksana" (Kirim Hasil) -- resource aktif divisi station ini.
     private List<ResourceLookupDto> resourceOptions = new();
     private bool showLogoutConfirm = false;
@@ -302,7 +311,10 @@ else
             scanInfo ??= publicDetail?.ScanInfo;
 
             if (!stationScanFailed)
+            {
                 resourceOptions = await StationApi.GetResourcesAsync();
+                await ApplyAutoLoginIfNeeded();
+            }
         }
         else
         {
@@ -313,6 +325,31 @@ else
 
         notFound = scanInfo is null;
         isLoading = false;
+    }
+
+    // Prompt 40: auto-login operator sesi saat scan -- HANYA stasiun tidak terkunci. Kalau
+    // SuggestedResourceId (kaskade LINE_BUNDLE/PENERIMA/COUNTERPART/RIWAYAT, lihat
+    // SIS_Bundle_ScanInfo) terisi dan beda dari operator sesi saat ini, ganti operator sesi ke
+    // resource itu dan simpan ke localStorage (sticky, sama seperti pemilihan manual di
+    // /station) -- scan ulang bundle yang sama (Rescan) TIDAK memicu ini lagi, supaya
+    // pergantian manual operator tidak langsung tertimpa. NULL -> operator sesi dipertahankan.
+    private async Task ApplyAutoLoginIfNeeded()
+    {
+        autoLoginApplied = false;
+        if (IsLocked) return;
+        if (scanInfo?.Bundle.SuggestedResourceId is not { } suggestedId) return;
+        if (operatorId == suggestedId) return;
+
+        operatorId = suggestedId;
+        operatorName = scanInfo.Bundle.SuggestedResourceName;
+        autoLoginApplied = true;
+
+        await JS.InvokeVoidAsync("localStorage.setItem", "stationOperatorId", operatorId.Value.ToString());
+        await JS.InvokeVoidAsync("localStorage.setItem", "stationOperatorName", operatorName ?? string.Empty);
+
+        // Hitung ulang scanInfo terhadap operator yang benar (Aksi SS7/NextCounterpart di
+        // SIS_Bundle_ScanInfo bergantung ke @ResourceId).
+        scanInfo = await StationApi.ScanAsync(Serial, operatorId);
     }
 
     private async Task Rescan()
@@ -388,7 +425,9 @@ else
             QtyLost = values.QtyLost,
             Remark = values.Remark,
             ConfirmExceed = values.ConfirmExceed,
-            ConfirmShort = values.ConfirmShort
+            ConfirmShort = values.ConfirmShort,
+            // Prompt 40: penerima manual dipilih operator pengirim -- diteruskan apa adanya.
+            AutoReceiveResourceId = values.AutoReceiveResourceId
         });
 
         actionBusy = false;

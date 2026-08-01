@@ -213,6 +213,8 @@ else
                                             }
                                             <br />
                                             <span class="text-muted">Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</span>
+                                            <br />
+                                            <span class="text-muted">Diterima oleh: <strong>@ReceiverDisplayName(item)</strong></span>
                                         </p>
                                         <div class="d-flex gap-2">
                                             <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
@@ -246,7 +248,11 @@ else
                                         }
                                     </ul>
                                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                        <span class="text-muted">Dari: @grp.FromDivisionName &middot; @grp.GroupTime.ToString("dd/MM HH:mm")</span>
+                                        <span class="text-muted">
+                                            Dari: @grp.FromDivisionName &middot; @grp.GroupTime.ToString("dd/MM HH:mm")
+                                            <br />
+                                            Diterima oleh: <strong>@ReceiverDisplayName(grp.Items.First())</strong>
+                                        </span>
                                         <div class="d-flex gap-2">
                                             <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModalGroup(grp)">Dengan Catatan</button>
                                             <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveGroup(grp)">Terima</button>
@@ -2284,9 +2290,18 @@ else
     private static bool CanEditOrDeleteBundle(StationPendingHandoverDto item) =>
         DateTime.Now - item.CreatedAt < TimeSpan.FromHours(1);
 
+    // Prompt 40: penerima default saat "Terima" manual -- counterpart resource pengirim
+    // (SuggestedReceiverResourceId, lihat SIS_Station_PendingReceives) kalau ada, selain itu
+    // operator sesi aktif.
+    private string ReceiverDisplayName(StationPendingReceiveDto item) =>
+        item.SuggestedReceiverResourceName ?? currentOperatorName ?? "-";
+
+    private int? EffectiveReceiverResourceId(StationPendingReceiveDto item) =>
+        item.SuggestedReceiverResourceId ?? currentOperatorId;
+
     private async Task ReceiveOne(StationPendingReceiveDto item)
     {
-        await DoReceiveAsync(item.WorkflowLogId, null);
+        await DoReceiveAsync(item.WorkflowLogId, null, EffectiveReceiverResourceId(item));
     }
 
     private void OpenReceiveNoteModal(StationPendingReceiveDto item)
@@ -2328,12 +2343,13 @@ else
         if (receiveNoteTarget is null) return;
 
         var workflowLogId = receiveNoteTarget.WorkflowLogId;
+        var resourceId = EffectiveReceiverResourceId(receiveNoteTarget);
         var remark = receiveNoteText;
         CloseReceiveNoteModal();
-        await DoReceiveAsync(workflowLogId, remark);
+        await DoReceiveAsync(workflowLogId, remark, resourceId);
     }
 
-    private async Task DoReceiveAsync(int workflowLogId, string? remark)
+    private async Task DoReceiveAsync(int workflowLogId, string? remark, int? resourceId = null)
     {
         isBusy = true;
         actionError = string.Empty;
@@ -2341,7 +2357,7 @@ else
         var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
         {
             WorkflowLogId = workflowLogId,
-            ResourceId = currentOperatorId!.Value,
+            ResourceId = (resourceId ?? currentOperatorId)!.Value,
             Remark = remark
         });
 
@@ -2350,7 +2366,9 @@ else
         await RefreshLists();
     }
 
-    // Gabungan: "Terima" berlaku ke semua baris ukuran dalam kartu sekaligus.
+    // Gabungan: "Terima" berlaku ke semua baris ukuran dalam kartu sekaligus. Prompt 40: tiap
+    // baris memakai penerima default MASING-MASING (SuggestedReceiverResourceId kalau ada),
+    // bukan satu operator untuk semua.
     private async Task ReceiveGroup(NonBundleReceiveGroup group, string? remark = null)
     {
         isBusy = true;
@@ -2361,7 +2379,7 @@ else
             var (success, error) = await StationApi.ReceiveAsync(new StationReceiveRequest
             {
                 WorkflowLogId = item.WorkflowLogId,
-                ResourceId = currentOperatorId!.Value,
+                ResourceId = (EffectiveReceiverResourceId(item) ?? currentOperatorId)!.Value,
                 Remark = remark
             });
 

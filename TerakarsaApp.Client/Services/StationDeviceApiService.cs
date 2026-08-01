@@ -236,6 +236,17 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<WorkflowQuotaInfoDto>();
     }
 
+    // Prompt 40: dropdown "Diterima Oleh ({divisi tujuan})" wajib di form Kirim Hasil.
+    public async Task<List<ResourceLookupDto>> GetReceiverOptionsAsync(int articleWorkflowId, int? bundleId)
+    {
+        var url = $"api/station/receiver-options?articleWorkflowId={articleWorkflowId}";
+        if (bundleId.HasValue) url += $"&bundleId={bundleId.Value}";
+
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ResourceLookupDto>>() ?? new();
+    }
+
     public async Task<BundleScanInfoDto?> ScanAsync(string serial, int? resourceId)
     {
         var url = $"api/station/scan/{Uri.EscapeDataString(serial)}";

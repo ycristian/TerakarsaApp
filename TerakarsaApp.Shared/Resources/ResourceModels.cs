@@ -13,6 +13,8 @@ public class ResourceDto
     // Prompt 39: resource pasangan di divisi lanjutan (mis. Line A1 -> Trim A1), opsional.
     public int? CounterpartResourceId { get; set; }
     public string? CounterpartResourceName { get; set; }
+    // Prompt 40: nama divisi counterpart -- dipakai list Master Resource "{Nama} ({Divisi})".
+    public string? CounterpartDivisionName { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }

@@ -21,4 +21,8 @@ public class BundleCompleteFormValues
     // terkunci) -- pemanggil pakai ini kalau ada, fallback ke resource sesi kalau NULL.
     // TIDAK dipakai untuk EDIT (UPDATE tidak pernah mengubah resource_id).
     public int? ResourceId { get; set; }
+    // Prompt 40: penerima manual dipilih operator pengirim -- hanya terisi dari dropdown
+    // "Diterima Oleh" saat BundleScanActionDto.ReceiverPickerRequired = true. Sekali pakai
+    // per pengiriman, TIDAK disimpan sebagai counterpart maupun sticky antar bundle.
+    public int? AutoReceiveResourceId { get; set; }
 }

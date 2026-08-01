@@ -8,6 +8,8 @@
 -- Prompt 39: counterpart_resource_id + nama resource pasangan -- LEFT JOIN filter
 -- deleted_at IS NULL DI KLAUSA ON (bukan WHERE) supaya baris utama tidak ikut hilang
 -- kalau pasangannya sudah dihapus.
+-- Prompt 40: tambah CounterpartDivisionName (nama divisi counterpart) -- dipakai list
+-- Master Resource menampilkan "{Nama} ({Divisi})", sama pola JOIN LEFT + filter ON.
 
 SET ANSI_NULLS ON;
 GO
@@ -62,12 +64,14 @@ BEGIN
                    r.resource_name AS ResourceName, r.is_active AS IsActive,
                    r.include_in_dashboard AS IncludeInDashboard,
                    r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
+                   cpd.division_name AS CounterpartDivisionName,
                    r.created_at AS CreatedAt, r.created_by AS CreatedBy,
                    r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
             FROM resources r
             INNER JOIN divisions d ON d.division_id = r.division_id
             INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
             LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
+            LEFT JOIN divisions cpd ON cpd.division_id = cp.division_id
             WHERE r.deleted_at IS NULL
               AND (@SearchTerm IS NULL OR NOT EXISTS (
                     SELECT 1 FROM STRING_SPLIT(@SearchTerm, '' '') tok
@@ -101,12 +105,14 @@ BEGIN
            r.resource_name AS ResourceName, r.is_active AS IsActive,
            r.include_in_dashboard AS IncludeInDashboard,
            r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
+           cpd.division_name AS CounterpartDivisionName,
            r.created_at AS CreatedAt, r.created_by AS CreatedBy,
            r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
     FROM resources r
     INNER JOIN divisions d ON d.division_id = r.division_id
     INNER JOIN resource_types rt ON rt.resource_type_id = r.resource_type_id
     LEFT JOIN resources cp ON cp.resource_id = r.counterpart_resource_id AND cp.deleted_at IS NULL
+    LEFT JOIN divisions cpd ON cpd.division_id = cp.division_id
     WHERE r.resource_id = @Id AND r.deleted_at IS NULL;
 END;
 GO

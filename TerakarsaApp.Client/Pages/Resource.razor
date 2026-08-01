@@ -73,7 +73,7 @@ else
                             <SortableHeader Label="Tipe Resource" Column="ResourceTypeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Status</th>
                             <th>Dashboard</th>
-                            <th>Pasangan</th>
+                            <th>Counterpart</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -99,7 +99,7 @@ else
                                         <span class="badge bg-secondary">Tidak</span>
                                     }
                                 </td>
-                                <td>@(r.CounterpartResourceName ?? "-")</td>
+                                <td>@(r.CounterpartResourceName is not null ? $"{r.CounterpartResourceName} ({r.CounterpartDivisionName})" : "-")</td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(r)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(r)"><i class="fe fe-trash-2"></i></button>
@@ -141,7 +141,7 @@ else
                             <ValidationMessage For="@(() => formModel.DivisionId)" class="text-danger" />
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Resource Pasangan (opsional)</label>
+                            <label class="form-label">Counterpart (Divisi Berikutnya)</label>
                             <SearchableSelect TItem="ResourceCounterpartOptionDto" Items="counterpartOptions"
                                               @bind-Value="formModel.CounterpartResourceId"
                                               IdSelector="@(o => o.Id)" TextSelector="@(o => $"{o.ResourceName} ({o.DivisionName})")"

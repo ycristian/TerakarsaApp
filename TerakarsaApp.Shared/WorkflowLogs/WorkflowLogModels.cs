@@ -68,6 +68,10 @@ public class StationPendingReceiveDto
     public DateTime? UpdatedAt { get; set; }
     // Prompt 28: badge "Penyesuaian" untuk item hasil ADJUST (qty_ok > 0) di tab Masuk.
     public bool IsAdjustment { get; set; }
+    // Prompt 40: counterpart resource pengirim, valid terhadap divisi ini -- dipakai penerima
+    // default saat "Terima" manual (tunggal maupun borongan), NULL bila tidak ada.
+    public int? SuggestedReceiverResourceId { get; set; }
+    public string? SuggestedReceiverResourceName { get; set; }
 }
 
 public class StationPendingHandoverDto
@@ -266,6 +270,11 @@ public class StationCompleteRequest
     public bool ConfirmExceed { get; set; }
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini.
     public bool ConfirmShort { get; set; }
+    // Prompt 40: penerima manual dipilih operator pengirim -- HANYA dipakai server kalau step
+    // tujuan auto_receive = 1 DAN counterpart pengirim tidak valid (lihat
+    // BundleScanActionDto.ReceiverPickerRequired). Diteruskan apa adanya ke SP -- SP
+    // satu-satunya penjaga, API tidak validasi ulang.
+    public int? AutoReceiveResourceId { get; set; }
 }
 
 // Prompt 14: info kuota qty step ber-bundle ("Masuk: X • Tercatat: Y • Sisa: Z"), dipakai

@@ -38,6 +38,9 @@ public class WorkflowLogCreateInput
     // resource bawaan, SP melewati validasi "bundle ditugaskan ke line lain" (step station
     // pertama). NULL untuk pemanggil non-stasiun -- SP memperlakukannya sama seperti terkunci.
     public bool? ActingAllowResourceChange { get; set; }
+    // Prompt 40: penerima manual (dipilih operator pengirim) -- dipakai SP HANYA kalau step
+    // tujuan auto_receive = 1 dan counterpart pengirim tidak valid.
+    public int? AutoReceiveResourceId { get; set; }
 }
 
 public class WorkflowLogReceiveInput
@@ -194,6 +197,20 @@ public class WorkflowLogService
             .ToListAsync();
 
         return rows.FirstOrDefault();
+    }
+
+    // Prompt 40: dropdown "Diterima Oleh ({divisi tujuan})" wajib di form Kirim Hasil --
+    // resource hidup + aktif milik divisi tujuan step berikutnya dari @ArticleWorkflowId.
+    public async Task<List<TerakarsaApp.Shared.Resources.ResourceLookupDto>> GetReceiverOptionsAsync(int articleWorkflowId, int? bundleId)
+    {
+        var articleWorkflowIdParam = new SqlParameter("@ArticleWorkflowId", articleWorkflowId);
+        var bundleIdParam = new SqlParameter("@BundleId", (object?)bundleId ?? DBNull.Value);
+
+        return await _db.Database
+            .SqlQueryRaw<TerakarsaApp.Shared.Resources.ResourceLookupDto>(
+                "EXEC SIS_Station_ReceiverOptions @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId",
+                articleWorkflowIdParam, bundleIdParam)
+            .ToListAsync();
     }
 
     // Prompt 22b: lineResourceId = EffectiveResourceId(operator sesi) dari
@@ -392,7 +409,7 @@ public class WorkflowLogService
     }
 
     private const string CreateLogSql =
-        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort, @ActingAllowResourceChange = @ActingAllowResourceChange";
+        "EXEC SIS_WorkflowLog_Manage @Action = @Action, @ArticleWorkflowId = @ArticleWorkflowId, @BundleId = @BundleId, @ArticleSizeId = @ArticleSizeId, @ResourceId = @ResourceId, @QtyOk = @QtyOk, @QtyRejectPrint = @QtyRejectPrint, @QtyRejectFabric = @QtyRejectFabric, @QtyRejectSewing = @QtyRejectSewing, @QtyRejectRework = @QtyRejectRework, @QtyLost = @QtyLost, @Remark = @Remark, @UserId = @UserId, @ActingDivisionId = @ActingDivisionId, @ConfirmExceed = @ConfirmExceed, @ConfirmShort = @ConfirmShort, @ActingAllowResourceChange = @ActingAllowResourceChange, @AutoReceiveResourceId = @AutoReceiveResourceId";
 
     private static SqlParameter[] BuildCreateLogParams(WorkflowLogCreateInput input, int userId) => new[]
     {
@@ -412,7 +429,8 @@ public class WorkflowLogService
         new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value),
         new SqlParameter("@ConfirmExceed", input.ConfirmExceed),
         new SqlParameter("@ConfirmShort", input.ConfirmShort),
-        new SqlParameter("@ActingAllowResourceChange", (object?)input.ActingAllowResourceChange ?? DBNull.Value)
+        new SqlParameter("@ActingAllowResourceChange", (object?)input.ActingAllowResourceChange ?? DBNull.Value),
+        new SqlParameter("@AutoReceiveResourceId", (object?)input.AutoReceiveResourceId ?? DBNull.Value)
     };
 
     public async Task<(bool Success, string Error)> CreateAsync(WorkflowLogCreateInput input, int userId)

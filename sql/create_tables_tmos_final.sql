@@ -167,11 +167,11 @@ CREATE TABLE resources(
  resource_name varchar(150) not null,
  is_active bit not null default 1,
  include_in_dashboard bit not null default 1,       -- Prompt 36: ikut dihitung & ditampilkan di dashboard
- counterpart_resource_id int null                   -- Prompt 39: resource pasangan di divisi lanjutan (mis.
-   constraint FK_resources_counterpart                -- Line A1 di Sewing -> Trim A1 di Buang Benang). Dipakai
-   foreign key references resources(resource_id),     -- auto-terima untuk mengisi received_by_resource_id dengan
-                                                        -- resource divisi penerima, dan sebagai saran pelaksana
-                                                        -- di station. Satu arah, opsional.
+ counterpart_resource_id int null                   -- Prompt 39/40: resource pasangan di divisi lanjutan (mis.
+   constraint FK_resources_counterpart                -- Line A1 di Sewing -> Trim A1 di Buang Benang). Prompt 40:
+   foreign key references resources(resource_id),     -- auto-terima WAJIB pakai ini (bukan lagi fallback ke
+                                                        -- pengirim) bila valid terhadap divisi tujuan; kalau tidak,
+                                                        -- operator wajib pilih penerima manual. Satu arah, opsional.
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,

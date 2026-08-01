@@ -111,6 +111,15 @@
 --   ke step ini, dan (b) created_at baris log step ini sendiri (kalau sudah pernah dicicil).
 --   NULL kalau step ini belum tersentuh sama sekali (step pertama artikel, belum ada input) --
 --   client menaruhnya paling bawah.
+--
+-- Prompt 40: SIS_Station_PendingReceives kini membawa SuggestedReceiverResourceId/Name --
+--   counterpart dari resource pengirim (awl.resource_id) yang valid terhadap @DivisionId
+--   (hidup + aktif + division_id = @DivisionId), NULL bila tidak ada. Dipakai client sebagai
+--   penerima default pada penerimaan manual (tab "Masuk"/IN) -- operator sesi tetap menang
+--   kalau diganti manual, dan "Terima Borongan" memakai penerima default PER BARIS, bukan satu
+--   operator untuk semua. SP baru SIS_Station_ReceiverOptions (di bawah) -- dropdown "Diterima
+--   Oleh" wajib pada form Kirim Hasil ketika step tujuan auto_receive = 1 tapi counterpart
+--   pengirim tidak valid (lihat SIS_Bundle_ScanInfo.ReceiverPickerRequired).
 
 SET ANSI_NULLS ON;
 GO
@@ -135,7 +144,11 @@ BEGIN
            spd.size_name AS SizeName, spd.sort_order AS SizeSortOrder,
            awl.updated_at AS UpdatedAt,
            -- Prompt 28: badge "Penyesuaian" di tab Masuk untuk baris ADJUSTMENT (qty_ok > 0).
-           CASE WHEN awl.log_type = 'ADJUSTMENT' THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsAdjustment
+           CASE WHEN awl.log_type = 'ADJUSTMENT' THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsAdjustment,
+           -- Prompt 40: counterpart resource pengirim (awl.resource_id), valid terhadap
+           -- @DivisionId (hidup + aktif + division_id = @DivisionId) -- dipakai penerima
+           -- default saat "Terima" manual, NULL bila tidak ada.
+           cprr.resource_id AS SuggestedReceiverResourceId, cprr.resource_name AS SuggestedReceiverResourceName
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
@@ -145,6 +158,9 @@ BEGIN
     LEFT JOIN resources br ON br.resource_id = b.resource_id
     LEFT JOIN article_sizes asz ON asz.article_size_id = awl.article_size_id
     LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+    LEFT JOIN resources sndr ON sndr.resource_id = awl.resource_id
+    LEFT JOIN resources cprr ON cprr.resource_id = sndr.counterpart_resource_id
+        AND cprr.deleted_at IS NULL AND cprr.is_active = 1 AND cprr.division_id = @DivisionId
     WHERE awl.target_division_id = @DivisionId
       AND awl.received_at IS NULL
       AND awl.deleted_at IS NULL
@@ -804,5 +820,36 @@ BEGIN
                   )
               AND (@ResourceId IS NULL OR awl3.resource_id IS NULL OR awl3.resource_id = @ResourceId)
         ) AS DikirimCount;
+END;
+GO
+
+-- Prompt 40: dropdown "Diterima Oleh ({divisi tujuan})" wajib di form Kirim Hasil ketika step
+-- tujuan auto_receive = 1 tapi counterpart pengirim tidak valid (lihat
+-- SIS_Bundle_ScanInfo.ReceiverPickerRequired) -- resource hidup + aktif milik divisi tujuan
+-- step BERIKUTNYA dari @ArticleWorkflowId (step yang sedang dikerjakan/dikirim hasilnya).
+-- @BundleId diterima murni supaya bentuk pemanggilan client konsisten dengan endpoint lain
+-- (quota-info, scan) -- divisi tujuan sama untuk semua bundle artikel yang sama, jadi tidak
+-- dipakai di query.
+CREATE OR ALTER PROCEDURE SIS_Station_ReceiverOptions
+    @ArticleWorkflowId INT,
+    @BundleId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @ArticleId INT, @SortOrder INT;
+    SELECT @ArticleId = article_id, @SortOrder = sort_order
+    FROM article_workflows WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL;
+
+    DECLARE @TargetDivisionId INT;
+    SELECT TOP 1 @TargetDivisionId = division_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @SortOrder
+    ORDER BY sort_order ASC;
+
+    SELECT resource_id AS ResourceId, resource_name AS ResourceName
+    FROM resources
+    WHERE division_id = @TargetDivisionId AND is_active = 1 AND deleted_at IS NULL
+    ORDER BY resource_name ASC;
 END;
 GO
