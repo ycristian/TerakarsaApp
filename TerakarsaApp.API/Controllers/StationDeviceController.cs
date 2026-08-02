@@ -27,6 +27,8 @@ public class StationDeviceController : ControllerBase
     private readonly PackService _packService;
     private readonly ProjectService _projectService;
     private readonly ArticlePhotoService _articlePhotoService;
+    private readonly RekapProduksiService _rekapProduksiService;
+    private readonly DivisionService _divisionService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
@@ -37,6 +39,8 @@ public class StationDeviceController : ControllerBase
         PackService packService,
         ProjectService projectService,
         ArticlePhotoService articlePhotoService,
+        RekapProduksiService rekapProduksiService,
+        DivisionService divisionService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
@@ -46,6 +50,8 @@ public class StationDeviceController : ControllerBase
         _packService = packService;
         _projectService = projectService;
         _articlePhotoService = articlePhotoService;
+        _rekapProduksiService = rekapProduksiService;
+        _divisionService = divisionService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -90,6 +96,40 @@ public class StationDeviceController : ControllerBase
     {
         var result = await _employeeService.GetActiveByResourceAsync(resourceId);
         return Ok(result);
+    }
+
+    // Prompt 42: dropdown "Divisi" (level pertama) di tab Rekap Produksi -- reuse
+    // DivisionService.GetActiveAsync (dipakai juga oleh /reports/produksi admin), client cukup
+    // ambil Id + DivisionName. Resource (per divisi) dan Penjahit (per resource) pakai endpoint
+    // cascading yang sudah ada di atas (resources/{divisionId}, employees/{resourceId}).
+    [HttpGet("divisions")]
+    public async Task<IActionResult> GetStationDivisions()
+    {
+        var result = await _divisionService.GetActiveAsync();
+        return Ok(result);
+    }
+
+    // Prompt 42: tab "Rekap Produksi" -- header (nama divisi/resource/penjahit sesuai level,
+    // rentang periode gajian, total pcs) + detail harian + WIP snapshot. Level = pilihan
+    // terdalam yang diisi client (DIVISION | RESOURCE | EMPLOYEE).
+    [HttpGet("rekap-struk")]
+    public async Task<IActionResult> GetRekapStruk(
+        [FromQuery] string level, [FromQuery] int divisionId, [FromQuery] int? resourceId,
+        [FromQuery] int? employeeId, [FromQuery] DateTime? date)
+    {
+        var result = await _rekapProduksiService.GetAsync(level, divisionId, resourceId, employeeId, date);
+        if (result.Header is null) return NotFound("Divisi tidak ditemukan.");
+        return Ok(result);
+    }
+
+    // Prompt 42: "Cetak Struk" di tab Rekap Produksi -- snapshot ULANG di SP (bukan payload
+    // dari client) lalu insert print_jobs job_type REKAP_PRODUKSI.
+    [HttpPost("rekap-struk/print")]
+    public async Task<IActionResult> PrintRekapStruk([FromBody] RekapStrukPrintRequest request)
+    {
+        var (success, error, printJobId) = await _rekapProduksiService.PrintAsync(request, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
     }
 
     // Prompt 24: ringkasan per size untuk modal "Buat Bundle" -- juga dipakai memvalidasi
@@ -217,6 +257,16 @@ public class StationDeviceController : ControllerBase
         return Ok(new { PrintJobId = printJobId });
     }
 
+    // Prompt 41 (lanjutan): "Print Hasil" -- cetak kupon manual segera setelah Kirim Hasil,
+    // tanpa menunggu divisi berikutnya menerima. Sama pola dengan print-reject di atas.
+    [HttpPost("logs/{id:int}/print-hasil")]
+    public async Task<IActionResult> PrintHasil(int id)
+    {
+        var (success, error, printJobId) = await _workflowLogService.PrintHasilAsync(id, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
     // Prompt 22b: @ResourceId dari operator sesi (query string, sama pola dengan Scan di
     // bawah) -- filter antrian Masuk/Dikerjakan/Dikirim/Counts ke Line operator ini saja.
     // EffectiveResourceId tetap menang kalau stasiun terkunci (memaksa default_resource_id
@@ -320,7 +370,7 @@ public class StationDeviceController : ControllerBase
             ReceivedByResourceId = resourceId,
             ReceivedRemark = request.Remark,
             ActingDivisionId = CurrentStation.DivisionId
-        });
+        }, _systemUserId);
 
         if (!success) return BadRequest(error);
         return Ok();

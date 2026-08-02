@@ -4,6 +4,7 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Divisions
 @using TerakarsaApp.Shared.Employees
 @using TerakarsaApp.Shared.Packs
 @using TerakarsaApp.Shared.Projects
@@ -169,6 +170,11 @@ else
                         </a>
                     </li>
                 }
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "rekap" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekap")'>
+                        Rekap Produksi
+                    </a>
+                </li>
             </ul>
         </div>
         <div class="card-body">
@@ -640,6 +646,35 @@ else
                     <div class="alert alert-success mt-3 mb-0">@packingFeedback</div>
                 }
             }
+            else if (activeTab == "rekap")
+            {
+                <div class="row g-2 align-items-end mb-2" style="max-width: 960px;">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Divisi</label>
+                        <SearchableSelect TItem="DivisionDto" Items="rekapDivisions" Value="rekapDivisionId" ValueChanged="HandleRekapDivisionChanged"
+                                          IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                          Placeholder="Cari divisi..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Resource</label>
+                        <SearchableSelect TItem="ResourceLookupDto" Items="rekapResourceOptions" Value="rekapResourceId" ValueChanged="HandleRekapResourceChanged"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          Disabled="@(rekapDivisionId <= 0)"
+                                          Placeholder="Cari resource..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Penjahit</label>
+                        <SearchableSelect TItem="EmployeeLookupDto" Items="rekapEmployeeOptions" @bind-Value="rekapEmployeeId"
+                                          IdSelector="@(e => e.Id)" TextSelector="@(e => BundleDisplay.FormatEmployeeOption(e.EmployeeCode, e.EmployeeName))"
+                                          Disabled="@(rekapResourceId <= 0)"
+                                          Placeholder="Cari penjahit..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-primary w-100" disabled="@(rekapDivisionId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
+                    </div>
+                </div>
+                <p class="text-muted mb-0">Pilih Divisi (wajib), lalu Resource dan Penjahit (opsional) untuk mempersempit level rekap -- level rekap mengikuti pilihan terdalam yang diisi.</p>
+            }
 
             @if (!string.IsNullOrEmpty(actionError))
             {
@@ -654,6 +689,73 @@ else
 }
 
 </div>
+
+@if (showRekapStrukModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Rekap Produksi</h5>
+                    <button type="button" class="btn-close" @onclick="CloseRekapStrukModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-8 col-md-6">
+                            <label class="form-label">Tanggal</label>
+                            <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                   value="@rekapDate.ToString("yyyy-MM-dd")" @onchange="HandleRekapDateChanged" />
+                        </div>
+                    </div>
+
+                    @if (isLoadingRekap)
+                    {
+                        <p class="text-muted mb-0">Memuat...</p>
+                    }
+                    else if (rekapResult?.Header is null)
+                    {
+                        <p class="text-muted mb-0">Data tidak ditemukan.</p>
+                    }
+                    else
+                    {
+                        var h = rekapResult.Header;
+                        <p class="mb-2">
+                            <strong>@h.DivisionName</strong>
+                            @if (!string.IsNullOrEmpty(h.ResourceName))
+                            {
+                                <text> &middot; @h.ResourceName</text>
+                            }
+                            @if (!string.IsNullOrEmpty(h.EmployeeName))
+                            {
+                                <text> &middot; @h.EmployeeName</text>
+                            }
+                        </p>
+                        <p class="text-muted mb-3">
+                            Periode: <strong>@FormatPeriod(h.PeriodStart) &ndash; @FormatPeriod(h.PeriodEnd)</strong>
+                        </p>
+                        <div class="border rounded p-3 text-center">
+                            <div class="text-muted small">Total pcs periode ini</div>
+                            <div class="fs-2 fw-bold">@h.TotalQty</div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(rekapError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@rekapError</div>
+                    }
+                    @if (!string.IsNullOrEmpty(rekapPrintFeedback))
+                    {
+                        <div class="alert alert-success mt-3 mb-0">@rekapPrintFeedback</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseRekapStrukModal">Tutup</button>
+                    <button class="btn btn-primary" disabled="@(isBusy || rekapResult?.Header is null)" @onclick="ConfirmPrintRekapStruk">Cetak Struk</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @if (showReceiveNoteModal && (receiveNoteTarget is not null || receiveNoteGroupTarget is not null))
 {
@@ -2093,6 +2195,99 @@ else
         {
             packingProjects = await StationApi.GetPackingProjectsAsync();
         }
+        else if (tab == "rekap" && rekapDivisions.Count == 0)
+        {
+            rekapDivisions = await StationApi.GetStationDivisionsAsync();
+        }
+    }
+
+    // Prompt 42: dropdown cascading Divisi -> Resource -> Penjahit di tab Rekap Produksi
+    // (pola Prompt 32) -- level rekap = pilihan terdalam yang diisi (lihat RekapLevel).
+    private async Task HandleRekapDivisionChanged(int divisionId)
+    {
+        rekapDivisionId = divisionId;
+        rekapResourceId = 0;
+        rekapEmployeeId = 0;
+        rekapEmployeeOptions = new();
+        rekapResourceOptions = divisionId > 0 ? await StationApi.GetResourcesByDivisionAsync(divisionId) : new();
+    }
+
+    private async Task HandleRekapResourceChanged(int resourceId)
+    {
+        rekapResourceId = resourceId;
+        rekapEmployeeId = 0;
+        rekapEmployeeOptions = resourceId > 0 ? await StationApi.GetEmployeesByResourceAsync(resourceId) : new();
+    }
+
+    private string RekapLevel => rekapEmployeeId > 0 ? "EMPLOYEE" : (rekapResourceId > 0 ? "RESOURCE" : "DIVISION");
+
+    private static string FormatPeriod(DateTime dt)
+    {
+        var hariIndo = new[] { "Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab" };
+        return $"{hariIndo[(int)dt.DayOfWeek]} {dt:dd/MM HH:mm}";
+    }
+
+    private async Task OpenRekapStrukModal()
+    {
+        if (rekapDivisionId <= 0) return;
+
+        rekapDate = DateTime.Today;
+        rekapError = string.Empty;
+        rekapPrintFeedback = string.Empty;
+        showRekapStrukModal = true;
+        await LoadRekapStruk();
+    }
+
+    private void CloseRekapStrukModal()
+    {
+        showRekapStrukModal = false;
+        rekapResult = null;
+    }
+
+    private async Task HandleRekapDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed) && parsed.Date <= DateTime.Today)
+        {
+            rekapDate = parsed.Date;
+            await LoadRekapStruk();
+        }
+    }
+
+    private async Task LoadRekapStruk()
+    {
+        isLoadingRekap = true;
+        rekapError = string.Empty;
+        rekapResult = await StationApi.GetRekapStrukAsync(RekapLevel, rekapDivisionId,
+            rekapResourceId > 0 ? rekapResourceId : null, rekapEmployeeId > 0 ? rekapEmployeeId : null, rekapDate);
+        isLoadingRekap = false;
+
+        if (rekapResult?.Header is null)
+            rekapError = "Data tidak ditemukan.";
+    }
+
+    private async Task ConfirmPrintRekapStruk()
+    {
+        if (rekapDivisionId <= 0) return;
+
+        isBusy = true;
+        rekapError = string.Empty;
+        rekapPrintFeedback = string.Empty;
+
+        var (success, error) = await StationApi.PrintRekapStrukAsync(new RekapStrukPrintRequest
+        {
+            Level = RekapLevel,
+            DivisionId = rekapDivisionId,
+            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
+            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            Date = rekapDate
+        });
+
+        isBusy = false;
+
+        if (success)
+            rekapPrintFeedback = "Rekap masuk antrian cetak.";
+        else
+            rekapError = error;
     }
 
     // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
@@ -3127,6 +3322,21 @@ else
     private ProjectPackingDto packingData = new();
     private string packingError = string.Empty;
     private string packingFeedback = string.Empty;
+
+    // Prompt 42: tab "Rekap Produksi" -- dropdown cascading Divisi -> Resource -> Penjahit,
+    // menggantikan Rekap Penjahit Prompt 41 (Line lintas-divisi, tanpa Divisi).
+    private List<DivisionDto> rekapDivisions = new();
+    private int rekapDivisionId;
+    private List<ResourceLookupDto> rekapResourceOptions = new();
+    private int rekapResourceId;
+    private List<EmployeeLookupDto> rekapEmployeeOptions = new();
+    private int rekapEmployeeId;
+    private bool showRekapStrukModal = false;
+    private DateTime rekapDate = DateTime.Today;
+    private bool isLoadingRekap = false;
+    private RekapStrukResultDto? rekapResult;
+    private string rekapError = string.Empty;
+    private string rekapPrintFeedback = string.Empty;
 
     private class PackArticleOption
     {

@@ -181,6 +181,11 @@ public class BundleService
                 LastDivisionName = reader.IsDBNull(reader.GetOrdinal("LastDivisionName")) ? null : reader.GetString(reader.GetOrdinal("LastDivisionName")),
                 EmployeeName = reader.IsDBNull(reader.GetOrdinal("EmployeeName")) ? null : reader.GetString(reader.GetOrdinal("EmployeeName")),
                 SuggestedResourceId = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceId")) ? null : reader.GetInt32(reader.GetOrdinal("SuggestedResourceId")),
+                // Fix (Prompt 43): SuggestedResourceName/Source dulu tidak pernah dibaca dari
+                // reader -- SuggestedResourceId terisi tapi nama/sumbernya selalu null sampai
+                // ke client, badge "Operator otomatis" jadi tampil kosong.
+                SuggestedResourceName = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceName")) ? null : reader.GetString(reader.GetOrdinal("SuggestedResourceName")),
+                SuggestedResourceSource = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceSource")) ? null : reader.GetString(reader.GetOrdinal("SuggestedResourceSource")),
             };
 
             await reader.NextResultAsync();
@@ -242,6 +247,8 @@ public class BundleService
                 var actionRemarkOrdinal = reader.GetOrdinal("ActionRemark");
                 action.ActionRemark = reader.IsDBNull(actionRemarkOrdinal) ? null : reader.GetString(actionRemarkOrdinal);
                 action.AllowedAdjust = reader.GetBoolean(reader.GetOrdinal("AllowedAdjust"));
+                var printKuponOrdinal = reader.GetOrdinal("ActionPrintKupon");
+                action.PrintKupon = !reader.IsDBNull(printKuponOrdinal) && reader.GetBoolean(printKuponOrdinal);
             }
 
             await reader.NextResultAsync();

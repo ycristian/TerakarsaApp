@@ -17020,6 +17020,11 @@ table.table-bordered.dataTable thead tr:first-child td {
     background-attachment: fixed;
     background-position: 50% 0;
     background-repeat: no-repeat;
+    /* overflow:clip only clips within this box's own height, and position:absolute
+       descendants (e.g. SearchableSelect's dropdown) don't count toward its auto
+       height -- on a short page that silently truncates dropdowns that open near
+       the bottom of the content, even though the viewport below is visibly empty. */
+    min-height: 100vh;
 }
 
 .error-template h1 {

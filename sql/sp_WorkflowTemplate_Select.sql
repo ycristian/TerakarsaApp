@@ -93,7 +93,8 @@ BEGIN
 
     SELECT s.step_id AS Id, s.workflow_template_id AS WorkflowTemplateId,
            s.step_name AS StepName, s.division_id AS DivisionId, d.division_name AS DivisionName,
-           s.sort_order AS SortOrder, s.requires_bundle AS RequiresBundle, s.auto_receive AS AutoReceive
+           s.sort_order AS SortOrder, s.requires_bundle AS RequiresBundle, s.auto_receive AS AutoReceive,
+           s.print_kupon AS PrintKupon
     FROM workflow_template_steps s
     INNER JOIN divisions d ON d.division_id = s.division_id
     WHERE s.workflow_template_id = @WorkflowTemplateId AND s.deleted_at IS NULL

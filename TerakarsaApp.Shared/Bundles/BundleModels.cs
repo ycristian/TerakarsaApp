@@ -237,6 +237,11 @@ public class BundleScanActionDto
     // True HANYA kalau NextAutoReceive = true DAN counterpart NULL -- client WAJIB tampilkan
     // dropdown "Diterima Oleh" dan mewajibkan pilihan sebelum submit.
     public bool? ReceiverPickerRequired { get; set; }
+
+    // Prompt 41 (lanjutan): true kalau step ActionArticleWorkflowId ber-print_kupon = 1 --
+    // dipakai menampilkan tombol "Print Hasil" (cetak kupon manual, independen dari auto-print
+    // saat diterima) selama AllowedAction = "EDIT" (baris baru dibuat, belum diterima tujuan).
+    public bool PrintKupon { get; set; }
 }
 
 // Prompt 28: saldo reject/hilang per step ber-bundle milik divisi pemanggil untuk bundle ini

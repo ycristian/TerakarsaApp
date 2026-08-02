@@ -169,6 +169,42 @@
 -- ditolak keras ('Bundle ini atas nama {Nama}. Batalkan penerimaan dulu bila salah orang.'),
 -- berlaku untuk SEMUA step ber-bundle (termasuk step station pertama), lihat blok komentar
 -- di action CREATE.
+--
+-- Prompt 41 -- kupon borongan: begitu received_at sebuah baris TERISI (RECEIVE manual, jalur
+-- auto-terima di CREATE, ATAU jalur auto-terima di REVISE_HANDOVER -- tiga-tiganya, bukan
+-- cuma RECEIVE), dicek article_workflows.print_kupon milik STEP ASAL baris itu (article_
+-- workflow_id baris ini sendiri, BUKAN target_division_id/step tujuan) -- kalau 1, INSERT
+-- print_jobs job_type = 'KUPON_BORONGAN' (payload dirakit FOR JSON PATH, pola sama dengan
+-- SIS_WorkflowLog_PrintReject di bawah file ini). print_kupon hanya valid utk step ber-bundle
+-- (ditegakkan di SIS_WorkflowTemplate_Manage/SIS_ArticleWorkflow_Manage, bukan di sini) jadi
+-- tidak perlu re-cek requires_bundle di sini. UNRECEIVE TIDAK memicu apa pun (kupon yang sudah
+-- tercetak dianggap hangus, DB tetap acuan bayar) -- job print_jobs yang sudah terlanjur masuk
+-- antrian juga TIDAK di-cancel/dihapus, hanya tidak ada job BARU yang dibuat.
+-- tailor_name: ISNULL(employees.employee_name via bundles.employee_id, ISNULL(resources.
+-- resource_name via bundles.resource_id, ISNULL(resources.resource_name via awl.resource_id,
+-- '-'))) -- pola sama dengan Pelaksana di sp_Report_Produksi.sql (Prompt 32/35: employee_name
+-- diutamakan di atas resource_name Line), ditambah satu tingkat fallback lagi ke resource
+-- baris log itu sendiri sebelum jatuh ke '-' (bundle lama tanpa employee_id maupun resource_id).
+--
+-- Prompt 43 -- guard divisi pelaksana/penerima: CREATE dan RECEIVE tidak pernah memvalidasi
+-- bahwa @ResourceId/@ReceivedByResourceId benar-benar milik divisi step/tujuannya (beda dari
+-- REVISE_HANDOVER dan ADJUST yang sudah punya guard ini). Ditambahkan sekarang, pola sama
+-- persis: IF ... IS NOT NULL AND NOT EXISTS (SELECT 1 FROM resources WHERE resource_id = ...
+-- AND division_id = ... AND deleted_at IS NULL) -> RAISERROR. Tanpa guard ini, resource dari
+-- divisi lain bisa lolos jadi resource_id/received_by_resource_id, lalu dikunci ke step-step
+-- berikutnya lewat aturan Prompt 40 SS7 "penerima mengikat pelaksana" -- satu baris salah
+-- menular ke seluruh sisa timeline bundle. Lihat juga sql/repair_43_pelaksana_divisi_check.sql
+-- (laporan read-only baris lama yang sudah terlanjur salah).
+--
+-- Prompt 44 -- ADJUST ikut auto-terima: sebelumnya baris ADJUSTMENT (qty_ok > 0, target_
+-- division_id terisi) TIDAK PERNAH mengisi received_at sama sekali, walau step tujuannya
+-- auto_receive = 1 -- beda dari CREATE dan REVISE_HANDOVER yang sudah menghitungnya. Sekarang
+-- ADJUST memakai pola sama persis dengan REVISE_HANDOVER (bukan CREATE): tidak ada form
+-- penerima manual di aksi ini, jadi kalau step tujuan auto_receive = 1 tapi counterpart
+-- pelaksana (@ResourceId) tidak valid, baris dibiarkan tidak diterima (received_at tetap
+-- NULL) -- turun ke alur RECEIVE manual biasa di divisi tujuan, tanpa RAISERROR yang
+-- menghalangi penyimpanan penyesuaian. Tidak menyentuh kupon borongan (Prompt 41) --
+-- ADJUST tetap di luar tiga jalur yang memicu kupon (RECEIVE manual/CREATE/REVISE_HANDOVER).
 
 SET ANSI_NULLS ON;
 GO
@@ -252,6 +288,19 @@ BEGIN
         IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @DivisionId
         BEGIN
             RAISERROR('Step ini bukan milik divisi Anda.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 43: @ResourceId (pelaksana) dulu tidak pernah dicek harus milik @DivisionId
+        -- (divisi step ini) -- beda dari REVISE_HANDOVER/ADJUST yang sudah punya guard serupa.
+        -- Lubang ini memungkinkan resource divisi lain lolos jadi pelaksana, yang lewat Prompt
+        -- 40 SS7 "penerima mengikat pelaksana" lalu mengunci step-step berikutnya ke resource
+        -- yang salah itu juga.
+        IF @ResourceId IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @ResourceId AND division_id = @DivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Pelaksana bukan resource milik divisi ini.', 16, 1);
             RETURN;
         END
 
@@ -471,20 +520,85 @@ BEGIN
             END
         END
 
-        INSERT INTO article_workflow_logs (
-            article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
-            qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
-            remark, target_division_id, received_at, received_by_resource_id, received_remark,
-            created_at, created_by
-        )
-        VALUES (
-            @ArticleWorkflowId, @BundleId, @ArticleSizeId, @DivisionId, @ResourceId, NULL,
-            @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
-            @Remark, @ComputedTargetDivisionId, @AutoReceivedAt, @AutoReceivedByResourceId, @AutoReceivedRemark,
-            SYSDATETIME(), @UserId
-        );
+        -- Prompt 41: INSERT baris + INSERT print_jobs kupon (kalau berlaku, jalur auto-terima)
+        -- HARUS satu transaksi -- kalau insert print_jobs gagal, baris log ikut batal.
+        DECLARE @NewLogId INT;
+        BEGIN TRAN;
+        BEGIN TRY
+            INSERT INTO article_workflow_logs (
+                article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
+                qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
+                remark, target_division_id, received_at, received_by_resource_id, received_remark,
+                created_at, created_by
+            )
+            VALUES (
+                @ArticleWorkflowId, @BundleId, @ArticleSizeId, @DivisionId, @ResourceId, NULL,
+                @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
+                @Remark, @ComputedTargetDivisionId, @AutoReceivedAt, @AutoReceivedByResourceId, @AutoReceivedRemark,
+                SYSDATETIME(), @UserId
+            );
 
-        SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
+            SET @NewLogId = CAST(SCOPE_IDENTITY() AS INT);
+
+            -- Prompt 41: kupon borongan -- hanya jalur auto-terima (@AutoReceivedAt terisi di atas)
+            -- yang bisa mengisi received_at langsung di sini; RECEIVE manual biasa ditangani di
+            -- action RECEIVE sendiri. Lihat blok komentar besar di atas CREATE PROCEDURE.
+            IF @AutoReceivedAt IS NOT NULL AND EXISTS (
+                SELECT 1 FROM article_workflows WHERE article_workflow_id = @ArticleWorkflowId AND print_kupon = 1
+            )
+            BEGIN
+                DECLARE @KuponPayload_Create NVARCHAR(MAX) = (
+                    SELECT
+                        awl.workflow_log_id AS workflow_log_id,
+                        b.serial AS serial,
+                        b.bundle_no AS bundle_no,
+                        pr.bundle_letter AS bundle_letter,
+                        pr.project_name AS project_name,
+                        a.article_name AS article_name,
+                        a.style AS style,
+                        a.color AS color,
+                        spd.size_name AS size_name,
+                        awl.qty_ok AS qty_ok,
+                        awl.qty_reject_print AS qty_reject_print,
+                        awl.qty_reject_fabric AS qty_reject_fabric,
+                        awl.qty_reject_sewing AS qty_reject_sewing,
+                        awl.qty_reject_rework AS qty_reject_rework,
+                        awl.qty_lost AS qty_lost,
+                        ISNULL(ben.employee_name, ISNULL(brn.resource_name, ISNULL(arn.resource_name, N'-'))) AS tailor_name,
+                        aw.step_name AS step_name,
+                        dv.division_name AS division_name,
+                        lrn.resource_name AS line_resource_name,
+                        awl.received_at AS received_at,
+                        awl.created_at AS created_at,
+                        awl.updated_at AS updated_at
+                    FROM article_workflow_logs awl
+                    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                    INNER JOIN articles a ON a.article_id = aw.article_id
+                    INNER JOIN projects pr ON pr.project_id = a.project_id
+                    LEFT JOIN divisions dv ON dv.division_id = awl.division_id
+                    LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+                    LEFT JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                    LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                    LEFT JOIN resources brn ON brn.resource_id = b.resource_id
+                    LEFT JOIN resources arn ON arn.resource_id = awl.resource_id
+                    LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+                    LEFT JOIN resources lrn ON lrn.resource_id = ben.resource_id
+                    WHERE awl.workflow_log_id = @NewLogId
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+                );
+
+                INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+                VALUES ('KUPON_BORONGAN', @NewLogId, @KuponPayload_Create, 'PENDING', SYSDATETIME(), @UserId);
+            END
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
+
+        SELECT @NewLogId AS NewId;
     END
 
     ELSE IF @Action = 'UPDATE'
@@ -710,11 +824,84 @@ BEGIN
             RETURN;
         END
 
-        UPDATE article_workflow_logs
-        SET received_at = SYSDATETIME(),
-            received_by_resource_id = @ReceivedByResourceId,
-            received_remark = @ReceivedRemark
-        WHERE workflow_log_id = @Id;
+        -- Prompt 43: @ReceivedByResourceId dulu tidak pernah dicek harus milik @RecTargetDivisionId
+        -- (divisi tujuan) sebelum di-UPDATE ke received_by_resource_id -- lubang yang sama dengan
+        -- CREATE di atas, lihat komentar di sana.
+        IF @ReceivedByResourceId IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM resources WHERE resource_id = @ReceivedByResourceId AND division_id = @RecTargetDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Penerima bukan resource milik divisi ini.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 41: UPDATE received_at + INSERT print_jobs kupon (kalau berlaku) HARUS satu
+        -- transaksi -- kalau insert print_jobs gagal, penerimaan ikut batal (bukan partial).
+        BEGIN TRAN;
+        BEGIN TRY
+            UPDATE article_workflow_logs
+            SET received_at = SYSDATETIME(),
+                received_by_resource_id = @ReceivedByResourceId,
+                received_remark = @ReceivedRemark
+            WHERE workflow_log_id = @Id;
+
+            -- Prompt 41: kupon borongan -- lihat blok komentar besar di atas CREATE PROCEDURE.
+            IF EXISTS (
+                SELECT 1 FROM article_workflow_logs awl
+                INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL AND aw.print_kupon = 1
+            )
+            BEGIN
+                DECLARE @KuponPayload_Receive NVARCHAR(MAX) = (
+                    SELECT
+                        awl.workflow_log_id AS workflow_log_id,
+                        b.serial AS serial,
+                        b.bundle_no AS bundle_no,
+                        pr.bundle_letter AS bundle_letter,
+                        pr.project_name AS project_name,
+                        a.article_name AS article_name,
+                        a.style AS style,
+                        a.color AS color,
+                        spd.size_name AS size_name,
+                        awl.qty_ok AS qty_ok,
+                        awl.qty_reject_print AS qty_reject_print,
+                        awl.qty_reject_fabric AS qty_reject_fabric,
+                        awl.qty_reject_sewing AS qty_reject_sewing,
+                        awl.qty_reject_rework AS qty_reject_rework,
+                        awl.qty_lost AS qty_lost,
+                        ISNULL(ben.employee_name, ISNULL(brn.resource_name, ISNULL(arn.resource_name, N'-'))) AS tailor_name,
+                        aw.step_name AS step_name,
+                        dv.division_name AS division_name,
+                        lrn.resource_name AS line_resource_name,
+                        awl.received_at AS received_at,
+                        awl.created_at AS created_at,
+                        awl.updated_at AS updated_at
+                    FROM article_workflow_logs awl
+                    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                    INNER JOIN articles a ON a.article_id = aw.article_id
+                    INNER JOIN projects pr ON pr.project_id = a.project_id
+                    LEFT JOIN divisions dv ON dv.division_id = awl.division_id
+                    LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+                    LEFT JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                    LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                    LEFT JOIN resources brn ON brn.resource_id = b.resource_id
+                    LEFT JOIN resources arn ON arn.resource_id = awl.resource_id
+                    LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+                    LEFT JOIN resources lrn ON lrn.resource_id = ben.resource_id
+                    WHERE awl.workflow_log_id = @Id
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+                );
+
+                INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+                VALUES ('KUPON_BORONGAN', @Id, @KuponPayload_Receive, 'PENDING', SYSDATETIME(), @UserId);
+            END
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'UNRECEIVE'
@@ -941,23 +1128,86 @@ BEGIN
         END
         DECLARE @RevWillAutoReceive BIT = CASE WHEN @RevAutoReceive = 1 AND @RevCounterpartResourceId IS NOT NULL THEN 1 ELSE 0 END;
 
-        UPDATE article_workflow_logs
-        SET qty_ok = @QtyOk,
-            qty_reject_print = @QtyRejectPrint,
-            qty_reject_fabric = @QtyRejectFabric,
-            qty_reject_sewing = @QtyRejectSewing,
-            qty_reject_rework = @QtyRejectRework,
-            qty_lost = @QtyLost,
-            remark = @Remark,
-            target_division_id = @NewTargetDivisionId,
-            resource_id = ISNULL(@ResourceId, resource_id),
-            received_at = CASE WHEN @RevWillAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
-            received_by_resource_id = CASE WHEN @RevWillAutoReceive = 1 THEN @RevCounterpartResourceId ELSE NULL END,
-            received_remark = CASE WHEN @RevWillAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
-            updated_at = SYSDATETIME(),
-            updated_by = @UserId,
-            updated_by_resource_id = @UpdatedByResourceId
-        WHERE workflow_log_id = @Id;
+        -- Prompt 41: UPDATE baris + INSERT print_jobs kupon (kalau berlaku, jalur auto-terima)
+        -- HARUS satu transaksi -- kalau insert print_jobs gagal, revisi ikut batal.
+        BEGIN TRAN;
+        BEGIN TRY
+            UPDATE article_workflow_logs
+            SET qty_ok = @QtyOk,
+                qty_reject_print = @QtyRejectPrint,
+                qty_reject_fabric = @QtyRejectFabric,
+                qty_reject_sewing = @QtyRejectSewing,
+                qty_reject_rework = @QtyRejectRework,
+                qty_lost = @QtyLost,
+                remark = @Remark,
+                target_division_id = @NewTargetDivisionId,
+                resource_id = ISNULL(@ResourceId, resource_id),
+                received_at = CASE WHEN @RevWillAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
+                received_by_resource_id = CASE WHEN @RevWillAutoReceive = 1 THEN @RevCounterpartResourceId ELSE NULL END,
+                received_remark = CASE WHEN @RevWillAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
+                updated_at = SYSDATETIME(),
+                updated_by = @UserId,
+                updated_by_resource_id = @UpdatedByResourceId
+            WHERE workflow_log_id = @Id;
+
+            -- Prompt 41: kupon borongan -- hanya jalur auto-terima (@RevWillAutoReceive = 1) yang
+            -- mengisi received_at di sini. Lihat blok komentar besar di atas CREATE PROCEDURE.
+            IF @RevWillAutoReceive = 1 AND EXISTS (
+                SELECT 1 FROM article_workflow_logs awl
+                INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                WHERE awl.workflow_log_id = @Id AND aw.print_kupon = 1
+            )
+            BEGIN
+                DECLARE @KuponPayload_Revise NVARCHAR(MAX) = (
+                    SELECT
+                        awl.workflow_log_id AS workflow_log_id,
+                        b.serial AS serial,
+                        b.bundle_no AS bundle_no,
+                        pr.bundle_letter AS bundle_letter,
+                        pr.project_name AS project_name,
+                        a.article_name AS article_name,
+                        a.style AS style,
+                        a.color AS color,
+                        spd.size_name AS size_name,
+                        awl.qty_ok AS qty_ok,
+                        awl.qty_reject_print AS qty_reject_print,
+                        awl.qty_reject_fabric AS qty_reject_fabric,
+                        awl.qty_reject_sewing AS qty_reject_sewing,
+                        awl.qty_reject_rework AS qty_reject_rework,
+                        awl.qty_lost AS qty_lost,
+                        ISNULL(ben.employee_name, ISNULL(brn.resource_name, ISNULL(arn.resource_name, N'-'))) AS tailor_name,
+                        aw.step_name AS step_name,
+                        dv.division_name AS division_name,
+                        lrn.resource_name AS line_resource_name,
+                        awl.received_at AS received_at,
+                        awl.created_at AS created_at,
+                        awl.updated_at AS updated_at
+                    FROM article_workflow_logs awl
+                    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+                    INNER JOIN articles a ON a.article_id = aw.article_id
+                    INNER JOIN projects pr ON pr.project_id = a.project_id
+                    LEFT JOIN divisions dv ON dv.division_id = awl.division_id
+                    LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+                    LEFT JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+                    LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+                    LEFT JOIN resources brn ON brn.resource_id = b.resource_id
+                    LEFT JOIN resources arn ON arn.resource_id = awl.resource_id
+                    LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+                    LEFT JOIN resources lrn ON lrn.resource_id = ben.resource_id
+                    WHERE awl.workflow_log_id = @Id
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+                );
+
+                INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+                VALUES ('KUPON_BORONGAN', @Id, @KuponPayload_Revise, 'PENDING', SYSDATETIME(), @UserId);
+            END
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'ADJUST'
@@ -1090,10 +1340,10 @@ BEGIN
         -- Divisi tujuan terkunci sesuai urutan workflow (sama seperti @ComputedTargetDivisionId
         -- di CREATE) -- @TargetDivisionId dari pemanggil sekadar wajib diisi (bukti UI sudah
         -- menampilkannya), nilai final tetap dihitung ulang di sini, bukan dipercaya mentah.
-        DECLARE @AdjTargetDivisionId INT = NULL;
+        DECLARE @AdjTargetDivisionId INT = NULL, @AdjTargetAutoReceive BIT = 0;
         IF @QtyOk > 0
         BEGIN
-            SELECT TOP 1 @AdjTargetDivisionId = division_id
+            SELECT TOP 1 @AdjTargetDivisionId = division_id, @AdjTargetAutoReceive = ISNULL(auto_receive, 0)
             FROM article_workflows
             WHERE article_id = @AdjArticleId AND deleted_at IS NULL AND sort_order > @AdjSortOrder
             ORDER BY sort_order ASC;
@@ -1105,15 +1355,37 @@ BEGIN
             END
         END
 
+        -- Prompt 44: pola sama REVISE_HANDOVER -- ADJUST tidak punya form penerima manual,
+        -- jadi kalau counterpart pelaksana tidak valid, baris dibiarkan tidak diterima.
+        DECLARE @AdjReceivedAt DATETIME2 = NULL, @AdjReceivedByResourceId INT = NULL, @AdjReceivedRemark VARCHAR(500) = NULL;
+        IF @AdjTargetAutoReceive = 1
+        BEGIN
+            DECLARE @AdjCounterpartResourceId INT = NULL;
+            SELECT @AdjCounterpartResourceId = cp.resource_id
+            FROM resources r
+            INNER JOIN resources cp ON cp.resource_id = r.counterpart_resource_id
+            WHERE r.resource_id = @ResourceId AND cp.deleted_at IS NULL AND cp.is_active = 1
+              AND cp.division_id = @AdjTargetDivisionId;
+
+            IF @AdjCounterpartResourceId IS NOT NULL
+            BEGIN
+                SET @AdjReceivedAt = SYSDATETIME();
+                SET @AdjReceivedByResourceId = @AdjCounterpartResourceId;
+                SET @AdjReceivedRemark = 'Otomatis: auto-terima';
+            END
+        END
+
         INSERT INTO article_workflow_logs (
             article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
             qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
-            remark, target_division_id, log_type, created_at, created_by
+            remark, target_division_id, log_type, received_at, received_by_resource_id, received_remark,
+            created_at, created_by
         )
         VALUES (
             @ArticleWorkflowId, @BundleId, NULL, @AdjDivisionId, @ResourceId, NULL,
             @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
-            @Remark, @AdjTargetDivisionId, 'ADJUSTMENT', SYSDATETIME(), @UserId
+            @Remark, @AdjTargetDivisionId, 'ADJUSTMENT', @AdjReceivedAt, @AdjReceivedByResourceId, @AdjReceivedRemark,
+            SYSDATETIME(), @UserId
         );
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
@@ -1244,5 +1516,85 @@ BEGIN
     END
 
     SELECT @LastPrintJobId AS NewPrintJobId;
+END;
+GO
+
+-- Prompt 41 (lanjutan): "Print Hasil" -- tombol manual di BundleScanCard, muncul selama baris
+-- masih EDIT (dibuat divisi ini, belum diterima tujuan -- lihat SIS_Bundle_ScanInfo
+-- ActionPrintKupon) DAN step-nya ber-print_kupon = 1. Independen dari received_at (auto-print
+-- di SIS_WorkflowLog_Manage RECEIVE/CREATE/REVISE_HANDOVER baru jalan setelah diterima divisi
+-- berikutnya) -- ini memberi kupon fisik ke penjahit segera setelah submit, tanpa menunggu
+-- QC/divisi berikutnya menerima. Boleh ditekan berkali-kali (operator mungkin salah tekan/
+-- kertas kusut) -- tidak ada guard "sudah pernah cetak", payload dirakit ulang tiap kali
+-- (received_at biasanya masih NULL di titik ini, EscPosBuilder menampilkan "-").
+CREATE OR ALTER PROCEDURE SIS_WorkflowLog_PrintHasil
+    @WorkflowLogId INT,
+    @UserId        INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PrintKupon BIT;
+    SELECT @PrintKupon = aw.print_kupon
+    FROM article_workflow_logs awl
+    INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+    WHERE awl.workflow_log_id = @WorkflowLogId AND awl.deleted_at IS NULL;
+
+    IF @PrintKupon IS NULL
+    BEGIN
+        RAISERROR('Baris log tidak ditemukan.', 16, 1);
+        RETURN;
+    END
+
+    IF @PrintKupon = 0
+    BEGIN
+        RAISERROR('Step ini tidak mengaktifkan kupon borongan.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @Payload NVARCHAR(MAX) = (
+        SELECT
+            awl.workflow_log_id AS workflow_log_id,
+            b.serial AS serial,
+            b.bundle_no AS bundle_no,
+            pr.bundle_letter AS bundle_letter,
+            pr.project_name AS project_name,
+            a.article_name AS article_name,
+            a.style AS style,
+            a.color AS color,
+            spd.size_name AS size_name,
+            awl.qty_ok AS qty_ok,
+            awl.qty_reject_print AS qty_reject_print,
+            awl.qty_reject_fabric AS qty_reject_fabric,
+            awl.qty_reject_sewing AS qty_reject_sewing,
+            awl.qty_reject_rework AS qty_reject_rework,
+            awl.qty_lost AS qty_lost,
+            ISNULL(ben.employee_name, ISNULL(brn.resource_name, ISNULL(arn.resource_name, N'-'))) AS tailor_name,
+            aw.step_name AS step_name,
+            dv.division_name AS division_name,
+            lrn.resource_name AS line_resource_name,
+            awl.received_at AS received_at,
+            awl.created_at AS created_at,
+            awl.updated_at AS updated_at
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        INNER JOIN articles a ON a.article_id = aw.article_id
+        INNER JOIN projects pr ON pr.project_id = a.project_id
+        LEFT JOIN divisions dv ON dv.division_id = awl.division_id
+        LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
+        LEFT JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+        LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+        LEFT JOIN resources brn ON brn.resource_id = b.resource_id
+        LEFT JOIN resources arn ON arn.resource_id = awl.resource_id
+        LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+        LEFT JOIN resources lrn ON lrn.resource_id = ben.resource_id
+        WHERE awl.workflow_log_id = @WorkflowLogId
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+    );
+
+    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+    VALUES ('KUPON_BORONGAN', @WorkflowLogId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
 END;
 GO

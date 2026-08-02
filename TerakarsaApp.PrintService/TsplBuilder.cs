@@ -254,8 +254,11 @@ public static class TsplBuilder
 
         if (!string.IsNullOrWhiteSpace(data.Remark))
         {
-            var remarkText = TruncateToFit(Sanitize(data.Remark), 40, "1", 1, rightEdge - leftX);
-            Write(Text(leftX, y, "1", 1, 1, remarkText));
+            var remarkCap = Math.Min(40, (rightEdge - leftX) / CharWidth("1", 1));
+            var (remarkLine1, remarkLine2) = WrapTwoLines(Sanitize(data.Remark), remarkCap);
+            Write(Text(leftX, y, "1", 1, 1, remarkLine1));
+            if (!string.IsNullOrEmpty(remarkLine2))
+                Write(Text(leftX, y + 14, "1", 1, 1, remarkLine2));
         }
 
         Write($"BAR {leftX},290,{rightEdge - leftX},2\r\n");
@@ -340,6 +343,20 @@ public static class TsplBuilder
     {
         var widthCap = availableWidthDot / CharWidth(font, xMult);
         return Truncate(value, Math.Min(maxLen, widthCap));
+    }
+
+    // Pecah teks jadi maks 2 baris di batas spasi terdekat (bukan potong di tengah kata);
+    // baris kedua tetap dipotong dgn "..." kalau masih kepanjangan setelah dibagi 2.
+    private static (string Line1, string Line2) WrapTwoLines(string value, int maxCharsPerLine)
+    {
+        if (value.Length <= maxCharsPerLine) return (value, "");
+
+        var breakAt = value.LastIndexOf(' ', Math.Min(maxCharsPerLine, value.Length - 1));
+        if (breakAt <= 0) breakAt = maxCharsPerLine;
+
+        var line1 = value.Substring(0, breakAt).TrimEnd();
+        var line2 = Truncate(value.Substring(breakAt).TrimStart(), maxCharsPerLine);
+        return (line1, line2);
     }
 
     private static string Join(string separator, params string?[] parts) =>

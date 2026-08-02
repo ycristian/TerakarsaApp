@@ -1,7 +1,8 @@
 @typeparam TItem
+@inject IJSRuntime JS
 
 <div class="position-relative">
-    <input type="text" class="form-control" placeholder="@Placeholder"
+    <input @ref="inputRef" type="text" class="form-control" placeholder="@Placeholder"
            value="@(isOpen ? searchText : SelectedLabel)"
            disabled="@Disabled"
            @oninput="OnInput"
@@ -10,7 +11,7 @@
 
     @if (isOpen)
     {
-        <div class="dropdown-menu show" style="min-width: 100%; width: max-content; max-width: min(90vw, 480px); max-height: 220px; overflow-y: auto; z-index: 1051;">
+        <div class="dropdown-menu show" style="@DropdownStyle">
             @if (AllowNone)
             {
                 <button type="button" class="dropdown-item" @onmousedown="SelectNone" @onmousedown:preventDefault="true">@NoneLabel</button>
@@ -41,8 +42,21 @@
     [Parameter] public string NoneLabel { get; set; } = "- Tidak ada -";
     [Parameter] public bool Disabled { get; set; } = false;
 
+    private ElementReference inputRef;
     private bool isOpen = false;
     private string searchText = string.Empty;
+    private bool openUpward = false;
+    private double maxHeightPx = PreferredMaxHeight;
+
+    private const double PreferredMaxHeight = 320;
+    private const double MinUsableHeight = 140;
+    private const double ViewportBuffer = 12;
+
+    private string DropdownStyle =>
+        $"min-width: 100%; width: max-content; max-width: min(90vw, 480px); " +
+        $"max-height: {maxHeightPx.ToString(System.Globalization.CultureInfo.InvariantCulture)}px; " +
+        $"overflow-y: auto; z-index: 1051;" +
+        (openUpward ? " top: auto; bottom: 100%;" : string.Empty);
 
     private string SelectedLabel
     {
@@ -58,16 +72,50 @@
         ? Items
         : Items.Where(i => TextSelector(i).Contains(searchText, StringComparison.OrdinalIgnoreCase)).ToList();
 
-    private void OnFocus()
+    private async Task OnFocus()
     {
         isOpen = true;
         searchText = string.Empty;
+        await UpdatePositionAsync();
     }
 
-    private void OnInput(ChangeEventArgs e)
+    private async Task OnInput(ChangeEventArgs e)
     {
         searchText = e.Value?.ToString() ?? string.Empty;
         isOpen = true;
+        await UpdatePositionAsync();
+    }
+
+    private async Task UpdatePositionAsync()
+    {
+        try
+        {
+            var space = await JS.InvokeAsync<DropdownSpace>("getDropdownSpace", inputRef);
+
+            if (space.SpaceBelow - ViewportBuffer >= MinUsableHeight || space.SpaceBelow >= space.SpaceAbove)
+            {
+                openUpward = false;
+                maxHeightPx = Math.Clamp(space.SpaceBelow - ViewportBuffer, MinUsableHeight, PreferredMaxHeight);
+            }
+            else
+            {
+                openUpward = true;
+                maxHeightPx = Math.Clamp(space.SpaceAbove - ViewportBuffer, MinUsableHeight, PreferredMaxHeight);
+            }
+        }
+        catch (JSException)
+        {
+            openUpward = false;
+            maxHeightPx = PreferredMaxHeight;
+        }
+
+        StateHasChanged();
+    }
+
+    private class DropdownSpace
+    {
+        public double SpaceBelow { get; set; }
+        public double SpaceAbove { get; set; }
     }
 
     private async Task OnBlur()

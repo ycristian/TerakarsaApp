@@ -125,6 +125,7 @@ else
                                         <th>Divisi</th>
                                         <th>Butuh Bundle</th>
                                         <th>Auto Terima</th>
+                                        <th>Kupon</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -136,6 +137,7 @@ else
                                             <td>@s.DivisionName</td>
                                             <td>@(s.RequiresBundle ? "Ya" : "Tidak")</td>
                                             <td>@(s.AutoReceive ? "Ya" : "Tidak")</td>
+                                            <td>@(s.PrintKupon ? "Ya" : "Tidak")</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -186,6 +188,7 @@ else
                                         <th style="width: 10%;">Urutan</th>
                                         <th style="width: 12%;">Butuh Bundle</th>
                                         <th style="width: 13%;">Auto Terima</th>
+                                        <th style="width: 10%;">Kupon</th>
                                         <th style="width: 60px;"></th>
                                     </tr>
                                 </thead>
@@ -202,10 +205,14 @@ else
                                             </td>
                                             <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
                                             <td class="text-center">
-                                                <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                                <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" @bind:after="() => OnRequiresBundleChanged(row)" title="Butuh bundle" />
                                             </td>
                                             <td class="text-center">
                                                 <input type="checkbox" class="form-check-input" @bind="row.AutoReceive" title="Auto terima" />
+                                            </td>
+                                            <td class="text-center">
+                                                <input type="checkbox" class="form-check-input" @bind="row.PrintKupon" disabled="@(!row.RequiresBundle)"
+                                                       title="@(row.RequiresBundle ? "Cetak kupon borongan otomatis saat hasil step ini dikonfirmasi diterima." : "Kupon hanya untuk step bundle")" />
                                             </td>
                                             <td class="text-center">
                                                 <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveStepRow(row)" disabled="@(formModel.Steps.Count <= 1)"><i class="fe fe-trash-2"></i></button>
@@ -356,7 +363,8 @@ else
                 DivisionId = s.DivisionId,
                 SortOrder = s.SortOrder,
                 RequiresBundle = s.RequiresBundle,
-                AutoReceive = s.AutoReceive
+                AutoReceive = s.AutoReceive,
+                PrintKupon = s.PrintKupon
             }).ToList()
         };
         errorMessage = string.Empty;
@@ -378,6 +386,14 @@ else
     {
         if (formModel.Steps.Count <= 1) return;
         formModel.Steps.Remove(row);
+    }
+
+    // Prompt 41: kupon hanya berlaku utk step ber-bundle -- matikan checkbox Kupon otomatis
+    // kalau Butuh Bundle dimatikan (SP menolak kombinasi ini juga, ini cuma UX).
+    private void OnRequiresBundleChanged(WorkflowTemplateStepRowModel row)
+    {
+        if (!row.RequiresBundle)
+            row.PrintKupon = false;
     }
 
     private async Task HandleSubmit()
@@ -412,7 +428,8 @@ else
             DivisionId = s.DivisionId,
             SortOrder = s.SortOrder,
             RequiresBundle = s.RequiresBundle,
-            AutoReceive = s.AutoReceive
+            AutoReceive = s.AutoReceive,
+            PrintKupon = s.PrintKupon
         }).ToList();
 
         (bool Success, string Error) result;
@@ -506,5 +523,6 @@ else
         public int SortOrder { get; set; }
         public bool RequiresBundle { get; set; } = true;
         public bool AutoReceive { get; set; }
+        public bool PrintKupon { get; set; }
     }
 }

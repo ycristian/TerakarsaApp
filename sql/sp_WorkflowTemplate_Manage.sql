@@ -4,6 +4,10 @@
 -- UPDATE: baris dengan Id -> update, baris tanpa Id (NULL) -> insert baru,
 -- baris lama yang tidak ada lagi di JSON -> soft delete.
 -- Pengambilan data ada di procedure terpisah: sp_WorkflowTemplate_Select.sql.
+--
+-- Prompt 41 -- print_kupon per step: sama pola dengan auto_receive (JSON @Steps membawa
+-- PrintKupon). v1 hanya valid utk step ber-bundle -- step manapun di JSON dengan
+-- PrintKupon = 1 DAN RequiresBundle = 0 ditolak (RAISERROR), baik CREATE maupun UPDATE.
 
 SET ANSI_NULLS ON;
 GO
@@ -42,6 +46,15 @@ BEGIN
             RETURN;
         END
 
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (StepName VARCHAR(150) '$.StepName', RequiresBundle BIT '$.RequiresBundle', PrintKupon BIT '$.PrintKupon')
+            WHERE ISNULL(PrintKupon, 0) = 1 AND RequiresBundle = 0
+        )
+        BEGIN
+            RAISERROR('Kupon hanya berlaku untuk step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             INSERT INTO workflow_templates (workflow_code, workflow_name, created_at, created_by)
@@ -49,15 +62,16 @@ BEGIN
 
             DECLARE @NewTemplateId INT = CAST(SCOPE_IDENTITY() AS INT);
 
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
-            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
+            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     StepName       VARCHAR(150) '$.StepName',
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
-                    AutoReceive    BIT          '$.AutoReceive'
+                    AutoReceive    BIT          '$.AutoReceive',
+                    PrintKupon     BIT          '$.PrintKupon'
                 ) j;
 
             COMMIT TRAN;
@@ -93,6 +107,15 @@ BEGIN
             RETURN;
         END
 
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (StepName VARCHAR(150) '$.StepName', RequiresBundle BIT '$.RequiresBundle', PrintKupon BIT '$.PrintKupon')
+            WHERE ISNULL(PrintKupon, 0) = 1 AND RequiresBundle = 0
+        )
+        BEGIN
+            RAISERROR('Kupon hanya berlaku untuk step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             UPDATE workflow_templates
@@ -109,6 +132,7 @@ BEGIN
                 wts.sort_order = j.SortOrder,
                 wts.requires_bundle = j.RequiresBundle,
                 wts.auto_receive = ISNULL(j.AutoReceive, 0),
+                wts.print_kupon = ISNULL(j.PrintKupon, 0),
                 wts.updated_at = SYSDATETIME(),
                 wts.updated_by = @UserId
             FROM workflow_template_steps wts
@@ -119,7 +143,8 @@ BEGIN
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
-                    AutoReceive    BIT          '$.AutoReceive'
+                    AutoReceive    BIT          '$.AutoReceive',
+                    PrintKupon     BIT          '$.PrintKupon'
                 ) j ON j.Id = wts.step_id
             WHERE wts.workflow_template_id = @Id AND wts.deleted_at IS NULL;
 
@@ -139,8 +164,8 @@ BEGIN
               );
 
             -- Baris tanpa Id -> insert baru
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
-            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
+            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     Id             INT          '$.Id',
@@ -148,7 +173,8 @@ BEGIN
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
-                    AutoReceive    BIT          '$.AutoReceive'
+                    AutoReceive    BIT          '$.AutoReceive',
+                    PrintKupon     BIT          '$.PrintKupon'
                 ) j
             WHERE j.Id IS NULL;
 

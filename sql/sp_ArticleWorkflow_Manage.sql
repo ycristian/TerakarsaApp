@@ -17,6 +17,11 @@
 -- Prompt 34 -- auto_receive per step: APPLY menyalin dari workflow_template_steps seperti
 -- kolom lain; SAVE menerima AutoReceive di JSON @Steps seperti RequiresBundle. Step Bundling
 -- implisit selalu auto_receive = 0 (default kolom, tidak pernah diisi eksplisit di sini).
+--
+-- Prompt 41 -- print_kupon per step: sama pola dengan auto_receive. APPLY menyalin dari
+-- template (sudah divalidasi valid di sana); SAVE menerima PrintKupon di JSON @Steps dan
+-- menolak (RAISERROR) kalau PrintKupon = 1 pada step RequiresBundle = 0. Step Bundling
+-- implisit selalu print_kupon = 0 (default kolom, tidak pernah diisi eksplisit di sini).
 
 SET ANSI_NULLS ON;
 GO
@@ -80,8 +85,8 @@ BEGIN
 
         BEGIN TRAN;
         BEGIN TRY
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
-            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, wts.auto_receive, SYSDATETIME(), @UserId
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
+            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, wts.auto_receive, wts.print_kupon, SYSDATETIME(), @UserId
             FROM workflow_template_steps wts
             WHERE wts.workflow_template_id = @WorkflowTemplateId AND wts.deleted_at IS NULL;
 
@@ -138,6 +143,15 @@ BEGIN
             RETURN;
         END
 
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (StepName VARCHAR(150) '$.StepName', RequiresBundle BIT '$.RequiresBundle', PrintKupon BIT '$.PrintKupon')
+            WHERE ISNULL(PrintKupon, 0) = 1 AND RequiresBundle = 0
+        )
+        BEGIN
+            RAISERROR('Kupon hanya berlaku untuk step ber-bundle.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             -- Baris dengan Id -> update (workflow_template_id asal tidak diubah). JSON tidak
@@ -148,6 +162,7 @@ BEGIN
                 aw.sort_order = j.SortOrder,
                 aw.requires_bundle = j.RequiresBundle,
                 aw.auto_receive = ISNULL(j.AutoReceive, 0),
+                aw.print_kupon = ISNULL(j.PrintKupon, 0),
                 aw.updated_at = SYSDATETIME(),
                 aw.updated_by = @UserId
             FROM article_workflows aw
@@ -158,7 +173,8 @@ BEGIN
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
-                    AutoReceive    BIT          '$.AutoReceive'
+                    AutoReceive    BIT          '$.AutoReceive',
+                    PrintKupon     BIT          '$.PrintKupon'
                 ) j ON j.Id = aw.article_workflow_id
             WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL;
 
@@ -180,8 +196,8 @@ BEGIN
               );
 
             -- Baris tanpa Id -> insert baru, workflow_template_id = NULL (step manual)
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, created_at, created_by)
-            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), SYSDATETIME(), @UserId
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
+            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     Id             INT          '$.Id',
@@ -189,7 +205,8 @@ BEGIN
                     DivisionId     INT          '$.DivisionId',
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
-                    AutoReceive    BIT          '$.AutoReceive'
+                    AutoReceive    BIT          '$.AutoReceive',
+                    PrintKupon     BIT          '$.PrintKupon'
                 ) j
             WHERE j.Id IS NULL;
 

@@ -510,12 +510,19 @@ BEGIN
         END
 
         -- 4. RIWAYAT -- resource_id baris hidup terakhir bundle ini yang division_id = @DivisionId.
+        -- Fix (Prompt 43): kandidat ini dulu TIDAK memfilter r.division_id = @DivisionId (beda
+        -- dari 3 kandidat lain di atas) -- t.DivisionId = @DivisionId hanya menjamin BARIS LOG-nya
+        -- ada di divisi ini, bukan resource pelaksana baris itu sendiri. Baris lama yang salah
+        -- pelaksana (lihat sql/repair_43_pelaksana_divisi_check.sql) jadi ikut disarankan lagi
+        -- sebagai operator sesi berikutnya -- lubang yang membuat resource divisi lain terus
+        -- menular lewat auto-login. Ditambah r.division_id = @DivisionId supaya konsisten dengan
+        -- syarat "kandidat WAJIB ... division_id = @DivisionId" di komentar pembuka blok ini.
         IF @SuggestedResourceId IS NULL
         BEGIN
             SELECT TOP 1 @SuggestedResourceId = t.ResourceId, @SuggestedResourceName = r.resource_name
             FROM @Timeline t
             INNER JOIN resources r ON r.resource_id = t.ResourceId
-            WHERE t.DivisionId = @DivisionId AND r.deleted_at IS NULL AND r.is_active = 1
+            WHERE t.DivisionId = @DivisionId AND r.deleted_at IS NULL AND r.is_active = 1 AND r.division_id = @DivisionId
             ORDER BY t.CreatedAt DESC;
 
             IF @SuggestedResourceId IS NOT NULL
@@ -613,6 +620,14 @@ BEGIN
 
     DECLARE @AllowedAdjust BIT = CASE WHEN EXISTS (SELECT 1 FROM @AdjustSteps) THEN 1 ELSE 0 END;
 
+    -- Prompt 41 (lanjutan): "Print Hasil" -- true kalau step @ActionArticleWorkflowId
+    -- ber-print_kupon = 1 -- dipakai client menampilkan tombol cetak kupon manual di kartu
+    -- (relevan terutama saat AllowedAction = 'EDIT', baris baru dibuat/belum diterima --
+    -- lihat SIS_WorkflowLog_PrintHasil).
+    DECLARE @ActionPrintKupon BIT = 0;
+    IF @ActionArticleWorkflowId IS NOT NULL
+        SELECT @ActionPrintKupon = ISNULL(print_kupon, 0) FROM article_workflows WHERE article_workflow_id = @ActionArticleWorkflowId;
+
     -- 3. Aksi (emisi hasil -- perhitungan sudah dilakukan di atas, sebelum result set 1)
     SELECT @AllowedAction AS AllowedAction, @ActionArticleWorkflowId AS ActionArticleWorkflowId,
            @ActionWorkflowLogId AS ActionWorkflowLogId, @Message AS Message, @IsLastStep AS IsLastStep,
@@ -623,7 +638,8 @@ BEGIN
            @ActionRemark AS ActionRemark, @AllowedAdjust AS AllowedAdjust,
            @NextAutoReceive AS NextAutoReceive,
            @NextCounterpartResourceId AS NextCounterpartResourceId, @NextCounterpartResourceName AS NextCounterpartResourceName,
-           @ReceiverPickerRequired AS ReceiverPickerRequired;
+           @ReceiverPickerRequired AS ReceiverPickerRequired,
+           @ActionPrintKupon AS ActionPrintKupon;
 
     -- 4. Saldo per step ber-bundle milik @DivisionId yang bisa disesuaikan (kosong kalau
     -- AllowedAdjust = 0).

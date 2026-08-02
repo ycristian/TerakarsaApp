@@ -86,6 +86,7 @@
                     @if (t.QtyOk > 0 || t.QtyRejectPrint != 0 || t.QtyRejectFabric != 0 || t.QtyRejectSewing != 0 || t.QtyRejectRework != 0 || t.QtyLost != 0 || !string.IsNullOrEmpty(t.TargetDivisionName) || !string.IsNullOrEmpty(t.ResourceName))
                     {
                         <div class="text-muted small">
+                            <div>No @t.Id</div>
                             @if (!string.IsNullOrEmpty(t.ResourceName))
                             {
                                 <div>Pelaksana: @(!string.IsNullOrEmpty(t.DivisionName) ? $"{t.DivisionName} - " : "")@t.ResourceName</div>
@@ -191,8 +192,20 @@
                             <text>Bundle ini sudah kamu serahkan, masih menunggu diterima tujuan — masih bisa direvisi.</text>
                         }
                     </span>
-                    <button class="btn btn-outline-primary btn-sm ms-2" disabled="@Busy" @onclick="OpenEditModal">Edit</button>
+                    <div class="d-flex gap-2 ms-2">
+                        @if (Info.Action.PrintKupon && Info.Action.ActionWorkflowLogId is not null)
+                        {
+                            <button class="btn btn-outline-success btn-sm text-nowrap" disabled="@(Busy || printHasilBusy)" @onclick="PrintHasil">
+                                <i class="fe fe-printer"></i> Print Hasil
+                            </button>
+                        }
+                        <button class="btn btn-outline-primary btn-sm" disabled="@Busy" @onclick="OpenEditModal">Edit</button>
+                    </div>
                 </div>
+                @if (!string.IsNullOrEmpty(printHasilFeedback))
+                {
+                    <div class="small mt-1 @(printHasilFeedback == "Kupon masuk antrian cetak." ? "text-success" : "text-danger")">@printHasilFeedback</div>
+                }
             }
             else
             {
@@ -247,27 +260,52 @@
                         <div class="row g-2 align-items-center mb-1">
                             <div class="col-6">Reject Print</div>
                             <div class="col-3">@adjustStep.SaldoRejectPrint</div>
-                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectPrint" /></div>
+                            <div class="col-3">
+                                <div class="input-group input-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" title="Balik tanda +/-" @onclick="() => adjustQtyRejectPrint = -adjustQtyRejectPrint">&plusmn;</button>
+                                    <input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectPrint" />
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-2 align-items-center mb-1">
                             <div class="col-6">Reject Bahan</div>
                             <div class="col-3">@adjustStep.SaldoRejectFabric</div>
-                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectFabric" /></div>
+                            <div class="col-3">
+                                <div class="input-group input-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" title="Balik tanda +/-" @onclick="() => adjustQtyRejectFabric = -adjustQtyRejectFabric">&plusmn;</button>
+                                    <input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectFabric" />
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-2 align-items-center mb-1">
                             <div class="col-6">Reject Jahit</div>
                             <div class="col-3">@adjustStep.SaldoRejectSewing</div>
-                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectSewing" /></div>
+                            <div class="col-3">
+                                <div class="input-group input-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" title="Balik tanda +/-" @onclick="() => adjustQtyRejectSewing = -adjustQtyRejectSewing">&plusmn;</button>
+                                    <input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectSewing" />
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-2 align-items-center mb-1">
                             <div class="col-6">Reject Rework</div>
                             <div class="col-3">@adjustStep.SaldoRejectRework</div>
-                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectRework" /></div>
+                            <div class="col-3">
+                                <div class="input-group input-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" title="Balik tanda +/-" @onclick="() => adjustQtyRejectRework = -adjustQtyRejectRework">&plusmn;</button>
+                                    <input type="number" class="form-control form-control-sm" @bind="adjustQtyRejectRework" />
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-2 align-items-center mb-1">
                             <div class="col-6">Hilang</div>
                             <div class="col-3">@adjustStep.SaldoLost</div>
-                            <div class="col-3"><input type="number" class="form-control form-control-sm" @bind="adjustQtyLost" /></div>
+                            <div class="col-3">
+                                <div class="input-group input-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" title="Balik tanda +/-" @onclick="() => adjustQtyLost = -adjustQtyLost">&plusmn;</button>
+                                    <input type="number" class="form-control form-control-sm" @bind="adjustQtyLost" />
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
                             <div class="col-6">Qty OK</div>
@@ -673,6 +711,26 @@
 
         printRejectBusyId = null;
         printRejectFeedback = success ? "Nota reject masuk antrian cetak." : error;
+    }
+
+    // Prompt 41 (lanjutan): "Print Hasil" -- cetak kupon manual segera setelah Kirim Hasil,
+    // muncul selama AllowedAction = "EDIT" (belum diterima) dan step-nya ber-print_kupon = 1.
+    // Boleh ditekan berkali-kali, tidak ada guard "sudah pernah cetak" (lihat
+    // SIS_WorkflowLog_PrintHasil).
+    private bool printHasilBusy;
+    private string printHasilFeedback = string.Empty;
+
+    private async Task PrintHasil()
+    {
+        if (Info.Action.ActionWorkflowLogId is null) return;
+
+        printHasilBusy = true;
+        printHasilFeedback = string.Empty;
+
+        var (success, error) = await StationApi.PrintHasilAsync(Info.Action.ActionWorkflowLogId.Value);
+
+        printHasilBusy = false;
+        printHasilFeedback = success ? "Kupon masuk antrian cetak." : error;
     }
 
     // Prompt 28: baris ADJUSTMENT boleh bernilai negatif (mutasi) -- tampilkan tanda +/- di

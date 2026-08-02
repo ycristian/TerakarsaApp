@@ -21,7 +21,8 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Log(LogLevel.Information,
-            $"TerakarsaApp.PrintService dimulai. DryRun={_options.DryRun}, Printer='{_options.PrinterName}', ApiBaseUrl={_options.ApiBaseUrl}, PollSeconds={_options.PollSeconds}, BatchSize={_options.BatchSize}");
+            $"TerakarsaApp.PrintService dimulai. DryRun={_options.DryRun}, PrinterLabelOn={_options.PrinterLabelOn}, PrinterThermalOn={_options.PrinterThermalOn}, " +
+            $"Printer='{_options.PrinterName}', KuponPrinterName='{_options.KuponPrinterName}', ApiBaseUrl={_options.ApiBaseUrl}, PollSeconds={_options.PollSeconds}, BatchSize={_options.BatchSize}");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -69,8 +70,16 @@ public class Worker : BackgroundService
         }
     }
 
+    private static readonly HashSet<string> KuponJobTypes = new() { "KUPON_BORONGAN", "REKAP_PRODUKSI" };
+
     private async Task ProcessJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
+        if (KuponJobTypes.Contains(job.JobType))
+        {
+            await ProcessKuponJobAsync(job, ct);
+            return;
+        }
+
         if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL" && job.JobType != "REJECT_NOTE")
         {
             Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung.");
@@ -110,18 +119,76 @@ public class Worker : BackgroundService
 
         try
         {
-            if (_options.DryRun)
+            if (_options.DryRun || !_options.PrinterLabelOn)
             {
                 var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
                 Directory.CreateDirectory(dryRunDir);
                 var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.tspl");
                 await File.WriteAllBytesAsync(path, tspl, ct);
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun) serial {serial}: TSPL ditulis ke {path}");
+                var reason = _options.DryRun ? "DryRun" : "PrinterLabelOn=false";
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} ({reason}) serial {serial}: TSPL ditulis ke {path}");
             }
             else
             {
                 RawPrinterHelper.SendBytesToPrinter(_options.PrinterName, tspl);
                 Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {serial}: dicetak ke printer '{_options.PrinterName}'.");
+            }
+
+            await ReportSafeAsync(job.PrintJobId, true, null, ct);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, $"Job #{job.PrintJobId}: gagal cetak - {ex.Message}");
+            await ReportSafeAsync(job.PrintJobId, false, ex.Message, ct);
+        }
+    }
+
+    // Prompt 41/42: KUPON_BORONGAN/REKAP_PRODUKSI -- printer struk ESC/POS terpisah (KuponPrinterName),
+    // via RawPrinterHelper yang sama (raw bytes, tanpa driver/SDK khusus).
+    private async Task ProcessKuponJobAsync(PrintJobClaimedDto job, CancellationToken ct)
+    {
+        byte[] escpos;
+        string label;
+        try
+        {
+            if (job.JobType == "REKAP_PRODUKSI")
+            {
+                var rekapPayload = EscPosBuilder.ParseRekapProduksiPayload(job.Payload);
+                label = rekapPayload.EmployeeName ?? rekapPayload.ResourceName ?? rekapPayload.DivisionName;
+                escpos = EscPosBuilder.BuildRekapProduksi(rekapPayload, _options.KuponPaperWidthChars);
+            }
+            else
+            {
+                var kuponPayload = EscPosBuilder.ParseKuponBoronganPayload(job.Payload);
+                label = kuponPayload.Serial ?? $"WL#{kuponPayload.WorkflowLogId}";
+                escpos = EscPosBuilder.BuildKuponBorongan(kuponPayload, _options.KuponPaperWidthChars);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, $"Job #{job.PrintJobId}: payload rusak - {ex.Message}");
+            await ReportSafeAsync(job.PrintJobId, false, $"Payload rusak: {ex.Message}", ct);
+            return;
+        }
+
+        try
+        {
+            if (_options.DryRun || !_options.PrinterThermalOn)
+            {
+                var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
+                Directory.CreateDirectory(dryRunDir);
+                var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.escpos");
+                await File.WriteAllBytesAsync(path, escpos, ct);
+                var reason = _options.DryRun ? "DryRun" : "PrinterThermalOn=false";
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} ({reason}) {label}: ESC/POS ditulis ke {path}");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_options.KuponPrinterName))
+                    throw new InvalidOperationException("Printer kupon belum dikonfigurasi.");
+
+                RawPrinterHelper.SendBytesToPrinter(_options.KuponPrinterName, escpos);
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} {label}: dicetak ke printer '{_options.KuponPrinterName}'.");
             }
 
             await ReportSafeAsync(job.PrintJobId, true, null, ct);

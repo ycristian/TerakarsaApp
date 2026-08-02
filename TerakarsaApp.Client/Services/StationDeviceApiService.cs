@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Divisions;
 using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Projects;
@@ -143,6 +144,17 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak nota reject." : error.Trim('"'));
+    }
+
+    // Prompt 41 (lanjutan): "Print Hasil" -- cetak kupon manual segera setelah Kirim Hasil,
+    // muncul di BundleScanCard selama baris masih EDIT (belum diterima) dan step-nya
+    // ber-print_kupon = 1.
+    public async Task<(bool Success, string Error)> PrintHasilAsync(int workflowLogId)
+    {
+        var response = await _http.PostAsync($"api/station/logs/{workflowLogId}/print-hasil", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak kupon." : error.Trim('"'));
     }
 
     // Prompt 22b: resourceId = operator sesi saat ini, dipakai server untuk filter antrian
@@ -388,5 +400,34 @@ public class StationDeviceApiService
         var response = await _http.GetAsync($"api/station/packing/scan/{Uri.EscapeDataString(serial)}");
         if (!response.IsSuccessStatusCode) return null;
         return await response.Content.ReadFromJsonAsync<PackScanInfoDto>();
+    }
+
+    // Prompt 42: dropdown "Divisi" (level pertama) di tab Rekap Produksi.
+    public async Task<List<DivisionDto>> GetStationDivisionsAsync()
+    {
+        var response = await _http.GetAsync("api/station/divisions");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<DivisionDto>>() ?? new();
+    }
+
+    // Prompt 42: tab "Rekap Produksi" -- header + detail harian + WIP snapshot, menggantikan
+    // Rekap Penjahit Prompt 41.
+    public async Task<RekapStrukResultDto?> GetRekapStrukAsync(string level, int divisionId, int? resourceId, int? employeeId, DateTime date)
+    {
+        var url = $"api/station/rekap-struk?level={Uri.EscapeDataString(level)}&divisionId={divisionId}&date={date:yyyy-MM-dd}";
+        if (resourceId.HasValue) url += $"&resourceId={resourceId.Value}";
+        if (employeeId.HasValue) url += $"&employeeId={employeeId.Value}";
+
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<RekapStrukResultDto>();
+    }
+
+    public async Task<(bool Success, string Error)> PrintRekapStrukAsync(RekapStrukPrintRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/rekap-struk/print", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak rekap." : error.Trim('"'));
     }
 }

@@ -9,6 +9,9 @@ public class WorkflowTemplateStepDto
     public int SortOrder { get; set; }
     public bool RequiresBundle { get; set; } = true;
     public bool AutoReceive { get; set; }
+    // Prompt 41: cetak kupon borongan otomatis saat baris step ini diterima -- hanya valid
+    // utk RequiresBundle = true, ditolak SP kalau tidak.
+    public bool PrintKupon { get; set; }
 }
 
 public class WorkflowTemplateDto
@@ -32,6 +35,7 @@ public class WorkflowTemplateStepRequest
     public int SortOrder { get; set; }
     public bool RequiresBundle { get; set; } = true;
     public bool AutoReceive { get; set; }
+    public bool PrintKupon { get; set; }
 }
 
 public class WorkflowTemplateCreateRequest

@@ -103,3 +103,51 @@ public class StationMeDto
     // Prompt 25: gate tab "Packing" di /station.
     public bool EnablePacking { get; set; }
 }
+
+// Prompt 42: tab "Rekap Produksi" di /station (menggantikan Rekap Penjahit Prompt 41) -- lihat
+// SIS_Report_RekapStruk di sql/sp_Report_RekapStruk.sql. Level = pilihan terdalam yang diisi
+// di dropdown cascading Divisi -> Resource -> Penjahit ("DIVISION" | "RESOURCE" | "EMPLOYEE").
+public class RekapStrukHeaderDto
+{
+    public string DivisionName { get; set; } = string.Empty;
+    public string? ResourceName { get; set; }
+    public string? EmployeeName { get; set; }
+    public string Level { get; set; } = "DIVISION";
+    public DateTime PeriodStart { get; set; }
+    public DateTime PeriodEnd { get; set; }
+    public int TotalQty { get; set; }
+}
+
+// Baris Detail (harian, Result set 2) maupun WIP (snapshot, Result set 3) -- bentuknya sama
+// ("granularitas sama seperti result set 2" per prompt), bedanya EventDate NULL utk WIP (bukan
+// kejadian harian) dan kelima kolom reject/lost WIP selalu 0. Label sudah diformat SP sesuai
+// Level (bundle letter+no / nama penjahit / nama resource) -- client tinggal cetak apa adanya.
+public class RekapStrukRowDto
+{
+    public DateTime? EventDate { get; set; }
+    public string ArticleName { get; set; } = string.Empty;
+    public string? SizeName { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public int Qty { get; set; }
+    public int QtyRejectPrint { get; set; }
+    public int QtyRejectFabric { get; set; }
+    public int QtyRejectSewing { get; set; }
+    public int QtyRejectRework { get; set; }
+    public int QtyLost { get; set; }
+}
+
+public class RekapStrukResultDto
+{
+    public RekapStrukHeaderDto? Header { get; set; }
+    public List<RekapStrukRowDto> Detail { get; set; } = new();
+    public List<RekapStrukRowDto> Wip { get; set; } = new();
+}
+
+public class RekapStrukPrintRequest
+{
+    public string Level { get; set; } = "DIVISION";
+    public int DivisionId { get; set; }
+    public int? ResourceId { get; set; }
+    public int? EmployeeId { get; set; }
+    public DateTime Date { get; set; }
+}

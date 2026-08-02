@@ -389,6 +389,7 @@ CREATE TABLE workflow_template_steps(
  sort_order int not null default 0,
  requires_bundle bit not null default 1,     -- 0 = step boleh log tanpa bundle (mis. Cutting)
  auto_receive bit not null default 0,       -- serah ke step ini otomatis diterima (received_at terisi saat insert log)
+ print_kupon bit not null default 0,        -- Prompt 41: cetak kupon borongan saat baris step ini diterima (hanya valid requires_bundle = 1)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -418,6 +419,7 @@ CREATE TABLE article_workflows(
  sort_order int not null default 0,
  requires_bundle bit not null default 1,     -- salinan dari template step
  auto_receive bit not null default 0,       -- salinan dari template step; selalu 0 utk step Bundling implisit
+ print_kupon bit not null default 0,        -- Prompt 41: salinan dari template step; selalu 0 utk step Bundling implisit
  is_bundling bit not null default 0,         -- step Bundling implisit (disisipkan sistem saat APPLY, bukan dari template)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,

@@ -290,6 +290,7 @@ else
                                         <th style="width: 12%;">Urutan</th>
                                         <th style="width: 13%;">Butuh Bundle</th>
                                         <th style="width: 13%;">Auto Terima</th>
+                                        <th style="width: 10%;">Kupon</th>
                                         <th style="width: 60px;"></th>
                                     </tr>
                                 </thead>
@@ -323,6 +324,9 @@ else
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" disabled title="Auto terima (tidak berlaku utk step Bundling)" />
                                                 </td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" disabled title="Kupon (tidak berlaku utk step Bundling)" />
+                                                </td>
                                                 <td></td>
                                             </tr>
                                         }
@@ -339,10 +343,14 @@ else
                                                 </td>
                                                 <td><input type="number" class="form-control" @bind="row.SortOrder" /></td>
                                                 <td class="text-center">
-                                                    <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" title="Butuh bundle" />
+                                                    <input type="checkbox" class="form-check-input" @bind="row.RequiresBundle" @bind:after="() => OnWorkflowRequiresBundleChanged(row)" title="Butuh bundle" />
                                                 </td>
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" @bind="row.AutoReceive" title="Auto terima" />
+                                                </td>
+                                                <td class="text-center">
+                                                    <input type="checkbox" class="form-check-input" @bind="row.PrintKupon" disabled="@(!row.RequiresBundle)"
+                                                           title="@(row.RequiresBundle ? "Cetak kupon borongan otomatis saat hasil step ini dikonfirmasi diterima." : "Kupon hanya untuk step bundle")" />
                                                 </td>
                                                 <td class="text-center">
                                                     <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
@@ -924,7 +932,8 @@ else
                 DivisionId = s.DivisionId,
                 SortOrder = s.SortOrder,
                 RequiresBundle = s.RequiresBundle,
-                AutoReceive = s.AutoReceive
+                AutoReceive = s.AutoReceive,
+                PrintKupon = s.PrintKupon
             }).ToList();
             bundlingSteps = workflow.Steps.Where(s => s.IsBundling).ToList();
         }
@@ -984,6 +993,14 @@ else
         workflowRows.Remove(row);
     }
 
+    // Prompt 41: kupon hanya berlaku utk step ber-bundle -- matikan checkbox Kupon otomatis
+    // kalau Butuh Bundle dimatikan (SP menolak kombinasi ini juga, ini cuma UX).
+    private void OnWorkflowRequiresBundleChanged(WorkflowStepRowModel row)
+    {
+        if (!row.RequiresBundle)
+            row.PrintKupon = false;
+    }
+
     private async Task HandleSaveWorkflow()
     {
         if (ArticleId is null) return;
@@ -1016,7 +1033,8 @@ else
                 DivisionId = r.DivisionId,
                 SortOrder = r.SortOrder,
                 RequiresBundle = r.RequiresBundle,
-                AutoReceive = r.AutoReceive
+                AutoReceive = r.AutoReceive,
+                PrintKupon = r.PrintKupon
             }).ToList()
         });
 
@@ -1065,6 +1083,7 @@ else
         public int SortOrder { get; set; }
         public bool RequiresBundle { get; set; } = true;
         public bool AutoReceive { get; set; }
+        public bool PrintKupon { get; set; }
     }
 
     private class WorkflowDisplayItem

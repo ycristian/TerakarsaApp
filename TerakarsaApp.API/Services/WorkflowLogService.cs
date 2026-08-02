@@ -506,19 +506,23 @@ public class WorkflowLogService
         }
     }
 
-    public async Task<(bool Success, string Error)> ReceiveAsync(WorkflowLogReceiveInput input)
+    // Prompt 41: @UserId ditambahkan (dulu tidak dikirim) -- dipakai sbg created_by print_jobs
+    // kupon borongan kalau step asal baris ber-print_kupon = 1 (lihat SIS_WorkflowLog_Manage
+    // action RECEIVE).
+    public async Task<(bool Success, string Error)> ReceiveAsync(WorkflowLogReceiveInput input, int userId)
     {
         var actionParam = new SqlParameter("@Action", "RECEIVE");
         var idParam = new SqlParameter("@Id", input.WorkflowLogId);
         var receivedByParam = new SqlParameter("@ReceivedByResourceId", input.ReceivedByResourceId);
         var receivedRemarkParam = new SqlParameter("@ReceivedRemark", (object?)input.ReceivedRemark ?? DBNull.Value);
         var actingDivisionIdParam = new SqlParameter("@ActingDivisionId", (object?)input.ActingDivisionId ?? DBNull.Value);
+        var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @ReceivedByResourceId = @ReceivedByResourceId, @ReceivedRemark = @ReceivedRemark, @ActingDivisionId = @ActingDivisionId",
-                actionParam, idParam, receivedByParam, receivedRemarkParam, actingDivisionIdParam);
+                "EXEC SIS_WorkflowLog_Manage @Action = @Action, @Id = @Id, @ReceivedByResourceId = @ReceivedByResourceId, @ReceivedRemark = @ReceivedRemark, @ActingDivisionId = @ActingDivisionId, @UserId = @UserId",
+                actionParam, idParam, receivedByParam, receivedRemarkParam, actingDivisionIdParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -609,6 +613,28 @@ public class WorkflowLogService
                 .SqlQueryRaw<int>(
                     "EXEC SIS_WorkflowLog_PrintReject @WorkflowLogId = @WorkflowLogId, @Copies = @Copies, @UserId = @UserId",
                     idParam, copiesParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
+        }
+    }
+
+    // Prompt 41 (lanjutan): "Print Hasil" -- tombol manual di BundleScanCard, lihat
+    // SIS_WorkflowLog_PrintHasil.
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintHasilAsync(int workflowLogId, int userId)
+    {
+        var idParam = new SqlParameter("@WorkflowLogId", workflowLogId);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_WorkflowLog_PrintHasil @WorkflowLogId = @WorkflowLogId, @UserId = @UserId",
+                    idParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }
