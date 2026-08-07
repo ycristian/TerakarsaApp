@@ -108,9 +108,9 @@ public class StationDeviceApiService
 
     // Fix: "Hapus" bundle dari tab OUT station Bundling (baris sudah received_at tapi masih
     // WIP murni & dalam jendela 1 jam -- lihat StationPendingHandoverDto.ReceivedAt).
-    public async Task<(bool Success, string Error)> DeleteBundleAsync(int bundleId)
+    public async Task<(bool Success, string Error)> DeleteBundleAsync(int bundleId, string reason)
     {
-        var response = await _http.DeleteAsync($"api/station/bundles/{bundleId}");
+        var response = await _http.DeleteAsync($"api/station/bundles/{bundleId}?reason={Uri.EscapeDataString(reason)}");
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus bundle." : error.Trim('"'));

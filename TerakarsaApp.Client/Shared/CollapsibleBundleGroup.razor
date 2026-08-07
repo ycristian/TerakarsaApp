@@ -1,0 +1,60 @@
+@* Prompt 45/46: kartu grup (project+artikel) + tabel bundle di dalamnya, dipakai bersama oleh
+   tab "PO Berjalan" (Prompt 45), "Selesai" dan "Reject" (Prompt 46) pada LineDetailModal --
+   supaya markup kartu/collapse/"+N lainnya" tidak disalin ulang tiap tab. *@
+@typeparam TItem
+
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="cursor:pointer;" @onclick="ToggleCollapse">
+        <div>
+            <i class="fe @(IsCollapsed ? "fe-chevron-right" : "fe-chevron-down") me-1"></i>
+            @HeaderLeft
+        </div>
+        <div class="text-muted small">
+            @HeaderRight
+        </div>
+    </div>
+    @if (!IsCollapsed)
+    {
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr>@TableHeader</tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in VisibleItems)
+                    {
+                        @RowTemplate!(item)
+                    }
+                    @if (!IsExpanded && Items.Count > MaxVisible)
+                    {
+                        <tr>
+                            <td colspan="@ColSpan">
+                                <a href="javascript:void(0)" @onclick="Expand">+ @(Items.Count - MaxVisible) @MoreLabel</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public RenderFragment? HeaderLeft { get; set; }
+    [Parameter] public RenderFragment? HeaderRight { get; set; }
+    [Parameter] public RenderFragment? TableHeader { get; set; }
+    [Parameter] public RenderFragment<TItem>? RowTemplate { get; set; }
+    [Parameter] public List<TItem> Items { get; set; } = new();
+    [Parameter] public bool IsCollapsed { get; set; }
+    [Parameter] public EventCallback OnToggleCollapse { get; set; }
+    [Parameter] public bool IsExpanded { get; set; }
+    [Parameter] public EventCallback OnExpand { get; set; }
+    [Parameter] public int MaxVisible { get; set; } = 5;
+    [Parameter] public string MoreLabel { get; set; } = "bundle lainnya";
+    [Parameter] public int ColSpan { get; set; } = 8;
+
+    private List<TItem> VisibleItems => IsExpanded ? Items : Items.Take(MaxVisible).ToList();
+
+    private Task ToggleCollapse() => OnToggleCollapse.InvokeAsync();
+    private Task Expand() => OnExpand.InvokeAsync();
+}

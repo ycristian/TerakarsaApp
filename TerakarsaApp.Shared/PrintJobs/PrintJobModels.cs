@@ -5,6 +5,15 @@ namespace TerakarsaApp.Shared.PrintJobs;
 public class PrintJobClaimRequest
 {
     public int BatchSize { get; set; } = 5;
+
+    // Job_type yang printer-nya sedang ON di worker pemanggil (lihat PrinterLabelOn/
+    // PrinterThermalOn) -- job_type lain tidak diklaim sama sekali, tetap PENDING.
+    public List<string> JobTypes { get; set; } = new();
+
+    // Ad hoc (lanjutan Prompt 48): sama dengan PrintWorkerOptions.DryRun di worker pemanggil --
+    // kalau true, klaim dari print_jobs_dryrun (SIS_PrintJobDryRun_Claim), BUKAN print_jobs
+    // live, supaya testing tidak pernah menyentuh antrian cetak nyata.
+    public bool DryRun { get; set; }
 }
 
 public class PrintJobClaimedDto
@@ -14,6 +23,17 @@ public class PrintJobClaimedDto
     public int RefId { get; set; }
     public string Payload { get; set; } = string.Empty;
     public int RetryCount { get; set; }
+
+    // Prompt 48: printer tujuan diresolusi SAAT KLAIM lewat print_job_routes -> print_devices
+    // (menggantikan PrinterName tunggal di appsettings). RenderMode menentukan alur worker:
+    // 'RAW_TSPL' = jalur lama tanpa perubahan (TsplBuilder); 'TOKEN' = panggil
+    // GET api/print/render/{id} lalu terjemahkan lewat EscPosRenderer. CharsPerLine/
+    // CharsPerLineSmall hanya relevan untuk RenderMode TOKEN (lebar font A/B ESC/POS).
+    public string DeviceCode { get; set; } = string.Empty;
+    public string PrinterName { get; set; } = string.Empty;
+    public string RenderMode { get; set; } = string.Empty;
+    public int CharsPerLine { get; set; }
+    public int CharsPerLineSmall { get; set; }
 }
 
 public class PrintJobReportRequest
@@ -21,6 +41,17 @@ public class PrintJobReportRequest
     public int PrintJobId { get; set; }
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
+
+    // Ad hoc (lanjutan Prompt 48): sama seperti PrintJobClaimRequest.DryRun -- lapor ke
+    // SIS_PrintJobDryRun_Report (print_jobs_dryrun), bukan SIS_PrintJob_Report (live).
+    public bool DryRun { get; set; }
+}
+
+// Bentuk respons GET api/print/render/{printJobId} (Prompt 48).
+public class PrintRenderResponse
+{
+    [JsonPropertyName("tokenText")]
+    public string? TokenText { get; set; }
 }
 
 // Bentuk payload JSON print_jobs untuk job_type BUNDLE_LABEL (lihat sql/sp_Bundle_Manage.sql,
@@ -50,6 +81,11 @@ public class BundleLabelPayload
 
     [JsonPropertyName("article_name")]
     public string ArticleName { get; set; } = string.Empty;
+
+    // Prompt 35: catatan bebas bundles.remarks -- dicetak di bawah nama artikel (kolom kiri),
+    // TERPISAH dari Remark di bawah (article_workflow_logs.remark, kolom kanan).
+    [JsonPropertyName("bundle_remarks")]
+    public string? BundleRemarks { get; set; }
 
     [JsonPropertyName("style")]
     public string? Style { get; set; }
@@ -193,6 +229,11 @@ public class KuponBoronganPayload
     [JsonPropertyName("article_name")]
     public string ArticleName { get; set; } = string.Empty;
 
+    // Prompt 44: catatan bebas bundles.remarks, dicetak "Note : ..." setelah baris reject/lost
+    // kalau terisi (lihat EscPosBuilder.BuildKuponBorongan).
+    [JsonPropertyName("bundle_remarks")]
+    public string? BundleRemarks { get; set; }
+
     [JsonPropertyName("style")]
     public string? Style { get; set; }
 
@@ -327,4 +368,83 @@ public class RekapProduksiPayload
 
     [JsonPropertyName("wip_lines")]
     public List<RekapProduksiWipLine> WipLines { get; set; } = new();
+}
+
+// Fix: job_type REKAP_KARYAWAN -- tombol "Cetak Karyawan" terpisah dari "Cetak Struk"
+// (RekapProduksiPayload di atas, tidak diubah), lihat SIS_Report_RekapKaryawanPrint di
+// sql/sp_Report_RekapStruk.sql. Beda dari RekapProduksiPayload: satu HARI saja (bukan periode
+// gajian mingguan), baris sudah dipecah per bundle (Selesai) / per PO (WIP) -- pengelompokan
+// Line > Karyawan > PO(> Bundle utk Selesai) dilakukan di EscPosBuilder saat cetak, SP hanya
+// mengembalikan baris flat sudah terurut.
+public class RekapKaryawanDoneRow
+{
+    [JsonPropertyName("line_resource_name")]
+    public string LineResourceName { get; set; } = string.Empty;
+
+    [JsonPropertyName("employee_name")]
+    public string EmployeeName { get; set; } = string.Empty;
+
+    [JsonPropertyName("project_name")]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [JsonPropertyName("bundle_label")]
+    public string BundleLabel { get; set; } = string.Empty;
+
+    [JsonPropertyName("size_name")]
+    public string? SizeName { get; set; }
+
+    [JsonPropertyName("qty_ok")]
+    public int QtyOk { get; set; }
+
+    [JsonPropertyName("qty_reject_print")]
+    public int QtyRejectPrint { get; set; }
+
+    [JsonPropertyName("qty_reject_fabric")]
+    public int QtyRejectFabric { get; set; }
+
+    [JsonPropertyName("qty_reject_sewing")]
+    public int QtyRejectSewing { get; set; }
+
+    [JsonPropertyName("qty_reject_rework")]
+    public int QtyRejectRework { get; set; }
+
+    [JsonPropertyName("qty_lost")]
+    public int QtyLost { get; set; }
+}
+
+// WIP berhenti di level PO (bukan per bundle) -- lihat catatan prompt.
+public class RekapKaryawanWipRow
+{
+    [JsonPropertyName("line_resource_name")]
+    public string LineResourceName { get; set; } = string.Empty;
+
+    [JsonPropertyName("employee_name")]
+    public string EmployeeName { get; set; } = string.Empty;
+
+    [JsonPropertyName("project_name")]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [JsonPropertyName("qty_wip")]
+    public int QtyWip { get; set; }
+}
+
+public class RekapKaryawanPayload
+{
+    [JsonPropertyName("division_name")]
+    public string DivisionName { get; set; } = string.Empty;
+
+    [JsonPropertyName("resource_name")]
+    public string? ResourceName { get; set; }
+
+    [JsonPropertyName("employee_name")]
+    public string? EmployeeName { get; set; }
+
+    [JsonPropertyName("date")]
+    public DateTime Date { get; set; }
+
+    [JsonPropertyName("done_rows")]
+    public List<RekapKaryawanDoneRow> DoneRows { get; set; } = new();
+
+    [JsonPropertyName("wip_rows")]
+    public List<RekapKaryawanWipRow> WipRows { get; set; } = new();
 }

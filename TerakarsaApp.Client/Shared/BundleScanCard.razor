@@ -513,6 +513,19 @@
                 <div class="modal-body">
                     <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
 
+                    <div class="mb-3">
+                        @if (AllowResourceChange)
+                        {
+                            <ResourcePickerCards Resources="ResourceOptions" SelectedId="completeResourceId"
+                                                  SelectedIdChanged="(int? v) => completeResourceId = v ?? 0" Label="Pelaksana" />
+                        }
+                        else
+                        {
+                            <label class="form-label">Pelaksana</label>
+                            <div class="form-control form-control-lg bg-light"><i class="fe fe-lock"></i> @ActiveResourceName</div>
+                        }
+                    </div>
+
                     <div class="d-flex justify-content-end mb-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="SetCompleteAllOk">Set All OK</button>
                     </div>
@@ -546,15 +559,6 @@
                     @if (completeQuotaInfo is not null)
                     {
                         <div class="form-text mb-2">Masuk: @completeQuotaInfo.QtyMasuk &middot; Tercatat: @completeQuotaInfo.QtySudah &middot; Sisa: @completeQuotaInfo.Sisa</div>
-                    }
-
-                    @if (ShowResourceSuggestion)
-                    {
-                        <div class="mb-2">
-                            <label class="form-label">Pelaksana</label>
-                            <SearchableSelect TItem="ResourceLookupDto" Items="ResourceOptions" @bind-Value="completeResourceId"
-                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)" Placeholder="Cari resource..." />
-                        </div>
                     }
 
                     <div class="mb-2">
@@ -610,6 +614,13 @@
                     {
                         <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
                     }
+
+                    @if (AllowResourceChange && completeResourceId > 0 && completeResourceId != ActiveResourceId)
+                    {
+                        <div class="mt-2">
+                            <span class="badge bg-warning text-dark">Pelaksana: @(ResourceOptions.FirstOrDefault(r => r.Id == completeResourceId)?.ResourceName) — bukan operator sesi</span>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseCompleteModal">Batal</button>
@@ -646,6 +657,9 @@
     [Parameter] public List<ResourceLookupDto> ResourceOptions { get; set; } = new();
     [Parameter] public int? ActiveResourceId { get; set; }
     [Parameter] public bool AllowResourceChange { get; set; } = true;
+    // Prompt 49: nama operator sesi -- dipakai teks terkunci (ikon gembok) saat
+    // AllowResourceChange = false, pengganti picker "Pelaksana".
+    [Parameter] public string? ActiveResourceName { get; set; }
 
     private bool showFullTimeline = false;
     private bool showReceiveNote = false;
@@ -747,9 +761,9 @@
     private string completeRemark = string.Empty;
     private string completeRemarkError = string.Empty;
     private WorkflowQuotaInfoDto? completeQuotaInfo;
-    // Prompt 39: hanya relevan/ditampilkan kalau ShowResourceSuggestion true.
+    // Prompt 49: picker "Pelaksana" -- semua resource aktif divisi stasiun, sekali pakai per
+    // pengiriman (reset ke operator sesi tiap kali modal dibuka, lihat OpenCompleteModal).
     private int completeResourceId;
-    private bool ShowResourceSuggestion => AllowResourceChange && Info.Bundle.SuggestedResourceId is not null;
     // Prompt 40: dropdown "Diterima Oleh" wajib kalau ReceiverPickerRequired = true (step
     // tujuan auto_receive = 1 tapi counterpart pengirim tidak valid) -- sekali pakai per
     // pengiriman, TIDAK sticky antar bundle.
@@ -768,7 +782,7 @@
     private async Task OpenCompleteModal()
     {
         completeRemarkError = string.Empty;
-        completeResourceId = ShowResourceSuggestion ? Info.Bundle.SuggestedResourceId!.Value : (ActiveResourceId ?? 0);
+        completeResourceId = ActiveResourceId ?? 0;
         completeAutoReceiveResourceId = 0;
         receiverOptions = Info.Action.ReceiverPickerRequired == true && Info.Action.ActionArticleWorkflowId is not null
             ? await StationApi.GetReceiverOptionsAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)

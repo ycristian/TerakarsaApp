@@ -16,35 +16,74 @@
     </li>
     @foreach (var group in moduleGroups)
     {
-        <li class="sub-category">
-            <h3>@group.Category</h3>
-        </li>
-        @foreach (var entry in group.Entries)
+        @if (group.Category == "Setting")
         {
-            @if (entry is FlatEntry flat)
-            {
-                <li class="slide">
-                    <NavLink class="side-menu__item" href="@flat.Module.Route">
-                        <i class="side-menu__icon @flat.Module.Icon"></i><span class="side-menu__label">@flat.Module.Name</span>
-                    </NavLink>
-                </li>
-            }
-            else if (entry is SubGroupEntry sub)
-            {
-                <li class="slide">
-                    <a class="side-menu__item" data-bs-toggle="slide" href="javascript:void(0)">
-                        <i class="side-menu__icon fe fe-folder"></i><span class="side-menu__label">@sub.SubCategory</span><i class="angle fe fe-chevron-right"></i>
-                    </a>
-                    <ul class="slide-menu">
-                        <li class="side-menu-label1"><a href="javascript:void(0)">@sub.SubCategory</a></li>
-                        @foreach (var m in sub.Modules)
+            <li class="slide">
+                <a class="side-menu__item" data-bs-toggle="slide" href="javascript:void(0)">
+                    <i class="side-menu__icon fe fe-settings"></i><span class="side-menu__label">Setting</span><i class="angle fe fe-chevron-right"></i>
+                </a>
+                <ul class="slide-menu">
+                    <li class="side-menu-label1"><a href="javascript:void(0)">Setting</a></li>
+                    @foreach (var entry in group.Entries)
+                    {
+                        @if (entry is FlatEntry flat)
                         {
                             <li>
-                                <NavLink class="slide-item" href="@m.Route"> @m.Name</NavLink>
+                                <NavLink class="slide-item" href="@flat.Module.Route"> @flat.Module.Name</NavLink>
                             </li>
                         }
-                    </ul>
-                </li>
+                        else if (entry is SubGroupEntry sub)
+                        {
+                            <li class="sub-slide">
+                                <a class="slide-item" data-bs-toggle="sub-slide" href="javascript:void(0)">
+                                    <span>@sub.SubCategory</span><i class="sub-angle fe fe-chevron-right"></i>
+                                </a>
+                                <ul class="sub-slide-menu">
+                                    @foreach (var m in sub.Modules)
+                                    {
+                                        <li>
+                                            <NavLink class="sub-slide-item" href="@m.Route"> @m.Name</NavLink>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                    }
+                </ul>
+            </li>
+        }
+        else
+        {
+            <li class="sub-category">
+                <h3>@group.Category</h3>
+            </li>
+            @foreach (var entry in group.Entries)
+            {
+                @if (entry is FlatEntry flat)
+                {
+                    <li class="slide">
+                        <NavLink class="side-menu__item" href="@flat.Module.Route">
+                            <i class="side-menu__icon @flat.Module.Icon"></i><span class="side-menu__label">@flat.Module.Name</span>
+                        </NavLink>
+                    </li>
+                }
+                else if (entry is SubGroupEntry sub)
+                {
+                    <li class="slide">
+                        <a class="side-menu__item" data-bs-toggle="slide" href="javascript:void(0)">
+                            <i class="side-menu__icon fe fe-folder"></i><span class="side-menu__label">@sub.SubCategory</span><i class="angle fe fe-chevron-right"></i>
+                        </a>
+                        <ul class="slide-menu">
+                            <li class="side-menu-label1"><a href="javascript:void(0)">@sub.SubCategory</a></li>
+                            @foreach (var m in sub.Modules)
+                            {
+                                <li>
+                                    <NavLink class="slide-item" href="@m.Route"> @m.Name</NavLink>
+                                </li>
+                            }
+                        </ul>
+                    </li>
+                }
             }
         }
     }

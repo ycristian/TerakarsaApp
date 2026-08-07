@@ -121,17 +121,18 @@ public class BundleService
         }
     }
 
-    public async Task<(bool Success, string Error)> DeleteAsync(int id, int userId)
+    public async Task<(bool Success, string Error)> DeleteAsync(int id, string deleteReason, int userId)
     {
         var actionParam = new SqlParameter("@Action", "DELETE");
         var idParam = new SqlParameter("@Id", id);
+        var deleteReasonParam = new SqlParameter("@DeleteReason", deleteReason);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @UserId = @UserId",
-                actionParam, idParam, userIdParam);
+                "EXEC SIS_Bundle_Manage @Action = @Action, @Id = @Id, @DeleteReason = @DeleteReason, @UserId = @UserId",
+                actionParam, idParam, deleteReasonParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

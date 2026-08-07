@@ -1,0 +1,1488 @@
+@* Prompt 45/46/51/52: modal drill-down per line/divisi (dashboard target harian) -- 7 tab: "WIP",
+   "Transit", "Per Penjahit" (line mode saja), "Selesai", "Reject", "Tren", "Per Jam". Read-only,
+   tidak ada aksi tulis apa pun di sini. Tab "WIP"/"Transit"/"Selesai"/"Reject" berbagi markup
+   kartu grup+tabel lewat CollapsibleBundleGroup. Prompt 51: ResourceId opsional -- null = mode
+   divisi (agregat seluruh resource divisi tsb, tab "Per Penjahit" disembunyikan). Prompt 52: tab
+   "WIP" (sebelumnya "PO Berjalan") dipersempit ke bundle DIKERJAKAN saja + jadi tab default; tab
+   "Transit" baru untuk bundle yang menunggu diterima, kepemilikan diselaraskan ke TUJUAN. *@
+@using System.Globalization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Dashboards
+@inject DashboardApiService DashboardApi
+@inject IJSRuntime JS
+
+@if (Show)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0">@ModalTitle</h5>
+                        <div class="text-muted small mt-1">
+                            @if (activeTab == "employees")
+                            {
+                                <span>@Tanggal.ToString("dd/MM/yyyy") &middot; @(Line?.Headcount ?? 0) org &middot; @(Line?.QtyOk ?? 0) / @(Line?.TargetTotal?.ToString("N0") ?? "-") OK</span>
+                            }
+                            else if (activeTab == "bundles")
+                            {
+                                <span>Kondisi saat ini &middot; @bundles.Count bundle &middot; @bundles.Sum(b => b.Qty).ToString("N0") qty</span>
+                            }
+                            else if (activeTab == "transit")
+                            {
+                                <span>Menunggu diterima &middot; @transit.Count bundle &middot; @transit.Sum(t => t.Qty).ToString("N0") qty</span>
+                            }
+                            else if (activeTab == "completed")
+                            {
+                                <span>@PeriodeLabel(periodeSelesai) &middot; @completed.Sum(c => c.QtyOk).ToString("N0") pcs selesai &middot; @completed.Select(c => c.ArticleId).Distinct().Count() PO</span>
+                            }
+                            else if (activeTab == "rejects")
+                            {
+                                var totalRjk = rejects.Sum(RjkOf);
+                                var totalOutputLine = rejects.FirstOrDefault()?.TotalOutputLine ?? 0;
+                                <span>@PeriodeLabel(periodeReject) &middot; @totalRjk.ToString("N0") dari @totalOutputLine.ToString("N0") pcs &middot; @FormatPersen(totalRjk, totalOutputLine)</span>
+                            }
+                            else if (activeTab == "trend")
+                            {
+                                <span>Tren harian &amp; mingguan &middot; @Tanggal.ToString("dd/MM/yyyy")</span>
+                            }
+                            else if (activeTab == "hourly")
+                            {
+                                <span>Output per jam &middot; @Tanggal.ToString("dd/MM/yyyy")</span>
+                            }
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <ul class="nav nav-tabs mb-3">
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "bundles" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("bundles")'>
+                                WIP
+                                @if (bundlesLoaded)
+                                {
+                                    <span class="badge bg-secondary ms-1">@bundles.Count</span>
+                                }
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "transit" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("transit")'>
+                                Transit
+                                @if (transitLoaded)
+                                {
+                                    <span class="badge @TransitBadgeClass() ms-1">@transit.Count</span>
+                                }
+                            </a>
+                        </li>
+                        @if (!IsDivisionMode)
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(activeTab == "employees" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("employees")'>Per Penjahit</a>
+                            </li>
+                        }
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "completed" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("completed")'>
+                                Selesai
+                                @if (completedLoaded)
+                                {
+                                    <span class="badge bg-secondary ms-1">@completed.Count</span>
+                                }
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "rejects" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rejects")'>
+                                Reject
+                                @if (rejectsLoaded)
+                                {
+                                    var totalRjkBadge = rejects.Sum(RjkOf);
+                                    <span class="badge @(totalRjkBadge > 0 ? "bg-danger" : "bg-secondary") ms-1">@totalRjkBadge</span>
+                                }
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "trend" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("trend")'>Tren</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(activeTab == "hourly" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("hourly")'>Per Jam</a>
+                        </li>
+                    </ul>
+
+                    @if (activeTab == "employees")
+                    {
+                        @if (isLoadingEmployees)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(employeeError))
+                        {
+                            <div class="alert alert-danger mb-0">@employeeError</div>
+                        }
+                        else
+                        {
+                            <p class="text-muted small mb-2">Diurutkan dari OK terendah. Penjahit tanpa progres/WIP disembunyikan.</p>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered mb-0 align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>No</th>
+                                            <th>Penjahit</th>
+                                            <th class="text-end">OK</th>
+                                            <th style="min-width:140px;">Progress</th>
+                                            <th class="text-end">Target</th>
+                                            <th class="text-end">org/jam</th>
+                                            <th class="text-end">Sisa</th>
+                                            <th class="text-end">Selisih</th>
+                                            <th class="text-end">WIP</th>
+                                            <th class="text-end">Rjk</th>
+                                            <th>Terakhir Ambil</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @{ var no = 0; }
+                                        @foreach (var row in VisibleEmployeeRows())
+                                        {
+                                            no++;
+                                            var diffPercent = RowDiffPercent(row);
+                                            <tr class="@(row.EmployeeId is null ? "fst-italic text-muted" : "")">
+                                                <td>@no</td>
+                                                <td>@(row.EmployeeName ?? "Tanpa Penjahit")</td>
+                                                <td class="text-end">@row.QtyOk.ToString("N0")</td>
+                                                <td>
+                                                    @if (RowHasTarget())
+                                                    {
+                                                        <div class="progress" style="height:8px;">
+                                                            <div class="progress-bar @ProgressBarClass(diffPercent)" style="width:@Math.Clamp(RowActualPercent(row) ?? 0, 0, 100).ToString("0", CultureInfo.InvariantCulture)%;"></div>
+                                                        </div>
+                                                        <span class="small @DiffTextClass(diffPercent)">@FormatPercent(RowActualPercent(row))</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">-</span>
+                                                    }
+                                                </td>
+                                                <td class="text-end">@(RowHasTarget() ? TargetPerPerson!.Value.ToString("N0") : "-")</td>
+                                                <td class="text-end">@(row.EmployeeId is null ? "-" : FormatRate(row))</td>
+                                                <td class="text-end">@(RowSisa(row)?.ToString("N0") ?? "-")</td>
+                                                <td class="text-end @DiffTextClass(diffPercent)">@FormatDiff(RowDiffQty(row), diffPercent)</td>
+                                                <td class="text-end @(IsWipOverload(row) ? "text-danger fw-bold" : "")">@FormatRowWip(row)</td>
+                                                <td class="text-end">@row.QtyReject.ToString("N0")</td>
+                                                <td>@FormatLastReceived(row.LastReceivedAt)</td>
+                                            </tr>
+                                        }
+                                        <tr class="fw-bold table-light">
+                                            <td></td>
+                                            <td>TOTAL (@(Line?.Headcount ?? 0) org)</td>
+                                            <td class="text-end">@TotalQtyOk().ToString("N0")</td>
+                                            <td>@(Line?.ActualPercent is null ? "-" : FormatPercent(Line.ActualPercent))</td>
+                                            <td class="text-end">@(Line?.TargetTotal?.ToString("N0") ?? "-")</td>
+                                            <td class="text-end">@FormatTotalRate()</td>
+                                            <td class="text-end">@(Line?.RemainingQty?.ToString("N0") ?? "-")</td>
+                                            <td class="text-end">@FormatDiff(Line?.DiffQty, Line?.DiffPercent)</td>
+                                            <td class="text-end">@FormatWip(TotalWipBundles(), TotalWip())</td>
+                                            <td class="text-end">@TotalQtyReject().ToString("N0")</td>
+                                            <td></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                    else if (activeTab == "bundles")
+                    {
+                        @if (isLoadingBundles)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(bundleError))
+                        {
+                            <div class="alert alert-danger mb-0">@bundleError</div>
+                        }
+                        else if (bundles.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada bundle aktif di line ini.</p>
+                        }
+                        else
+                        {
+                            <div class="thin-scrollbar" style="max-height:60vh; overflow-y:auto;">
+                                @foreach (var group in BuildBundleGroups())
+                                {
+                                    var groupKey = (group.ProjectId, group.ArticleId);
+                                    var oldestAge = AgeOf(group.Bundles[0].SejakAt);
+                                    <CollapsibleBundleGroup TItem="LineActiveBundleDto"
+                                                            Items="group.Bundles"
+                                                            IsCollapsed="bundleCollapsedGroups.Contains(groupKey)"
+                                                            OnToggleCollapse="() => ToggleInSet(bundleCollapsedGroups, groupKey)"
+                                                            IsExpanded="bundleExpandedGroups.Contains(groupKey)"
+                                                            OnExpand="() => AddToSet(bundleExpandedGroups, groupKey)"
+                                                            ColSpan="7">
+                                        <HeaderLeft>
+                                            <span class="fw-bold">@group.ProjectName</span>
+                                            <span class="ms-1">@group.ArticleName</span>
+                                            @if (!string.IsNullOrEmpty(group.Style) || !string.IsNullOrEmpty(group.Color))
+                                            {
+                                                <span class="text-muted ms-1">(@string.Join(" / ", new[] { group.Style, group.Color }.Where(s => !string.IsNullOrEmpty(s))))</span>
+                                            }
+                                        </HeaderLeft>
+                                        <HeaderRight>
+                                            @group.Bundles.Count bundle &middot; @group.Bundles.Sum(b => b.Qty).ToString("N0") qty &middot;
+                                            <span class="@StaleClass(oldestAge)">Terlama @FormatUmur(oldestAge)</span>
+                                        </HeaderRight>
+                                        <TableHeader>
+                                            <th>No</th>
+                                            <th>Serial</th>
+                                            <th>Size</th>
+                                            <th class="text-end">Qty</th>
+                                            <th>Penjahit</th>
+                                            <th>Sejak</th>
+                                            <th>Umur</th>
+                                        </TableHeader>
+                                        <RowTemplate Context="b">
+                                            @{ var age = AgeOf(b.SejakAt); }
+                                            <tr class="@RowBgClass(age)">
+                                                <td>@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                <td><a href="@BundleUrl(b.Serial)" target="_blank">@b.Serial</a></td>
+                                                <td>@b.SizeName</td>
+                                                <td class="text-end">@b.Qty.ToString("N0")</td>
+                                                <td>@BundleDisplay.FormatPenjahit(b.TailorName, b.EmployeeName)</td>
+                                                <td>@b.SejakAt.ToString("dd MMM", CultureInfo.GetCultureInfo("id-ID"))</td>
+                                                <td class="@StaleClass(age)">@FormatUmur(age)</td>
+                                            </tr>
+                                        </RowTemplate>
+                                    </CollapsibleBundleGroup>
+                                }
+                            </div>
+                        }
+                    }
+                    else if (activeTab == "transit")
+                    {
+                        @if (isLoadingTransit)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(transitError))
+                        {
+                            <div class="alert alert-danger mb-0">@transitError</div>
+                        }
+                        else if (transit.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada bundle menunggu diterima.</p>
+                        }
+                        else
+                        {
+                            <div class="thin-scrollbar" style="max-height:60vh; overflow-y:auto;">
+                                @foreach (var group in BuildTransitGroups())
+                                {
+                                    var groupKey = (group.ProjectId, group.ArticleId);
+                                    var oldestAge = AgeOf(group.Bundles[0].DiserahkanAt);
+                                    <CollapsibleBundleGroup TItem="LineTransitBundleDto"
+                                                            Items="group.Bundles"
+                                                            IsCollapsed="transitCollapsedGroups.Contains(groupKey)"
+                                                            OnToggleCollapse="() => ToggleInSet(transitCollapsedGroups, groupKey)"
+                                                            IsExpanded="transitExpandedGroups.Contains(groupKey)"
+                                                            OnExpand="() => AddToSet(transitExpandedGroups, groupKey)"
+                                                            ColSpan="7">
+                                        <HeaderLeft>
+                                            @if (group.IsUnresolvedGroup)
+                                            {
+                                                <span class="fw-bold">Belum ditentukan line</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="fw-bold">@group.ProjectName</span>
+                                                <span class="ms-1">@group.ArticleName</span>
+                                                @if (!string.IsNullOrEmpty(group.Style) || !string.IsNullOrEmpty(group.Color))
+                                                {
+                                                    <span class="text-muted ms-1">(@string.Join(" / ", new[] { group.Style, group.Color }.Where(s => !string.IsNullOrEmpty(s))))</span>
+                                                }
+                                            }
+                                        </HeaderLeft>
+                                        <HeaderRight>
+                                            @group.Bundles.Count bundle &middot; @group.Bundles.Sum(t => t.Qty).ToString("N0") qty &middot;
+                                            <span class="@StaleClass(oldestAge)">Terlama @FormatUmur(oldestAge)</span>
+                                        </HeaderRight>
+                                        <TableHeader>
+                                            <th>No</th>
+                                            <th>Serial</th>
+                                            <th>Size</th>
+                                            <th class="text-end">Qty</th>
+                                            <th>Dari</th>
+                                            <th>Diserahkan</th>
+                                            <th>Umur</th>
+                                        </TableHeader>
+                                        <RowTemplate Context="t">
+                                            @{ var age = AgeOf(t.DiserahkanAt); }
+                                            <tr class="@RowBgClass(age)">
+                                                <td>@BundleDisplay.Format(t.BundleLetter, t.BundleNo)</td>
+                                                <td><a href="@BundleUrl(t.Serial)" target="_blank">@t.Serial</a></td>
+                                                <td>@t.SizeName</td>
+                                                <td class="text-end">@t.Qty.ToString("N0")</td>
+                                                <td>@FormatDari(t)</td>
+                                                <td>@t.DiserahkanAt.ToString("dd MMM HH:mm", CultureInfo.GetCultureInfo("id-ID"))</td>
+                                                <td class="@StaleClass(age)">@FormatUmur(age)</td>
+                                            </tr>
+                                        </RowTemplate>
+                                    </CollapsibleBundleGroup>
+                                }
+                                <div class="text-muted small fw-bold border-top pt-2">
+                                    TOTAL: @transit.Count bundle &middot;
+                                    @transit.Select(t => t.ArticleId).Distinct().Count() PO &middot;
+                                    @transit.Sum(t => t.Qty).ToString("N0") qty &middot;
+                                    Terlama @FormatUmur(transit.Select(t => AgeOf(t.DiserahkanAt)).Max())
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (activeTab == "completed")
+                    {
+                        <div class="btn-group btn-group-sm mb-3" role="group">
+                            <button type="button" class="btn @(periodeSelesai == "hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeSelesai("hari")'>Hari ini</button>
+                            <button type="button" class="btn @(periodeSelesai == "7hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeSelesai("7hari")'>7 hari</button>
+                            <button type="button" class="btn @(periodeSelesai == "gajian" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeSelesai("gajian")'>Periode gajian</button>
+                        </div>
+                        @if (isLoadingCompleted)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(completedError))
+                        {
+                            <div class="alert alert-danger mb-0">@completedError</div>
+                        }
+                        else if (completed.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada bundle selesai pada periode ini.</p>
+                        }
+                        else
+                        {
+                            <div class="thin-scrollbar" style="max-height:55vh; overflow-y:auto;">
+                                @foreach (var group in BuildCompletedGroups())
+                                {
+                                    var groupKey = (group.ProjectId, group.ArticleId);
+                                    <CollapsibleBundleGroup TItem="LineCompletedBundleDto"
+                                                            Items="group.Bundles"
+                                                            IsCollapsed="completedCollapsedGroups.Contains(groupKey)"
+                                                            OnToggleCollapse="() => ToggleInSet(completedCollapsedGroups, groupKey)"
+                                                            IsExpanded="completedExpandedGroups.Contains(groupKey)"
+                                                            OnExpand="() => AddToSet(completedExpandedGroups, groupKey)"
+                                                            ColSpan="11">
+                                        <HeaderLeft>
+                                            <span class="fw-bold">@group.ProjectName</span>
+                                            <span class="ms-1">@group.ArticleName</span>
+                                            @if (!string.IsNullOrEmpty(group.Style) || !string.IsNullOrEmpty(group.Color))
+                                            {
+                                                <span class="text-muted ms-1">(@string.Join(" / ", new[] { group.Style, group.Color }.Where(s => !string.IsNullOrEmpty(s))))</span>
+                                            }
+                                        </HeaderLeft>
+                                        <HeaderRight>
+                                            @group.Bundles.Count bundle &middot;
+                                            <span class="text-success">OK @group.Bundles.Sum(b => b.QtyOk).ToString("N0")</span> &middot;
+                                            Rjk @group.Bundles.Sum(b => b.QtyReject).ToString("N0") &middot;
+                                            Hlg @group.Bundles.Sum(b => b.QtyLost).ToString("N0") &middot;
+                                            Sisa @group.Sisa.ToString("N0")
+                                        </HeaderRight>
+                                        <TableHeader>
+                                            <th>No</th>
+                                            <th>Serial</th>
+                                            <th>Size</th>
+                                            <th class="text-end">Qty</th>
+                                            <th class="text-end">OK</th>
+                                            <th class="text-end">Rjk</th>
+                                            <th class="text-end">Hlg</th>
+                                            <th>Penjahit</th>
+                                            <th>Diterima</th>
+                                            <th>Selesai</th>
+                                            <th class="text-end">Lama</th>
+                                        </TableHeader>
+                                        <RowTemplate Context="c">
+                                            <tr>
+                                                <td>@BundleDisplay.Format(c.BundleLetter, c.BundleNo)</td>
+                                                <td><a href="@BundleUrl(c.Serial)" target="_blank">@c.Serial</a></td>
+                                                <td>@c.SizeName</td>
+                                                <td class="text-end">@c.Qty.ToString("N0")</td>
+                                                <td class="text-end text-success">@c.QtyOk.ToString("N0")</td>
+                                                <td class="text-end @(c.QtyReject > 0 ? "text-danger" : "")">@c.QtyReject.ToString("N0")</td>
+                                                <td class="text-end @(c.QtyLost > 0 ? "text-danger" : "")">@c.QtyLost.ToString("N0")</td>
+                                                <td>@BundleDisplay.FormatPenjahit(c.TailorName, c.EmployeeName)</td>
+                                                <td>@FormatDiterima(c.ReceivedAt)</td>
+                                                <td>@FormatSelesai(c.SelesaiAt)</td>
+                                                <td class="text-end">@FormatLama(c.ReceivedAt, c.SelesaiAt)</td>
+                                            </tr>
+                                        </RowTemplate>
+                                    </CollapsibleBundleGroup>
+                                }
+                                <div class="text-muted small fw-bold border-top pt-2">
+                                    TOTAL: @completed.Count bundle &middot;
+                                    @completed.Select(c => c.ArticleId).Distinct().Count() PO &middot;
+                                    OK @completed.Sum(c => c.QtyOk).ToString("N0") &middot;
+                                    Rjk @completed.Sum(c => c.QtyReject).ToString("N0") &middot;
+                                    Hlg @completed.Sum(c => c.QtyLost).ToString("N0") &middot;
+                                    Rata-rata @FormatAvgLama() jam/bundle
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (activeTab == "rejects")
+                    {
+                        <div class="btn-group btn-group-sm mb-3" role="group">
+                            <button type="button" class="btn @(periodeReject == "hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeReject("hari")'>Hari ini</button>
+                            <button type="button" class="btn @(periodeReject == "7hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeReject("7hari")'>7 hari</button>
+                            <button type="button" class="btn @(periodeReject == "gajian" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetPeriodeReject("gajian")'>Periode gajian</button>
+                        </div>
+                        @if (isLoadingRejects)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(rejectError))
+                        {
+                            <div class="alert alert-danger mb-0">@rejectError</div>
+                        }
+                        else if (rejects.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada reject pada periode ini.</p>
+                        }
+                        else
+                        {
+                            <div class="thin-scrollbar" style="max-height:55vh; overflow-y:auto;">
+                                @foreach (var group in BuildRejectGroups())
+                                {
+                                    var groupKey = (group.ProjectId, group.ArticleId);
+                                    <CollapsibleBundleGroup TItem="LineRejectBundleDto"
+                                                            Items="group.Bundles"
+                                                            IsCollapsed="rejectCollapsedGroups.Contains(groupKey)"
+                                                            OnToggleCollapse="() => ToggleInSet(rejectCollapsedGroups, groupKey)"
+                                                            IsExpanded="rejectExpandedGroups.Contains(groupKey)"
+                                                            OnExpand="() => AddToSet(rejectExpandedGroups, groupKey)"
+                                                            ColSpan="12">
+                                        <HeaderLeft>
+                                            <span class="fw-bold">@group.ProjectName</span>
+                                            <span class="ms-1">@group.ArticleName</span>
+                                            @if (!string.IsNullOrEmpty(group.Style) || !string.IsNullOrEmpty(group.Color))
+                                            {
+                                                <span class="text-muted ms-1">(@string.Join(" / ", new[] { group.Style, group.Color }.Where(s => !string.IsNullOrEmpty(s))))</span>
+                                            }
+                                        </HeaderLeft>
+                                        <HeaderRight>
+                                            <span class="@(group.Percent >= LineDetailThresholds.RejectHighPercent ? "text-danger fw-bold" : "")">
+                                                Rjk @group.Bundles.Sum(RjkOf).ToString("N0") dari @group.TotalOutputPo.ToString("N0") &middot; @group.Percent.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"))%
+                                            </span>
+                                        </HeaderRight>
+                                        <TableHeader>
+                                            <th>No</th>
+                                            <th>Serial</th>
+                                            <th class="text-center">Size</th>
+                                            <th class="text-center">Print</th>
+                                            <th class="text-center">Fabric</th>
+                                            <th class="text-center">Sewing</th>
+                                            <th class="text-center">Rework</th>
+                                            <th class="text-center">Hlg</th>
+                                            <th>Penjahit</th>
+                                            <th>Remark</th>
+                                            <th>Jenis</th>
+                                            <th>Waktu</th>
+                                        </TableHeader>
+                                        <RowTemplate Context="r">
+                                            <tr class="@(r.LogType == "ADJUSTMENT" ? "fst-italic text-muted" : "")">
+                                                <td>@BundleDisplay.Format(r.BundleLetter, r.BundleNo)</td>
+                                                <td><a href="@BundleUrl(r.Serial)" target="_blank">@r.Serial</a></td>
+                                                <td>@(r.SizeName ?? "-")</td>
+                                                <td class="text-end @(r.QtyRejectPrint > 0 ? "text-danger" : "")">@r.QtyRejectPrint.ToString("N0")</td>
+                                                <td class="text-end @(r.QtyRejectFabric > 0 ? "text-danger" : "")">@r.QtyRejectFabric.ToString("N0")</td>
+                                                <td class="text-end @(r.QtyRejectSewing > 0 ? "text-danger" : "")">@r.QtyRejectSewing.ToString("N0")</td>
+                                                <td class="text-end @(r.QtyRejectRework > 0 ? "text-danger" : "")">@r.QtyRejectRework.ToString("N0")</td>
+                                                <td class="text-end @(r.QtyLost > 0 ? "text-danger" : "")">@r.QtyLost.ToString("N0")</td>
+                                                <td>@(r.EmployeeName ?? "-")</td>
+                                                <td>@(r.Remark ?? "-")</td>
+                                                <td>@FormatLogType(r.LogType)</td>
+                                                <td style="white-space:nowrap;">@r.WaktuAt.ToString("dd MMM HH:mm", CultureInfo.GetCultureInfo("id-ID"))</td>
+                                            </tr>
+                                        </RowTemplate>
+                                    </CollapsibleBundleGroup>
+                                }
+                                @{
+                                    var totalPrint = rejects.Sum(r => r.QtyRejectPrint);
+                                    var totalFabric = rejects.Sum(r => r.QtyRejectFabric);
+                                    var totalSewing = rejects.Sum(r => r.QtyRejectSewing);
+                                    var totalRework = rejects.Sum(r => r.QtyRejectRework);
+                                    var totalHlg = rejects.Sum(r => r.QtyLost);
+                                    var totalRjk = totalPrint + totalFabric + totalSewing;
+                                    var totalOutputLine = rejects.FirstOrDefault()?.TotalOutputLine ?? 0;
+                                }
+                                <div class="text-muted small fw-bold border-top pt-2">
+                                    TOTAL: @rejects.Count bundle bermasalah &middot;
+                                    @rejects.Select(r => r.ArticleId).Distinct().Count() PO &middot;
+                                    Print @totalPrint.ToString("N0") &middot;
+                                    Fabric @totalFabric.ToString("N0") &middot;
+                                    Sewing @totalSewing.ToString("N0") &middot;
+                                    Rework @totalRework.ToString("N0") &middot;
+                                    Hlg @totalHlg.ToString("N0") &middot;
+                                    @FormatPersen(totalRjk, totalOutputLine) dari total output line (Rjk, di luar Rework)
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (activeTab == "trend")
+                    {
+                        <div class="btn-group btn-group-sm mb-3" role="group">
+                            <button type="button" class="btn @(rentangTrend == "14hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetRentangTrend("14hari")'>14 hari</button>
+                            <button type="button" class="btn @(rentangTrend == "30hari" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetRentangTrend("30hari")'>30 hari</button>
+                        </div>
+
+                        @if (isLoadingTrendDaily && !trendDailyLoaded)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(trendDailyError))
+                        {
+                            <div class="alert alert-danger mb-0">@trendDailyError</div>
+                        }
+                        else
+                        {
+                            var totalTerimaTrend = trendDaily.Sum(t => t.QtyTerima);
+                            var totalOkTrend = trendDaily.Sum(t => t.QtyOk);
+                            var selisihTrend = totalTerimaTrend - totalOkTrend;
+                            var days = Math.Max(trendDaily.Count, 1);
+                            <div class="row g-2 mb-3">
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Rata-rata Terima/hari</div>
+                                        <div class="fw-bold fs-5">@((totalTerimaTrend / (double)days).ToString("0.0", CultureInfo.GetCultureInfo("id-ID")))</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Rata-rata OK/hari</div>
+                                        <div class="fw-bold fs-5">@((totalOkTrend / (double)days).ToString("0.0", CultureInfo.GetCultureInfo("id-ID")))</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Total OK</div>
+                                        <div class="fw-bold fs-5">@totalOkTrend.ToString("N0")</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Selisih Terima − OK</div>
+                                        <div class="fw-bold fs-5 @(selisihTrend > 0 ? "text-danger" : "")">@FormatSignedInt(selisihTrend)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="height:260px;">
+                                <canvas id="lineDetailTrendChart"></canvas>
+                            </div>
+
+                            <hr />
+
+                            <p class="text-muted small mb-2">10 periode gajian terakhir.</p>
+                            @if (isLoadingTrendWeekly && !trendWeeklyLoaded)
+                            {
+                                <p class="mb-0">Memuat data mingguan...</p>
+                            }
+                            else if (!string.IsNullOrEmpty(trendWeeklyError))
+                            {
+                                <div class="alert alert-danger mb-0">@trendWeeklyError</div>
+                            }
+                            else
+                            {
+                                <div class="table-responsive" style="max-height:40vh;">
+                                    <table class="table table-sm table-bordered mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th class="line-trend-sticky-col table-light">Minggu</th>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    <th class="text-center">
+                                                        @w.KodeMinggu<br />
+                                                        <span class="text-muted fw-normal small">@w.PeriodeMulai.ToString("dd MMM", CultureInfo.GetCultureInfo("id-ID"))</span>
+                                                    </th>
+                                                }
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Terima</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    <td class="text-end">@w.QtyTerima.ToString("N0")</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Qty OK</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    <td class="text-end">@w.QtyOk.ToString("N0")</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Selisih</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    var selisih = w.QtyOk - w.QtyTerima;
+                                                    <td class="text-end @(selisih < 0 ? "text-danger" : "")">@FormatSignedInt(selisih)</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Rjk</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    <td class="text-end">@w.QtyReject.ToString("N0")</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Rjk %</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    var basis = w.QtyOk + w.QtyReject;
+                                                    var pct = basis > 0 ? 100.0 * w.QtyReject / basis : 0;
+                                                    <td class="text-end @(pct >= LineDetailThresholds.RejectHighPercent ? "text-danger fw-bold" : "")">@pct.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"))%</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">Org</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    <td class="text-end">@(w.JumlahOrang?.ToString("N0") ?? "-")</td>
+                                                }
+                                            </tr>
+                                            <tr>
+                                                <td class="line-trend-sticky-col table-light fw-bold">org/hari</td>
+                                                @foreach (var w in trendWeekly)
+                                                {
+                                                    double? orgHari = (w.JumlahOrang is > 0 && w.JumlahHariKerja > 0)
+                                                        ? w.QtyOk / (double)w.JumlahOrang.Value / w.JumlahHariKerja
+                                                        : null;
+                                                    <td class="text-end">@(orgHari?.ToString("0.0", CultureInfo.GetCultureInfo("id-ID")) ?? "-")</td>
+                                                }
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                    }
+                    else if (activeTab == "hourly")
+                    {
+                        @if (isLoadingHourly && !hourlyLoaded)
+                        {
+                            <p class="mb-0">Memuat data...</p>
+                        }
+                        else if (!string.IsNullOrEmpty(hourlyError))
+                        {
+                            <div class="alert alert-danger mb-0">@hourlyError</div>
+                        }
+                        else if (hourly is null || hourly.Hours.Count == 0)
+                        {
+                            <p class="text-muted mb-0">Tidak ada jam kerja pada tanggal ini.</p>
+                        }
+                        else
+                        {
+                            var workingHours = hourly.Hours.Where(h => !h.IsIstirahat).ToList();
+                            var mostProductive = workingHours.Where(h => (h.QtyOk ?? 0) > 0).OrderByDescending(h => h.QtyOk).FirstOrDefault();
+                            var emptyHourCount = workingHours.Count(h => (h.QtyOk ?? 0) == 0);
+                            var avgPerHour = workingHours.Count > 0 ? workingHours.Average(h => h.QtyOk ?? 0) : 0;
+                            <div class="row g-2 mb-3">
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Jam paling produktif</div>
+                                        <div class="fw-bold fs-6">@(mostProductive is not null ? $"{mostProductive.Jam:00}:00 · {mostProductive.QtyOk:N0} pcs" : "-")</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Jam tanpa output</div>
+                                        <div class="fw-bold fs-5 @(emptyHourCount > 0 ? "text-danger" : "")">@emptyHourCount</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="border rounded p-2 text-center">
+                                        <div class="text-muted small">Rata-rata pcs/jam</div>
+                                        <div class="fw-bold fs-5">@avgPerHour.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"))</div>
+                                    </div>
+                                </div>
+                                @if (hourly.Meta.TargetPerJam is not null)
+                                {
+                                    <div class="col-6 col-md-3">
+                                        <div class="border rounded p-2 text-center">
+                                            <div class="text-muted small">Target/jam</div>
+                                            <div class="fw-bold fs-5">@hourly.Meta.TargetPerJam.Value.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"))</div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <div style="height:280px;">
+                                <canvas id="lineDetailHourlyChart"></canvas>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public int DivisionId { get; set; }
+    // Prompt 51: opsional -- null = mode divisi (agregat seluruh resource divisi tsb).
+    [Parameter] public int? ResourceId { get; set; }
+    [Parameter] public string DivisionName { get; set; } = string.Empty;
+    [Parameter] public string ResourceName { get; set; } = string.Empty;
+    [Parameter] public DateTime Tanggal { get; set; }
+    [Parameter] public DashboardResourceDto? Line { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool IsDivisionMode => ResourceId is null;
+    private string ModalTitle => IsDivisionMode ? DivisionName : $"{DivisionName} — {ResourceName}";
+
+    private string activeTab = "employees";
+
+    private bool isLoadingEmployees;
+    private string employeeError = string.Empty;
+    private List<LineEmployeeProgressDto> employees = new();
+
+    private bool bundlesLoaded;
+    private bool isLoadingBundles;
+    private string bundleError = string.Empty;
+    private List<LineActiveBundleDto> bundles = new();
+
+    // Prompt 52: tab "Transit".
+    private bool transitLoaded;
+    private bool isLoadingTransit;
+    private string transitError = string.Empty;
+    private List<LineTransitBundleDto> transit = new();
+
+    // Prompt 46: tab "Selesai".
+    private bool completedLoaded;
+    private bool isLoadingCompleted;
+    private string completedError = string.Empty;
+    private List<LineCompletedBundleDto> completed = new();
+    private string periodeSelesai = "hari";
+
+    // Prompt 46: tab "Reject" (menggantikan tab ad hoc lama).
+    private bool rejectsLoaded;
+    private bool isLoadingRejects;
+    private string rejectError = string.Empty;
+    private List<LineRejectBundleDto> rejects = new();
+    private string periodeReject = "hari";
+
+    // Prompt 51: tab "Tren" (grafik harian + rekap mingguan).
+    private bool trendDailyLoaded;
+    private bool isLoadingTrendDaily;
+    private string trendDailyError = string.Empty;
+    private List<LineTrendDailyDto> trendDaily = new();
+    private string rentangTrend = "14hari";
+    private bool trendChartDirty;
+
+    private bool trendWeeklyLoaded;
+    private bool isLoadingTrendWeekly;
+    private string trendWeeklyError = string.Empty;
+    private List<LineTrendWeeklyDto> trendWeekly = new();
+
+    // Prompt 51: tab "Per Jam".
+    private bool hourlyLoaded;
+    private bool isLoadingHourly;
+    private string hourlyError = string.Empty;
+    private LineHourlyResult? hourly;
+    private bool hourlyChartDirty;
+
+    private HashSet<(int, int)> bundleExpandedGroups = new();
+    private HashSet<(int, int)> bundleCollapsedGroups = new();
+    private HashSet<(int, int)> transitExpandedGroups = new();
+    private HashSet<(int, int)> transitCollapsedGroups = new();
+    private HashSet<(int, int)> completedExpandedGroups = new();
+    private HashSet<(int, int)> completedCollapsedGroups = new();
+    private HashSet<(int, int)> rejectExpandedGroups = new();
+    private HashSet<(int, int)> rejectCollapsedGroups = new();
+
+    private int? loadedDivisionId;
+    private int? loadedResourceId;
+    private DateTime? loadedTanggal;
+    private bool loadedIsSet;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Show) return;
+
+        if (!loadedIsSet || loadedDivisionId != DivisionId || loadedResourceId != ResourceId || loadedTanggal != Tanggal.Date)
+        {
+            loadedIsSet = true;
+            loadedDivisionId = DivisionId;
+            loadedResourceId = ResourceId;
+            loadedTanggal = Tanggal.Date;
+            // Prompt 52: "WIP" selalu jadi tab default saat modal dibuka, menggantikan posisi
+            // "PO Berjalan" (sebelumnya mode line default ke "Per Penjahit").
+            activeTab = "bundles";
+            bundlesLoaded = false;
+            bundles = new();
+            transitLoaded = false;
+            transit = new();
+            completedLoaded = false;
+            completed = new();
+            periodeSelesai = "hari";
+            rejectsLoaded = false;
+            rejects = new();
+            periodeReject = "hari";
+            trendDailyLoaded = false;
+            trendDaily = new();
+            rentangTrend = "14hari";
+            trendWeeklyLoaded = false;
+            trendWeekly = new();
+            trendChartDirty = false;
+            hourlyLoaded = false;
+            hourly = null;
+            hourlyChartDirty = false;
+            bundleExpandedGroups.Clear();
+            bundleCollapsedGroups.Clear();
+            transitExpandedGroups.Clear();
+            transitCollapsedGroups.Clear();
+            completedExpandedGroups.Clear();
+            completedCollapsedGroups.Clear();
+            rejectExpandedGroups.Clear();
+            rejectCollapsedGroups.Clear();
+            await LoadBundlesAsync();
+        }
+    }
+
+    // Prompt 51: (re)gambar chart Chart.js setelah render -- canvas dibuat ulang tiap kali tab
+    // Tren/Per Jam di-mount (elemen <canvas> lenyap saat pindah tab, @if di markup), jadi harus
+    // di-render ulang tiap kali tab itu jadi aktif, bukan cuma sekali saat data pertama dimuat.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (activeTab == "trend" && trendChartDirty && !isLoadingTrendDaily)
+        {
+            trendChartDirty = false;
+            await RenderTrendChartAsync();
+        }
+        else if (activeTab == "hourly" && hourlyChartDirty && !isLoadingHourly)
+        {
+            hourlyChartDirty = false;
+            await RenderHourlyChartAsync();
+        }
+    }
+
+    private async Task RenderTrendChartAsync()
+    {
+        if (trendDaily.Count == 0) return;
+        var labels = trendDaily.Select(t => t.Tanggal.ToString("dd/MM", CultureInfo.GetCultureInfo("id-ID"))).ToArray();
+        var terima = trendDaily.Select(t => (int?)t.QtyTerima).ToArray();
+        var ok = trendDaily.Select(t => (int?)t.QtyOk).ToArray();
+        await JS.InvokeVoidAsync("lineDetailCharts.renderTrend", "lineDetailTrendChart", labels, terima, ok);
+    }
+
+    private async Task RenderHourlyChartAsync()
+    {
+        if (hourly is null || hourly.Hours.Count == 0) return;
+        var labels = hourly.Hours.Select(h => $"{h.Jam:00}:00 – {h.Jam + 1:00}:00").ToArray();
+        var terima = hourly.Hours.Select(h => h.QtyTerima).ToArray();
+        var ok = hourly.Hours.Select(h => h.QtyOk).ToArray();
+        var breakFlags = hourly.Hours.Select(h => h.IsIstirahat).ToArray();
+        await JS.InvokeVoidAsync("lineDetailCharts.renderHourly", "lineDetailHourlyChart", labels, terima, ok, breakFlags, hourly.Meta.TargetPerJam);
+    }
+
+    private async Task LoadEmployeesAsync()
+    {
+        isLoadingEmployees = true;
+        employeeError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineEmployeeProgressAsync(DivisionId, ResourceId, Tanggal.Date);
+        if (!success)
+        {
+            employeeError = "Gagal memuat data penjahit.";
+        }
+        else
+        {
+            employees = result;
+        }
+        isLoadingEmployees = false;
+    }
+
+    private async Task LoadBundlesAsync()
+    {
+        isLoadingBundles = true;
+        bundleError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineActiveBundlesAsync(DivisionId, ResourceId);
+        if (!success)
+        {
+            bundleError = "Gagal memuat data bundle.";
+        }
+        else
+        {
+            bundles = result;
+        }
+        bundlesLoaded = true;
+        isLoadingBundles = false;
+    }
+
+    // Prompt 52: tab "Transit".
+    private async Task LoadTransitAsync()
+    {
+        isLoadingTransit = true;
+        transitError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineTransitBundlesAsync(DivisionId, ResourceId);
+        if (!success)
+        {
+            transitError = "Gagal memuat data transit.";
+        }
+        else
+        {
+            transit = result;
+        }
+        transitLoaded = true;
+        isLoadingTransit = false;
+    }
+
+    // Prompt 46: tab "Selesai" -- kolom "Sisa" per grup butuh data bundle aktif (tab WIP), jadi
+    // dimuat bareng kalau belum ada (kondisi saat ini, tidak terikat periode). Prompt 52: `bundles`
+    // sekarang HANYA DIKERJAKAN (TRANSIT dipindah kepemilikannya ke tab Transit divisi/resource
+    // TUJUAN) -- "Sisa" otomatis ikut menyempit ke DIKERJAKAN saja, konsisten dengan definisi
+    // baru "yang masih jadi tanggung jawab line ini" (bundle yang sudah diserahkan keluar bukan
+    // lagi urusan line ini, lihat Bagian 2 prompt 52).
+    private async Task LoadCompletedAsync()
+    {
+        isLoadingCompleted = true;
+        completedError = string.Empty;
+        StateHasChanged();
+
+        var bundlesTask = (!bundlesLoaded && !isLoadingBundles) ? LoadBundlesAsync() : Task.CompletedTask;
+        var (success, result) = await DashboardApi.GetLineCompletedBundlesAsync(DivisionId, ResourceId, periodeSelesai, Tanggal.Date);
+        await bundlesTask;
+
+        if (!success)
+        {
+            completedError = "Gagal memuat data bundle selesai.";
+        }
+        else
+        {
+            completed = result;
+        }
+        completedLoaded = true;
+        isLoadingCompleted = false;
+    }
+
+    private async Task LoadRejectsAsync()
+    {
+        isLoadingRejects = true;
+        rejectError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineRejectBundlesAsync(DivisionId, ResourceId, periodeReject, Tanggal.Date);
+        if (!success)
+        {
+            rejectError = "Gagal memuat data reject.";
+        }
+        else
+        {
+            rejects = result;
+        }
+        rejectsLoaded = true;
+        isLoadingRejects = false;
+    }
+
+    private async Task SetTab(string tab)
+    {
+        activeTab = tab;
+        if (tab == "bundles" && !bundlesLoaded && !isLoadingBundles)
+        {
+            await LoadBundlesAsync();
+        }
+        else if (tab == "transit" && !transitLoaded && !isLoadingTransit)
+        {
+            await LoadTransitAsync();
+        }
+        else if (tab == "completed" && !completedLoaded && !isLoadingCompleted)
+        {
+            await LoadCompletedAsync();
+        }
+        else if (tab == "rejects" && !rejectsLoaded && !isLoadingRejects)
+        {
+            await LoadRejectsAsync();
+        }
+        else if (tab == "trend")
+        {
+            trendChartDirty = true;
+            if (!trendDailyLoaded && !isLoadingTrendDaily) await LoadTrendDailyAsync();
+            if (!trendWeeklyLoaded && !isLoadingTrendWeekly) await LoadTrendWeeklyAsync();
+        }
+        else if (tab == "hourly")
+        {
+            hourlyChartDirty = true;
+            if (!hourlyLoaded && !isLoadingHourly) await LoadHourlyAsync();
+        }
+    }
+
+    private async Task LoadTrendDailyAsync()
+    {
+        isLoadingTrendDaily = true;
+        trendDailyError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineTrendDailyAsync(DivisionId, ResourceId, rentangTrend, Tanggal.Date);
+        if (!success)
+        {
+            trendDailyError = "Gagal memuat data tren harian.";
+        }
+        else
+        {
+            trendDaily = result;
+        }
+        trendDailyLoaded = true;
+        isLoadingTrendDaily = false;
+        trendChartDirty = true;
+    }
+
+    private async Task LoadTrendWeeklyAsync()
+    {
+        isLoadingTrendWeekly = true;
+        trendWeeklyError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineTrendWeeklyAsync(DivisionId, ResourceId, Tanggal.Date);
+        if (!success)
+        {
+            trendWeeklyError = "Gagal memuat data rekap mingguan.";
+        }
+        else
+        {
+            trendWeekly = result;
+        }
+        trendWeeklyLoaded = true;
+        isLoadingTrendWeekly = false;
+    }
+
+    // Ganti rentang cuma me-refresh grafik harian -- tabel rekap mingguan TIDAK ikut ter-refresh
+    // (Bagian 2 & verifikasi prompt 51).
+    private async Task SetRentangTrend(string rentang)
+    {
+        if (rentangTrend == rentang) return;
+        rentangTrend = rentang;
+        await LoadTrendDailyAsync();
+    }
+
+    private async Task LoadHourlyAsync()
+    {
+        isLoadingHourly = true;
+        hourlyError = string.Empty;
+        StateHasChanged();
+
+        var (success, result) = await DashboardApi.GetLineHourlyAsync(DivisionId, ResourceId, Tanggal.Date);
+        if (!success)
+        {
+            hourlyError = "Gagal memuat data per jam.";
+        }
+        else
+        {
+            hourly = result;
+        }
+        hourlyLoaded = true;
+        isLoadingHourly = false;
+        hourlyChartDirty = true;
+    }
+
+    private static string FormatSignedInt(int n) => n >= 0 ? $"+{n:N0}" : $"−{Math.Abs(n):N0}";
+
+    private async Task SetPeriodeSelesai(string periode)
+    {
+        if (periodeSelesai == periode) return;
+        periodeSelesai = periode;
+        completedExpandedGroups.Clear();
+        completedCollapsedGroups.Clear();
+        await LoadCompletedAsync();
+    }
+
+    private async Task SetPeriodeReject(string periode)
+    {
+        if (periodeReject == periode) return;
+        periodeReject = periode;
+        rejectExpandedGroups.Clear();
+        rejectCollapsedGroups.Clear();
+        await LoadRejectsAsync();
+    }
+
+    private static string PeriodeLabel(string periode) =>
+        periode switch
+        {
+            "7hari" => "7 Hari",
+            "gajian" => "Periode Gajian",
+            _ => "Hari Ini",
+        };
+
+    private static string FormatPersen(int n, int total) =>
+        total > 0 ? $"{Math.Round(100.0 * n / total, 1).ToString("0.0", CultureInfo.GetCultureInfo("id-ID"))}%" : "0%";
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private static void ToggleInSet(HashSet<(int, int)> set, (int, int) key)
+    {
+        if (!set.Add(key)) set.Remove(key);
+    }
+
+    private static void AddToSet(HashSet<(int, int)> set, (int, int) key) => set.Add(key);
+
+    // --- Tab 1: Per Penjahit ---
+    // Target per orang = Line.TargetPerPerson (PPIC set per LINE, sama untuk semua penjahit di
+    // line ybs -- tidak ada target per individu). Progress/Selisih dihitung dari situ + rasio
+    // waktu berjalan Line.ExpectedPercent (jadwal satu line dipakai bersama, tidak per orang).
+
+    private int? TargetPerPerson => Line?.TargetPerPerson;
+
+    private bool RowHasTarget() => TargetPerPerson is > 0;
+
+    private double? RowActualPercent(LineEmployeeProgressDto row) =>
+        RowHasTarget() ? 100.0 * row.QtyOk / TargetPerPerson!.Value : null;
+
+    private int? RowDiffQty(LineEmployeeProgressDto row)
+    {
+        if (!RowHasTarget() || Line?.ExpectedPercent is null) return null;
+        return (int)Math.Round(row.QtyOk - (TargetPerPerson!.Value * (Line.ExpectedPercent.Value / 100.0)));
+    }
+
+    private double? RowDiffPercent(LineEmployeeProgressDto row)
+    {
+        if (!RowHasTarget() || Line?.ExpectedPercent is null) return null;
+        return RowActualPercent(row) - Line.ExpectedPercent;
+    }
+
+    private int? RowSisa(LineEmployeeProgressDto row)
+    {
+        if (!RowHasTarget()) return null;
+        var sisa = TargetPerPerson!.Value - row.QtyOk;
+        return sisa > 0 ? sisa : 0;
+    }
+
+    // Hanya tampilkan penjahit yang punya progres atau WIP -- yang benar-benar kosong (tidak
+    // ngerjain apa-apa & tidak ada tumpukan) tidak perlu memenuhi tabel. "Tanpa Penjahit" tetap
+    // ikut aturan yang sama (SP sudah menjamin baris ini cuma muncul kalau memang ada datanya).
+    private List<LineEmployeeProgressDto> VisibleEmployeeRows()
+    {
+        var withEmployee = employees.Where(e => e.EmployeeId is not null && (e.QtyOk > 0 || e.Wip > 0)).OrderBy(e => e.QtyOk).ToList();
+        var withoutEmployee = employees.Where(e => e.EmployeeId is null && (e.QtyOk > 0 || e.Wip > 0)).ToList();
+        withEmployee.AddRange(withoutEmployee);
+        return withEmployee;
+    }
+
+    // TOTAL dihitung dari jumlah SELURUH baris SP (bukan disalin dari Line, dan bukan cuma yang
+    // tampil) supaya kalau basis perhitungannya menyimpang dari dashboard, itu KELIHATAN di sini
+    // (lihat verifikasi prompt 45) -- bukan malah ditutupi dengan menampilkan angka Line langsung.
+    private int TotalQtyOk() => employees.Sum(e => e.QtyOk);
+    private int TotalQtyReject() => employees.Sum(e => e.QtyReject);
+    private int TotalWip() => employees.Sum(e => e.Wip);
+    private int TotalWipBundles() => employees.Sum(e => e.WipBundles);
+
+    private string FormatTotalRate()
+    {
+        var headcount = Line?.Headcount ?? 0;
+        var minutes = employees.FirstOrDefault()?.JamEfektifBerjalan;
+        if (headcount <= 0 || minutes is null || minutes <= 0) return "-";
+        var rate = TotalQtyOk() / (double)headcount / (minutes.Value / 60.0);
+        return rate.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"));
+    }
+
+    private static string FormatRate(LineEmployeeProgressDto row)
+    {
+        if (row.JamEfektifBerjalan is null || row.JamEfektifBerjalan <= 0) return "-";
+        var rate = row.QtyOk / (row.JamEfektifBerjalan.Value / 60.0);
+        return rate.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"));
+    }
+
+    private static string FormatRowWip(LineEmployeeProgressDto row) => FormatWip(row.WipBundles, row.Wip);
+
+    // WIP "N bundle - M pcs", sama seperti dashboard utama (Prompt 45 revisi) -- satu tempat,
+    // dipakai baris penjahit maupun TOTAL.
+    private static string FormatWip(int bundles, int pcs) => bundles > 0 ? $"{bundles}-{pcs:N0}" : "0";
+
+    private static string FormatPercent(double? p) => p is null ? "-" : $"{Math.Round(p.Value)}%";
+
+    private static string FormatDiff(int? diffQty, double? diffPercent)
+    {
+        if (diffQty is null || diffPercent is null) return "-";
+        var qtySign = diffQty >= 0 ? "+" : "-";
+        var pctSign = diffPercent >= 0 ? "+" : "-";
+        return $"{qtySign}{Math.Abs(diffQty.Value):N0} ({pctSign}{Math.Round(Math.Abs(diffPercent.Value))}%)";
+    }
+
+    // Warna sama dengan dashboard: hijau selisih >= 0, kuning defisit < 10 poin persen, merah
+    // defisit >= 10 poin (lihat StatusColorClass/StatusTextClass di TvDashboard.razor).
+    private static string ProgressBarClass(double? diffPercent)
+    {
+        if (diffPercent is null) return "bg-secondary";
+        if (diffPercent >= 0) return "bg-success";
+        if (diffPercent > -10) return "bg-warning";
+        return "bg-danger";
+    }
+
+    private static string DiffTextClass(double? diffPercent)
+    {
+        if (diffPercent is null) return "text-muted";
+        if (diffPercent >= 0) return "text-success";
+        if (diffPercent > -10) return "text-warning-emphasis";
+        return "text-danger";
+    }
+
+    private static string FormatLastReceived(DateTime? t)
+    {
+        if (t is null) return "-";
+        return $"{t.Value:dd/MM HH:mm} ({FormatUmur(AgeOf(t.Value))})";
+    }
+
+    private bool IsWipOverload(LineEmployeeProgressDto row)
+    {
+        var withEmployee = employees.Where(e => e.EmployeeId is not null).ToList();
+        if (withEmployee.Count == 0) return false;
+        var avg = withEmployee.Average(e => e.Wip);
+        if (avg <= 0) return false;
+        return row.Wip > avg * LineDetailThresholds.WipOverloadMultiplier;
+    }
+
+    // --- Tab 2: WIP (Prompt 45, dipersempit Prompt 52 -- sebelumnya "PO Berjalan") ---
+
+    private class BundleGroup
+    {
+        public int ProjectId { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int ArticleId { get; set; }
+        public string ArticleName { get; set; } = string.Empty;
+        public string? Style { get; set; }
+        public string? Color { get; set; }
+        public List<LineActiveBundleDto> Bundles { get; set; } = new();
+    }
+
+    private List<BundleGroup> BuildBundleGroups()
+    {
+        var groups = bundles
+            .GroupBy(b => (b.ProjectId, b.ArticleId))
+            .Select(g => new BundleGroup
+            {
+                ProjectId = g.Key.ProjectId,
+                ProjectName = g.First().ProjectName,
+                ArticleId = g.Key.ArticleId,
+                ArticleName = g.First().ArticleName,
+                Style = g.First().Style,
+                Color = g.First().Color,
+                Bundles = g.OrderByDescending(b => AgeOf(b.SejakAt)).ToList(),
+            })
+            .OrderByDescending(g => AgeOf(g.Bundles[0].SejakAt))
+            .ToList();
+        return groups;
+    }
+
+    // --- Tab "Transit" (Prompt 52) ---
+
+    private class TransitGroup
+    {
+        public bool IsUnresolvedGroup { get; set; }
+        public int ProjectId { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int ArticleId { get; set; }
+        public string ArticleName { get; set; } = string.Empty;
+        public string? Style { get; set; }
+        public string? Color { get; set; }
+        public List<LineTransitBundleDto> Bundles { get; set; } = new();
+    }
+
+    // Grup normal per project+artikel (sama pola dengan BuildBundleGroups), DITAMBAH satu grup
+    // penampung "Belum ditentukan line" (kunci semu ProjectId/ArticleId = -1) berisi seluruh
+    // baris BelumDitentukanLine -- hanya relevan di mode line, di mode divisi SP tidak pernah
+    // menandai baris manapun sebagai itu (lihat SIS_Report_LineTransitBundles). Semua grup
+    // (termasuk penampung) ikut diurutkan dari bundle terlama (Bagian 5 prompt 52).
+    private List<TransitGroup> BuildTransitGroups()
+    {
+        var groups = transit
+            .Where(t => !t.BelumDitentukanLine)
+            .GroupBy(t => (t.ProjectId, t.ArticleId))
+            .Select(g => new TransitGroup
+            {
+                ProjectId = g.Key.ProjectId,
+                ProjectName = g.First().ProjectName,
+                ArticleId = g.Key.ArticleId,
+                ArticleName = g.First().ArticleName,
+                Style = g.First().Style,
+                Color = g.First().Color,
+                Bundles = g.OrderByDescending(t => AgeOf(t.DiserahkanAt)).ToList(),
+            })
+            .ToList();
+
+        var unresolved = transit.Where(t => t.BelumDitentukanLine).ToList();
+        if (unresolved.Count > 0)
+        {
+            groups.Add(new TransitGroup
+            {
+                IsUnresolvedGroup = true,
+                ProjectId = -1,
+                ArticleId = -1,
+                ProjectName = "Belum ditentukan line",
+                Bundles = unresolved.OrderByDescending(t => AgeOf(t.DiserahkanAt)).ToList(),
+            });
+        }
+
+        return groups.OrderByDescending(g => AgeOf(g.Bundles[0].DiserahkanAt)).ToList();
+    }
+
+    // Badge Transit diberi warna peringatan bila ADA bundle yang melewati ambang mandek (Bagian
+    // 3 prompt 52) -- sama ambang dengan StaleClass/RowBgClass di bawah.
+    private string TransitBadgeClass()
+    {
+        if (transit.Count == 0) return "bg-secondary";
+        var maxAgeDays = transit.Max(t => AgeOf(t.DiserahkanAt).TotalDays);
+        if (maxAgeDays >= LineDetailThresholds.BundleStaleRedDays) return "bg-danger";
+        if (maxAgeDays >= LineDetailThresholds.BundleStaleYellowDays) return "bg-warning text-dark";
+        return "bg-secondary";
+    }
+
+    // "Dari" = divisi + resource pengirim (Bagian 5 prompt 52) -- dibutuhkan utk menelusuri fisik
+    // barang, bukan penerima (yang justru belum diketahui/belum terjadi).
+    private static string FormatDari(LineTransitBundleDto t) =>
+        string.IsNullOrEmpty(t.AsalResourceName) ? (t.AsalDivisionName ?? "-") : $"{t.AsalDivisionName} · {t.AsalResourceName}";
+
+    private static TimeSpan AgeOf(DateTime sejakAt)
+    {
+        var span = DateTime.Now - sejakAt;
+        return span < TimeSpan.Zero ? TimeSpan.Zero : span;
+    }
+
+    private static string FormatUmur(TimeSpan age) =>
+        age.TotalHours >= 24 ? $"{(int)Math.Floor(age.TotalDays)} hari" : $"{(int)Math.Floor(age.TotalHours)} jam";
+
+    // Ambang mandek -- lihat TerakarsaApp.Shared.Dashboards.LineDetailThresholds.
+    private static string StaleClass(TimeSpan age)
+    {
+        if (age.TotalDays >= LineDetailThresholds.BundleStaleRedDays) return "text-danger fw-bold";
+        if (age.TotalDays >= LineDetailThresholds.BundleStaleYellowDays) return "text-warning-emphasis fw-bold";
+        return "";
+    }
+
+    private static string RowBgClass(TimeSpan age)
+    {
+        if (age.TotalDays >= LineDetailThresholds.BundleStaleRedDays) return "table-danger";
+        if (age.TotalDays >= LineDetailThresholds.BundleStaleYellowDays) return "table-warning";
+        return "";
+    }
+
+    // --- Tab 3 (Prompt 46): Selesai ---
+
+    private class CompletedGroup
+    {
+        public int ProjectId { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int ArticleId { get; set; }
+        public string ArticleName { get; set; } = string.Empty;
+        public string? Style { get; set; }
+        public string? Color { get; set; }
+        public int Sisa { get; set; }
+        public List<LineCompletedBundleDto> Bundles { get; set; } = new();
+    }
+
+    // Grup diurutkan dari OK terbesar (Bagian 3 prompt 46). "Sisa" per PO diambil dari data tab
+    // "PO Berjalan" (kondisi saat ini, bukan periode) -- lihat LoadCompletedAsync.
+    private List<CompletedGroup> BuildCompletedGroups()
+    {
+        var groups = completed
+            .GroupBy(c => (c.ProjectId, c.ArticleId))
+            .Select(g => new CompletedGroup
+            {
+                ProjectId = g.Key.ProjectId,
+                ProjectName = g.First().ProjectName,
+                ArticleId = g.Key.ArticleId,
+                ArticleName = g.First().ArticleName,
+                Style = g.First().Style,
+                Color = g.First().Color,
+                Bundles = g.OrderByDescending(c => c.SelesaiAt).ToList(),
+                Sisa = bundles.Where(b => b.ArticleId == g.Key.ArticleId).Sum(b => b.Qty),
+            })
+            .OrderByDescending(g => g.Bundles.Sum(c => c.QtyOk))
+            .ToList();
+        return groups;
+    }
+
+    private string FormatSelesai(DateTime t) =>
+        periodeSelesai == "hari"
+            ? t.ToString("HH:mm", CultureInfo.GetCultureInfo("id-ID"))
+            : t.ToString("dd MMM HH:mm", CultureInfo.GetCultureInfo("id-ID"));
+
+    // Kolom "Diterima" = ReceivedAt apa adanya (bukan hasil hitungan) -- format sama dengan
+    // "Selesai" (jam saja saat periode Hari ini, tanggal+jam saat periode lebih panjang), "-"
+    // kalau bundle memang dibuat langsung di line ini (tidak ada step sebelumnya).
+    private string FormatDiterima(DateTime? t)
+    {
+        if (t is null) return "-";
+        return periodeSelesai == "hari"
+            ? t.Value.ToString("HH:mm", CultureInfo.GetCultureInfo("id-ID"))
+            : t.Value.ToString("dd MMM HH:mm", CultureInfo.GetCultureInfo("id-ID"));
+    }
+
+    private static string FormatLama(DateTime? receivedAt, DateTime selesaiAt)
+    {
+        if (receivedAt is null) return "-";
+        var hours = (selesaiAt - receivedAt.Value).TotalHours;
+        if (hours < 0) hours = 0;
+        return hours.ToString("0.0", CultureInfo.GetCultureInfo("id-ID"));
+    }
+
+    private static double? LamaHours(DateTime? receivedAt, DateTime selesaiAt)
+    {
+        if (receivedAt is null) return null;
+        var hours = (selesaiAt - receivedAt.Value).TotalHours;
+        return hours < 0 ? 0 : hours;
+    }
+
+    private string FormatAvgLama()
+    {
+        var hours = completed.Select(c => LamaHours(c.ReceivedAt, c.SelesaiAt)).Where(h => h is not null).Select(h => h!.Value).ToList();
+        if (hours.Count == 0) return "-";
+        return hours.Average().ToString("0.0", CultureInfo.GetCultureInfo("id-ID"));
+    }
+
+    // --- Tab 4 (Prompt 46): Reject ---
+
+    // "Rjk" = basis 3 kategori (Print+Fabric+Sewing), TIDAK termasuk Rework -- IDENTIK dengan
+    // QtyReject di tab Per Penjahit/Selesai (lihat SIS_Report_LineEmployeeProgress), dihitung DI
+    // CLIENT dari 3 field terpisah karena SP sengaja tidak menggabungnya (kategori reject tidak
+    // boleh digabung jadi satu angka di tab ini -- lihat sql/sp_Report_LineDetail.sql).
+    private static int RjkOf(LineRejectBundleDto r) => r.QtyRejectPrint + r.QtyRejectFabric + r.QtyRejectSewing;
+
+    private class RejectGroup
+    {
+        public int ProjectId { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int ArticleId { get; set; }
+        public string ArticleName { get; set; } = string.Empty;
+        public string? Style { get; set; }
+        public string? Color { get; set; }
+        public int TotalOutputPo { get; set; }
+        public List<LineRejectBundleDto> Bundles { get; set; } = new();
+        public double Percent => TotalOutputPo > 0 ? 100.0 * Bundles.Sum(RjkOf) / TotalOutputPo : 0;
+    }
+
+    // Grup diurutkan dari PERSENTASE reject tertinggi (bukan jumlah absolut), supaya PO kecil
+    // dengan reject tinggi tetap terlihat di atas (Bagian 4 prompt 46).
+    private List<RejectGroup> BuildRejectGroups()
+    {
+        var groups = rejects
+            .GroupBy(r => (r.ProjectId, r.ArticleId))
+            .Select(g => new RejectGroup
+            {
+                ProjectId = g.Key.ProjectId,
+                ProjectName = g.First().ProjectName,
+                ArticleId = g.Key.ArticleId,
+                ArticleName = g.First().ArticleName,
+                Style = g.First().Style,
+                Color = g.First().Color,
+                TotalOutputPo = g.First().TotalOutputPo,
+                Bundles = g.OrderByDescending(RjkOf).ThenByDescending(r => r.QtyLost).ToList(),
+            })
+            .OrderByDescending(g => g.Percent)
+            .ToList();
+        return groups;
+    }
+
+    private static string FormatLogType(string logType) => logType == "ADJUSTMENT" ? "Adjustment" : "Normal";
+
+    // Serial di tab WIP/Transit/Selesai/Reject dibuat link ke /b/{serial} -- halaman scan bundle
+    // yang sama dipakai station (BundleScanPublic.razor), pola sama dengan ReportBundle.razor.
+    private static string BundleUrl(string serial) => $"/b/{serial}";
+}

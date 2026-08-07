@@ -24,7 +24,7 @@ public class PrintController : ControllerBase
     public async Task<IActionResult> Claim([FromBody] PrintJobClaimRequest request)
     {
         var batchSize = request.BatchSize <= 0 ? 5 : request.BatchSize;
-        var result = await _printJobService.ClaimAsync(batchSize);
+        var result = await _printJobService.ClaimAsync(batchSize, request.JobTypes, request.DryRun);
         return Ok(result);
     }
 
@@ -33,5 +33,17 @@ public class PrintController : ControllerBase
     {
         await _printJobService.ReportAsync(request);
         return Ok();
+    }
+
+    // Prompt 48: render isi cetakan (job_type render_mode = TOKEN) -- dipanggil worker
+    // SETELAH klaim, sebelum diterjemahkan ke byte ESC/POS lewat EscPosRenderer. dryRun (ad
+    // hoc lanjutan Prompt 48) harus sama dengan flag yang dipakai saat klaim job ini --
+    // menentukan apakah SIS_Print_Dispatch baca dari print_jobs_dryrun atau print_jobs.
+    [HttpGet("render/{printJobId:int}")]
+    public async Task<IActionResult> Render(int printJobId, [FromQuery] bool dryRun = false)
+    {
+        var (success, error, tokenText) = await _printJobService.RenderAsync(printJobId, dryRun);
+        if (!success) return BadRequest(error);
+        return Ok(new { tokenText });
     }
 }

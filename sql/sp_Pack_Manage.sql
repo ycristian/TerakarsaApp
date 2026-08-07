@@ -99,7 +99,7 @@ BEGIN
         ;WITH LastStep AS (
             SELECT a.article_id,
                    (SELECT TOP 1 aw.article_workflow_id FROM article_workflows aw
-                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL
+                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL
                     ORDER BY aw.sort_order DESC) AS LastStepId
             FROM articles a WHERE a.project_id = @ProjectId AND a.deleted_at IS NULL
         ),
@@ -275,7 +275,7 @@ BEGIN
         ;WITH LastStep AS (
             SELECT a.article_id,
                    (SELECT TOP 1 aw.article_workflow_id FROM article_workflows aw
-                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL
+                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL
                     ORDER BY aw.sort_order DESC) AS LastStepId
             FROM articles a WHERE a.project_id = @PlanProjectId AND a.deleted_at IS NULL
         ),
@@ -399,7 +399,7 @@ BEGIN
         ;WITH LastStep AS (
             SELECT a.article_id,
                    (SELECT TOP 1 aw.article_workflow_id FROM article_workflows aw
-                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL
+                    WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL
                     ORDER BY aw.sort_order DESC) AS LastStepId
             FROM articles a WHERE a.project_id = @ConfirmProjectId AND a.deleted_at IS NULL
         ),

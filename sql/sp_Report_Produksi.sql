@@ -110,9 +110,21 @@ BEGIN
     ),
 
     -- (A) Baris log nyata milik divisi -- kontribusi Qty Done / Menunggu QC / Reject (5 kategori).
+    -- FIX (2026-08-03): LineResourceId dulu SELALU pakai bundle's resource (b.resource_id) kalau
+    -- ada bundle, mengikuti konvensi "Pelaksana = resource bawaan bundle" (revisi 2026-07-25 di
+    -- bawah). Itu benar utk divisi Sewing (bundles.resource_id memang line Sewing itu sendiri),
+    -- tapi SALAH utk divisi bundle-based lain (mis. Press DTF) yang resource-nya sendiri (mis.
+    -- "DTF Team") tidak pernah muncul sebagai bundles.resource_id -- kolom itu isinya line Sewing
+    -- TUJUAN bundle, bukan siapa yang kerja di divisi ybs. Akibatnya filter @ResourceId di divisi
+    -- non-sewing selalu kosong walau qty_ok ada & received_at sudah terisi (diverifikasi manual
+    -- EXEC SIS_Report_ProduksiAgg utk divisi Press DTF). Fix: pakai resource bundle HANYA kalau
+    -- resource itu memang milik divisi step ybs (brd.division_id = @DivisionId); kalau beda
+    -- divisi -> fallback ke awl.resource_id (siapa yang benar-benar login/kerjakan step ini) --
+    -- sama seperti fallback yang sudah dipakai baris non-bundle. Harus sinkron dgn perbaikan yang
+    -- sama di sql/sp_Report_RekapStruk.sql (Prompt 42 mengikuti definisi ini PERSIS).
     DirectAtoms AS (
         SELECT
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.resource_id ELSE NULL END AS LineResourceId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brd.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
             a.project_id AS PoId,
             aw.article_id AS ArticleId,
             CASE
@@ -156,6 +168,7 @@ BEGIN
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         INNER JOIN articles a ON a.article_id = aw.article_id AND a.deleted_at IS NULL
         LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id AND b.deleted_at IS NULL
+        LEFT JOIN resources brd ON brd.resource_id = b.resource_id
         WHERE awl.deleted_at IS NULL AND aw.division_id = @DivisionId
     ),
 
@@ -251,7 +264,7 @@ BEGIN
         SELECT LineResourceId, PoId, ArticleId, QtyDone, QtyMenungguQc, QtyWip,
                QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost
         FROM SizeWip
-    )
+    ),
 
     -- Prompt 36: RG = agregat mentah (sama seperti sebelumnya), lalu di-CROSS APPLY ke
     -- STRING_AGG supaya breakdown 5 kategori reject tampil sbg satu kolom teks ringkas
@@ -338,11 +351,14 @@ BEGIN
     -- fallback-ke-Line tetap bisa digabung satu tab lewat GROUP BY nama yang sama.
     DirectAtoms AS (
         SELECT
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.resource_id ELSE NULL END AS LineResourceId,
+            -- FIX (2026-08-03): fallback ke awl.resource_id kalau bundle's resource beda divisi
+            -- dari step ybs -- lihat catatan FIX lengkap di SIS_Report_ProduksiAgg DirectAtoms di
+            -- atas (brn di sini sudah join ke b.resource_id, jadi brn.division_id dipakai lagi).
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
             -- Prompt 32: employee_name (master employees) diutamakan di atas resource_name Line.
             -- Prompt 35: fallback ke resource_person_name (teks bebas lama) DIHAPUS -- kolom itu
             -- sudah jadi bundles.remarks (bukan identitas lagi).
-            CASE WHEN awl.bundle_id IS NOT NULL
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId
                      THEN ISNULL(ben.employee_name, brn.resource_name)
                  ELSE arn.resource_name
             END AS PelaksanaKey,
@@ -502,7 +518,7 @@ BEGIN
         SELECT LineResourceId, PelaksanaKey, PoId, ArticleId, BundleId, BundleNo, BundleSerial, ArticleSizeId,
                QtyDone, QtyMenungguQc, QtyWip, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost
         FROM SizeWip
-    )
+    ),
 
     -- PelaksanaName = ISNULL(t.PelaksanaKey, 'Tanpa Nama'). PelaksanaKey sudah dihitung
     -- final per-atom di tiap CTE (bukan agregat) -- baris ber-bundle SELALU dari resource

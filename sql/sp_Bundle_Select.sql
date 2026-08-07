@@ -78,7 +78,7 @@ BEGIN
     DECLARE @FirstBundleStepId INT;
     SELECT TOP 1 @FirstBundleStepId = article_workflow_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1
     ORDER BY sort_order ASC;
 
     DECLARE @HasFirstBundleStep BIT = CASE WHEN @FirstBundleStepId IS NULL THEN 0 ELSE 1 END;
@@ -90,7 +90,7 @@ BEGIN
     DECLARE @FirstStationBundleDivisionId INT;
     SELECT TOP 1 @FirstStationBundleDivisionId = division_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND is_bundling = 0
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND is_bundling = 0
     ORDER BY sort_order ASC;
 
     DECLARE @BundlingDivisionId INT;
@@ -101,7 +101,7 @@ BEGIN
     DECLARE @LastNonBundleStepId INT;
     SELECT TOP 1 @LastNonBundleStepId = article_workflow_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 0
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 0
     ORDER BY sort_order DESC;
 
     SELECT

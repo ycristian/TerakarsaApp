@@ -88,6 +88,7 @@ builder.Services.AddScoped<PrintJobService>();
 builder.Services.AddScoped<ReportBundleService>();
 builder.Services.AddScoped<ReportWipService>();
 builder.Services.AddScoped<ReportProduksiService>();
+builder.Services.AddScoped<ReportActivityLogService>();
 builder.Services.AddScoped<SuperAdminService>();
 builder.Services.AddScoped<WorkScheduleService>();
 builder.Services.AddScoped<DailyPlanService>();

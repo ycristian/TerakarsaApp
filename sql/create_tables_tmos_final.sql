@@ -421,6 +421,10 @@ CREATE TABLE article_workflows(
  auto_receive bit not null default 0,       -- salinan dari template step; selalu 0 utk step Bundling implisit
  print_kupon bit not null default 0,        -- Prompt 41: salinan dari template step; selalu 0 utk step Bundling implisit
  is_bundling bit not null default 0,         -- step Bundling implisit (disisipkan sistem saat APPLY, bukan dari template)
+ inactive_at datetime2 null,    -- Prompt 50: diisi = step berhenti jadi jalur untuk unit baru
+                                 -- (restrukturisasi setelah ada log). Baris tetap deleted_at
+                                 -- IS NULL dengan sengaja -- lihat sp_ArticleWorkflow_Restructure.sql.
+ inactive_by int null,
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -513,6 +517,10 @@ CREATE TABLE article_workflow_logs(
  received_remark varchar(500) null,
  target_division_id int null                -- sebelumnya target_division, disamakan pola _id
    constraint FK_awl_target_division foreign key references divisions(division_id),
+ target_division_id_original int null,      -- Prompt 50: nilai target_division_id SEBELUM
+                                              -- redirect pertama (restrukturisasi workflow) --
+                                              -- hanya diisi kalau masih NULL, redirect kedua
+                                              -- tidak menimpanya. Lihat sp_ArticleWorkflow_Restructure.sql.
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,                   -- PENCATAT: user login (dari stasiun = user sistem 'station')
  updated_at datetime2 null,                 -- Prompt 12d: trio ini hanya diisi action UPDATE (revisi
@@ -522,6 +530,40 @@ CREATE TABLE article_workflow_logs(
  deleted_at datetime2 null,
  deleted_by int null,
  delete_reason varchar(255) null
+);
+
+-- Prompt 48: daftar printer fisik. Menambah/mengganti printer = INSERT/UPDATE di sini,
+-- tidak perlu deploy ulang PrintService.
+CREATE TABLE print_devices(
+ print_device_id int primary key identity(1,1),
+ device_code varchar(30) not null,          -- 'THERMAL', 'LABEL', 'THERMAL_FINISHING', dst
+ device_name varchar(150) not null,         -- nama untuk manusia, mis. 'Struk Lantai 1'
+ printer_name varchar(255) not null,        -- nama printer Windows PERSIS
+ render_mode varchar(20) not null           -- 'TOKEN' (dirender SP) | 'RAW_TSPL' (dirakit C#)
+   constraint CK_print_devices_render_mode check (render_mode in ('TOKEN','RAW_TSPL')),
+ chars_per_line int not null default 48,    -- lebar font A
+ chars_per_line_small int not null default 64, -- lebar font B
+ is_active bit not null default 1,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Prompt 48: pemetaan job_type -> printer tujuan.
+CREATE TABLE print_job_routes(
+ print_job_route_id int primary key identity(1,1),
+ job_type varchar(30) not null,
+ print_device_id int not null
+   constraint FK_pjr_print_devices foreign key references print_devices(print_device_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
 );
 
 -- Antrian cetak label QR. Dibuat otomatis saat bundle dibuat (job_type BUNDLE_LABEL,
@@ -536,6 +578,34 @@ CREATE TABLE print_jobs(
  error_message varchar(500) null,
  retry_count int not null default 0,
  printed_at datetime2 null,
+ print_device_id int null                   -- Prompt 48: diisi SAAT KLAIM (bukan saat dibuat) --
+   constraint FK_print_jobs_print_devices    -- catatan printer mana yang benar-benar dipakai;
+   foreign key references print_devices(print_device_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Antrian cetak KHUSUS TESTING (mirror print_jobs persis) -- saat TerakarsaApp.PrintService
+-- jalan dengan DryRun=true, worker memanggil varian *_DryRun dari Claim/Report/Dispatch yang
+-- baca/tulis ke sini, BUKAN ke print_jobs -- supaya polling/klaim/testing tidak pernah
+-- menyentuh antrian cetak live. Diisi lewat SIS_PrintJobDryRun_Seed (copy satu baris dari
+-- print_jobs asli, baris sumbernya TIDAK diubah). print_device_id tetap FK ke print_devices
+-- yang sama (routing config bukan hal yang perlu dipisah live/dryrun).
+CREATE TABLE print_jobs_dryrun(
+ print_job_id int primary key identity(1,1),
+ job_type varchar(30) not null,
+ ref_id int not null,
+ payload nvarchar(max) not null,
+ [status] varchar(20) not null default 'PENDING',
+ error_message varchar(500) null,
+ retry_count int not null default 0,
+ printed_at datetime2 null,
+ print_device_id int null
+   constraint FK_print_jobs_dryrun_print_devices foreign key references print_devices(print_device_id),
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -862,6 +932,23 @@ CREATE TABLE dashboard_tokens(
 );
 GO
 
+-- ============ 9f. APP SETTINGS ============
+-- Saklar konfigurasi global tingkat sistem. Baris tunggal (id = 1), kolom bit per setting --
+-- bukan key-value, karena baru satu setting yang dibutuhkan (auto_print_coupon_active,
+-- saklar master auto-print kupon borongan Prompt 41, terpisah dari flag print_kupon per step).
+
+CREATE TABLE app_settings(
+ app_setting_id int primary key identity(1,1),
+ auto_print_coupon_active bit not null default 1,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
 
@@ -891,6 +978,8 @@ CREATE UNIQUE INDEX UX_ddp_date_division       ON daily_division_plans(plan_date
 CREATE UNIQUE INDEX UX_drp_plan_resource       ON daily_resource_plans(daily_division_plan_id, resource_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_dashboard_tokens_token  ON dashboard_tokens(dashboard_token) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_dashboard_tokens_name   ON dashboard_tokens(token_name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_print_devices_code      ON print_devices(device_code) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_print_job_routes_type   ON print_job_routes(job_type) WHERE deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
@@ -899,6 +988,9 @@ CREATE INDEX IX_ddp_plan_date       ON daily_division_plans(plan_date) WHERE del
 CREATE INDEX IX_movement_stock      ON material_movement(stock_id)  WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_bundle          ON article_workflow_logs(bundle_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_article_workflow ON article_workflow_logs(article_workflow_id) WHERE deleted_at IS NULL;
+-- Prompt 47: modul Log Aktivitas -- filter rentang created_at/received_at langsung.
+CREATE INDEX IX_awl_created_at      ON article_workflow_logs(created_at) WHERE deleted_at IS NULL;
+CREATE INDEX IX_awl_received_at     ON article_workflow_logs(received_at) WHERE deleted_at IS NULL;
 CREATE INDEX IX_bundles_article     ON bundles(article_id);
 CREATE INDEX IX_articles_project    ON articles(project_id);
 CREATE INDEX IX_stocks_material     ON material_stocks(material_id);

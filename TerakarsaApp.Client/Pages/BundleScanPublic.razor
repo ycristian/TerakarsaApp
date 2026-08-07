@@ -90,7 +90,8 @@ else
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
                         OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true"
                         IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested"
-                        ResourceOptions="resourceOptions" ActiveResourceId="operatorId" AllowResourceChange="@(station?.AllowResourceChange ?? true)" />
+                        ResourceOptions="resourceOptions" ActiveResourceId="operatorId" ActiveResourceName="operatorName"
+                        AllowResourceChange="@(station?.AllowResourceChange ?? true)" />
     }
     else
     {

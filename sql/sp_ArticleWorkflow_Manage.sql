@@ -22,6 +22,12 @@
 -- template (sudah divalidasi valid di sana); SAVE menerima PrintKupon di JSON @Steps dan
 -- menolak (RAISERROR) kalau PrintKupon = 1 pada step RequiresBundle = 0. Step Bundling
 -- implisit selalu print_kupon = 0 (default kolom, tidak pernah diisi eksplisit di sini).
+--
+-- Fix: APPLY & SAVE sekarang menolak (RAISERROR) step dengan divisi kosong atau divisi yang
+-- sudah di-soft-delete (APPLY mengecek step template asal, SAVE mengecek DivisionId di JSON
+-- @Steps) -- sebelumnya cuma ditegakkan lewat NOT NULL/FK divisions, yang tidak menangkap
+-- divisi yang deleted_at-nya sudah terisi. Client (ArticleEdit.razor) sudah menolak baris
+-- tanpa divisi sebelum submit -- guard ini menutup jalur langsung ke API/SP.
 
 SET ANSI_NULLS ON;
 GO
@@ -49,6 +55,20 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM workflow_templates WHERE workflow_template_id = @WorkflowTemplateId AND deleted_at IS NULL)
         BEGIN
             RAISERROR('Template workflow tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Fix: tolak APPLY kalau ada step template yang divisinya sudah di-soft-delete
+        -- setelah template dibuat -- tanpa ini, article_workflows baru ikut mewarisi divisi
+        -- mati dan kartunya tidak akan pernah muncul di station manapun (lihat kasus
+        -- SIS_Division_Manage DELETE yang tidak mengecek pemakaian).
+        IF EXISTS (
+            SELECT 1 FROM workflow_template_steps wts
+            WHERE wts.workflow_template_id = @WorkflowTemplateId AND wts.deleted_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM divisions d WHERE d.division_id = wts.division_id AND d.deleted_at IS NULL)
+        )
+        BEGIN
+            RAISERROR('Template workflow ini memiliki step dengan divisi yang sudah dihapus. Perbaiki template terlebih dahulu.', 16, 1);
             RETURN;
         END
 
@@ -119,7 +139,7 @@ BEGIN
             SELECT 1
             FROM article_workflows aw
             INNER JOIN article_workflow_logs awl ON awl.article_workflow_id = aw.article_workflow_id AND awl.deleted_at IS NULL
-            WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.is_bundling = 0
+            WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.is_bundling = 0 AND aw.inactive_at IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM OPENJSON(@Steps) WITH (Id INT '$.Id') j
                   WHERE j.Id = aw.article_workflow_id
@@ -127,6 +147,19 @@ BEGIN
         )
         BEGIN
             RAISERROR('Tidak bisa menghapus step yang sudah memiliki log produksi.', 16, 1);
+            RETURN;
+        END
+
+        -- Fix: sama dengan guard di SIS_WorkflowTemplate_Manage -- tolak step tanpa divisi
+        -- atau divisi yang sudah di-soft-delete, dengan pesan Indonesia, bukan cuma
+        -- mengandalkan NOT NULL/FK divisions.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (DivisionId INT '$.DivisionId') j
+            WHERE j.DivisionId IS NULL
+               OR NOT EXISTS (SELECT 1 FROM divisions d WHERE d.division_id = j.DivisionId AND d.deleted_at IS NULL)
+        )
+        BEGIN
+            RAISERROR('Setiap step wajib memiliki divisi yang valid.', 16, 1);
             RETURN;
         END
 
@@ -185,11 +218,16 @@ BEGIN
             -- (Id null) sehingga kalau insert duluan, baris itu langsung cocok "tidak ada
             -- di JSON" dan ikut ke-soft-delete pada transaksi yang sama (bug lama:
             -- created_at == deleted_at persis pada baris yang baru ditambahkan).
+            -- Prompt 50: inactive_at IS NOT NULL dikecualikan juga -- perlakuan persis sama
+            -- dengan is_bundling = 1 (SIS_ArticleWorkflow_ListByArticle menyembunyikan baris
+            -- ini dari grid, jadi JSON dari client TIDAK PERNAH memuatnya -- tanpa pengecualian
+            -- ini, step yang baru dinonaktifkan langsung ke-soft-delete begitu admin menekan
+            -- Simpan tanpa mengubah apa pun, lalu tertolak guard log di atas kalau sudah ber-log).
             UPDATE aw
             SET aw.deleted_at = SYSDATETIME(),
                 aw.deleted_by = @UserId
             FROM article_workflows aw
-            WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.is_bundling = 0
+            WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.is_bundling = 0 AND aw.inactive_at IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM OPENJSON(@Steps) WITH (Id INT '$.Id') j
                   WHERE j.Id = aw.article_workflow_id
@@ -262,7 +300,7 @@ BEGIN
                 DECLARE @SaveMinStationBundleSort INT;
                 SELECT @SaveMinStationBundleSort = MIN(sort_order)
                 FROM article_workflows
-                WHERE article_id = @ArticleId AND deleted_at IS NULL AND is_bundling = 0 AND requires_bundle = 1;
+                WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND is_bundling = 0 AND requires_bundle = 1;
 
                 UPDATE article_workflows SET sort_order = @SaveMinStationBundleSort WHERE article_workflow_id = @SaveBundlingId;
 

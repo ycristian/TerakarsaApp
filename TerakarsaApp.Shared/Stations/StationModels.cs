@@ -151,3 +151,13 @@ public class RekapStrukPrintRequest
     public int? EmployeeId { get; set; }
     public DateTime Date { get; set; }
 }
+
+// Fix: tombol "Cetak Karyawan" -- terpisah dari RekapStrukPrintRequest (tidak ada @Level,
+// @Date di sini SATU HARI, bukan periode gajian mingguan -- lihat SIS_Report_RekapKaryawanPrint).
+public class RekapKaryawanPrintRequest
+{
+    public int DivisionId { get; set; }
+    public int? ResourceId { get; set; }
+    public int? EmployeeId { get; set; }
+    public DateTime Date { get; set; }
+}

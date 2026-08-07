@@ -1046,6 +1046,19 @@ else
                         <p><strong>@reviseTarget.ArticleName</strong> &middot; @reviseTarget.StepName</p>
                     }
 
+                    <div class="mb-3">
+                        @if (!IsLocked)
+                        {
+                            <ResourcePickerCards Resources="operators" SelectedId="revisePelaksanaResourceId"
+                                                  SelectedIdChanged="(int? v) => revisePelaksanaResourceId = v ?? 0" Label="Pelaksana" />
+                        }
+                        else
+                        {
+                            <label class="form-label">Pelaksana</label>
+                            <div class="form-control form-control-lg bg-light"><i class="fe fe-lock"></i> @station?.DefaultResourceName</div>
+                        }
+                    </div>
+
                     <div class="d-flex justify-content-end mb-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ResetRevise">Reset</button>
                     </div>
@@ -1465,7 +1478,9 @@ else
                 </div>
                 <div class="modal-body">
                     <p class="mb-1">Yakin hapus bundle No. @BundleDisplay.Format(deleteBundleTarget.BundleLetter, deleteBundleTarget.BundleNo) &middot; @deleteBundleTarget.Serial?</p>
-                    <p class="text-muted mb-0">Bundle sudah diterima @deleteBundleTarget.TargetDivisionName. Hanya bisa dihapus sampai 1 jam setelah bundle dibuat.</p>
+                    <p class="text-muted mb-2">Bundle sudah diterima @deleteBundleTarget.TargetDivisionName. Hanya bisa dihapus sampai 1 jam setelah bundle dibuat.</p>
+                    <label class="form-label">Alasan hapus (wajib)</label>
+                    <textarea class="form-control" rows="2" @bind="deleteBundleReason"></textarea>
                     @if (!string.IsNullOrEmpty(deleteBundleError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@deleteBundleError</div>
@@ -1913,6 +1928,7 @@ else
     private bool showDeleteBundleModal = false;
     private StationPendingHandoverDto? deleteBundleTarget;
     private string deleteBundleError = string.Empty;
+    private string deleteBundleReason = string.Empty;
 
     // Prompt 24: Cetak Ulang label -- dipakai kartu bundle di IN/WIP/OUT.
     private string reprintFeedback = string.Empty;
@@ -1939,6 +1955,9 @@ else
     private string reviseRemark = string.Empty;
     private string reviseError = string.Empty;
     private WorkflowQuotaInfoDto? reviseQuotaInfo;
+    // Prompt 49: picker "Pelaksana" -- default = resource_id baris log (pelaksana tercatat),
+    // bukan operator sesi. Sekali pakai (di-reset tiap kali modal dibuka, lihat OpenReviseModal).
+    private int revisePelaksanaResourceId;
 
     private bool showBatalSerahModal = false;
     private StationPendingHandoverDto? batalSerahTarget;
@@ -2158,11 +2177,19 @@ else
     private async Task RefreshLists()
     {
         isLoadingLists = true;
-        pendingReceives = await StationApi.GetPendingReceivesAsync(currentOperatorId);
-        inProgress = await StationApi.GetInProgressAsync(currentOperatorId);
-        activeWork = await StationApi.GetActiveWorkAsync();
-        outbound = await StationApi.GetOutboundAsync(currentOperatorId);
-        counts = await StationApi.GetCountsAsync(currentOperatorId);
+
+        var pendingReceivesTask = StationApi.GetPendingReceivesAsync(currentOperatorId);
+        var inProgressTask = StationApi.GetInProgressAsync(currentOperatorId);
+        var activeWorkTask = StationApi.GetActiveWorkAsync();
+        var outboundTask = StationApi.GetOutboundAsync(currentOperatorId);
+        var countsTask = StationApi.GetCountsAsync(currentOperatorId);
+        await Task.WhenAll(pendingReceivesTask, inProgressTask, activeWorkTask, outboundTask, countsTask);
+
+        pendingReceives = pendingReceivesTask.Result;
+        inProgress = inProgressTask.Result;
+        activeWork = activeWorkTask.Result;
+        outbound = outboundTask.Result;
+        counts = countsTask.Result;
         isLoadingLists = false;
         StateHasChanged();
 
@@ -2171,15 +2198,19 @@ else
 
     // Fix: foto kartu "Buat Bundle" -- fetch lazy per ArticleId yang belum ada di cache,
     // supaya tidak refetch ulang setiap RefreshLists (polling) selama daftar kartu sama.
+    // Fetch paralel (bukan satu-satu) supaya banyak foto tidak menumpuk jadi latensi berurutan.
     private async Task LoadMissingArticlePhotos()
     {
         var articleIds = activeWork.Where(a => a.IsBundling).Select(a => a.ArticleId).Distinct()
             .Where(id => !articlePhotoCache.ContainsKey(id)).ToList();
         if (articleIds.Count == 0) return;
 
-        foreach (var articleId in articleIds)
+        var photoTasks = articleIds.ToDictionary(id => id, id => StationApi.GetArticlePhotoAsync(id));
+        await Task.WhenAll(photoTasks.Values);
+
+        foreach (var (articleId, task) in photoTasks)
         {
-            var result = await StationApi.GetArticlePhotoAsync(articleId);
+            var result = task.Result;
             articlePhotoCache[articleId] = result is null
                 ? null
                 : $"data:{result.Value.ContentType};base64,{Convert.ToBase64String(result.Value.Bytes)}";
@@ -2728,6 +2759,7 @@ else
             ?? (item.TargetDivisionOptions.Count == 1 ? item.TargetDivisionOptions[0].Id : 0);
         reviseRemark = item.Remark ?? string.Empty;
         reviseError = string.Empty;
+        revisePelaksanaResourceId = item.ResourceId ?? currentOperatorId ?? 0;
         reviseQuotaInfo = item.BundleId is not null
             ? await StationApi.GetQuotaInfoAsync(item.ArticleWorkflowId, item.BundleId.Value)
             : null;
@@ -2745,6 +2777,7 @@ else
         reviseQtyRejectRework = reviseTarget.QtyRejectRework;
         reviseQtyLost = reviseTarget.QtyLost;
         reviseRemark = reviseTarget.Remark ?? string.Empty;
+        revisePelaksanaResourceId = reviseTarget.ResourceId ?? currentOperatorId ?? 0;
     }
 
     private void CloseReviseModal()
@@ -2781,7 +2814,8 @@ else
                 QtyRejectRework = reviseQtyRejectRework,
                 QtyLost = reviseQtyLost,
                 Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
-                ResourceId = currentOperatorId.Value
+                ResourceId = currentOperatorId.Value,
+                PelaksanaResourceId = revisePelaksanaResourceId > 0 ? revisePelaksanaResourceId : null
             });
 
             isBusy = false;
@@ -2814,7 +2848,8 @@ else
             QtyLost = reviseQtyLost,
             Remark = string.IsNullOrWhiteSpace(reviseRemark) ? null : reviseRemark,
             NewTargetDivisionId = reviseTargetDivisionId,
-            ResourceId = currentOperatorId.Value
+            ResourceId = currentOperatorId.Value,
+            NewResourceId = revisePelaksanaResourceId > 0 ? revisePelaksanaResourceId : null
         });
 
         isBusy = false;
@@ -3239,6 +3274,7 @@ else
     {
         deleteBundleTarget = item;
         deleteBundleError = string.Empty;
+        deleteBundleReason = string.Empty;
         showDeleteBundleModal = true;
     }
 
@@ -3253,10 +3289,16 @@ else
     {
         if (deleteBundleTarget?.BundleId is null) return;
 
+        if (string.IsNullOrWhiteSpace(deleteBundleReason))
+        {
+            deleteBundleError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
         isBusy = true;
         deleteBundleError = string.Empty;
 
-        var (success, error) = await StationApi.DeleteBundleAsync(deleteBundleTarget.BundleId.Value);
+        var (success, error) = await StationApi.DeleteBundleAsync(deleteBundleTarget.BundleId.Value, deleteBundleReason);
 
         isBusy = false;
 

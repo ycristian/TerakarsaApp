@@ -1,0 +1,31 @@
+@* Prompt 49: grid pilih pelaksana kartu kecil -- pola sama dengan picker "Penjahit (Tim)" di
+   modal Buat Bundle (col-6 col-md-4, w-100 py-2, tanpa btn-lg). *@
+@using TerakarsaApp.Shared.Resources
+
+<div>
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <label class="form-label">@Label</label>
+    }
+    <div class="row g-2">
+        @foreach (var r in Resources)
+        {
+            <div class="col-6 col-md-4">
+                <button type="button" class="btn @(SelectedId == r.Id ? "btn-primary" : "btn-outline-primary") w-100 py-2"
+                        disabled="@Disabled" @onclick="() => Select(r.Id)">
+                    @r.ResourceName
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<ResourceLookupDto> Resources { get; set; } = new();
+    [Parameter] public int? SelectedId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedIdChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Label { get; set; } = "Pelaksana";
+
+    private Task Select(int id) => SelectedIdChanged.InvokeAsync(id);
+}

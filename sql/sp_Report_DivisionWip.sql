@@ -122,7 +122,8 @@ GO
 -- A2. Total WIP per (divisi, resource penerima) -- TANPA breakdown artikel/JSON, TANPA
 -- filter project (dashboard mengagregasi seluruh project berjalan). Dipakai oleh
 -- SIS_Dashboard_TargetHarian (Prompt 38) lewat INSERT ... EXEC, supaya definisi WIP
--- (fn_BundleLastLog di atas) tidak disalin ulang ke SP lain.
+-- (fn_BundleLastLog di atas) tidak disalin ulang ke SP lain. TotalBundles (Prompt 45 revisi):
+-- jumlah bundle, dipakai dashboard menampilkan WIP sebagai "N bundle - M pcs".
 CREATE OR ALTER PROCEDURE SIS_Report_DivisionWipTotals
 AS
 BEGIN
@@ -131,7 +132,8 @@ BEGIN
     SELECT
         target_division_id AS DivisionId,
         received_by_resource_id AS ResourceId,
-        SUM(qty_ok) AS TotalPcs
+        SUM(qty_ok) AS TotalPcs,
+        COUNT(*) AS TotalBundles
     FROM fn_BundleLastLog(NULL)
     WHERE received_at IS NOT NULL
     GROUP BY target_division_id, received_by_resource_id;

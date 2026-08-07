@@ -115,4 +115,30 @@ public class RekapProduksiService
             return (false, ex.Message, 0);
         }
     }
+
+    // Fix: "Cetak Karyawan" -- checkbox "Print Karyawan" pada kartu Rekap Produksi
+    // /activity-log, memakai SIS_Report_RekapKaryawanPrint (SATU HARI, breakdown Line >
+    // Karyawan > PO > Bundle), terpisah dari PrintAsync/SIS_Report_RekapStrukPrint di atas.
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintKaryawanAsync(RekapKaryawanPrintRequest request, int userId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var dateParam = new SqlParameter("@Date", request.Date.Date);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_Report_RekapKaryawanPrint @DivisionId = @DivisionId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Date = @Date, @UserId = @UserId",
+                    divisionIdParam, resourceIdParam, employeeIdParam, dateParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
+        }
+    }
 }

@@ -202,14 +202,14 @@ BEGIN
                (
                    SELECT TOP 1 aw4.division_id
                    FROM article_workflows aw4
-                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.inactive_at IS NULL AND aw4.sort_order > aw.sort_order
                    ORDER BY aw4.sort_order ASC
                ) AS NextDivisionId,
                (
                    SELECT TOP 1 d4.division_name
                    FROM article_workflows aw4
                    INNER JOIN divisions d4 ON d4.division_id = aw4.division_id
-                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.inactive_at IS NULL AND aw4.sort_order > aw.sort_order
                    ORDER BY aw4.sort_order ASC
                ) AS NextDivisionName,
                (
@@ -254,6 +254,7 @@ BEGIN
         INNER JOIN projects p ON p.project_id = a.project_id
         WHERE aw.division_id = @DivisionId
           AND aw.deleted_at IS NULL
+          AND aw.inactive_at IS NULL
           AND aw.requires_bundle = 0
           AND p.deleted_at IS NULL
           AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
@@ -287,14 +288,14 @@ BEGIN
                (
                    SELECT TOP 1 aw4.division_id
                    FROM article_workflows aw4
-                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.inactive_at IS NULL AND aw4.sort_order > aw.sort_order
                    ORDER BY aw4.sort_order ASC
                ) AS NextDivisionId,
                (
                    SELECT TOP 1 d4.division_name
                    FROM article_workflows aw4
                    INNER JOIN divisions d4 ON d4.division_id = aw4.division_id
-                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.sort_order > aw.sort_order
+                   WHERE aw4.article_id = aw.article_id AND aw4.deleted_at IS NULL AND aw4.inactive_at IS NULL AND aw4.sort_order > aw.sort_order
                    ORDER BY aw4.sort_order ASC
                ) AS NextDivisionName,
                CAST(NULL AS NVARCHAR(MAX)) AS SizesJson,
@@ -330,7 +331,7 @@ BEGIN
                                WHERE awl5.article_workflow_id = (
                                    SELECT TOP 1 aw5.article_workflow_id
                                    FROM article_workflows aw5
-                                   WHERE aw5.article_id = aw.article_id AND aw5.deleted_at IS NULL AND aw5.requires_bundle = 0
+                                   WHERE aw5.article_id = aw.article_id AND aw5.deleted_at IS NULL AND aw5.inactive_at IS NULL AND aw5.requires_bundle = 0
                                    ORDER BY aw5.sort_order DESC
                                )
                                AND awl5.article_size_id = asz6.article_size_id
@@ -425,6 +426,9 @@ BEGIN
            -- Prompt 23: baris step terakhir (target_division_id NULL, jendela H+1) -- lihat
            -- komentar besar di atas file.
            CASE WHEN awl.target_division_id IS NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep,
+           -- Prompt 49: id mentah pelaksana baris ini (selain nama di bawah) -- dipakai client
+           -- sebagai default terpilih di picker "Pelaksana" pada modal Revisi/Edit.
+           awl.resource_id AS ResourceId,
            r.resource_name AS ResourceName,
            awl.created_at AS CreatedAt,
            awl.updated_at AS UpdatedAt,
@@ -445,7 +449,7 @@ BEGIN
                SELECT DISTINCT aw3.division_id AS Id, d3.division_name AS DivisionName
                FROM article_workflows aw3
                INNER JOIN divisions d3 ON d3.division_id = aw3.division_id
-               WHERE aw3.article_id = a.article_id AND aw3.deleted_at IS NULL
+               WHERE aw3.article_id = a.article_id AND aw3.deleted_at IS NULL AND aw3.inactive_at IS NULL
                FOR JSON PATH
            ) AS TargetDivisionOptionsJson,
            -- Prompt 24: data penjahit BUNDLE (bundles.resource_id/employee_id) --
@@ -591,7 +595,7 @@ BEGIN
                        aw.sort_order AS SortOrder, aw.division_id AS DivisionId,
                        LAG(aw.article_workflow_id) OVER (ORDER BY aw.sort_order) AS PrevArticleWorkflowId
                 FROM article_workflows aw
-                WHERE aw.article_id = bs.article_id AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                WHERE aw.article_id = bs.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
             ) q
             WHERE (
                 CASE WHEN q.PrevArticleWorkflowId IS NULL THEN bs.qty
@@ -647,7 +651,7 @@ BEGIN
     OUTER APPLY (
         SELECT TOP 1 aw2.division_id
         FROM article_workflows aw2
-        WHERE aw2.article_id = bs.article_id AND aw2.deleted_at IS NULL AND aw2.sort_order > fr.SortOrder
+        WHERE aw2.article_id = bs.article_id AND aw2.deleted_at IS NULL AND aw2.inactive_at IS NULL AND aw2.sort_order > fr.SortOrder
         ORDER BY aw2.sort_order ASC
     ) nd2
     LEFT JOIN divisions nd ON nd.division_id = nd2.division_id
@@ -722,7 +726,7 @@ BEGIN
                                aw.division_id AS DivisionId,
                                LAG(aw.article_workflow_id) OVER (ORDER BY aw.sort_order) AS PrevArticleWorkflowId
                         FROM article_workflows aw
-                        WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                        WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
                     ) q
                     WHERE (
                         CASE WHEN q.PrevArticleWorkflowId IS NULL THEN b.qty
@@ -778,7 +782,7 @@ BEGIN
             FROM article_workflows aw
             INNER JOIN articles a ON a.article_id = aw.article_id
             INNER JOIN projects p ON p.project_id = a.project_id
-            WHERE aw.division_id = @DivisionId AND aw.deleted_at IS NULL
+            WHERE aw.division_id = @DivisionId AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL
               AND (aw.requires_bundle = 0 OR aw.is_bundling = 1)
               AND p.deleted_at IS NULL AND ISNULL(p.manual_status, '') NOT IN ('COMPLETED', 'CANCELLED')
               AND (
@@ -844,7 +848,7 @@ BEGIN
     DECLARE @TargetDivisionId INT;
     SELECT TOP 1 @TargetDivisionId = division_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @SortOrder
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @SortOrder
     ORDER BY sort_order ASC;
 
     SELECT resource_id AS ResourceId, resource_name AS ResourceName

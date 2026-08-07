@@ -1,0 +1,652 @@
+@page "/activity-log"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Reports
+@using TerakarsaApp.Shared.Resources
+@using TerakarsaApp.Shared.Stations
+@inject ReportActivityLogApiService ReportApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<PageTitle>Log Aktivitas</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Log Aktivitas</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Log Aktivitas</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center" style="cursor:pointer" @onclick="ToggleRekapCard">
+            <h3 class="card-title mb-0">Rekap Produksi</h3>
+            <i class="fe @(rekapExpanded ? "fe-chevron-up" : "fe-chevron-down")"></i>
+        </div>
+        @if (rekapExpanded)
+        {
+            <div class="card-body">
+                <div class="row g-2 align-items-end mb-2">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Divisi</label>
+                        <SearchableSelect TItem="DivisionDto" Items="divisions" Value="rekapDivisionId" ValueChanged="HandleRekapDivisionChanged"
+                                          IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                          Placeholder="Cari divisi..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Resource</label>
+                        <SearchableSelect TItem="ResourceLookupDto" Items="rekapResourceOptions" Value="rekapResourceId" ValueChanged="HandleRekapResourceChanged"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          Disabled="@(rekapDivisionId <= 0)"
+                                          Placeholder="Cari resource..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Penjahit</label>
+                        <SearchableSelect TItem="EmployeeLookupDto" Items="rekapEmployeeOptions" Value="rekapEmployeeId" ValueChanged="HandleRekapEmployeeChanged"
+                                          IdSelector="@(e => e.Id)" TextSelector="@(e => BundleDisplay.FormatEmployeeOption(e.EmployeeCode, e.EmployeeName))"
+                                          Disabled="@(rekapResourceId <= 0)"
+                                          Placeholder="Cari penjahit..." />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Tanggal</label>
+                        <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                               value="@rekapDate.ToString("yyyy-MM-dd")" @onchange="HandleRekapDateChanged" />
+                    </div>
+                </div>
+                <p class="text-muted small mb-2">Pilih Divisi (wajib), lalu Resource dan Penjahit (opsional) untuk mempersempit level rekap -- level rekap mengikuti pilihan terdalam yang diisi.</p>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="printKaryawanCheck" @bind="printKaryawanChecked" />
+                    <label class="form-check-label" for="printKaryawanCheck">Print Karyawan</label>
+                </div>
+
+                @if (printKaryawanChecked && rekapDivisionId > 0)
+                {
+                    <div class="mb-3">
+                        <button class="btn btn-outline-primary" disabled="@isPrintingKaryawan" @onclick="ConfirmPrintRekapKaryawan">
+                            <i class="fe fe-printer"></i> Cetak Karyawan
+                        </button>
+                        <span class="text-muted small ms-2">Breakdown Line &gt; Karyawan &gt; PO &gt; Bundle untuk tanggal @rekapDate.ToString("dd/MM/yyyy") (satu hari, bukan periode gajian).</span>
+                        @if (!string.IsNullOrEmpty(rekapKaryawanFeedback))
+                        {
+                            <div class="small mt-1 @(rekapKaryawanFeedback.StartsWith("Rekap") ? "text-success" : "text-danger")">@rekapKaryawanFeedback</div>
+                        }
+                    </div>
+                }
+
+                @if (rekapDivisionId <= 0)
+                {
+                    <p class="text-muted mb-0">Pilih divisi untuk melihat rekap.</p>
+                }
+                else if (isLoadingRekap)
+                {
+                    <p class="text-muted mb-0">Memuat...</p>
+                }
+                else if (rekapResult?.Header is null)
+                {
+                    <p class="text-muted mb-0">Data tidak ditemukan.</p>
+                }
+                else
+                {
+                    var h = rekapResult.Header;
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <p class="mb-1">
+                                <strong>@h.DivisionName</strong>
+                                @if (!string.IsNullOrEmpty(h.ResourceName))
+                                {
+                                    <text> &middot; @h.ResourceName</text>
+                                }
+                                @if (!string.IsNullOrEmpty(h.EmployeeName))
+                                {
+                                    <text> &middot; @h.EmployeeName</text>
+                                }
+                            </p>
+                            <p class="text-muted mb-0">Periode: <strong>@FormatRekapPeriod(h.PeriodStart) &ndash; @FormatRekapPeriod(h.PeriodEnd)</strong></p>
+                        </div>
+                        <div class="border rounded p-2 text-center">
+                            <div class="text-muted small">Total pcs periode ini</div>
+                            <div class="fs-3 fw-bold">@h.TotalQty</div>
+                        </div>
+                        <button class="btn btn-primary" disabled="@isPrintingRekap" @onclick="ConfirmPrintRekapStruk">
+                            <i class="fe fe-printer"></i> Cetak Struk
+                        </button>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(rekapFeedback))
+                {
+                    <div class="small mt-2 @(rekapFeedback.StartsWith("Rekap") ? "text-success" : "text-danger")">@rekapFeedback</div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Dari</label>
+                    <input type="datetime-local" class="form-control" @bind="dateFrom" @bind:format="yyyy-MM-ddTHH:mm" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Sampai</label>
+                    <input type="datetime-local" class="form-control" @bind="dateTo" @bind:format="yyyy-MM-ddTHH:mm" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Basis Waktu</label>
+                    <select class="form-select" @bind="timeBasis">
+                        <option value="ANY">Serah &amp; Terima</option>
+                        <option value="CREATED">Waktu Serah</option>
+                        <option value="RECEIVED">Waktu Terima</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-outline-secondary btn-sm flex-fill" @onclick="SetToday">Hari Ini</button>
+                        <button class="btn btn-outline-secondary btn-sm flex-fill" @onclick="SetYesterday">Kemarin</button>
+                        <button class="btn btn-outline-secondary btn-sm flex-fill" @onclick="SetLast7Days">7 Hari Terakhir</button>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-2 align-items-end mt-1">
+                <div class="col-md-3">
+                    <label class="form-label">Divisi</label>
+                    <SearchableSelect TItem="DivisionDto" Items="divisions" @bind-Value="selectedDivisionId"
+                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                      AllowNone="true" NoneLabel="- Semua Divisi -" Placeholder="Cari divisi..."
+                                      @bind-Value:after="OnDivisionChanged" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Resource</label>
+                    <SearchableSelect TItem="ResourceLookupDto" Items="resources" @bind-Value="selectedResourceId"
+                                      IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                      AllowNone="true" NoneLabel="- Semua Resource -" Placeholder="Cari resource..."
+                                      Disabled="@(selectedDivisionId <= 0)" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Employee</label>
+                    <SearchableSelect TItem="EmployeeLookupDto" Items="employees" @bind-Value="selectedEmployeeId"
+                                      IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                      AllowNone="true" NoneLabel="- Semua Employee -" Placeholder="Cari employee..."
+                                      Disabled="@(selectedDivisionId <= 0)" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Pencarian</label>
+                    <input class="form-control" placeholder="Serial / project / artikel / step..." @bind="searchTerm"
+                           @onkeyup='e => { if (e.Key == "Enter") { _ = ApplyFilter(); } }' />
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-12 d-flex gap-2">
+                    <button class="btn btn-primary" disabled="@isLoading" @onclick="ApplyFilter">Terapkan</button>
+                    <button class="btn btn-outline-secondary" disabled="@isLoading" @onclick="ResetFilter">Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            @if (isLoading)
+            {
+                <p class="mb-0">Memuat data...</p>
+            }
+            else if (result.Items.Count == 0)
+            {
+                <p class="text-muted mb-0">Tidak ada aktivitas pada rentang waktu ini.</p>
+            }
+            else
+            {
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <button class="btn btn-outline-success btn-sm" disabled="@(selectedIds.Count == 0 || isBulkPrinting)" @onclick="BulkPrintKupon">
+                        <i class="fe fe-printer"></i> Cetak Kupon Terpilih (@selectedIds.Count)
+                    </button>
+                    <PageSizeSelector PageSize="pageSize" PageSizeChanged="HandlePageSizeChange" />
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0">
+                        <thead>
+                            <tr>
+                                <th class="text-center align-middle" style="width: 40px;">
+                                    <input type="checkbox" checked="@AllEligibleSelected" disabled="@(!result.Items.Any(i => i.PrintKupon))" @onchange="ToggleSelectAll" title="Pilih semua kupon di halaman ini" />
+                                </th>
+                                <th>Id</th>
+                                <SortableHeader Label="Waktu Serah" Column="CreatedAt" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                <SortableHeader Label="Waktu Terima" Column="ReceivedAt" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                <th>Bundle</th>
+                                <th>Project</th>
+                                <th>Artikel</th>
+                                <th>Size</th>
+                                <th>Step</th>
+                                <th>Div Tujuan</th>
+                                <th>Pelaksana</th>
+                                <SortableHeader Label="Penerima" Column="ReceivedByResourceName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                <SortableHeader Label="Penjahit" Column="EmployeeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                                <th class="text-end">Qty OK</th>
+                                <th class="text-end">Rjct</th>
+                                <th class="text-end">Lost</th>
+                                <th>Status</th>
+                                <th>Remark</th>
+                                <th>Pencatat</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in result.Items)
+                            {
+                                <tr style="@(item.CanNavigate ? "cursor:pointer;" : "")"
+                                    class="@(item.CanNavigate ? "activity-row-clickable" : "")"
+                                    @onclick="() => OpenBundle(item)">
+                                    <td class="text-center align-middle" style="width: 40px;" @onclick:stopPropagation="true">
+                                        @if (item.PrintKupon)
+                                        {
+                                            <input type="checkbox" checked="@selectedIds.Contains(item.WorkflowLogId)" @onchange="e => ToggleSelect(item.WorkflowLogId, e)" />
+                                        }
+                                    </td>
+                                    <td>@item.WorkflowLogId</td>
+                                    <td>@item.CreatedAt.ToString("dd/MM/yy HH:mm")</td>
+                                    <td>@(IsAutoTerima(item) ? "Auto Terima" : item.ReceivedAt?.ToString("dd/MM/yy HH:mm") ?? "-")</td>
+                                    <td>@(item.BundleId.HasValue ? BundleDisplay.Format(item.BundleLetter, item.BundleNo) : "-")</td>
+                                    <td>@(item.ProjectName ?? "-")</td>
+                                    <td>@(item.ArticleName ?? "-")</td>
+                                    <td>@(item.SizeName ?? "-")</td>
+                                    <td>@(item.StepName ?? "-")</td>
+                                    <td>@(item.TargetDivisionName ?? "-")</td>
+                                    <td>@(item.ResourceName ?? "-")</td>
+                                    <td>@(item.ReceivedByResourceName ?? "-")</td>
+                                    <td>@(item.EmployeeName ?? "-")</td>
+                                    <td class="text-end @(item.QtyOk > 0 ? "text-success" : "")">@item.QtyOk</td>
+                                    <td class="text-end @(RejectTotal(item) > 0 ? "text-danger" : "")" title="@RejectDetail(item)">@(RejectTotal(item) == 0 ? "-" : RejectTotal(item).ToString())</td>
+                                    <td class="text-end @(item.QtyLost > 0 ? "text-danger" : "")">@(item.QtyLost == 0 ? "-" : item.QtyLost.ToString())</td>
+                                    <td><span class="badge @(item.Status == "DITERIMA" ? "bg-success" : "bg-warning")">@(item.Status == "DITERIMA" ? "Diterima" : "Menunggu")</span></td>
+                                    <td>@(item.Remark ?? "-")</td>
+                                    <td>@(item.CreatedByName ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (!string.IsNullOrEmpty(printKuponFeedback))
+                {
+                    <div class="small mt-2 @(printKuponFeedback.StartsWith("Kupon") ? "text-success" : "text-danger")">@printKuponFeedback</div>
+                }
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <span class="text-muted">Total baris: @result.TotalCount &mdash; Total Qty OK: @result.TotalQtyOk</span>
+                </div>
+                <div class="mt-2">
+                    <TablePagination PageNumber="currentPage" PageSize="pageSize" TotalCount="result.TotalCount" TotalPages="result.TotalPages" PageNumberChanged="ChangePage" />
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .activity-row-clickable:hover {
+        background-color: rgba(0, 0, 0, 0.04);
+    }
+</style>
+
+@code {
+    private bool? hasAccess = null;
+
+    private List<DivisionDto> divisions = new();
+    private List<ResourceLookupDto> resources = new();
+    private List<EmployeeLookupDto> employees = new();
+
+    private DateTime dateFrom;
+    private DateTime dateTo;
+    private string timeBasis = "ANY";
+    private int selectedDivisionId;
+    private int selectedResourceId;
+    private int selectedEmployeeId;
+    private string searchTerm = string.Empty;
+
+    private bool isLoading = false;
+    private int currentPage = 1;
+    private int pageSize = 50;
+    private string? sortColumn;
+    private string sortDirection = "desc";
+
+    private ActivityLogPagedResult result = new();
+
+    // Fix: kartu "Rekap Produksi" -- collapsed by default, dropdown cascading Divisi ->
+    // Resource -> Penjahit terpisah dari filter utama di atas (pola Prompt 42 di
+    // StationDevice.razor). "divisions" (sudah dimuat OnInitializedAsync) dipakai ulang untuk
+    // dropdown Divisi di sini.
+    private bool rekapExpanded;
+    private int rekapDivisionId;
+    private int rekapResourceId;
+    private int rekapEmployeeId;
+    private DateTime rekapDate = DateTime.Today;
+    private List<ResourceLookupDto> rekapResourceOptions = new();
+    private List<EmployeeLookupDto> rekapEmployeeOptions = new();
+    private RekapStrukResultDto? rekapResult;
+    private bool isLoadingRekap;
+    private bool isPrintingRekap;
+    private string rekapFeedback = string.Empty;
+
+    // Fix: checkbox "Print Karyawan" -- tombol "Cetak Karyawan" BARU terpisah dari "Cetak
+    // Struk" di atas, tidak muncul sama sekali kalau checkbox ini tidak dicentang. Memakai
+    // rekapDivisionId/rekapResourceId/rekapEmployeeId/rekapDate yang sama dengan Cetak Struk.
+    private bool printKaryawanChecked;
+    private bool isPrintingKaryawan;
+    private string rekapKaryawanFeedback = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "REPORT_ACTIVITY");
+
+        if (hasAccess != true) return;
+
+        SetToday();
+        divisions = await ReportApi.GetDivisionsAsync();
+        await LoadAsync();
+    }
+
+    private void SetToday()
+    {
+        var today = DateTime.Today;
+        dateFrom = today;
+        dateTo = today.AddHours(23).AddMinutes(59);
+    }
+
+    private void SetYesterday()
+    {
+        var yesterday = DateTime.Today.AddDays(-1);
+        dateFrom = yesterday;
+        dateTo = yesterday.AddHours(23).AddMinutes(59);
+    }
+
+    private void SetLast7Days()
+    {
+        var today = DateTime.Today;
+        dateFrom = today.AddDays(-6);
+        dateTo = today.AddHours(23).AddMinutes(59);
+    }
+
+    private async Task OnDivisionChanged()
+    {
+        selectedResourceId = 0;
+        selectedEmployeeId = 0;
+        resources = selectedDivisionId > 0 ? await ReportApi.GetResourcesAsync(selectedDivisionId) : new();
+        employees = selectedDivisionId > 0 ? await ReportApi.GetEmployeesAsync(selectedDivisionId) : new();
+    }
+
+    private async Task ApplyFilter()
+    {
+        currentPage = 1;
+        selectedIds.Clear();
+        await LoadAsync();
+    }
+
+    private async Task ResetFilter()
+    {
+        SetToday();
+        timeBasis = "ANY";
+        selectedDivisionId = 0;
+        selectedResourceId = 0;
+        selectedEmployeeId = 0;
+        searchTerm = string.Empty;
+        resources = new();
+        employees = new();
+        currentPage = 1;
+        sortColumn = null;
+        sortDirection = "desc";
+        selectedIds.Clear();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        result = await ReportApi.GetActivityLogAsync(new ActivityLogPagedRequest
+        {
+            DateFrom = dateFrom,
+            DateTo = dateTo,
+            TimeBasis = timeBasis,
+            DivisionId = selectedDivisionId > 0 ? selectedDivisionId : null,
+            ResourceId = selectedResourceId > 0 ? selectedResourceId : null,
+            EmployeeId = selectedEmployeeId > 0 ? selectedEmployeeId : null,
+            SearchTerm = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm.Trim(),
+            PageNumber = currentPage,
+            PageSize = pageSize,
+            SortColumn = sortColumn,
+            SortDirection = sortDirection
+        });
+        isLoading = false;
+    }
+
+    private async Task ToggleSort(string column)
+    {
+        if (sortColumn == column)
+            sortDirection = sortDirection == "asc" ? "desc" : "asc";
+        else
+        {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task HandlePageSizeChange(int newSize)
+    {
+        pageSize = newSize;
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1 || page > result.TotalPages) return;
+        currentPage = page;
+        await LoadAsync();
+    }
+
+    private async Task OpenBundle(ActivityLogRowDto item)
+    {
+        if (!item.CanNavigate || string.IsNullOrEmpty(item.BundleSerial)) return;
+        await JS.InvokeVoidAsync("open", $"/b/{item.BundleSerial}", "_blank");
+    }
+
+    // Fix: kolom Waktu Terima -- kalau serah dan terima jatuh di menit yang sama (auto-terima,
+    // dua panggilan SYSDATETIME() terpisah di SIS_WorkflowLog_Manage tapi dalam transaksi yang
+    // sama, jadi selalu sama sampai menit tampilan), tampilkan "Auto Terima" bukan jam.
+    private static bool IsAutoTerima(ActivityLogRowDto item) =>
+        item.ReceivedAt.HasValue && item.ReceivedAt.Value.ToString("dd/MM/yy HH:mm") == item.CreatedAt.ToString("dd/MM/yy HH:mm");
+
+    private HashSet<int> selectedIds = new();
+    private bool isBulkPrinting;
+    private string printKuponFeedback = string.Empty;
+
+    // Ceklis "pilih semua" hanya menghitung baris ber-PrintKupon di halaman yang sedang
+    // tampil -- baris tanpa kupon tidak punya ceklis sama sekali.
+    private bool AllEligibleSelected =>
+        result.Items.Any(i => i.PrintKupon) && result.Items.Where(i => i.PrintKupon).All(i => selectedIds.Contains(i.WorkflowLogId));
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        var check = e.Value is bool b && b;
+        foreach (var item in result.Items.Where(i => i.PrintKupon))
+        {
+            if (check) selectedIds.Add(item.WorkflowLogId);
+            else selectedIds.Remove(item.WorkflowLogId);
+        }
+    }
+
+    private void ToggleSelect(int workflowLogId, ChangeEventArgs e)
+    {
+        var check = e.Value is bool b && b;
+        if (check) selectedIds.Add(workflowLogId);
+        else selectedIds.Remove(workflowLogId);
+    }
+
+    // Fix: "Cetak Kupon Terpilih" -- bulk print, ganti skema tombol per-baris lama. Tidak ada
+    // SP/endpoint bulk baru -- tetap panggil SIS_WorkflowLog_PrintHasil satu-satu lewat
+    // WorkflowLogService.PrintHasilAsync (sama dengan tombol "Print Hasil" di BundleScanCard),
+    // berurutan supaya feedback sukses/gagal bisa dihitung per baris.
+    private async Task BulkPrintKupon()
+    {
+        if (selectedIds.Count == 0) return;
+
+        isBulkPrinting = true;
+        printKuponFeedback = string.Empty;
+
+        var ids = selectedIds.ToList();
+        var successCount = 0;
+        var firstError = string.Empty;
+
+        foreach (var id in ids)
+        {
+            var (success, error) = await ReportApi.PrintKuponAsync(id);
+            if (success) successCount++;
+            else if (string.IsNullOrEmpty(firstError)) firstError = error;
+        }
+
+        selectedIds.Clear();
+        isBulkPrinting = false;
+        printKuponFeedback = successCount == ids.Count
+            ? $"Kupon masuk antrian cetak ({successCount} baris)."
+            : $"Kupon masuk antrian cetak untuk {successCount} dari {ids.Count} baris. {firstError}".Trim();
+    }
+
+    // Rjct -- kolom ringkas gabungan 4 kategori reject (print/fabric/sewing/rework), rincian
+    // per kategori ditampilkan lewat tooltip title. Lost (qty_lost) kolom terpisah, tidak ikut
+    // digabung di sini.
+    private static int RejectTotal(ActivityLogRowDto item) =>
+        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework;
+
+    private static string RejectDetail(ActivityLogRowDto item)
+    {
+        var parts = new (string Label, int Qty)[]
+        {
+            ("Print", item.QtyRejectPrint), ("Fabric", item.QtyRejectFabric), ("Sewing", item.QtyRejectSewing),
+            ("Rework", item.QtyRejectRework)
+        };
+        var text = string.Join(", ", parts.Where(p => p.Qty > 0).Select(p => $"{p.Label}: {p.Qty}"));
+        return text.Length == 0 ? "Tidak ada reject" : text;
+    }
+
+    // Fix: kartu "Rekap Produksi" (pola Prompt 42 station, tab Rekap Produksi) -- collapsed
+    // by default, expand memuat rekap hari ini utk divisi yang belum dipilih (kosong).
+    private void ToggleRekapCard()
+    {
+        rekapExpanded = !rekapExpanded;
+    }
+
+    private async Task HandleRekapDivisionChanged(int divisionId)
+    {
+        rekapDivisionId = divisionId;
+        rekapResourceId = 0;
+        rekapEmployeeId = 0;
+        rekapEmployeeOptions = new();
+        rekapResourceOptions = divisionId > 0 ? await ReportApi.GetResourcesAsync(divisionId) : new();
+        rekapFeedback = string.Empty;
+        await LoadRekapStruk();
+    }
+
+    private async Task HandleRekapResourceChanged(int resourceId)
+    {
+        rekapResourceId = resourceId;
+        rekapEmployeeId = 0;
+        rekapEmployeeOptions = resourceId > 0 ? await ReportApi.GetEmployeesByResourceAsync(resourceId) : new();
+        await LoadRekapStruk();
+    }
+
+    private async Task HandleRekapEmployeeChanged(int employeeId)
+    {
+        rekapEmployeeId = employeeId;
+        await LoadRekapStruk();
+    }
+
+    private async Task HandleRekapDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed) && parsed.Date <= DateTime.Today)
+        {
+            rekapDate = parsed.Date;
+            await LoadRekapStruk();
+        }
+    }
+
+    private string RekapLevel => rekapEmployeeId > 0 ? "EMPLOYEE" : (rekapResourceId > 0 ? "RESOURCE" : "DIVISION");
+
+    private static string FormatRekapPeriod(DateTime dt)
+    {
+        var hariIndo = new[] { "Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab" };
+        return $"{hariIndo[(int)dt.DayOfWeek]} {dt:dd/MM HH:mm}";
+    }
+
+    private async Task LoadRekapStruk()
+    {
+        if (rekapDivisionId <= 0)
+        {
+            rekapResult = null;
+            return;
+        }
+
+        isLoadingRekap = true;
+        rekapResult = await ReportApi.GetRekapStrukAsync(RekapLevel, rekapDivisionId,
+            rekapResourceId > 0 ? rekapResourceId : null, rekapEmployeeId > 0 ? rekapEmployeeId : null, rekapDate);
+        isLoadingRekap = false;
+    }
+
+    private async Task ConfirmPrintRekapStruk()
+    {
+        if (rekapDivisionId <= 0) return;
+
+        isPrintingRekap = true;
+        rekapFeedback = string.Empty;
+
+        var (success, error) = await ReportApi.PrintRekapStrukAsync(new RekapStrukPrintRequest
+        {
+            Level = RekapLevel,
+            DivisionId = rekapDivisionId,
+            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
+            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            Date = rekapDate
+        });
+
+        isPrintingRekap = false;
+        rekapFeedback = success ? "Rekap masuk antrian cetak." : error;
+    }
+
+    // Fix: "Cetak Karyawan" -- tombol baru terpisah dari Cetak Struk, hanya tampil kalau
+    // checkbox "Print Karyawan" dicentang. Tanggal SATU HARI (rekapDate), bukan periode
+    // gajian mingguan.
+    private async Task ConfirmPrintRekapKaryawan()
+    {
+        if (rekapDivisionId <= 0) return;
+
+        isPrintingKaryawan = true;
+        rekapKaryawanFeedback = string.Empty;
+
+        var (success, error) = await ReportApi.PrintRekapKaryawanAsync(new RekapKaryawanPrintRequest
+        {
+            DivisionId = rekapDivisionId,
+            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
+            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            Date = rekapDate
+        });
+
+        isPrintingKaryawan = false;
+        rekapKaryawanFeedback = success ? "Rekap Karyawan masuk antrian cetak." : error;
+    }
+}

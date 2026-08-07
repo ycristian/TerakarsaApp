@@ -314,6 +314,23 @@
     border-bottom: 1px solid var(--tv-border);
 }
 
+.tv-line-row {
+    cursor: pointer;
+}
+
+.tv-line-row:hover {
+    background: var(--tv-border);
+}
+
+/* Prompt 51: nama divisi di header kartu/tabel jadi bisa diklik -> modal mode divisi. */
+.tv-clickable {
+    cursor: pointer;
+}
+
+.tv-clickable:hover {
+    text-decoration: underline;
+}
+
 .tv-line-table tbody tr:last-child {
     border-bottom: none;
 }

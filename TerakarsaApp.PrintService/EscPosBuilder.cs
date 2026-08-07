@@ -4,11 +4,18 @@ using TerakarsaApp.Shared.PrintJobs;
 
 namespace TerakarsaApp.PrintService;
 
-// Prompt 41/42: struk thermal 58 mm (ESC/POS) -- printer struk biasa, BUKAN printer label TSC
-// (lihat TsplBuilder). Dua job_type: KUPON_BORONGAN (per bundle, Prompt 41, TIDAK diubah) dan
-// REKAP_PRODUKSI (ringkasan mingguan per periode gajian, Prompt 42 -- menggantikan REKAP_PENJAHIT
-// harian Prompt 41). Lebar kertas dalam karakter (default 32, 58 mm) dari
-// PrintWorkerOptions.KuponPaperWidthChars -- dipakai utk separator garis + rata kanan.
+// Prompt 41/42: struk thermal (ESC/POS) -- printer struk biasa, BUKAN printer label TSC
+// (lihat TsplBuilder). Lebar kertas dalam karakter dari PrintWorkerOptions.KuponPaperWidthChars
+// -- dipakai utk separator garis + rata kanan.
+//
+// STATUS Prompt 48: TIDAK LAGI DIPANGGIL dari Worker.cs. Perakitan cetakan thermal pindah ke
+// SQL (token + SIS_Print_Dispatch, lihat sql/sp_Print_Render.sql + TerakarsaApp.PrintService/
+// EscPosRenderer.cs) -- KUPON_BORONGAN sudah dipindah (SIS_Print_KuponBorongan), REKAP_PRODUKSI/
+// REKAP_KARYAWAN BELUM (route THERMAL sudah ada tapi SIS_Print_Dispatch belum punya cabang utk
+// job_type itu -- job akan gagal jelas "belum punya SP render", bukan diam-diam salah cetak).
+// File ini SENGAJA dipertahankan (bukan dihapus) sebagai referensi layout PERSIS saat SP render
+// utk REKAP_PRODUKSI/REKAP_KARYAWAN ditulis nanti -- pola sama seperti SIS_Print_KuponBorongan
+// diterjemahkan elemen-per-elemen dari BuildKuponBorongan di bawah.
 public static class EscPosBuilder
 {
     private const byte ESC = 0x1B;
@@ -43,6 +50,19 @@ public static class EscPosBuilder
             Line(Sanitize(s));
             WriteBytes(ESC, 0x45, 0); // ESC E 0 : bold off
         }
+        void BoldLeftRight(string left, string right)
+        {
+            left = Sanitize(left);
+            right = Sanitize(right);
+            var pad = paperWidthChars - left.Length - right.Length;
+            if (pad < 1) pad = 1;
+            WriteBytes(ESC, 0x45, 1); // ESC E 1 : bold on
+            Write(left);
+            Write(new string(' ', pad));
+            Write(right);
+            WriteBytes(ESC, 0x45, 0); // ESC E 0 : bold off
+            Write("\n");
+        }
 
         WriteBytes(ESC, 0x40); // ESC @ : initialize
         WriteBytes(ESC, 0x61, 0); // ESC a 0 : left align (semua baris)
@@ -51,11 +71,11 @@ public static class EscPosBuilder
         Sep();
 
         var bundleNo = string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}";
-        Bold($"{data.Serial} ({bundleNo})");
+        BoldLeftRight($"{data.Serial} ({bundleNo})", data.SizeName ?? "");
         Line(Sanitize(data.ProjectName));
-        var articleLine = string.Join(" ", new[] { data.ArticleName, data.Style, data.Color }.Where(v => !string.IsNullOrWhiteSpace(v)));
-        Line(Sanitize(articleLine));
-        Line($"Size : {Sanitize(data.SizeName)}");
+        Line(Sanitize(data.ArticleName).Trim());
+        var styleColor = string.Join(" ", new[] { data.Style, data.Color }.Where(v => !string.IsNullOrWhiteSpace(v)));
+        Line(Sanitize(styleColor));
         Sep();
 
         var lineTailor = string.IsNullOrWhiteSpace(data.LineResourceName)
@@ -69,6 +89,11 @@ public static class EscPosBuilder
         if (data.QtyRejectSewing > 0) Line($"Reject Jahit : {data.QtyRejectSewing} pcs");
         if (data.QtyRejectRework > 0) Line($"Rework : {data.QtyRejectRework} pcs");
         if (data.QtyLost > 0) Line($"Hilang : {data.QtyLost} pcs");
+        if (!string.IsNullOrWhiteSpace(data.BundleRemarks))
+        {
+            foreach (var noteLine in WrapLines($"Note : {Sanitize(data.BundleRemarks)}", paperWidthChars))
+                Line(noteLine);
+        }
         Sep();
 
         var footerAt = data.UpdatedAt ?? data.CreatedAt;
@@ -96,17 +121,11 @@ public static class EscPosBuilder
         void Line(string s = "") => Write(s + "\n");
         void Sep() => Line(new string('-', paperWidthChars));
         string RightAlign(string s) => s.Length >= paperWidthChars ? s : new string(' ', paperWidthChars - s.Length) + s;
-        void Bold(string s)
-        {
-            WriteBytes(ESC, 0x45, 1);
-            Line(Sanitize(s));
-            WriteBytes(ESC, 0x45, 0);
-        }
         void BoldRight(string s)
         {
-            WriteBytes(ESC, 0x45, 1);
-            Line(RightAlign(Sanitize(s)));
-            WriteBytes(ESC, 0x45, 0);
+            WriteBytes(ESC, 0x45, 1); // ESC E 1 : bold on
+            Line(RightAlign(s));
+            WriteBytes(ESC, 0x45, 0); // ESC E 0 : bold off
         }
         string RejectCodes(int rp, int rf, int rs, int rw, int ls, string sep)
         {
@@ -129,14 +148,14 @@ public static class EscPosBuilder
         WriteBytes(ESC, 0x40); // ESC @ : initialize
         WriteBytes(ESC, 0x61, 0); // ESC a 0 : left align (semua baris)
 
-        Bold($"Rekap {data.DivisionName}");
+        Line(Sanitize($"Rekap {data.DivisionName}"));
         var subtitle = data.Level switch
         {
             "EMPLOYEE" => string.IsNullOrWhiteSpace(data.ResourceName) ? data.EmployeeName : $"{data.EmployeeName} - {data.ResourceName}",
             "RESOURCE" => data.ResourceName,
             _ => null
         };
-        if (!string.IsNullOrWhiteSpace(subtitle)) Bold(subtitle!);
+        if (!string.IsNullOrWhiteSpace(subtitle)) Line(Sanitize(subtitle!));
         Sep();
 
         var days = data.Lines
@@ -151,7 +170,7 @@ public static class EscPosBuilder
 
         foreach (var day in days)
         {
-            Bold(FormatHari(day));
+            Line(Sanitize(FormatHari(day)));
 
             var dayLines = data.Lines.Where(l => l.EventDate!.Value.Date == day).ToList();
             var articles = dayLines.Select(l => l.ArticleName).Distinct();
@@ -169,20 +188,18 @@ public static class EscPosBuilder
                 }
             }
 
-            BoldRight($"{dayQty} pcs");
+            Line(RightAlign($"{dayQty} pcs"));
             var dayCodes = RejectCodes(dRp, dRf, dRs, dRw, dLs, "/");
-            if (dayCodes.Length > 0) BoldRight(dayCodes);
+            if (dayCodes.Length > 0) Line(RightAlign(dayCodes));
 
             totalQty += dayQty;
             totalRp += dRp; totalRf += dRf; totalRs += dRs; totalRw += dRw; totalLs += dLs;
         }
 
         Sep();
-        WriteBytes(GS, 0x21, 0x11); // double height + width
         Line(RightAlign($"TOTAL  {totalQty} pcs"));
-        WriteBytes(GS, 0x21, 0x00);
         var totalCodes = RejectCodes(totalRp, totalRf, totalRs, totalRw, totalLs, "/");
-        if (totalCodes.Length > 0) BoldRight(totalCodes);
+        if (totalCodes.Length > 0) Line(RightAlign(totalCodes));
         Sep();
 
         Line("> WORK IN PROGRESS (WIP) <");
@@ -209,6 +226,127 @@ public static class EscPosBuilder
         return stream.ToArray();
     }
 
+    public static RekapKaryawanPayload ParseRekapKaryawanPayload(string payloadJson)
+    {
+        return JsonSerializer.Deserialize<RekapKaryawanPayload>(payloadJson)
+            ?? throw new InvalidDataException("Payload REKAP_KARYAWAN kosong atau tidak valid.");
+    }
+
+    // Fix: "Cetak Karyawan" -- checkbox "Print Karyawan" pada kartu Rekap Produksi
+    // /activity-log, tombol terpisah dari "Cetak Struk" (BuildRekapProduksi di atas, tidak
+    // diubah). Baris Selesai (done_rows) dan WIP (wip_rows) sudah flat dari SP (SIS_Report_
+    // RekapKaryawanPrint), dikelompokkan Line > Karyawan > PO (> Bundle utk Selesai) di sini
+    // pakai LINQ GroupBy berurutan, sama pola dengan BuildRekapProduksi (grouping hari > artikel
+    // dilakukan di builder, bukan SP).
+    public static byte[] BuildRekapKaryawan(RekapKaryawanPayload data, int paperWidthChars)
+    {
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+        void WriteBytes(params byte[] b) => stream.Write(b, 0, b.Length);
+        void Line(string s = "") => Write(s + "\n");
+        void Sep() => Line(new string('-', paperWidthChars));
+        string RightAlign(string s) => s.Length >= paperWidthChars ? s : new string(' ', paperWidthChars - s.Length) + s;
+        void BoldRight(string s)
+        {
+            WriteBytes(ESC, 0x45, 1); // ESC E 1 : bold on
+            Line(RightAlign(s));
+            WriteBytes(ESC, 0x45, 0); // ESC E 0 : bold off
+        }
+        string RejectCodes(int rp, int rf, int rs, int rw, int ls)
+        {
+            var parts = new List<string>();
+            if (rp > 0) parts.Add($"rp:{rp}");
+            if (rf > 0) parts.Add($"rf:{rf}");
+            if (rs > 0) parts.Add($"rs:{rs}");
+            if (rw > 0) parts.Add($"rw:{rw}");
+            if (ls > 0) parts.Add($"ls:{ls}");
+            return string.Join(" ", parts);
+        }
+        // "Book" N karakter -- minimal N, pad spasi kalau lebih pendek, TIDAK dipotong kalau
+        // lebih panjang (lihat prompt: NoBundle minimal 6, Size minimal 5).
+        string PadMin(string s, int minWidth) => s.Length >= minWidth ? s : s + new string(' ', minWidth - s.Length);
+        // Qty OK dicetak BOLD, reject (kalau ada) NORMAL di baris yang sama -- toggle ESC E
+        // di tengah baris, bukan seluruh baris.
+        void BundleLine(string bundleLabel, string? sizeName, int qtyOk, int rp, int rf, int rs, int rw, int ls)
+        {
+            var left = $"  {PadMin(bundleLabel, 6)} {PadMin(sizeName ?? "-", 5)} ";
+            var codes = RejectCodes(rp, rf, rs, rw, ls);
+            Write(left);
+            WriteBytes(ESC, 0x45, 1); // ESC E 1 : bold on
+            Write(qtyOk.ToString());
+            WriteBytes(ESC, 0x45, 0); // ESC E 0 : bold off
+            Line(codes.Length == 0 ? "" : $" {codes}");
+        }
+
+        WriteBytes(ESC, 0x40); // ESC @ : initialize
+        WriteBytes(ESC, 0x61, 0); // ESC a 0 : left align (semua baris)
+
+        Line(Sanitize($"Rekap Karyawan {data.DivisionName}"));
+        var subtitle = string.Join(" - ", new[] { data.ResourceName, data.EmployeeName }.Where(v => !string.IsNullOrWhiteSpace(v)));
+        if (subtitle.Length > 0) Line(Sanitize(subtitle));
+        Line(Sanitize($"Tanggal {data.Date:dd/MM/yyyy}"));
+        Sep();
+
+        var totalQty = 0;
+        int totalRp = 0, totalRf = 0, totalRs = 0, totalRw = 0, totalLs = 0;
+
+        foreach (var lineGroup in data.DoneRows.GroupBy(r => r.LineResourceName).OrderBy(g => g.Key))
+        {
+            Line(Sanitize(lineGroup.Key));
+            foreach (var empGroup in lineGroup.GroupBy(r => r.EmployeeName).OrderBy(g => g.Key))
+            {
+                Line(Sanitize($" - {empGroup.Key}"));
+                foreach (var poGroup in empGroup.GroupBy(r => r.ProjectName).OrderBy(g => g.Key))
+                {
+                    Line(Sanitize($"   {poGroup.Key}"));
+                    foreach (var row in poGroup)
+                    {
+                        BundleLine(row.BundleLabel, row.SizeName, row.QtyOk, row.QtyRejectPrint, row.QtyRejectFabric, row.QtyRejectSewing, row.QtyRejectRework, row.QtyLost);
+                        totalQty += row.QtyOk;
+                        totalRp += row.QtyRejectPrint; totalRf += row.QtyRejectFabric; totalRs += row.QtyRejectSewing;
+                        totalRw += row.QtyRejectRework; totalLs += row.QtyLost;
+                    }
+                }
+            }
+        }
+
+        Sep();
+        BoldRight($"TOTAL  {totalQty} pcs");
+        var totalCodes = RejectCodes(totalRp, totalRf, totalRs, totalRw, totalLs);
+        if (totalCodes.Length > 0) Line(RightAlign(totalCodes));
+        Sep();
+
+        Line("> WORK IN PROGRESS (WIP) <");
+        var wipQty = 0;
+        foreach (var lineGroup in data.WipRows.GroupBy(r => r.LineResourceName).OrderBy(g => g.Key))
+        {
+            Line(Sanitize(lineGroup.Key));
+            foreach (var empGroup in lineGroup.GroupBy(r => r.EmployeeName).OrderBy(g => g.Key))
+            {
+                Line(Sanitize($" - {empGroup.Key}"));
+                foreach (var row in empGroup.OrderBy(r => r.ProjectName))
+                {
+                    Line(Sanitize($"   {row.ProjectName}  {row.QtyWip} pcs"));
+                    wipQty += row.QtyWip;
+                }
+            }
+        }
+        Sep();
+        BoldRight($"WIP  {wipQty} pcs");
+        Line();
+
+        Line($"Dicetak {DateTime.Now:dd/MM/yyyy HH:mm}");
+
+        WriteBytes(ESC, 0x64, 3);
+        WriteBytes(GS, 0x56, 1);
+
+        return stream.ToArray();
+    }
+
     private static string FormatHari(DateTime date)
     {
         var hari = new[] { "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu" };
@@ -218,4 +356,20 @@ public static class EscPosBuilder
     // ESC/POS memakai encoding ASCII (lihat Write di atas) -- pola sama dengan TsplBuilder.
     private static string Sanitize(string? value) =>
         (value ?? string.Empty).Replace("\r", " ").Replace("\n", " ");
+
+    // Word-wrap ke banyak baris (bukan cuma 2 seperti TsplBuilder.WrapTwoLines) -- dipakai utk
+    // Note bundle_remarks yang panjangnya bebas (varchar 500). Pecah di spasi terakhir sebelum
+    // width; kata tunggal yang lebih panjang dari width dipotong paksa.
+    private static IEnumerable<string> WrapLines(string text, int width)
+    {
+        var remaining = text;
+        while (remaining.Length > width)
+        {
+            var breakAt = remaining.LastIndexOf(' ', Math.Min(width, remaining.Length - 1));
+            if (breakAt <= 0) breakAt = width;
+            yield return remaining.Substring(0, breakAt).TrimEnd();
+            remaining = remaining.Substring(breakAt).TrimStart();
+        }
+        if (remaining.Length > 0) yield return remaining;
+    }
 }

@@ -40,6 +40,36 @@
 -- (hanya diisi level EMPLOYEE -- level RESOURCE/DIVISION menggabung lintas size), Label (bundle
 -- letter+no / nama penjahit / nama resource sesuai level, SUDAH diformat siap-tampil), Qty +
 -- 5 kolom reject/lost (WIP selalu 0 di kelimanya, WIP bukan hasil kerja).
+--
+-- FIX #1 (2026-08-03): DirectAtoms.LineResourceId sebelumnya hanya diisi dari bundle (b.resource_id),
+-- NULL utk baris non-bundle (mis. divisi Press DTF yang log-nya langsung awl.resource_id tanpa
+-- bundle). Akibatnya filter level RESOURCE/EMPLOYEE (@ResourceId IS NULL OR LineResourceId =
+-- @ResourceId) membuang SEMUA baris non-bundle -> Total Qty selalu 0 utk resource/penjahit di
+-- divisi non-bundle walau IN/WIP/OUT station menunjukkan ada aktivitas. Sekarang fallback ke
+-- awl.resource_id persis seperti PelaksanaName di sebelahnya sudah lakukan. LineResourceName ikut
+-- fallback ke resource_name yang sama (arn) supaya level DIVISION tidak menggabung semua resource
+-- non-bundle jadi satu baris "Tanpa Line". (SizeWip pada result set 3 SENGAJA tidak diberi
+-- fallback serupa -- WIP non-bundle adalah material yang belum diklaim siapa pun, jadi memang
+-- belum py resource.)
+--
+-- FIX #2 (2026-08-03, ROOT CAUSE utama "Total pcs periode ini = 0" utk Press DTF): meski
+-- bundle_id NOT NULL (Press DTF requires_bundle = 1), Total Qty tetap 0 utk filter resource
+-- Press DTF sendiri (mis. "DTF Team") karena bundles.resource_id adalah LINE JAHIT tujuan bundle
+-- itu (diisi saat Bundling, divisi "Sew + QC") -- BUKAN resource yang mengerjakan step Press DTF.
+-- Verifikasi manual ke DB: bundle-bundle yang di-press hari ini oleh resource_id=2 (DTF Team,
+-- division_id=4) semuanya py bundles.resource_id di rentang 3/7/10/11/12 (division_id=2, Sew+QC)
+-- -- filter @ResourceId=2 tidak pernah cocok dgn LineResourceId dari bundle, walau received_at
+-- sudah terisi dalam periode. Root cause ini SAMA PERSIS di SIS_Report_ProduksiAgg/Detail
+-- (sp_Report_Produksi.sql, Prompt 30) -- diverifikasi manual EXEC SIS_Report_ProduksiAgg
+-- @DivisionId=4 @ResourceId=2 juga kosong -- jadi turut diperbaiki di sana (harus sinkron,
+-- lihat syarat "PERSIS" di atas). Fix: bundle's resource HANYA dipakai kalau resource itu benar
+-- milik divisi step ybs (brn/brd.division_id = @DivisionId, kasus Sewing yang jadi alasan asli
+-- konvensi "Pelaksana = resource bawaan bundle" di Prompt 30 2026-07-25); kalau resource bundle
+-- beda divisi (bundle menunjuk line Sewing tujuan, bukan siapa yg kerja di divisi non-sewing spt
+-- Press DTF) -> fallback ke awl.resource_id (siapa yg benar-benar login/kerjakan step ini).
+-- BundleWip (result set 3, WIP snapshot) SENGAJA TIDAK diberi fix serupa -- WIP adalah bundle yg
+-- BELUM dicatat siapa pun di step ini (belum ada baris awl utk fallback), jadi tetap dikelompokkan
+-- per line Sewing tujuan seperti semula (perilaku existing, di luar cakupan laporan "hasil").
 
 SET ANSI_NULLS ON;
 GO
@@ -82,12 +112,13 @@ BEGIN
     -- ================= Result set 1: header =================
     ;WITH DirectAtoms AS (
         SELECT
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.resource_id ELSE NULL END AS LineResourceId,
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.employee_id ELSE NULL END AS EmployeeId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brd.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brd.division_id = @DivisionId THEN b.employee_id ELSE NULL END AS EmployeeId,
             awl.qty_ok AS QtyOk
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id AND b.deleted_at IS NULL
+        LEFT JOIN resources brd ON brd.resource_id = b.resource_id
         WHERE awl.deleted_at IS NULL AND aw.division_id = @DivisionId
           AND (
                 (awl.target_division_id IS NULL AND awl.created_at >= @PeriodStart AND awl.created_at < @PeriodEnd)
@@ -114,10 +145,10 @@ BEGIN
     -- ================= Result set 2: detail harian (Qty Done) =================
     ;WITH DirectAtoms AS (
         SELECT
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.resource_id ELSE NULL END AS LineResourceId,
-            ISNULL(lr.resource_name, N'Tanpa Line') AS LineResourceName,
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.employee_id ELSE NULL END AS EmployeeId,
-            CASE WHEN awl.bundle_id IS NOT NULL THEN ISNULL(ben.employee_name, brn.resource_name) ELSE arn.resource_name END AS PelaksanaName,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN ISNULL(lr.resource_name, N'Tanpa Line') ELSE ISNULL(arn.resource_name, N'Tanpa Line') END AS LineResourceName,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN b.employee_id ELSE NULL END AS EmployeeId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN ISNULL(ben.employee_name, brn.resource_name) ELSE arn.resource_name END AS PelaksanaName,
             ar.article_name AS ArticleName,
             b.bundle_no AS BundleNo,
             pr.bundle_letter AS BundleLetter,
@@ -332,10 +363,10 @@ BEGIN
 
     ;WITH DirectAtoms AS (
         SELECT
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.resource_id ELSE NULL END AS LineResourceId,
-            ISNULL(lr.resource_name, N'Tanpa Line') AS LineResourceName,
-            CASE WHEN awl.bundle_id IS NOT NULL THEN b.employee_id ELSE NULL END AS EmployeeId,
-            CASE WHEN awl.bundle_id IS NOT NULL THEN ISNULL(ben.employee_name, brn.resource_name) ELSE arn.resource_name END AS PelaksanaName,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN ISNULL(lr.resource_name, N'Tanpa Line') ELSE ISNULL(arn.resource_name, N'Tanpa Line') END AS LineResourceName,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN b.employee_id ELSE NULL END AS EmployeeId,
+            CASE WHEN awl.bundle_id IS NOT NULL AND brn.division_id = @DivisionId THEN ISNULL(ben.employee_name, brn.resource_name) ELSE arn.resource_name END AS PelaksanaName,
             ar.article_name AS ArticleName,
             b.bundle_no AS BundleNo,
             pr.bundle_letter AS BundleLetter,
@@ -537,6 +568,187 @@ BEGIN
 
     INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
     VALUES ('REKAP_PRODUKSI', @DivisionId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
+END;
+GO
+
+-- Fix: "Cetak Karyawan" -- tombol BARU terpisah dari "Cetak Struk" di atas (checkbox "Print
+-- Karyawan" pada kartu Rekap Produksi /activity-log). Beda mendasar dari SIS_Report_RekapStruk/
+-- SIS_Report_RekapStrukPrint:
+--   1. Periode = SATU HARI (@Date, default hari ini), BUKAN periode gajian mingguan.
+--   2. Baris Selesai dipecah sampai level Bundle, dikelompokkan Line > Karyawan > PO > Bundle
+--      (bukan per-Level dropdown seperti SIS_Report_RekapStruk) -- SP mengembalikan baris FLAT
+--      sudah terurut, pengelompokan visual dilakukan EscPosBuilder saat cetak.
+--   3. Baris WIP berhenti di level PO (Line > Karyawan > PO, TANPA rincian per bundle).
+--   4. HANYA baris ber-bundle yang disertakan (Selesai maupun WIP) -- baris non-bundle (mis.
+--      Cutting) tidak punya konsep karyawan/bundle, di luar cakupan breakdown ini.
+-- @ResourceId/@EmployeeId (dari dropdown Resource/Penjahit yang sama dgn Cetak Struk) tetap
+-- mempersempit scope kalau diisi -- TIDAK selalu seluruh divisi.
+CREATE OR ALTER PROCEDURE SIS_Report_RekapKaryawanPrint
+    @DivisionId INT,
+    @ResourceId INT = NULL,
+    @EmployeeId INT = NULL,
+    @Date       DATE = NULL,
+    @UserId     INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM divisions WHERE division_id = @DivisionId AND deleted_at IS NULL)
+    BEGIN
+        RAISERROR('Divisi tidak ditemukan.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @EffectiveDate DATE = ISNULL(@Date, CAST(SYSDATETIME() AS DATE));
+    DECLARE @DayStart DATETIME2 = CAST(@EffectiveDate AS DATETIME2);
+    DECLARE @DayEnd DATETIME2 = DATEADD(DAY, 1, @DayStart);
+    -- Anchor snapshot WIP: "sekarang" kalau @Date = hari ini (hari belum selesai), else akhir
+    -- hari itu (tengah malam berikutnya) -- pola sama dgn anchor @PeriodEnd di SIS_Report_RekapStruk.
+    DECLARE @WipAnchor DATETIME2 = CASE WHEN @EffectiveDate = CAST(SYSDATETIME() AS DATE) THEN SYSDATETIME() ELSE @DayEnd END;
+
+    DECLARE @Payload NVARCHAR(MAX);
+
+    ;WITH DoneAtoms AS (
+        -- Line/Karyawan: fallback sama dgn DirectAtoms di SIS_Report_RekapStruk (FIX #1/#2) --
+        -- bundle's resource dipakai HANYA kalau resource itu benar milik divisi step ybs,
+        -- kalau tidak (mis. Press DTF) fallback ke awl.resource_id (siapa yg benar-benar
+        -- kerjakan step ini). Karena di sini SUDAH INNER JOIN bundles, "awl.bundle_id IS NOT
+        -- NULL" pada kondisi asli tidak perlu diulang (selalu true).
+        SELECT
+            CASE WHEN brn.division_id = @DivisionId THEN b.resource_id ELSE awl.resource_id END AS LineResourceId,
+            CASE WHEN brn.division_id = @DivisionId THEN ISNULL(lr.resource_name, N'Tanpa Line') ELSE ISNULL(arn.resource_name, N'Tanpa Line') END AS LineResourceName,
+            CASE WHEN brn.division_id = @DivisionId THEN b.employee_id ELSE NULL END AS EmployeeId,
+            CASE WHEN brn.division_id = @DivisionId THEN ISNULL(ben.employee_name, N'Tanpa Penjahit') ELSE N'Tanpa Penjahit' END AS EmployeeName,
+            pr.project_name AS ProjectName,
+            ISNULL(pr.bundle_letter + '-', '') + CAST(b.bundle_no AS VARCHAR(10)) AS BundleLabel,
+            ISNULL(spd.size_name, N'-') AS SizeName,
+            awl.qty_ok AS QtyOk,
+            awl.qty_reject_print AS QtyRejectPrint,
+            awl.qty_reject_fabric AS QtyRejectFabric,
+            awl.qty_reject_sewing AS QtyRejectSewing,
+            awl.qty_reject_rework AS QtyRejectRework,
+            awl.qty_lost AS QtyLost
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+        INNER JOIN bundles b ON b.bundle_id = awl.bundle_id AND b.deleted_at IS NULL
+        INNER JOIN articles ar ON ar.article_id = b.article_id AND ar.deleted_at IS NULL
+        INNER JOIN projects pr ON pr.project_id = ar.project_id AND pr.deleted_at IS NULL
+        LEFT JOIN resources lr ON lr.resource_id = b.resource_id
+        LEFT JOIN resources brn ON brn.resource_id = b.resource_id
+        LEFT JOIN resources arn ON arn.resource_id = awl.resource_id
+        LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+        LEFT JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+        LEFT JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+        WHERE awl.deleted_at IS NULL AND aw.division_id = @DivisionId
+          AND (
+                (awl.target_division_id IS NULL AND awl.created_at >= @DayStart AND awl.created_at < @DayEnd)
+             OR (awl.target_division_id IS NOT NULL AND awl.received_at >= @DayStart AND awl.received_at < @DayEnd)
+              )
+    ),
+    -- WIP: salinan persis StepPrev/BundleMasuk/BundleTercatat/BundleWip dari SIS_Report_RekapStruk
+    -- (anchor @WipAnchor menggantikan @PeriodEnd), TANPA SizeMasuk/SizeTercatat/SizeWip (non-bundle
+    -- WIP tidak punya karyawan/line, di luar cakupan breakdown ini).
+    StepPrev AS (
+        SELECT
+            aw.article_workflow_id, aw.article_id, aw.sort_order,
+            (SELECT TOP 1 p.article_workflow_id FROM article_workflows p
+             WHERE p.article_id = aw.article_id AND p.deleted_at IS NULL AND p.sort_order < aw.sort_order
+             ORDER BY p.sort_order DESC) AS prev_article_workflow_id,
+            (SELECT TOP 1 p.requires_bundle FROM article_workflows p
+             WHERE p.article_id = aw.article_id AND p.deleted_at IS NULL AND p.sort_order < aw.sort_order
+             ORDER BY p.sort_order DESC) AS prev_requires_bundle
+        FROM article_workflows aw
+        WHERE aw.deleted_at IS NULL AND aw.division_id = @DivisionId
+    ),
+    BundleMasuk AS (
+        SELECT s.article_workflow_id AS StepArticleWorkflowId, pl.bundle_id AS BundleId, SUM(pl.qty_ok) AS MasukQty
+        FROM StepPrev s
+        INNER JOIN article_workflow_logs pl
+            ON pl.article_workflow_id = s.prev_article_workflow_id
+           AND pl.deleted_at IS NULL AND pl.target_division_id = @DivisionId
+           AND pl.received_at IS NOT NULL AND pl.received_at < @WipAnchor AND pl.bundle_id IS NOT NULL
+        WHERE s.prev_requires_bundle = 1
+        GROUP BY s.article_workflow_id, pl.bundle_id
+    ),
+    BundleTercatat AS (
+        SELECT s.article_workflow_id AS StepArticleWorkflowId, cl.bundle_id AS BundleId,
+               SUM(cl.qty_ok + cl.qty_reject_print + cl.qty_reject_fabric + cl.qty_reject_sewing
+                   + cl.qty_reject_rework + cl.qty_lost) AS TercatatQty
+        FROM StepPrev s
+        INNER JOIN article_workflow_logs cl
+            ON cl.article_workflow_id = s.article_workflow_id
+           AND cl.deleted_at IS NULL AND cl.created_at < @WipAnchor
+        WHERE s.prev_requires_bundle = 1
+        GROUP BY s.article_workflow_id, cl.bundle_id
+    ),
+    BundleWip AS (
+        SELECT
+            b.resource_id AS LineResourceId, ISNULL(lr.resource_name, N'Tanpa Line') AS LineResourceName,
+            b.employee_id AS EmployeeId, ISNULL(ben.employee_name, N'Tanpa Penjahit') AS EmployeeName,
+            pr.project_name AS ProjectName,
+            CASE WHEN (bm.MasukQty - ISNULL(bt.TercatatQty, 0)) > 0 THEN (bm.MasukQty - ISNULL(bt.TercatatQty, 0)) ELSE 0 END AS QtyWip
+        FROM BundleMasuk bm
+        LEFT JOIN BundleTercatat bt ON bt.StepArticleWorkflowId = bm.StepArticleWorkflowId AND bt.BundleId = bm.BundleId
+        INNER JOIN bundles b ON b.bundle_id = bm.BundleId AND b.deleted_at IS NULL
+        INNER JOIN articles ar ON ar.article_id = b.article_id AND ar.deleted_at IS NULL
+        INNER JOIN projects pr ON pr.project_id = ar.project_id AND pr.deleted_at IS NULL
+        LEFT JOIN resources lr ON lr.resource_id = b.resource_id
+        LEFT JOIN employees ben ON ben.employee_id = b.employee_id AND ben.deleted_at IS NULL
+        WHERE (bm.MasukQty - ISNULL(bt.TercatatQty, 0)) > 0
+          AND (@ResourceId IS NULL OR b.resource_id = @ResourceId)
+          AND (@EmployeeId IS NULL OR b.employee_id = @EmployeeId)
+    )
+    SELECT @Payload = (
+        SELECT
+            dv.division_name AS division_name,
+            rs.resource_name AS resource_name,
+            emp.employee_name AS employee_name,
+            @EffectiveDate AS [date],
+            JSON_QUERY((
+                SELECT
+                    LineResourceName AS line_resource_name,
+                    EmployeeName AS employee_name,
+                    ProjectName AS project_name,
+                    BundleLabel AS bundle_label,
+                    SizeName AS size_name,
+                    SUM(QtyOk) AS qty_ok,
+                    SUM(QtyRejectPrint) AS qty_reject_print,
+                    SUM(QtyRejectFabric) AS qty_reject_fabric,
+                    SUM(QtyRejectSewing) AS qty_reject_sewing,
+                    SUM(QtyRejectRework) AS qty_reject_rework,
+                    SUM(QtyLost) AS qty_lost
+                FROM DoneAtoms
+                WHERE (@ResourceId IS NULL OR LineResourceId = @ResourceId)
+                  AND (@EmployeeId IS NULL OR EmployeeId = @EmployeeId)
+                GROUP BY LineResourceName, EmployeeName, ProjectName, BundleLabel, SizeName
+                HAVING SUM(QtyOk) > 0
+                    OR SUM(QtyRejectPrint + QtyRejectFabric + QtyRejectSewing + QtyRejectRework + QtyLost) > 0
+                ORDER BY LineResourceName ASC, EmployeeName ASC, ProjectName ASC, BundleLabel ASC
+                FOR JSON PATH
+            )) AS done_rows,
+            JSON_QUERY((
+                SELECT
+                    LineResourceName AS line_resource_name,
+                    EmployeeName AS employee_name,
+                    ProjectName AS project_name,
+                    SUM(QtyWip) AS qty_wip
+                FROM BundleWip
+                GROUP BY LineResourceName, EmployeeName, ProjectName
+                HAVING SUM(QtyWip) > 0
+                ORDER BY LineResourceName ASC, EmployeeName ASC, ProjectName ASC
+                FOR JSON PATH
+            )) AS wip_rows
+        FROM divisions dv
+        LEFT JOIN resources rs ON rs.resource_id = @ResourceId
+        LEFT JOIN employees emp ON emp.employee_id = @EmployeeId AND emp.deleted_at IS NULL
+        WHERE dv.division_id = @DivisionId
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+    );
+
+    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+    VALUES ('REKAP_KARYAWAN', @DivisionId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
 
     SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
 END;

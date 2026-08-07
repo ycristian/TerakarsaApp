@@ -1,0 +1,9 @@
+/* Thin scrollbar look, matching .app-sidebar's native scrollbar (assets/css/style.css) --
+   reusable on any scrollable container (e.g. modal tab panes) that wants the same visual. */
+.thin-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+}

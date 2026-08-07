@@ -1,0 +1,7 @@
+/* Prompt 51: kolom label metrik tabel rekap mingguan (tab "Tren") dikunci saat di-scroll
+   horizontal -- lihat Bagian 2b prompt 51. */
+.line-trend-sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+}

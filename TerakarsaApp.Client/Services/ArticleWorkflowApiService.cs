@@ -34,4 +34,36 @@ public class ArticleWorkflowApiService
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan workflow." : error.Trim('"'));
     }
+
+    public async Task<(RestructurePreviewResultDto? Result, string Error)> PreviewInsertStepAsync(RestructureInsertPreviewRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/article-workflows/{request.ArticleId}/restructure/preview-insert", request);
+        if (response.IsSuccessStatusCode) return (await response.Content.ReadFromJsonAsync<RestructurePreviewResultDto>(), string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (null, string.IsNullOrWhiteSpace(error) ? "Gagal memeriksa dampak sisip step." : error.Trim('"'));
+    }
+
+    public async Task<(RestructureInsertStepResultDto? Result, string Error)> InsertStepAsync(RestructureInsertPreviewRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/article-workflows/{request.ArticleId}/restructure/insert-step", request);
+        if (response.IsSuccessStatusCode) return (await response.Content.ReadFromJsonAsync<RestructureInsertStepResultDto>(), string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (null, string.IsNullOrWhiteSpace(error) ? "Gagal menyisipkan step." : error.Trim('"'));
+    }
+
+    public async Task<(RestructurePreviewResultDto? Result, string Error)> PreviewDeactivateStepAsync(RestructureDeactivatePreviewRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/article-workflows/{request.ArticleId}/restructure/preview-deactivate", request);
+        if (response.IsSuccessStatusCode) return (await response.Content.ReadFromJsonAsync<RestructurePreviewResultDto>(), string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (null, string.IsNullOrWhiteSpace(error) ? "Gagal memeriksa dampak nonaktifkan step." : error.Trim('"'));
+    }
+
+    public async Task<(RestructureDeactivateStepResultDto? Result, string Error)> DeactivateStepAsync(RestructureDeactivatePreviewRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/article-workflows/{request.ArticleId}/restructure/deactivate-step", request);
+        if (response.IsSuccessStatusCode) return (await response.Content.ReadFromJsonAsync<RestructureDeactivateStepResultDto>(), string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (null, string.IsNullOrWhiteSpace(error) ? "Gagal menonaktifkan step." : error.Trim('"'));
+    }
 }

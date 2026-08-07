@@ -85,6 +85,9 @@
 --      balik ke perilaku lama berdasar @ResourceId). UPDATE: kalau log Bundling bundle ini
 --      masih pending (received_at NULL, mis. bundle lama) dan step penerimanya kini ber-flag,
 --      langsung diterima juga di transaksi UPDATE yang sama -- tidak retroaktif ke bundle lain.
+--   17. @DeleteReason (baru) -- DELETE sekarang mewajibkan alasan (RAISERROR bila NULL/kosong),
+--      ditulis ke bundles.delete_reason. Pola sama dengan SIS_SuperAdmin_Manage BUNDLE_DELETE/
+--      LOG_DELETE; sebelumnya delete_reason selalu NULL di jalur DELETE biasa (station/admin).
 
 SET ANSI_NULLS ON;
 GO
@@ -103,7 +106,8 @@ CREATE OR ALTER PROCEDURE SIS_Bundle_Manage
     @PublicBaseUrl       VARCHAR(255) = NULL,
     @BundlingResourceId  INT = NULL,
     @PrintCopies         INT = 1,
-    @UserId              INT = NULL
+    @UserId              INT = NULL,
+    @DeleteReason        VARCHAR(255) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -201,11 +205,30 @@ BEGIN
         DECLARE @BundlingTargetDivisionId INT, @BundlingTargetAutoReceive BIT;
         SELECT TOP 1 @BundlingTargetDivisionId = division_id, @BundlingTargetAutoReceive = auto_receive
         FROM article_workflows
-        WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @BundlingSortOrder
+        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @BundlingSortOrder
         ORDER BY sort_order ASC;
+
+        DECLARE @LockResource_Article VARCHAR(60) = 'article_workflow_restructure_' + CAST(@ArticleId AS VARCHAR(20));
 
         BEGIN TRAN;
         BEGIN TRY
+            -- Prompt 50: applock per artikel -- SAMA PERSIS dengan resource yang dipakai
+            -- SIS_ArticleWorkflow_Restructure dan SIS_WorkflowLog_Manage, supaya pembuatan
+            -- bundle tidak bisa nyelip di tengah restrukturisasi artikel yang sama.
+            DECLARE @LockResultArticle INT;
+            EXEC @LockResultArticle = sp_getapplock
+                @Resource = @LockResource_Article,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 10000;
+
+            IF @LockResultArticle < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
             DECLARE @LockResult INT;
             EXEC @LockResult = sp_getapplock
                 @Resource = 'bundle_serial_seq',
@@ -276,6 +299,7 @@ BEGIN
                         p.no_po AS no_po,
                         p.material_name AS material_name,
                         a.article_name AS article_name,
+                        NULLIF(LTRIM(RTRIM(@Remarks)), '') AS bundle_remarks,
                         a.style AS style,
                         a.color AS color,
                         spk.size_pack_name AS size_pack_name,
@@ -312,7 +336,7 @@ BEGIN
             DECLARE @LastNonBundleStepId INT;
             SELECT TOP 1 @LastNonBundleStepId = article_workflow_id
             FROM article_workflows
-            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 0
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 0
             ORDER BY sort_order DESC;
 
             -- Prompt 17: catat kegiatan Bundling sebagai log workflow (menunggu diterima
@@ -504,7 +528,7 @@ BEGIN
         DECLARE @UpdNextAutoReceive BIT;
         SELECT TOP 1 @UpdNextAutoReceive = auto_receive
         FROM article_workflows
-        WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND sort_order > @UpdBundlingSortOrder
+        WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @UpdBundlingSortOrder
         ORDER BY sort_order ASC;
 
         UPDATE awl
@@ -519,6 +543,12 @@ BEGIN
 
     ELSE IF @Action = 'DELETE'
     BEGIN
+        IF @DeleteReason IS NULL OR LTRIM(RTRIM(@DeleteReason)) = ''
+        BEGIN
+            RAISERROR('Alasan hapus wajib diisi.', 16, 1);
+            RETURN;
+        END
+
         DECLARE @DelArticleId INT, @DelCreatedAt DATETIME2;
         SELECT @DelArticleId = article_id, @DelCreatedAt = created_at FROM bundles WHERE bundle_id = @Id AND deleted_at IS NULL;
 
@@ -572,7 +602,8 @@ BEGIN
 
         UPDATE bundles
         SET deleted_at = SYSDATETIME(),
-            deleted_by = @UserId
+            deleted_by = @UserId,
+            delete_reason = @DeleteReason
         WHERE bundle_id = @Id AND deleted_at IS NULL;
 
         UPDATE awl
@@ -593,6 +624,8 @@ GO
 -- Prompt: dipakai juga untuk "Print Label Cacat" (BundleScanCard) -- @Copies = jumlah lembar
 -- yang diminta user, @RemarkOverride = catatan Kirim Hasil + ringkasan qty cacat (dirakit di
 -- BundleService.PrintDefectLabelAsync), supaya beda dari remark log yang sudah tersimpan.
+-- bundle_remarks payload = bundles.remarks (catatan bebas Prompt 35) apa adanya, dicetak di
+-- bawah nama artikel (kolom kiri) -- field TERPISAH dari remark di atas.
 CREATE OR ALTER PROCEDURE SIS_Bundle_ReprintLabel
     @BundleId       INT,
     @PublicBaseUrl  VARCHAR(255) = NULL,
@@ -627,6 +660,7 @@ BEGIN
             p.no_po AS no_po,
             p.material_name AS material_name,
             a.article_name AS article_name,
+            b.remarks AS bundle_remarks,
             a.style AS style,
             a.color AS color,
             spk.size_pack_name AS size_pack_name,

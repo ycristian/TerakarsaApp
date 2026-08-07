@@ -212,9 +212,12 @@ public class StationDeviceController : ControllerBase
     // jendela 1 jam (lihat SIS_Station_PendingHandover/SIS_Bundle_Manage DELETE). SP sendiri
     // yang menegakkan aturan waktu/status -- endpoint ini cukup teruskan error apa adanya.
     [HttpDelete("bundles/{id:int}")]
-    public async Task<IActionResult> DeleteBundle(int id)
+    public async Task<IActionResult> DeleteBundle(int id, [FromQuery] string? reason)
     {
-        var (success, error) = await _bundleService.DeleteAsync(id, _systemUserId);
+        if (string.IsNullOrWhiteSpace(reason))
+            return BadRequest("Alasan hapus wajib diisi.");
+
+        var (success, error) = await _bundleService.DeleteAsync(id, reason, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok();
     }
@@ -517,6 +520,10 @@ public class StationDeviceController : ControllerBase
             return BadRequest("Qty tidak boleh negatif.");
 
         var resourceId = EffectiveResourceId(request.ResourceId);
+        // Prompt 49: PelaksanaResourceId (pelaksana pekerjaan, dari picker "Pelaksana") --
+        // stasiun terkunci memaksa default_resource_id lewat EffectiveResourceId yang sama,
+        // mengabaikan pilihan client. NULL tetap NULL (resource_id baris tidak diubah).
+        var pelaksanaResourceId = EffectiveResourceId(request.PelaksanaResourceId);
 
         var (success, error) = await _workflowLogService.UpdateAsync(new WorkflowLogUpdateInput
         {
@@ -532,7 +539,8 @@ public class StationDeviceController : ControllerBase
             ActingDivisionId = CurrentStation.DivisionId,
             UpdatedByResourceId = resourceId > 0 ? resourceId : null,
             ConfirmExceed = request.ConfirmExceed,
-            ConfirmShort = request.ConfirmShort
+            ConfirmShort = request.ConfirmShort,
+            ResourceId = pelaksanaResourceId
         }, _systemUserId);
 
         if (!success) return BadRequest(error);

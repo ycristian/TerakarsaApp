@@ -40,9 +40,9 @@ public class BundleApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan." : error.Trim('"'));
     }
 
-    public async Task<(bool Success, string Error)> DeleteAsync(int id)
+    public async Task<(bool Success, string Error)> DeleteAsync(int id, string reason)
     {
-        var response = await _http.DeleteAsync($"api/bundles/{id}");
+        var response = await _http.DeleteAsync($"api/bundles/{id}?reason={Uri.EscapeDataString(reason)}");
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus bundle." : error.Trim('"'));

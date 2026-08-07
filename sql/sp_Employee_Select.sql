@@ -129,3 +129,19 @@ BEGIN
     ORDER BY employee_name ASC;
 END;
 GO
+
+-- Prompt 47: dropdown "Employee" cascading dari Divisi (bukan Resource) di modul Log
+-- Aktivitas -- pola meniru SIS_Employee_GetActiveByResource di atas.
+CREATE OR ALTER PROCEDURE SIS_Employee_GetActiveByDivision
+    @DivisionId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT employee_id AS Id, employee_name AS EmployeeName, employee_code AS EmployeeCode
+    FROM employees
+    WHERE division_id = @DivisionId
+      AND deleted_at IS NULL
+    ORDER BY employee_name ASC;
+END;
+GO

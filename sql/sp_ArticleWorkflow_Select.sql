@@ -8,6 +8,9 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
+-- Prompt 50: step inactive_at IS NOT NULL (dinonaktifkan lewat SIS_ArticleWorkflow_Restructure)
+-- disembunyikan sepenuhnya dari grid edit workflow -- riwayat produksinya tetap ada, hanya
+-- tidak lagi bisa diedit/dilihat lewat editor step biasa.
 CREATE OR ALTER PROCEDURE SIS_ArticleWorkflow_ListByArticle
     @ArticleId INT
 AS
@@ -22,7 +25,7 @@ BEGIN
     FROM article_workflows aw
     INNER JOIN divisions d ON d.division_id = aw.division_id
     LEFT JOIN workflow_templates wt ON wt.workflow_template_id = aw.workflow_template_id
-    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL
+    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL
     ORDER BY aw.sort_order ASC, aw.article_workflow_id ASC;
 END;
 GO

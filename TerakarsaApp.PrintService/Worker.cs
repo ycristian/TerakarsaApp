@@ -22,7 +22,7 @@ public class Worker : BackgroundService
     {
         Log(LogLevel.Information,
             $"TerakarsaApp.PrintService dimulai. DryRun={_options.DryRun}, PrinterLabelOn={_options.PrinterLabelOn}, PrinterThermalOn={_options.PrinterThermalOn}, " +
-            $"Printer='{_options.PrinterName}', KuponPrinterName='{_options.KuponPrinterName}', ApiBaseUrl={_options.ApiBaseUrl}, PollSeconds={_options.PollSeconds}, BatchSize={_options.BatchSize}");
+            $"ApiBaseUrl={_options.ApiBaseUrl}, PollSeconds={_options.PollSeconds}, BatchSize={_options.BatchSize}");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -48,9 +48,19 @@ public class Worker : BackgroundService
         }
     }
 
+    private static readonly string[] LabelJobTypes = { "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE" };
+    private static readonly string[] KuponJobTypes = { "KUPON_BORONGAN", "REKAP_PRODUKSI", "REKAP_KARYAWAN" };
+
     private async Task PollOnceAsync(CancellationToken ct)
     {
-        var jobs = await _apiClient.ClaimAsync(Math.Max(1, _options.BatchSize), ct);
+        var enabledJobTypes = new List<string>();
+        if (_options.PrinterLabelOn) enabledJobTypes.AddRange(LabelJobTypes);
+        if (_options.PrinterThermalOn) enabledJobTypes.AddRange(KuponJobTypes);
+
+        // Semua printer off -- jangan panggil API sama sekali, tidak ada yang boleh diklaim.
+        if (enabledJobTypes.Count == 0) return;
+
+        var jobs = await _apiClient.ClaimAsync(Math.Max(1, _options.BatchSize), enabledJobTypes, _options.DryRun, ct);
         if (jobs.Count == 0) return;
 
         Log(LogLevel.Information, $"Klaim {jobs.Count} job cetak.");
@@ -70,19 +80,36 @@ public class Worker : BackgroundService
         }
     }
 
-    private static readonly HashSet<string> KuponJobTypes = new() { "KUPON_BORONGAN", "REKAP_PRODUKSI" };
-
+    // Prompt 48: dispatch berdasar RenderMode hasil klaim (bukan job_type langsung) --
+    // SIS_PrintJob_Claim hanya pernah mengembalikan job yang printer tujuannya sudah pasti
+    // (job_type tanpa route hidup, atau device is_active = 0, tidak pernah ikut diklaim sama
+    // sekali -- tetap PENDING). RenderMode 'RAW_TSPL' = jalur label lama (TsplBuilder,
+    // TIDAK berubah); 'TOKEN' = render lewat SP (SIS_Print_Dispatch) + EscPosRenderer.
     private async Task ProcessJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
-        if (KuponJobTypes.Contains(job.JobType))
+        if (job.RenderMode == "RAW_TSPL")
         {
-            await ProcessKuponJobAsync(job, ct);
+            await ProcessTsplJobAsync(job, ct);
+            return;
+        }
+        if (job.RenderMode == "TOKEN")
+        {
+            await ProcessTokenJobAsync(job, ct);
             return;
         }
 
+        Log(LogLevel.Warning, $"Job #{job.PrintJobId}: render_mode '{job.RenderMode}' tidak dikenal.");
+        await ReportSafeAsync(job.PrintJobId, false, "Render mode tidak dikenal.", ct);
+    }
+
+    // Jalur label TSC TTP-244 Pro -- TIDAK diubah (payload BUNDLE_LABEL, TsplBuilder, dst tetap
+    // persis). Satu-satunya perbedaan dari sebelum Prompt 48: printer diambil dari job.PrinterName
+    // (hasil resolusi print_devices saat klaim), bukan _options.PrinterName di appsettings.
+    private async Task ProcessTsplJobAsync(PrintJobClaimedDto job, CancellationToken ct)
+    {
         if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL" && job.JobType != "REJECT_NOTE")
         {
-            Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung.");
+            Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung di jalur RAW_TSPL.");
             await ReportSafeAsync(job.PrintJobId, false, "Job type belum didukung.", ct);
             return;
         }
@@ -119,19 +146,18 @@ public class Worker : BackgroundService
 
         try
         {
-            if (_options.DryRun || !_options.PrinterLabelOn)
+            if (_options.DryRun)
             {
                 var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
                 Directory.CreateDirectory(dryRunDir);
                 var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.tspl");
                 await File.WriteAllBytesAsync(path, tspl, ct);
-                var reason = _options.DryRun ? "DryRun" : "PrinterLabelOn=false";
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} ({reason}) serial {serial}: TSPL ditulis ke {path}");
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun) serial {serial}: TSPL ditulis ke {path}");
             }
             else
             {
-                RawPrinterHelper.SendBytesToPrinter(_options.PrinterName, tspl);
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {serial}: dicetak ke printer '{_options.PrinterName}'.");
+                RawPrinterHelper.SendBytesToPrinter(job.PrinterName, tspl);
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} serial {serial}: dicetak ke printer '{job.PrinterName}'.");
             }
 
             await ReportSafeAsync(job.PrintJobId, true, null, ct);
@@ -143,52 +169,52 @@ public class Worker : BackgroundService
         }
     }
 
-    // Prompt 41/42: KUPON_BORONGAN/REKAP_PRODUKSI -- printer struk ESC/POS terpisah (KuponPrinterName),
-    // via RawPrinterHelper yang sama (raw bytes, tanpa driver/SDK khusus).
-    private async Task ProcessKuponJobAsync(PrintJobClaimedDto job, CancellationToken ct)
+    // Prompt 48: render dilakukan SAAT job diklaim (bukan saat job dibuat) -- panggil
+    // api/print/render/{id} (SIS_Print_Dispatch), terjemahkan token -> byte ESC/POS lewat
+    // EscPosRenderer, kirim ke printer job ini (job.PrinterName, hasil resolusi print_devices).
+    // Kegagalan render (SP error / endpoint 400) dilaporkan lewat api/print/report dengan pesan
+    // aslinya, sama seperti kegagalan cetak biasa.
+    private async Task ProcessTokenJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
-        byte[] escpos;
-        string label;
+        string tokenText;
         try
         {
-            if (job.JobType == "REKAP_PRODUKSI")
-            {
-                var rekapPayload = EscPosBuilder.ParseRekapProduksiPayload(job.Payload);
-                label = rekapPayload.EmployeeName ?? rekapPayload.ResourceName ?? rekapPayload.DivisionName;
-                escpos = EscPosBuilder.BuildRekapProduksi(rekapPayload, _options.KuponPaperWidthChars);
-            }
-            else
-            {
-                var kuponPayload = EscPosBuilder.ParseKuponBoronganPayload(job.Payload);
-                label = kuponPayload.Serial ?? $"WL#{kuponPayload.WorkflowLogId}";
-                escpos = EscPosBuilder.BuildKuponBorongan(kuponPayload, _options.KuponPaperWidthChars);
-            }
+            tokenText = await _apiClient.RenderAsync(job.PrintJobId, _options.DryRun, ct);
         }
         catch (Exception ex)
         {
-            Log(LogLevel.Error, $"Job #{job.PrintJobId}: payload rusak - {ex.Message}");
-            await ReportSafeAsync(job.PrintJobId, false, $"Payload rusak: {ex.Message}", ct);
+            Log(LogLevel.Error, $"Job #{job.PrintJobId}: gagal render - {ex.Message}");
+            await ReportSafeAsync(job.PrintJobId, false, ex.Message, ct);
             return;
         }
 
+        var rendered = EscPosRenderer.Render(tokenText, job.CharsPerLine, job.CharsPerLineSmall);
+        foreach (var warning in rendered.Warnings)
+            Log(LogLevel.Warning, $"Job #{job.PrintJobId}: {warning}");
+
+        // KUPON_BORONGAN dicetak rangkap (KuponBoronganCopies, default 2, pola sama dengan
+        // sebelum Prompt 48); job_type TOKEN lain 1x.
+        var copies = job.JobType == "KUPON_BORONGAN" ? Math.Max(1, _options.KuponBoronganCopies) : 1;
+
         try
         {
-            if (_options.DryRun || !_options.PrinterThermalOn)
+            if (_options.DryRun)
             {
                 var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
                 Directory.CreateDirectory(dryRunDir);
-                var path = Path.Combine(dryRunDir, $"{job.PrintJobId}.escpos");
-                await File.WriteAllBytesAsync(path, escpos, ct);
-                var reason = _options.DryRun ? "DryRun" : "PrinterThermalOn=false";
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} ({reason}) {label}: ESC/POS ditulis ke {path}");
+                var escposPath = Path.Combine(dryRunDir, $"{job.PrintJobId}.escpos");
+                var txtPath = Path.Combine(dryRunDir, $"{job.PrintJobId}.txt");
+                await File.WriteAllBytesAsync(escposPath, rendered.Bytes, ct);
+                await File.WriteAllTextAsync(txtPath, rendered.PlainText, ct);
+                Log(LogLevel.Information, $"Job #{job.PrintJobId} (DryRun): ESC/POS ditulis ke {escposPath} dan {txtPath} ({copies}x)");
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(_options.KuponPrinterName))
-                    throw new InvalidOperationException("Printer kupon belum dikonfigurasi.");
-
-                RawPrinterHelper.SendBytesToPrinter(_options.KuponPrinterName, escpos);
-                Log(LogLevel.Information, $"Job #{job.PrintJobId} {label}: dicetak ke printer '{_options.KuponPrinterName}'.");
+                for (var i = 0; i < copies; i++)
+                {
+                    RawPrinterHelper.SendBytesToPrinter(job.PrinterName, rendered.Bytes);
+                }
+                Log(LogLevel.Information, $"Job #{job.PrintJobId}: dicetak {copies}x ke printer '{job.PrinterName}'.");
             }
 
             await ReportSafeAsync(job.PrintJobId, true, null, ct);
@@ -204,7 +230,7 @@ public class Worker : BackgroundService
     {
         try
         {
-            await _apiClient.ReportAsync(printJobId, success, errorMessage, ct);
+            await _apiClient.ReportAsync(printJobId, success, errorMessage, _options.DryRun, ct);
         }
         catch (Exception ex)
         {

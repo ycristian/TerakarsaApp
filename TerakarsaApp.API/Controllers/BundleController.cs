@@ -48,6 +48,9 @@ public class BundleController : ControllerBase
     [HttpPost("bundles")]
     public async Task<IActionResult> Create([FromBody] BundleCreateRequest request)
     {
+        if (!User.IsInRole("Admin"))
+            return Forbid();
+
         if (request.ArticleSizeId <= 0)
             return BadRequest("Ukuran wajib dipilih.");
 
@@ -72,9 +75,12 @@ public class BundleController : ControllerBase
     }
 
     [HttpDelete("bundles/{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, [FromQuery] string? reason)
     {
-        var (success, error) = await _bundleService.DeleteAsync(id, CurrentUserId);
+        if (string.IsNullOrWhiteSpace(reason))
+            return BadRequest("Alasan hapus wajib diisi.");
+
+        var (success, error) = await _bundleService.DeleteAsync(id, reason, CurrentUserId);
         if (!success) return BadRequest(error);
         return Ok();
     }
@@ -82,6 +88,9 @@ public class BundleController : ControllerBase
     [HttpPost("bundles/{id:int}/reprint")]
     public async Task<IActionResult> Reprint(int id, [FromQuery] int copies = 1)
     {
+        if (!User.IsInRole("Admin"))
+            return Forbid();
+
         if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
         var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, CurrentUserId);

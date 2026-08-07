@@ -125,11 +125,11 @@ BEGIN
       AND awl.bundle_id = @BundleId;
 
     DECLARE @MaxArticleSort INT = (
-        SELECT MAX(sort_order) FROM article_workflows WHERE article_id = @ArticleId AND deleted_at IS NULL
+        SELECT MAX(sort_order) FROM article_workflows WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL
     );
     DECLARE @FirstBundleSort INT = (
         SELECT MIN(sort_order) FROM article_workflows
-        WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1
+        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1
     );
 
     -- 3. Aksi (dihitung SEBELUM result set 1 supaya SuggestedResourceId/receiver info di
@@ -233,7 +233,7 @@ BEGIN
                     DECLARE @WipStepId INT, @WipStepSort INT;
                     SELECT TOP 1 @WipStepId = aw.article_workflow_id, @WipStepSort = aw.sort_order
                     FROM article_workflows aw
-                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
                       AND aw.sort_order > @LastLogSort
                     ORDER BY aw.sort_order ASC;
 
@@ -249,7 +249,7 @@ BEGIN
 
                         SELECT TOP 1 @NextArticleWorkflowId = article_workflow_id, @NextDivisionId = division_id
                         FROM article_workflows
-                        WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @WipStepSort
+                        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @WipStepSort
                         ORDER BY sort_order ASC;
                         SELECT @NextDivisionName = division_name FROM divisions WHERE division_id = @NextDivisionId;
                     END
@@ -292,7 +292,7 @@ BEGIN
                     SELECT aw.article_workflow_id, aw.step_name, aw.sort_order, aw.division_id,
                            LAG(aw.article_workflow_id) OVER (ORDER BY aw.sort_order) AS PrevArticleWorkflowId
                     FROM article_workflows aw
-                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
+                    WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
                 )
                 INSERT INTO @StepQuota (ArticleWorkflowId, StepName, SortOrder, DivisionId, QtyMasuk, QtySudah)
                 SELECT bs.article_workflow_id, bs.step_name, bs.sort_order, bs.division_id,
@@ -328,7 +328,7 @@ BEGIN
 
                     SELECT TOP 1 @NextArticleWorkflowId = article_workflow_id, @NextDivisionId = division_id
                     FROM article_workflows
-                    WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @CurSort
+                    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @CurSort
                     ORDER BY sort_order ASC;
                     SELECT @NextDivisionName = division_name FROM divisions WHERE division_id = @NextDivisionId;
 
@@ -370,7 +370,7 @@ BEGIN
                         DECLARE @PrevStepId INT;
                         SELECT TOP 1 @PrevStepId = article_workflow_id
                         FROM article_workflows
-                        WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @CurSort
+                        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @CurSort
                         ORDER BY sort_order DESC;
 
                         IF @PrevStepId IS NOT NULL AND EXISTS (

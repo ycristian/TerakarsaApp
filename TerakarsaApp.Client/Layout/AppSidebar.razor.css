@@ -1,0 +1,10 @@
+/* Sash's vendor CSS never sets overflow on .app-sidebar (it relies on the
+   PerfectScrollbar plugin, which this port doesn't ship) -- so once the menu
+   list is taller than the viewport there's nothing to scroll it with, even
+   though the thin custom scrollbar (::-webkit-scrollbar) is already styled
+   for it. .side-header stays visually pinned because it's position: fixed,
+   so it's unaffected by scrolling the rest of the sidebar. */
+.app-sidebar {
+    overflow-y: auto;
+    overflow-x: hidden;
+}

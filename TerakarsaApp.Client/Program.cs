@@ -75,6 +75,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.PublicPackApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportBundleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportWipApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportProduksiApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ReportActivityLogApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.SuperAdminApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkScheduleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.DailyPlanApiService>();

@@ -71,6 +71,19 @@ public class EmployeeService
             .ToListAsync();
     }
 
+    // Prompt 47: dropdown "Employee" cascading dari Divisi (bukan Resource) di modul Log
+    // Aktivitas.
+    public async Task<List<EmployeeLookupDto>> GetActiveByDivisionAsync(int divisionId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+
+        return await _db.Database
+            .SqlQueryRaw<EmployeeLookupDto>(
+                "EXEC SIS_Employee_GetActiveByDivision @DivisionId = @DivisionId",
+                divisionIdParam)
+            .ToListAsync();
+    }
+
     public async Task<EmployeeDto?> GetByIdAsync(int id)
     {
         var idParam = new SqlParameter("@Id", id);

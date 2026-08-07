@@ -320,7 +320,7 @@ BEGIN
         DECLARE @EditNextArticleWorkflowId INT;
         SELECT TOP 1 @EditNextArticleWorkflowId = article_workflow_id
         FROM article_workflows
-        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @EditSortOrder
+        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order > @EditSortOrder
         ORDER BY sort_order ASC;
 
         IF @EditNextArticleWorkflowId IS NOT NULL
@@ -349,7 +349,7 @@ BEGIN
         DECLARE @EditPrevArticleWorkflowId INT;
         SELECT TOP 1 @EditPrevArticleWorkflowId = article_workflow_id
         FROM article_workflows
-        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @EditSortOrder
+        WHERE article_id = @EditArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @EditSortOrder
         ORDER BY sort_order DESC;
 
         DECLARE @EditQtyMasuk INT;
@@ -446,7 +446,7 @@ BEGIN
         IF @EbBundlingArticleWorkflowId IS NOT NULL
             SELECT TOP 1 @EbNextArticleWorkflowId = article_workflow_id
             FROM article_workflows
-            WHERE article_id = @EbArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @EbBundlingSortOrder
+            WHERE article_id = @EbArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order > @EbBundlingSortOrder
             ORDER BY sort_order ASC;
 
         IF @EbNextArticleWorkflowId IS NOT NULL
@@ -656,13 +656,13 @@ BEGIN
     DECLARE @NextArticleWorkflowId INT;
     SELECT TOP 1 @NextArticleWorkflowId = article_workflow_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order > @SortOrder
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order > @SortOrder
     ORDER BY sort_order ASC;
 
     DECLARE @PrevArticleWorkflowId INT;
     SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
     ORDER BY sort_order DESC;
 
     DECLARE @QtyMasuk INT;

@@ -59,6 +59,12 @@
 -- opsional (pelaksana/operator sesi aktif saat revisi dari stasiun) -- kalau diisi, resource
 -- harus hidup dan milik divisi baris log ini. Mengisi trio updated_at/updated_by/
 -- updated_by_resource_id.
+-- Prompt 49: @ResourceId (parameter yang sama dipakai CREATE/REVISE_HANDOVER/ADJUST) sekarang
+-- JUGA dipakai UPDATE -- dulu UPDATE tidak pernah menyentuh resource_id sama sekali. Kalau
+-- diisi, resource harus hidup + milik division_id baris ini, lalu resource_id di-SET ke nilai
+-- itu; kalau NULL, resource_id dibiarkan apa adanya (tidak diubah). Pemisahan makna: resource_id
+-- = pelaksana PEKERJAAN (siapa yang mengerjakan baris ini), updated_by_resource_id = operator
+-- yang MEREVISI baris ini sekarang -- dua hal berbeda, boleh berbeda orang.
 --
 -- @Action = 'RECEIVE' (pengganti log RECEIVED terpisah pada model lama):
 --   UPDATE satu-satunya yang diizinkan pada log: received_at, received_by_resource_id,
@@ -243,6 +249,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- App setting (ad hoc, lanjutan Prompt 41): saklar master auto-print kupon borongan,
+    -- terpisah dari flag per-step print_kupon. 0 mematikan SEMUA insert print_jobs
+    -- KUPON_BORONGAN di bawah (CREATE/RECEIVE/REVISE_HANDOVER jalur auto-terima) tanpa
+    -- menyentuh print_kupon per step. Tidak ada baris app_settings = dianggap aktif (default aman).
+    DECLARE @AutoPrintCouponActive BIT = ISNULL((SELECT TOP 1 auto_print_coupon_active FROM app_settings WHERE deleted_at IS NULL), 1);
+
     IF @Action = 'CREATE'
     BEGIN
         DECLARE @DivisionId INT, @RequiresBundle BIT, @ArticleId INT, @SortOrder INT, @IsBundling BIT;
@@ -250,13 +262,16 @@ BEGIN
         SELECT @DivisionId = division_id, @RequiresBundle = requires_bundle,
                @ArticleId = article_id, @SortOrder = sort_order, @IsBundling = is_bundling
         FROM article_workflows
-        WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL;
+        WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL AND inactive_at IS NULL;
 
         IF @DivisionId IS NULL
         BEGIN
             RAISERROR('Step workflow tidak ditemukan.', 16, 1);
             RETURN;
         END
+
+        -- Prompt 50: resource applock per artikel -- lihat komentar di BEGIN TRAN di bawah.
+        DECLARE @LockResource_Create VARCHAR(60) = 'article_workflow_restructure_' + CAST(@ArticleId AS VARCHAR(20));
 
         -- Prompt 18: project terkunci (manual_status) menolak pencatatan log workflow.
         DECLARE @LockStatus_Create VARCHAR(20), @LockReason_Create VARCHAR(255);
@@ -331,7 +346,7 @@ BEGIN
         DECLARE @ComputedTargetDivisionId INT, @ComputedTargetAutoReceive BIT;
         SELECT TOP 1 @ComputedTargetDivisionId = division_id, @ComputedTargetAutoReceive = auto_receive
         FROM article_workflows
-        WHERE article_id = @ArticleId AND deleted_at IS NULL AND sort_order > @SortOrder
+        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @SortOrder
         ORDER BY sort_order ASC;
 
         DECLARE @AutoReceivedAt DATETIME2 = NULL, @AutoReceivedByResourceId INT = NULL, @AutoReceivedRemark VARCHAR(500) = NULL;
@@ -430,12 +445,12 @@ BEGIN
             DECLARE @FirstStationBundleSort INT;
             SELECT @FirstStationBundleSort = MIN(sort_order)
             FROM article_workflows
-            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND is_bundling = 0;
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND is_bundling = 0;
 
             DECLARE @PrevArticleWorkflowId INT;
             SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
             FROM article_workflows
-            WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
+            WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
             ORDER BY sort_order DESC;
 
             IF @PrevArticleWorkflowId IS NULL OR NOT EXISTS (
@@ -525,6 +540,20 @@ BEGIN
         DECLARE @NewLogId INT;
         BEGIN TRAN;
         BEGIN TRY
+            -- Prompt 50: applock per artikel -- SAMA PERSIS dengan resource yang dipakai
+            -- SIS_ArticleWorkflow_Restructure, supaya submit log baru tidak bisa nyelip di
+            -- tengah restrukturisasi artikel yang sama.
+            DECLARE @LockResultCreate INT;
+            EXEC @LockResultCreate = sp_getapplock
+                @Resource = @LockResource_Create, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+
+            IF @LockResultCreate < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
             INSERT INTO article_workflow_logs (
                 article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
                 qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
@@ -543,7 +572,7 @@ BEGIN
             -- Prompt 41: kupon borongan -- hanya jalur auto-terima (@AutoReceivedAt terisi di atas)
             -- yang bisa mengisi received_at langsung di sini; RECEIVE manual biasa ditangani di
             -- action RECEIVE sendiri. Lihat blok komentar besar di atas CREATE PROCEDURE.
-            IF @AutoReceivedAt IS NOT NULL AND EXISTS (
+            IF @AutoReceivedAt IS NOT NULL AND @AutoPrintCouponActive = 1 AND EXISTS (
                 SELECT 1 FROM article_workflows WHERE article_workflow_id = @ArticleWorkflowId AND print_kupon = 1
             )
             BEGIN
@@ -555,6 +584,7 @@ BEGIN
                         pr.bundle_letter AS bundle_letter,
                         pr.project_name AS project_name,
                         a.article_name AS article_name,
+                        b.remarks AS bundle_remarks,
                         a.style AS style,
                         a.color AS color,
                         spd.size_name AS size_name,
@@ -673,6 +703,17 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 49: @ResourceId di sini = pelaksana PEKERJAAN baris ini (boleh beda dari
+        -- @UpdatedByResourceId di atas, yang merevisi). NULL -> tidak diubah (lihat SET di bawah).
+        IF @ResourceId IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM resources
+            WHERE resource_id = @ResourceId AND division_id = @UpdDivisionId AND deleted_at IS NULL
+        )
+        BEGIN
+            RAISERROR('Pelaksana bukan resource milik divisi ini.', 16, 1);
+            RETURN;
+        END
+
         IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
            OR @QtyRejectRework < 0 OR @QtyLost < 0
         BEGIN
@@ -717,7 +758,7 @@ BEGIN
             DECLARE @UpdFirstBundleSort INT;
             SELECT @UpdFirstBundleSort = MIN(sort_order)
             FROM article_workflows
-            WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND requires_bundle = 1;
+            WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1;
 
             DECLARE @UpdQtyMasuk INT;
             IF @UpdSortOrder = @UpdFirstBundleSort
@@ -727,7 +768,7 @@ BEGIN
                 DECLARE @UpdPrevArticleWorkflowId INT;
                 SELECT TOP 1 @UpdPrevArticleWorkflowId = article_workflow_id
                 FROM article_workflows
-                WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @UpdSortOrder
+                WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @UpdSortOrder
                 ORDER BY sort_order DESC;
 
                 SELECT @UpdQtyMasuk = ISNULL(SUM(qty_ok), 0)
@@ -757,19 +798,41 @@ BEGIN
             END
         END
 
-        UPDATE article_workflow_logs
-        SET qty_ok = @QtyOk,
-            qty_reject_print = @QtyRejectPrint,
-            qty_reject_fabric = @QtyRejectFabric,
-            qty_reject_sewing = @QtyRejectSewing,
-            qty_reject_rework = @QtyRejectRework,
-            qty_lost = @QtyLost,
-            remark = @Remark,
-            article_size_id = @ArticleSizeId,
-            updated_at = SYSDATETIME(),
-            updated_by = @UserId,
-            updated_by_resource_id = @UpdatedByResourceId
-        WHERE workflow_log_id = @Id;
+        DECLARE @LockResource_Update VARCHAR(60) = 'article_workflow_restructure_' + CAST(@UpdArticleId AS VARCHAR(20));
+        BEGIN TRAN;
+        BEGIN TRY
+            DECLARE @LockResultUpdate INT;
+            EXEC @LockResultUpdate = sp_getapplock
+                @Resource = @LockResource_Update, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+
+            IF @LockResultUpdate < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
+            UPDATE article_workflow_logs
+            SET qty_ok = @QtyOk,
+                qty_reject_print = @QtyRejectPrint,
+                qty_reject_fabric = @QtyRejectFabric,
+                qty_reject_sewing = @QtyRejectSewing,
+                qty_reject_rework = @QtyRejectRework,
+                qty_lost = @QtyLost,
+                remark = @Remark,
+                article_size_id = @ArticleSizeId,
+                resource_id = ISNULL(@ResourceId, resource_id),
+                updated_at = SYSDATETIME(),
+                updated_by = @UserId,
+                updated_by_resource_id = @UpdatedByResourceId
+            WHERE workflow_log_id = @Id;
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'RECEIVE'
@@ -835,10 +898,23 @@ BEGIN
             RETURN;
         END
 
+        DECLARE @LockResource_Receive VARCHAR(60) = 'article_workflow_restructure_' + CAST(@RecArticleId AS VARCHAR(20));
+
         -- Prompt 41: UPDATE received_at + INSERT print_jobs kupon (kalau berlaku) HARUS satu
         -- transaksi -- kalau insert print_jobs gagal, penerimaan ikut batal (bukan partial).
         BEGIN TRAN;
         BEGIN TRY
+            DECLARE @LockResultReceive INT;
+            EXEC @LockResultReceive = sp_getapplock
+                @Resource = @LockResource_Receive, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+
+            IF @LockResultReceive < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
             UPDATE article_workflow_logs
             SET received_at = SYSDATETIME(),
                 received_by_resource_id = @ReceivedByResourceId,
@@ -846,7 +922,7 @@ BEGIN
             WHERE workflow_log_id = @Id;
 
             -- Prompt 41: kupon borongan -- lihat blok komentar besar di atas CREATE PROCEDURE.
-            IF EXISTS (
+            IF @AutoPrintCouponActive = 1 AND EXISTS (
                 SELECT 1 FROM article_workflow_logs awl
                 INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
                 WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL AND aw.print_kupon = 1
@@ -860,6 +936,7 @@ BEGIN
                         pr.bundle_letter AS bundle_letter,
                         pr.project_name AS project_name,
                         a.article_name AS article_name,
+                        b.remarks AS bundle_remarks,
                         a.style AS style,
                         a.color AS color,
                         spd.size_name AS size_name,
@@ -972,14 +1049,35 @@ BEGIN
             RETURN;
         END
 
-        UPDATE article_workflow_logs
-        SET received_at = NULL,
-            received_by_resource_id = NULL,
-            received_remark = NULL,
-            updated_at = SYSDATETIME(),
-            updated_by = @UserId,
-            updated_by_resource_id = @UpdatedByResourceId
-        WHERE workflow_log_id = @Id;
+        DECLARE @LockResource_Unreceive VARCHAR(60) = 'article_workflow_restructure_' + CAST(@UnrArticleId AS VARCHAR(20));
+        BEGIN TRAN;
+        BEGIN TRY
+            DECLARE @LockResultUnreceive INT;
+            EXEC @LockResultUnreceive = sp_getapplock
+                @Resource = @LockResource_Unreceive, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+
+            IF @LockResultUnreceive < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
+            UPDATE article_workflow_logs
+            SET received_at = NULL,
+                received_by_resource_id = NULL,
+                received_remark = NULL,
+                updated_at = SYSDATETIME(),
+                updated_by = @UserId,
+                updated_by_resource_id = @UpdatedByResourceId
+            WHERE workflow_log_id = @Id;
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'CANCEL_HANDOVER'
@@ -1128,10 +1226,23 @@ BEGIN
         END
         DECLARE @RevWillAutoReceive BIT = CASE WHEN @RevAutoReceive = 1 AND @RevCounterpartResourceId IS NOT NULL THEN 1 ELSE 0 END;
 
+        DECLARE @LockResource_Revise VARCHAR(60) = 'article_workflow_restructure_' + CAST(@RevArticleId AS VARCHAR(20));
+
         -- Prompt 41: UPDATE baris + INSERT print_jobs kupon (kalau berlaku, jalur auto-terima)
         -- HARUS satu transaksi -- kalau insert print_jobs gagal, revisi ikut batal.
         BEGIN TRAN;
         BEGIN TRY
+            DECLARE @LockResultRevise INT;
+            EXEC @LockResultRevise = sp_getapplock
+                @Resource = @LockResource_Revise, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+
+            IF @LockResultRevise < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
             UPDATE article_workflow_logs
             SET qty_ok = @QtyOk,
                 qty_reject_print = @QtyRejectPrint,
@@ -1152,7 +1263,7 @@ BEGIN
 
             -- Prompt 41: kupon borongan -- hanya jalur auto-terima (@RevWillAutoReceive = 1) yang
             -- mengisi received_at di sini. Lihat blok komentar besar di atas CREATE PROCEDURE.
-            IF @RevWillAutoReceive = 1 AND EXISTS (
+            IF @RevWillAutoReceive = 1 AND @AutoPrintCouponActive = 1 AND EXISTS (
                 SELECT 1 FROM article_workflow_logs awl
                 INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
                 WHERE awl.workflow_log_id = @Id AND aw.print_kupon = 1
@@ -1166,6 +1277,7 @@ BEGIN
                         pr.bundle_letter AS bundle_letter,
                         pr.project_name AS project_name,
                         a.article_name AS article_name,
+                        b.remarks AS bundle_remarks,
                         a.style AS style,
                         a.color AS color,
                         spd.size_name AS size_name,
@@ -1345,7 +1457,7 @@ BEGIN
         BEGIN
             SELECT TOP 1 @AdjTargetDivisionId = division_id, @AdjTargetAutoReceive = ISNULL(auto_receive, 0)
             FROM article_workflows
-            WHERE article_id = @AdjArticleId AND deleted_at IS NULL AND sort_order > @AdjSortOrder
+            WHERE article_id = @AdjArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @AdjSortOrder
             ORDER BY sort_order ASC;
 
             IF @AdjTargetDivisionId IS NOT NULL AND @TargetDivisionId IS NULL
@@ -1375,20 +1487,42 @@ BEGIN
             END
         END
 
-        INSERT INTO article_workflow_logs (
-            article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
-            qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
-            remark, target_division_id, log_type, received_at, received_by_resource_id, received_remark,
-            created_at, created_by
-        )
-        VALUES (
-            @ArticleWorkflowId, @BundleId, NULL, @AdjDivisionId, @ResourceId, NULL,
-            @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
-            @Remark, @AdjTargetDivisionId, 'ADJUSTMENT', @AdjReceivedAt, @AdjReceivedByResourceId, @AdjReceivedRemark,
-            SYSDATETIME(), @UserId
-        );
+        DECLARE @LockResource_Adjust VARCHAR(60) = 'article_workflow_restructure_' + CAST(@AdjArticleId AS VARCHAR(20));
+        BEGIN TRAN;
+        BEGIN TRY
+            DECLARE @LockResultAdjust INT;
+            EXEC @LockResultAdjust = sp_getapplock
+                @Resource = @LockResource_Adjust, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
 
-        SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
+            IF @LockResultAdjust < 0
+            BEGIN
+                RAISERROR('Gagal mengunci artikel. Coba lagi.', 16, 1);
+                ROLLBACK TRAN;
+                RETURN;
+            END
+
+            INSERT INTO article_workflow_logs (
+                article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
+                qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost,
+                remark, target_division_id, log_type, received_at, received_by_resource_id, received_remark,
+                created_at, created_by
+            )
+            VALUES (
+                @ArticleWorkflowId, @BundleId, NULL, @AdjDivisionId, @ResourceId, NULL,
+                @QtyOk, @QtyRejectPrint, @QtyRejectFabric, @QtyRejectSewing, @QtyRejectRework, @QtyLost,
+                @Remark, @AdjTargetDivisionId, 'ADJUSTMENT', @AdjReceivedAt, @AdjReceivedByResourceId, @AdjReceivedRemark,
+                SYSDATETIME(), @UserId
+            );
+
+            DECLARE @AdjNewId INT = CAST(SCOPE_IDENTITY() AS INT);
+            COMMIT TRAN;
+
+            SELECT @AdjNewId AS NewId;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH
     END
 
     ELSE IF @Action = 'DELETE'
@@ -1560,6 +1694,7 @@ BEGIN
             pr.bundle_letter AS bundle_letter,
             pr.project_name AS project_name,
             a.article_name AS article_name,
+            b.remarks AS bundle_remarks,
             a.style AS style,
             a.color AS color,
             spd.size_name AS size_name,

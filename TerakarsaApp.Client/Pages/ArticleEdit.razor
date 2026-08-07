@@ -278,7 +278,10 @@ else
 
                         <div class="mb-2 d-flex justify-content-between align-items-center">
                             <label class="form-label mb-0">Steps</label>
-                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddWorkflowRow">+ Tambah Baris</button>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenInsertStepModal">Sisipkan Step</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddWorkflowRow">+ Tambah Baris</button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <table class="table table-bordered border mb-0">
@@ -353,7 +356,13 @@ else
                                                            title="@(row.RequiresBundle ? "Cetak kupon borongan otomatis saat hasil step ini dikonfirmasi diterima." : "Kupon hanya untuk step bundle")" />
                                                 </td>
                                                 <td class="text-center">
-                                                    <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
+                                                    <div class="d-flex gap-1 justify-content-center">
+                                                        @if (row.Id.HasValue)
+                                                        {
+                                                            <button type="button" class="btn btn-sm btn-outline-warning" title="Nonaktifkan step ini" @onclick="() => OpenDeactivateModal(row)"><i class="fe fe-slash"></i></button>
+                                                        }
+                                                        <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveWorkflowRow(row)"><i class="fe fe-trash-2"></i></button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         }
@@ -498,6 +507,163 @@ else
             }
         </Message>
     </ConfirmDeleteModal>
+
+    @if (showInsertStepModal)
+    {
+        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Sisipkan Step</h5>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseInsertStepModal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nama Step</label>
+                            <input class="form-control" maxlength="150" @bind="insertForm.StepName" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Divisi</label>
+                            <SearchableSelect TItem="DivisionDto" Items="divisionOptions" @bind-Value="insertForm.DivisionId"
+                                              IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                              Placeholder="Cari divisi..." />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="insertRequiresBundle" @bind="insertForm.RequiresBundle" />
+                            <label class="form-check-label" for="insertRequiresBundle">Butuh bundle</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="insertAutoReceive" @bind="insertForm.AutoReceive" />
+                            <label class="form-check-label" for="insertAutoReceive">Auto-receive</label>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Sisipkan setelah</label>
+                            <SearchableSelect TItem="ArticleWorkflowStepDto" Items="@(workflow?.Steps ?? new())" @bind-Value="insertAfterWorkflowIdSelection"
+                                              IdSelector="@(s => s.Id)" TextSelector="@(s => s.StepName)"
+                                              AllowNone="true" NoneLabel="Jadi step pertama" Placeholder="Cari step..." />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="insertBackfill" @bind="insertForm.Backfill" />
+                            <label class="form-check-label" for="insertBackfill">Backfill log untuk unit yang sudah lewat</label>
+                        </div>
+
+                        @if (insertPreview is not null)
+                        {
+                            <div class="alert alert-info">
+                                <p class="mb-1">Baris pending akan dialihkan: <strong>@insertPreview.Summary.PendingLogsToRedirect</strong></p>
+                                <p class="mb-1">Baris backfill akan dibuat: <strong>@insertPreview.Summary.BackfillLogsToCreate</strong> (dipaksa walau backfill mati: @insertPreview.Summary.ForcedBackfillCount)</p>
+                                @if (insertPreview.AffectedUnits.Count > 0)
+                                {
+                                    <div class="table-responsive mt-2">
+                                        <table class="table table-sm mb-0">
+                                            <thead><tr><th>Unit</th><th>Ukuran</th><th>Kategori</th><th>Posisi Terakhir</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var u in insertPreview.AffectedUnits)
+                                                {
+                                                    <tr>
+                                                        <td>@(u.BundleId.HasValue ? $"{u.Serial} (#{u.BundleNo})" : "Non-bundle")</td>
+                                                        <td>@u.SizeName</td>
+                                                        <td>@(u.Category == "B" ? "Menunggu diterima" : "Sudah diterima")</td>
+                                                        <td>@u.LastStepName</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(insertError))
+                        {
+                            <div class="alert alert-danger">@insertError</div>
+                        }
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-secondary flex-fill" disabled="@isPreviewingInsert" @onclick="HandlePreviewInsertStep">
+                                @(isPreviewingInsert ? "Memeriksa..." : "Cek Dampak")
+                            </button>
+                            <button type="button" class="btn btn-primary flex-fill" disabled="@(insertPreview is null || isInsertingStep)" @onclick="HandleInsertStep">
+                                @(isInsertingStep ? "Menjalankan..." : "Jalankan")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (showDeactivateModal && deactivateTarget is not null)
+    {
+        <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Nonaktifkan Step: @deactivateTarget.StepName</h5>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseDeactivateModal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-3">Riwayat produksi step ini tetap tersimpan dan tetap muncul di laporan -- step ini hanya berhenti jadi jalur untuk unit baru.</p>
+
+                        @if (deactivatePreview is not null)
+                        {
+                            <div class="alert alert-info">
+                                <p class="mb-1">Baris pending akan dialihkan: <strong>@deactivatePreview.Summary.PendingLogsToRedirect</strong></p>
+                                <p class="mb-1">Baris riwayat (sudah diterima) akan dialihkan: <strong>@deactivatePreview.Summary.ReceivedLogsToRedirect</strong></p>
+                                @if (deactivatePreview.AffectedUnits.Count > 0)
+                                {
+                                    <div class="table-responsive mt-2">
+                                        <table class="table table-sm mb-0">
+                                            <thead><tr><th>Unit</th><th>Ukuran</th><th>Kategori</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var u in deactivatePreview.AffectedUnits)
+                                                {
+                                                    <tr>
+                                                        <td>@(u.BundleId.HasValue ? $"{u.Serial} (#{u.BundleNo})" : "Non-bundle")</td>
+                                                        <td>@u.SizeName</td>
+                                                        <td>@(u.Category == "B" ? "Menunggu diterima" : "Sudah diterima")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            </div>
+                            @if (deactivatePreview.Summary.ReceivedLogsToRedirect > 0)
+                            {
+                                <div class="alert alert-warning">
+                                    Riwayat serahan pada log yang sudah diterima akan berubah -- bundle lama akan menampilkan divisi tujuan yang berbeda dari kenyataan saat itu.
+                                </div>
+                            }
+                        }
+                        @if (!string.IsNullOrEmpty(deactivateError))
+                        {
+                            <div class="alert alert-danger">@deactivateError</div>
+                        }
+
+                        @if (!deactivateConfirmStep2)
+                        {
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-outline-secondary flex-fill" disabled="@isPreviewingDeactivate" @onclick="HandlePreviewDeactivateStep">
+                                    @(isPreviewingDeactivate ? "Memeriksa..." : "Cek Dampak")
+                                </button>
+                                <button type="button" class="btn btn-warning flex-fill" disabled="@(deactivatePreview is null)" @onclick="() => deactivateConfirmStep2 = true">
+                                    Nonaktifkan
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning">
+                                <p class="mb-2">Yakin nonaktifkan step "@deactivateTarget.StepName"? Tindakan ini tidak bisa dibatalkan (tidak ada fitur aktifkan kembali).</p>
+                                <button type="button" class="btn btn-danger btn-sm w-100" disabled="@isDeactivating" @onclick="HandleDeactivateStep">
+                                    @(isDeactivating ? "Menjalankan..." : "Ya, Nonaktifkan")
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -540,6 +706,23 @@ else
     private bool isSavingWorkflow = false;
     private string workflowError = string.Empty;
     private string workflowSuccessMessage = string.Empty;
+
+    // Prompt 50: restrukturisasi workflow setelah sudah ada log (sisip step / nonaktifkan step).
+    private bool showInsertStepModal = false;
+    private RestructureInsertPreviewRequest insertForm = new();
+    private int insertAfterWorkflowIdSelection = 0;
+    private RestructurePreviewResultDto? insertPreview;
+    private bool isPreviewingInsert = false;
+    private bool isInsertingStep = false;
+    private string insertError = string.Empty;
+
+    private bool showDeactivateModal = false;
+    private WorkflowStepRowModel? deactivateTarget;
+    private RestructurePreviewResultDto? deactivatePreview;
+    private bool isPreviewingDeactivate = false;
+    private bool isDeactivating = false;
+    private bool deactivateConfirmStep2 = false;
+    private string deactivateError = string.Empty;
 
     private List<WorkflowLogDto> workflowLogs = new();
     private bool isLoadingWorkflowLogs = false;
@@ -1049,6 +1232,129 @@ else
         {
             workflowError = result.Error;
         }
+    }
+
+    private void OpenInsertStepModal()
+    {
+        if (ArticleId is null) return;
+        insertForm = new RestructureInsertPreviewRequest { ArticleId = ArticleId.Value };
+        insertAfterWorkflowIdSelection = 0;
+        insertPreview = null;
+        insertError = string.Empty;
+        showInsertStepModal = true;
+    }
+
+    private void CloseInsertStepModal()
+    {
+        showInsertStepModal = false;
+    }
+
+    private async Task HandlePreviewInsertStep()
+    {
+        if (ArticleId is null) return;
+        if (string.IsNullOrWhiteSpace(insertForm.StepName) || insertForm.DivisionId <= 0)
+        {
+            insertError = "Nama step dan divisi wajib diisi.";
+            return;
+        }
+
+        insertForm.AfterWorkflowId = insertAfterWorkflowIdSelection > 0 ? insertAfterWorkflowIdSelection : null;
+        isPreviewingInsert = true;
+        insertError = string.Empty;
+        insertPreview = null;
+
+        var (result, error) = await ArticleWorkflowApi.PreviewInsertStepAsync(insertForm);
+
+        isPreviewingInsert = false;
+
+        if (result is null)
+            insertError = error;
+        else
+            insertPreview = result;
+    }
+
+    private async Task HandleInsertStep()
+    {
+        if (insertPreview is null) return;
+
+        isInsertingStep = true;
+        insertError = string.Empty;
+
+        var (result, error) = await ArticleWorkflowApi.InsertStepAsync(insertForm);
+
+        isInsertingStep = false;
+
+        if (result is null)
+        {
+            insertError = error;
+            return;
+        }
+
+        showInsertStepModal = false;
+        workflowSuccessMessage = "Step berhasil disisipkan.";
+        await LoadWorkflow();
+    }
+
+    private void OpenDeactivateModal(WorkflowStepRowModel row)
+    {
+        deactivateTarget = row;
+        deactivatePreview = null;
+        deactivateConfirmStep2 = false;
+        deactivateError = string.Empty;
+        showDeactivateModal = true;
+    }
+
+    private void CloseDeactivateModal()
+    {
+        showDeactivateModal = false;
+    }
+
+    private async Task HandlePreviewDeactivateStep()
+    {
+        if (ArticleId is null || deactivateTarget?.Id is null) return;
+
+        isPreviewingDeactivate = true;
+        deactivateError = string.Empty;
+        deactivatePreview = null;
+
+        var (result, error) = await ArticleWorkflowApi.PreviewDeactivateStepAsync(new RestructureDeactivatePreviewRequest
+        {
+            ArticleId = ArticleId.Value,
+            ArticleWorkflowId = deactivateTarget.Id.Value
+        });
+
+        isPreviewingDeactivate = false;
+
+        if (result is null)
+            deactivateError = error;
+        else
+            deactivatePreview = result;
+    }
+
+    private async Task HandleDeactivateStep()
+    {
+        if (ArticleId is null || deactivateTarget?.Id is null) return;
+
+        isDeactivating = true;
+        deactivateError = string.Empty;
+
+        var (result, error) = await ArticleWorkflowApi.DeactivateStepAsync(new RestructureDeactivatePreviewRequest
+        {
+            ArticleId = ArticleId.Value,
+            ArticleWorkflowId = deactivateTarget.Id.Value
+        });
+
+        isDeactivating = false;
+
+        if (result is null)
+        {
+            deactivateError = error;
+            return;
+        }
+
+        showDeactivateModal = false;
+        workflowSuccessMessage = "Step berhasil dinonaktifkan.";
+        await LoadWorkflow();
     }
 
     public class ArticleFormModel

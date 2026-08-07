@@ -50,4 +50,48 @@ public class ArticleWorkflowController : ControllerBase
         if (!success) return BadRequest(error);
         return Ok();
     }
+
+    // Prompt 50: restrukturisasi workflow setelah sudah ada log -- lihat
+    // sql/sp_ArticleWorkflow_Restructure.sql.
+    [HttpPost("{articleId}/restructure/preview-insert")]
+    public async Task<IActionResult> PreviewInsertStep(int articleId, [FromBody] RestructureInsertPreviewRequest request)
+    {
+        request.ArticleId = articleId;
+        if (string.IsNullOrWhiteSpace(request.StepName) || request.DivisionId <= 0)
+            return BadRequest("Nama step dan divisi wajib diisi.");
+
+        var (result, error) = await _articleWorkflowService.PreviewInsertAsync(request, CurrentUserId);
+        if (error != null) return BadRequest(error);
+        return Ok(result);
+    }
+
+    [HttpPost("{articleId}/restructure/insert-step")]
+    public async Task<IActionResult> InsertStep(int articleId, [FromBody] RestructureInsertPreviewRequest request)
+    {
+        request.ArticleId = articleId;
+        if (string.IsNullOrWhiteSpace(request.StepName) || request.DivisionId <= 0)
+            return BadRequest("Nama step dan divisi wajib diisi.");
+
+        var (result, error) = await _articleWorkflowService.InsertStepAsync(request, CurrentUserId);
+        if (error != null) return BadRequest(error);
+        return Ok(result);
+    }
+
+    [HttpPost("{articleId}/restructure/preview-deactivate")]
+    public async Task<IActionResult> PreviewDeactivateStep(int articleId, [FromBody] RestructureDeactivatePreviewRequest request)
+    {
+        request.ArticleId = articleId;
+        var (result, error) = await _articleWorkflowService.PreviewDeactivateAsync(request, CurrentUserId);
+        if (error != null) return BadRequest(error);
+        return Ok(result);
+    }
+
+    [HttpPost("{articleId}/restructure/deactivate-step")]
+    public async Task<IActionResult> DeactivateStep(int articleId, [FromBody] RestructureDeactivatePreviewRequest request)
+    {
+        request.ArticleId = articleId;
+        var (result, error) = await _articleWorkflowService.DeactivateStepAsync(request, CurrentUserId);
+        if (error != null) return BadRequest(error);
+        return Ok(result);
+    }
 }

@@ -77,7 +77,7 @@ else
                 {
                     <div class="tv-card">
                         <div class="tv-card-head">
-                            <span class="tv-card-name">@card.DivisionName</span>
+                            <span class="tv-card-name tv-clickable" @onclick="() => OpenLineDetailDivision(card)">@card.DivisionName</span>
                             <span class="tv-card-hours">@FormatHours(card.StartTime, card.EndTime)</span>
                         </div>
 
@@ -117,7 +117,7 @@ else
 
                             <div class="tv-card-foot">
                                 <span>@FormatRate(card.OutputPerPersonPerHour) org/jam &middot; sisa @FormatQty(card.RemainingQty ?? 0)</span>
-                                <span>Transit @FormatQty(card.Transit) &middot; WIP @FormatQty(card.Wip) &middot; Rjk @FormatQty(card.QtyReject)</span>
+                                <span>Transit @FormatQty(card.Transit) &middot; WIP @FormatWip(card.WipBundles, card.Wip) &middot; Rjk @FormatQty(card.QtyReject)</span>
                             </div>
                         }
                     </div>
@@ -132,7 +132,7 @@ else
                     <div class="tv-panel">
                         <div class="tv-panel-head">
                             <div>
-                                <span class="tv-card-name">@panel.DivisionName</span>
+                                <span class="tv-card-name tv-clickable" @onclick="() => OpenLineDetailDivision(panel)">@panel.DivisionName</span>
                                 @if (panel.IsHoliday)
                                 {
                                     <span class="tv-badge tv-badge-muted ms-2">Libur</span>
@@ -178,7 +178,7 @@ else
                             <tbody>
                                 @foreach (var line in lines)
                                 {
-                                    <tr>
+                                    <tr class="tv-line-row" @onclick="() => OpenLineDetail(panel, line)">
                                         <td>
                                             @line.ResourceName
                                             @if (line.HasTimeOverride)
@@ -209,7 +209,7 @@ else
                                             <span class="tv-selisih-qty">@FormatDiffQty(line.DiffQty)</span>
                                             <span class="tv-selisih-pct">@FormatDiffPercentOnly(line.DiffPercent)</span>
                                         </td>
-                                        <td class="tv-col-wip-reject">@FormatQty(line.Wip)</td>
+                                        <td class="tv-col-wip-reject">@FormatWip(line.WipBundles, line.Wip)</td>
                                         <td class="tv-col-wip-reject">@FormatQty(line.QtyReject)</td>
                                     </tr>
                                 }
@@ -238,19 +238,28 @@ else
                                         <span class="tv-selisih-qty">@FormatDiffQty(panel.DiffQty)</span>
                                         <span class="tv-selisih-pct">@FormatDiffPercentOnly(panel.DiffPercent)</span>
                                     </td>
-                                    <td class="tv-col-wip-reject">@FormatQty(panel.Wip)</td>
+                                    <td class="tv-col-wip-reject">@FormatWip(panel.WipBundles, panel.Wip)</td>
                                     <td class="tv-col-wip-reject">@FormatQty(panel.QtyReject)</td>
                                 </tr>
                             </tbody>
                         </table>
                         <div class="tv-panel-foot">
-                            WIP total @FormatQty(lines.Sum(l => l.Wip)) &middot; Reject @FormatQty(lines.Sum(l => l.QtyReject))
+                            WIP total @FormatWip(lines.Sum(l => l.WipBundles), lines.Sum(l => l.Wip)) &middot; Reject @FormatQty(lines.Sum(l => l.QtyReject))
                         </div>
                     </div>
                 }
             </div>
         }
     </div>
+
+    <LineDetailModal Show="showLineDetail"
+                      DivisionId="lineDetailDivisionId"
+                      ResourceId="lineDetailResourceId"
+                      DivisionName="@lineDetailDivisionName"
+                      ResourceName="@lineDetailResourceName"
+                      Tanggal="selectedDate"
+                      Line="lineDetailLine"
+                      OnClose="CloseLineDetail" />
 }
 
 @code {
@@ -271,6 +280,41 @@ else
     private DateTime? nextRefreshAt;
 
     private System.Threading.Timer? refreshTimer;
+
+    // Prompt 45/51: modal drill-down per line/divisi.
+    private bool showLineDetail;
+    private int lineDetailDivisionId;
+    private int? lineDetailResourceId;
+    private string lineDetailDivisionName = string.Empty;
+    private string lineDetailResourceName = string.Empty;
+    private DashboardResourceDto? lineDetailLine;
+
+    private void OpenLineDetail(DashboardDivisionDto panel, DashboardResourceDto line)
+    {
+        lineDetailDivisionId = panel.DivisionId;
+        lineDetailResourceId = line.ResourceId;
+        lineDetailDivisionName = panel.DivisionName;
+        lineDetailResourceName = line.ResourceName;
+        lineDetailLine = line;
+        showLineDetail = true;
+    }
+
+    // Prompt 51: klik nama divisi (header kartu DIVISION mode / header tabel RESOURCE mode) --
+    // modal mode divisi (ResourceId kosong), "Per Penjahit" disembunyikan oleh LineDetailModal.
+    private void OpenLineDetailDivision(DashboardDivisionDto division)
+    {
+        lineDetailDivisionId = division.DivisionId;
+        lineDetailResourceId = null;
+        lineDetailDivisionName = division.DivisionName;
+        lineDetailResourceName = string.Empty;
+        lineDetailLine = null;
+        showLineDetail = true;
+    }
+
+    private void CloseLineDetail()
+    {
+        showLineDetail = false;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -411,6 +455,10 @@ else
     }
 
     private static string FormatQty(int n) => n.ToString("N0", IdCulture);
+
+    // WIP ditampilkan "N bundle - M pcs" (Prompt 45 revisi) supaya kelihatan berapa bundle
+    // yang menumpuk, bukan cuma total pcs.
+    private static string FormatWip(int bundles, int pcs) => bundles > 0 ? $"{bundles}-{FormatQty(pcs)}" : "0";
 
     private static string FormatPercent(double? p) => p is null ? "-" : $"{Math.Round(p.Value)}%";
 

@@ -8,6 +8,13 @@
 -- Prompt 41 -- print_kupon per step: sama pola dengan auto_receive (JSON @Steps membawa
 -- PrintKupon). v1 hanya valid utk step ber-bundle -- step manapun di JSON dengan
 -- PrintKupon = 1 DAN RequiresBundle = 0 ditolak (RAISERROR), baik CREATE maupun UPDATE.
+--
+-- Fix: CREATE & UPDATE sekarang menolak (RAISERROR) step dengan DivisionId kosong ATAU
+-- menunjuk divisi yang sudah di-soft-delete -- sebelumnya cuma ditegakkan lewat NOT NULL/FK
+-- divisions, yang tidak menangkap divisi yang deleted_at-nya terisi (baris masih ada di FK,
+-- tapi sudah tidak boleh dipakai) dan melempar error SQL mentah alih-alih pesan Indonesia
+-- kalau DivisionId NULL/0 dari client. Client (WorkflowTemplate.razor) sudah menolak baris
+-- tanpa divisi sebelum submit -- guard ini menutup jalur langsung ke API/SP.
 
 SET ANSI_NULLS ON;
 GO
@@ -30,6 +37,20 @@ BEGIN
         IF EXISTS (SELECT 1 FROM workflow_templates WHERE workflow_code = @WorkflowCode AND deleted_at IS NULL)
         BEGIN
             RAISERROR('Kode workflow "%s" sudah digunakan.', 16, 1, @WorkflowCode);
+            RETURN;
+        END
+
+        -- Fix: divisi tiap step wajib diisi dan harus divisi yang masih hidup -- sebelum ini
+        -- cuma ditegakkan lewat NOT NULL/FK divisions, yang tidak menolak divisi yang sudah
+        -- di-soft-delete (deleted_at terisi tapi baris masih ada, FK tetap lolos) dan
+        -- melempar error SQL mentah alih-alih pesan Indonesia kalau DivisionId kosong.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (DivisionId INT '$.DivisionId') j
+            WHERE j.DivisionId IS NULL
+               OR NOT EXISTS (SELECT 1 FROM divisions d WHERE d.division_id = j.DivisionId AND d.deleted_at IS NULL)
+        )
+        BEGIN
+            RAISERROR('Setiap step wajib memiliki divisi yang valid.', 16, 1);
             RETURN;
         END
 
@@ -91,6 +112,17 @@ BEGIN
         )
         BEGIN
             RAISERROR('Kode workflow "%s" sudah digunakan.', 16, 1, @WorkflowCode);
+            RETURN;
+        END
+
+        -- Fix: lihat komentar di CREATE.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (DivisionId INT '$.DivisionId') j
+            WHERE j.DivisionId IS NULL
+               OR NOT EXISTS (SELECT 1 FROM divisions d WHERE d.division_id = j.DivisionId AND d.deleted_at IS NULL)
+        )
+        BEGIN
+            RAISERROR('Setiap step wajib memiliki divisi yang valid.', 16, 1);
             RETURN;
         END
 

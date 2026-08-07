@@ -92,6 +92,12 @@ public static class TsplBuilder
         Write(Text(qrX, 50, "1", 1, 1, "#"+data.NoPo?.ToUpperInvariant() ?? string.Empty));
         Write(Text(qrX, 70, "2", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
 
+        if (!string.IsNullOrWhiteSpace(data.BundleRemarks))
+        {
+            var bundleRemarksText = TruncateToFit(Sanitize(data.BundleRemarks).ToUpperInvariant(), 30, "1", 1, RightColX - qrX);
+            Write(Text(qrX, 92, "1", 1, 1, bundleRemarksText));
+        }
+
         // Prompt 27: kode huruf bundle per project (A-Z berputar) -- "B-27" bila project
         // ybs sudah punya bundle_letter, atau cuma nomor "27" utk project lama (NULL).
         var bundleNoText = string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}";

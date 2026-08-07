@@ -63,9 +63,10 @@ BEGIN
     GROUP BY division_id, resource_id;
 
     -- WIP per (divisi, resource penerima) -- pakai ulang SIS_Report_DivisionWipTotals
-    -- (Prompt 22, varian ditambahkan Prompt 38), BUKAN definisi baru.
-    CREATE TABLE #WipAgg (DivisionId INT, ResourceId INT NULL, TotalPcs INT);
-    INSERT INTO #WipAgg (DivisionId, ResourceId, TotalPcs)
+    -- (Prompt 22, varian ditambahkan Prompt 38), BUKAN definisi baru. TotalBundles (Prompt 45
+    -- revisi): dashboard menampilkan WIP sebagai "N bundle - M pcs".
+    CREATE TABLE #WipAgg (DivisionId INT, ResourceId INT NULL, TotalPcs INT, TotalBundles INT);
+    INSERT INTO #WipAgg (DivisionId, ResourceId, TotalPcs, TotalBundles)
     EXEC SIS_Report_DivisionWipTotals;
 
     -- Transit (belum diterima) per divisi tujuan -- pakai ulang SIS_Report_DivisionTransitTotals,
@@ -103,6 +104,7 @@ BEGIN
             ISNULL(qq.QtyOk, 0) AS QtyOk,
             ISNULL(qq.QtyReject, 0) AS QtyReject,
             ISNULL(ww.Wip, 0) AS Wip,
+            ISNULL(ww.WipBundles, 0) AS WipBundles,
             ISNULL(tt.Transit, 0) AS Transit
         FROM divisions d
         LEFT JOIN daily_division_plans ddp
@@ -118,7 +120,7 @@ BEGIN
             SELECT SUM(QtyOk) AS QtyOk, SUM(QtyReject) AS QtyReject FROM #QtyAgg WHERE DivisionId = d.division_id
         ) qq
         OUTER APPLY (
-            SELECT SUM(TotalPcs) AS Wip FROM #WipAgg WHERE DivisionId = d.division_id
+            SELECT SUM(TotalPcs) AS Wip, SUM(TotalBundles) AS WipBundles FROM #WipAgg WHERE DivisionId = d.division_id
         ) ww
         OUTER APPLY (
             SELECT TotalPcs AS Transit FROM #TransitAgg WHERE DivisionId = d.division_id
@@ -146,7 +148,7 @@ BEGIN
     SELECT
         DivisionId, DivisionName, DashboardMode, HasPlan, IsHoliday, HasTarget,
         StartTime, EndTime, Headcount, TargetPerPerson, TargetTotal,
-        QtyOk, QtyReject, Wip, Transit,
+        QtyOk, QtyReject, Wip, WipBundles, Transit,
         EffectiveMinutesTotal, EffectiveMinutesElapsed,
         CASE WHEN HasTarget = 0 OR ExpectedRatio IS NULL THEN NULL ELSE ROUND(100.0 * ExpectedRatio, 1) END AS ExpectedPercent,
         CASE WHEN HasTarget = 0 THEN NULL ELSE ROUND(100.0 * CAST(QtyOk AS FLOAT) / TargetTotal, 1) END AS ActualPercent,
@@ -178,7 +180,8 @@ BEGIN
                  THEN drp.headcount * drp.target_per_person ELSE NULL END AS TargetTotal,
             ISNULL(qq.QtyOk, 0) AS QtyOk,
             ISNULL(qq.QtyReject, 0) AS QtyReject,
-            ISNULL(ww.Wip, 0) AS Wip
+            ISNULL(ww.Wip, 0) AS Wip,
+            ISNULL(ww.WipBundles, 0) AS WipBundles
         FROM resources r
         INNER JOIN divisions d ON d.division_id = r.division_id AND d.deleted_at IS NULL
             AND d.dashboard_mode = 'RESOURCE' AND d.show_in_dashboard = 1
@@ -192,7 +195,7 @@ BEGIN
             SELECT QtyOk, QtyReject FROM #QtyAgg WHERE DivisionId = r.division_id AND ResourceId = r.resource_id
         ) qq
         OUTER APPLY (
-            SELECT TotalPcs AS Wip FROM #WipAgg WHERE DivisionId = r.division_id AND ResourceId = r.resource_id
+            SELECT TotalPcs AS Wip, TotalBundles AS WipBundles FROM #WipAgg WHERE DivisionId = r.division_id AND ResourceId = r.resource_id
         ) ww
         WHERE r.deleted_at IS NULL AND r.is_active = 1 AND r.include_in_dashboard = 1
     ),
@@ -217,7 +220,7 @@ BEGIN
     SELECT
         DivisionId, ResourceId, ResourceName, HasPlan, IsHoliday, HasTarget, HasTimeOverride,
         StartTime, EndTime, Headcount, TargetPerPerson, TargetTotal,
-        QtyOk, QtyReject, Wip,
+        QtyOk, QtyReject, Wip, WipBundles,
         EffectiveMinutesTotal, EffectiveMinutesElapsed,
         CASE WHEN HasTarget = 0 OR ExpectedRatio IS NULL THEN NULL ELSE ROUND(100.0 * ExpectedRatio, 1) END AS ExpectedPercent,
         CASE WHEN HasTarget = 0 THEN NULL ELSE ROUND(100.0 * CAST(QtyOk AS FLOAT) / TargetTotal, 1) END AS ActualPercent,

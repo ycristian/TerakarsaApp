@@ -109,6 +109,10 @@ public class StationPendingHandoverDto
     // field Divisi Tujuan/Penjahit & tombol Batal Serah, dan revisi lewat UPDATE biasa
     // (bukan REVISE_HANDOVER) untuk baris ini.
     public bool IsLastStep { get; set; }
+    // Prompt 49: id mentah pelaksana baris ini (default terpilih di picker "Pelaksana" pada
+    // modal Revisi). Untuk baris IsBundling, ini pelaksana BUNDLING -- BUKAN penjahit, lihat
+    // BundleResourceId/BundleResourceName di bawah untuk penjahit.
+    public int? ResourceId { get; set; }
     // Pelaksana BUNDLING (awl.resource_id) untuk baris IsBundling -- BUKAN penjahit, lihat
     // BundleResourceName di bawah untuk penjahit.
     public string? ResourceName { get; set; }
@@ -191,6 +195,11 @@ public class StationLogUpdateRequest
     public bool ConfirmExceed { get; set; }
     // Prompt 14b: konfirmasi sadar serahan kurang dari kuota qty masuk step ini.
     public bool ConfirmShort { get; set; }
+    // Prompt 49: pelaksana PEKERJAAN baris ini (BEDA dari ResourceId di atas, yang operator
+    // sesi/perevisi) -- dipilih lewat picker "Pelaksana" sekali pakai saat revisi. NULL =
+    // resource_id baris tidak diubah. Stasiun terkunci: server mengabaikan nilai ini dan
+    // memaksa default_resource_id (lihat StationDeviceController.EffectiveResourceId).
+    public int? PelaksanaResourceId { get; set; }
 }
 
 public class DivisionOptionDto

@@ -69,7 +69,7 @@ BEGIN
     DECLARE @FirstBundleSort INT;
     SELECT @FirstBundleSort = MIN(sort_order)
     FROM article_workflows
-    WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1;
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1;
 
     DECLARE @QtyMasuk INT;
     IF @SortOrder = @FirstBundleSort
@@ -79,7 +79,7 @@ BEGIN
         DECLARE @PrevArticleWorkflowId INT;
         SELECT TOP 1 @PrevArticleWorkflowId = article_workflow_id
         FROM article_workflows
-        WHERE article_id = @ArticleId AND deleted_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
+        WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND requires_bundle = 1 AND sort_order < @SortOrder
         ORDER BY sort_order DESC;
 
         SELECT @QtyMasuk = ISNULL(SUM(qty_ok), 0)
