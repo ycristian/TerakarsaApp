@@ -34,6 +34,12 @@
 -- memutus query di tengah OFFSET/FETCH (mis. jadi 'FETCH NEXT @Pag' -> error "Must
 -- declare the scalar variable" atau "Incorrect syntax"). Hanya muncul untuk kombinasi
 -- @SortColumn/@SortDirection tertentu yang membuat panjang @Sql pas di ambang 4000.
+--
+-- HasUnsetWorkflow: true bila project punya minimal satu artikel hidup yang belum
+-- punya baris article_workflows hidup sama sekali (workflow belum di-apply/diset).
+-- Ditampilkan sebagai peringatan terpisah di UI, di luar derived_status. Selalu jadi
+-- ORDER BY terdepan (DESC, sebelum kolom sort pilihan user) supaya project yang perlu
+-- di-set workflow-nya selalu muncul di baris paling atas.
 
 SET ANSI_NULLS ON;
 GO
@@ -112,7 +118,13 @@ BEGIN
                    su.FullName AS StatusChangedByName,
                    p.created_at AS CreatedAt, p.created_by AS CreatedBy,
                    p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy,
-                   ISNULL(prog.ProgressPercent, 0) AS ProgressPercent
+                   ISNULL(prog.ProgressPercent, 0) AS ProgressPercent,
+                   CAST(CASE WHEN EXISTS (
+                        SELECT 1 FROM articles a3
+                        WHERE a3.project_id = p.project_id AND a3.deleted_at IS NULL
+                          AND NOT EXISTS (SELECT 1 FROM article_workflows aw3
+                                          WHERE aw3.article_id = a3.article_id AND aw3.deleted_at IS NULL)
+                   ) THEN 1 ELSE 0 END AS BIT) AS HasUnsetWorkflow
             FROM projects p
             INNER JOIN buyers b ON b.buyer_id = p.customer_id
             LEFT JOIN employees md ON md.employee_id = p.project_md
@@ -159,7 +171,7 @@ BEGIN
                     (@Status IS NOT NULL AND ds.DerivedStatus = @Status)
                     OR (@Status IS NULL AND ds.DerivedStatus IN (''NOT_STARTED'', ''STARTED'', ''ON_GOING'', ''ON_HOLD''))
                   )
-            ORDER BY ' + CAST(@OrderCol AS NVARCHAR(MAX)) + N' ' + CAST(@Dir AS NVARCHAR(MAX)) + CAST(@Tiebreak AS NVARCHAR(MAX)) + N'
+            ORDER BY HasUnsetWorkflow DESC, ' + CAST(@OrderCol AS NVARCHAR(MAX)) + N' ' + CAST(@Dir AS NVARCHAR(MAX)) + CAST(@Tiebreak AS NVARCHAR(MAX)) + N'
             OFFSET (@PageNumber - 1) * @PageSize ROWS
             FETCH NEXT @PageSize ROWS ONLY;';
 
@@ -198,7 +210,13 @@ BEGIN
            su.FullName AS StatusChangedByName,
            p.created_at AS CreatedAt, p.created_by AS CreatedBy,
            p.updated_at AS UpdatedAt, p.updated_by AS UpdatedBy,
-           ISNULL(prog.ProgressPercent, 0) AS ProgressPercent
+           ISNULL(prog.ProgressPercent, 0) AS ProgressPercent,
+           CAST(CASE WHEN EXISTS (
+                SELECT 1 FROM articles a3
+                WHERE a3.project_id = p.project_id AND a3.deleted_at IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM article_workflows aw3
+                                  WHERE aw3.article_id = a3.article_id AND aw3.deleted_at IS NULL)
+           ) THEN 1 ELSE 0 END AS BIT) AS HasUnsetWorkflow
     FROM projects p
     INNER JOIN buyers b ON b.buyer_id = p.customer_id
     LEFT JOIN employees md ON md.employee_id = p.project_md

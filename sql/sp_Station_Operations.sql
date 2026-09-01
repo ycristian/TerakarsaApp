@@ -25,7 +25,13 @@
 --   divisi ini sendiri (division_id = @DivisionId), sudah punya tujuan serah, tapi BELUM
 --   diterima divisi tujuan (received_at IS NULL). Selama belum diterima, divisi pembuat
 --   masih boleh merevisi datanya (action UPDATE di SIS_WorkflowLog_Manage) -- begitu
---   diterima (received_at terisi lewat RECEIVE), baris terkunci dan hilang dari daftar ini.
+--   diterima (received_at terisi lewat RECEIVE), baris terkunci (tidak boleh direvisi lagi)
+--   TAPI tidak langsung hilang dari daftar ini -- lihat Fix di bawah.
+--   Fix: baris yang DIBUAT hari ini (awl.created_at) tetap tampil di tab OUT walau sudah
+--   diterima, supaya operator tetap bisa melihat riwayat kiriman hari ini (client menandai
+--   baris ini read-only, tanpa Revisi/Batal Serah -- lihat StationDevice.razor OutCards).
+--   Baris LAWAS (dibuat sebelum hari ini) yang sudah diterima tetap hilang dari daftar --
+--   hanya baris yang belum diterima sama sekali yang tetap tampil tanpa batas hari.
 --   Prompt 23: SEKARANG juga menyertakan baris step TERAKHIR artikel milik divisi ini
 --   (target_division_id NULL, tidak ada tujuan serah -- lihat SIS_Bundle_ScanInfo) selama
 --   masih dalam jendela revisi H+1 (hari dibuat + 1 hari kalender), supaya operator bisa
@@ -479,7 +485,14 @@ BEGIN
       AND (
             -- Prompt 28: baris qty_ok = 0 tidak pernah butuh diterima -- jangan tampilkan
             -- sebagai "menunggu diterima" di tab Dikirim juga.
-            (awl.target_division_id IS NOT NULL AND awl.received_at IS NULL AND awl.qty_ok > 0)
+            -- Fix: baris yang DIBUAT hari ini tetap tampil walau sudah diterima (received_at
+            -- terisi) -- supaya operator tetap bisa melihat riwayat kiriman hari ini di tab
+            -- OUT, bukan cuma yang masih menunggu. Baris begitu jadi read-only di client
+            -- (tanpa Revisi/Batal Serah, lihat StationDevice.razor) karena sudah terkunci.
+            -- Baris LAWAS yang belum diterima tetap tampil tanpa batas hari (received_at IS
+            -- NULL saja, tanpa syarat tanggal) -- perilaku lama dipertahankan.
+            (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0
+             AND (awl.received_at IS NULL OR CAST(awl.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
             -- Prompt 28: baris ADJUSTMENT dengan qty_ok = 0 SELALU target_division_id NULL
             -- (lihat SIS_WorkflowLog_Manage ADJUST) terlepas dari step ini step terakhir
             -- artikel atau bukan -- batasi cabang "step terakhir, jendela H+1" ini ke baris
@@ -808,7 +821,10 @@ BEGIN
             WHERE awl3.division_id = @DivisionId AND awl3.deleted_at IS NULL
               AND (
                     -- Prompt 28: samakan dengan SIS_Station_PendingHandover.
-                    (awl3.target_division_id IS NOT NULL AND awl3.received_at IS NULL AND awl3.qty_ok > 0)
+                    -- Fix: samakan juga syarat "dibuat hari ini tetap kehitung walau sudah
+                    -- diterima" dengan SIS_Station_PendingHandover.
+                    (awl3.target_division_id IS NOT NULL AND awl3.qty_ok > 0
+                     AND (awl3.received_at IS NULL OR CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
                     OR (awl3.target_division_id IS NULL AND awl3.log_type = 'NORMAL'
                         AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl3.created_at) AS DATE))
                     OR (

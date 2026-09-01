@@ -132,6 +132,16 @@ public class StationDeviceController : ControllerBase
         return Ok(new { PrintJobId = printJobId });
     }
 
+    // Ad hoc (2026-08-28): "Cetak WIP" -- terpisah dari "Cetak Struk" di atas, insert print_jobs
+    // job_type REKAP_WIP (lihat SIS_Report_WipPrint).
+    [HttpPost("rekap-wip/print")]
+    public async Task<IActionResult> PrintRekapWip([FromBody] RekapWipPrintRequest request)
+    {
+        var (success, error, printJobId) = await _rekapProduksiService.PrintWipAsync(request, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
+    }
+
     // Prompt 24: ringkasan per size untuk modal "Buat Bundle" -- juga dipakai memvalidasi
     // divisi token = divisi Bundling artikel ini (BundlingDivisionId).
     [HttpGet("bundling/articles/{articleId:int}/summary")]
@@ -472,19 +482,23 @@ public class StationDeviceController : ControllerBase
     public async Task<IActionResult> CreateNonBundleLogBatch([FromBody] StationNonBundleBatchCreateRequest request)
     {
         var resourceId = EffectiveResourceId(request.ResourceId);
-        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        // Fix: BadRequest(string) di-render StringOutputFormatter sebagai text/plain, bukan
+        // JSON -- client (CreateNonBundleLogBatchAsync) SELALU ReadFromJsonAsync<StationNonBundleBatchResult>
+        // pada respons gagal, jadi body-nya wajib bentuk StationNonBundleBatchResult juga di
+        // sini, bukan string mentah, supaya tidak JsonException ExpectedStartOfValueNotFound.
+        if (resourceId <= 0) return BadRequest(new StationNonBundleBatchResult { Error = "Operator wajib dipilih." });
 
         if (request.Entries.Count == 0)
-            return BadRequest("Minimal satu baris harus diisi.");
+            return BadRequest(new StationNonBundleBatchResult { Error = "Minimal satu baris harus diisi." });
 
         foreach (var entry in request.Entries)
         {
             if (entry.ArticleSizeId <= 0)
-                return BadRequest("Size wajib dipilih.");
+                return BadRequest(new StationNonBundleBatchResult { Error = "Size wajib dipilih.", ArticleSizeId = entry.ArticleSizeId });
 
             if (entry.QtyOk < 0 || entry.QtyRejectPrint < 0 || entry.QtyRejectFabric < 0 || entry.QtyRejectSewing < 0
                 || entry.QtyRejectRework < 0 || entry.QtyLost < 0)
-                return BadRequest("Qty tidak boleh negatif.");
+                return BadRequest(new StationNonBundleBatchResult { Error = "Qty tidak boleh negatif.", ArticleSizeId = entry.ArticleSizeId });
         }
 
         var inputs = request.Entries.Select(entry => new WorkflowLogCreateInput

@@ -21,7 +21,9 @@
 --       ditugaskan ke line tertentu) -- KECUALI stasiun pengirim tidak terkunci ke resource
 --       bawaan (@ActingAllowResourceChange = 1, Prompt 27), match ini dilewati sepenuhnya.
 --     - @ArticleSizeId harus NULL (size sudah melekat di bundle).
---   Umum: qty tidak boleh negatif; @ActingDivisionId (diisi dari token stasiun bila ada)
+--   Umum: qty tidak boleh negatif untuk step BER-BUNDLE (step non-bundle, mis. Cutting, boleh
+--   minus -- dipakai operator utk koreksi cepat, sama berlaku di UPDATE & REVISE_HANDOVER
+--   di bawah). @ActingDivisionId (diisi dari token stasiun bila ada)
 --   harus sama dengan divisi step, kalau tidak ditolak. target_division_id TIDAK LAGI
 --   diterima dari pemanggil -- dihitung otomatis di sini dari urutan workflow (divisi
 --   milik step hidup berikutnya, sort_order tepat di atas; NULL kalau ini step terakhir
@@ -319,8 +321,11 @@ BEGIN
             RETURN;
         END
 
-        IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
-           OR @QtyRejectRework < 0 OR @QtyLost < 0
+        -- Fix: qty boleh negatif untuk step NON-bundle (mis. Cutting) -- dipakai operator utk
+        -- koreksi cepat tanpa lewat mekanisme ADJUST (yang hanya berlaku step ber-bundle,
+        -- Prompt 28). Step ber-bundle tetap wajib non-negatif seperti semula.
+        IF @RequiresBundle = 1 AND (@QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0)
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;
@@ -714,8 +719,10 @@ BEGIN
             RETURN;
         END
 
-        IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
-           OR @QtyRejectRework < 0 OR @QtyLost < 0
+        -- Fix: qty boleh negatif untuk step NON-bundle (mis. Cutting) -- lihat catatan sama di
+        -- action CREATE.
+        IF @UpdBundleId IS NOT NULL AND (@QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0)
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;
@@ -1126,8 +1133,9 @@ BEGIN
 
     ELSE IF @Action = 'REVISE_HANDOVER'
     BEGIN
-        DECLARE @RevDivisionId INT, @RevReceivedAt DATETIME2, @RevArticleId INT;
-        SELECT @RevDivisionId = awl.division_id, @RevReceivedAt = awl.received_at, @RevArticleId = aw.article_id
+        DECLARE @RevDivisionId INT, @RevReceivedAt DATETIME2, @RevArticleId INT, @RevBundleId INT;
+        SELECT @RevDivisionId = awl.division_id, @RevReceivedAt = awl.received_at, @RevArticleId = aw.article_id,
+               @RevBundleId = awl.bundle_id
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
@@ -1156,8 +1164,10 @@ BEGIN
             RETURN;
         END
 
-        IF @QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
-           OR @QtyRejectRework < 0 OR @QtyLost < 0
+        -- Fix: qty boleh negatif untuk step NON-bundle (mis. Cutting) -- lihat catatan sama di
+        -- action CREATE.
+        IF @RevBundleId IS NOT NULL AND (@QtyOk < 0 OR @QtyRejectPrint < 0 OR @QtyRejectFabric < 0 OR @QtyRejectSewing < 0
+           OR @QtyRejectRework < 0 OR @QtyLost < 0)
         BEGIN
             RAISERROR('Qty tidak boleh negatif.', 16, 1);
             RETURN;

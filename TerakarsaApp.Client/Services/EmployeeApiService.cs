@@ -55,4 +55,20 @@ public class EmployeeApiService
         var response = await _http.DeleteAsync($"api/employee/{id}");
         return response.IsSuccessStatusCode;
     }
+
+    // Prompt 53: toggle Aktifkan/Nonaktifkan.
+    public async Task<bool> SetActiveAsync(int id, bool isActive)
+    {
+        var response = await _http.PatchAsJsonAsync("api/employee/active", new EmployeeSetActiveRequest { Id = id, IsActive = isActive });
+        return response.IsSuccessStatusCode;
+    }
+
+    // Prompt 53: saran kode karyawan otomatis {division_code}-{4 digit}.
+    public async Task<string?> GetNextCodeAsync(int divisionId)
+    {
+        var response = await _http.GetAsync($"api/employee/next-code?divisionId={divisionId}");
+        if (!response.IsSuccessStatusCode) return null;
+        var dto = await response.Content.ReadFromJsonAsync<EmployeeNextCodeDto>();
+        return dto?.SuggestedCode;
+    }
 }

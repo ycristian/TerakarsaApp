@@ -141,4 +141,30 @@ public class RekapProduksiService
             return (false, ex.Message, 0);
         }
     }
+
+    // Ad hoc (2026-08-28): tombol "Cetak WIP" -- job_type REKAP_WIP, memakai SIS_Report_WipPrint
+    // (SATU HARI/snapshot, bundle yg MASIH ada di step ini per akhir tanggal itu -- terpisah
+    // dari PrintAsync/SIS_Report_RekapStrukPrint di atas).
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintWipAsync(RekapWipPrintRequest request, int userId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var dateParam = new SqlParameter("@Date", request.Date.Date);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_Report_WipPrint @DivisionId = @DivisionId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Date = @Date, @UserId = @UserId",
+                    divisionIdParam, resourceIdParam, employeeIdParam, dateParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
+        }
+    }
 }

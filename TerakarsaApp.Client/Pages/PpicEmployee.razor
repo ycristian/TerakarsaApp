@@ -1,4 +1,4 @@
-@page "/employees"
+@page "/ppic/karyawan"
 @attribute [Authorize]
 @using Microsoft.AspNetCore.Authorization
 @using System.ComponentModel.DataAnnotations
@@ -9,20 +9,17 @@
 @using TerakarsaApp.Shared.Resources
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
-@inject EmployeeApiService EmployeeApi
-@inject DivisionApiService DivisionApi
-@inject PositionApiService PositionApi
-@inject ResourceApiService ResourceApi
+@inject PpicEmployeeApiService PpicEmployeeApi
 @inject AuthenticationStateProvider AuthStateProvider
 
-<PageTitle>Data Karyawan</PageTitle>
+<PageTitle>Karyawan (PPIC)</PageTitle>
 
 <div class="page-header">
-    <h1 class="page-title">Data Karyawan</h1>
+    <h1 class="page-title">Karyawan (PPIC)</h1>
     <div>
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
-            <li class="breadcrumb-item active" aria-current="page">Data Karyawan</li>
+            <li class="breadcrumb-item active" aria-current="page">Karyawan (PPIC)</li>
         </ol>
     </div>
 </div>
@@ -51,6 +48,13 @@ else
     </div>
 </div>
 
+@if (divisionOptions.Count == 0 && !isLoading)
+{
+    <div class="alert alert-info">
+        Belum ada divisi yang dicentang "Dikelola PPIC" di Master Divisi. Hubungi admin untuk mengaktifkan divisi yang relevan.
+    </div>
+}
+
 @if (isLoading)
 {
     <p>Memuat data...</p>
@@ -74,7 +78,7 @@ else
                             <SortableHeader Label="Nama Karyawan" Column="EmployeeName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Jabatan" Column="PositionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
-                            <th>Resource</th>
+                            <th>Line</th>
                             <SortableHeader Label="Tgl Bergabung" Column="JoinDate" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Status</th>
                             <th>Aksi</th>
@@ -176,7 +180,7 @@ else
                             <ValidationMessage For="@(() => formModel.PositionId)" class="text-danger" />
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Resource</label>
+                            <label class="form-label">Line/Resource</label>
                             <InputSelect class="form-select" @bind-Value="formModel.ResourceId" disabled="@(formModel.DivisionId <= 0)">
                                 <option value="0">- Tidak ada -</option>
                                 @foreach (var r in resourceOptions)
@@ -186,7 +190,7 @@ else
                             </InputSelect>
                             @if (formModel.DivisionId <= 0)
                             {
-                                <div class="form-text">Pilih divisi terlebih dahulu untuk memilih resource.</div>
+                                <div class="form-text">Pilih divisi terlebih dahulu untuk memilih line/resource.</div>
                             }
                         </div>
                         <div class="mb-3">
@@ -216,7 +220,13 @@ else
 }
 
 <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
-    <Message>Yakin ingin menghapus karyawan "@employeePendingDelete?.EmployeeName"?</Message>
+    <Message>
+        Yakin ingin menghapus karyawan "@employeePendingDelete?.EmployeeName"?
+        @if (!string.IsNullOrEmpty(deleteError))
+        {
+            <div class="alert alert-danger mt-2 mb-0">@deleteError</div>
+        }
+    </Message>
 </ConfirmDeleteModal>
 }
 
@@ -231,14 +241,12 @@ else
     private EmployeeFormModel formModel = new();
     private bool showDeleteConfirm = false;
     private bool isDeleting = false;
+    private string deleteError = string.Empty;
     private EmployeeDto? employeePendingDelete;
     private List<DivisionDto> divisionOptions = new();
     private List<PositionDto> positionOptions = new();
     private List<ResourceLookupDto> resourceOptions = new();
 
-    // Prompt 53: kode karyawan otomatis {division_code}-{4 digit} -- codeManuallyEdited hanya
-    // true kalau USER yang mengetik (lihat @bind-Value:after di field Kode), tidak ikut ke-set
-    // saat kode diisi otomatis lewat kode di bawah.
     private bool codeManuallyEdited = false;
     private bool showOverwriteCodeConfirm = false;
     private string? pendingSuggestedCode;
@@ -253,12 +261,12 @@ else
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        hasAccess = state.User.HasClaim("module", "MASTER_EMPLOYEE");
+        hasAccess = state.User.HasClaim("module", "PPIC_EMPLOYEE");
 
         if (hasAccess == true)
         {
-            divisionOptions = await DivisionApi.GetActiveAsync();
-            positionOptions = await PositionApi.GetActiveAsync();
+            divisionOptions = await PpicEmployeeApi.GetDivisionsAsync();
+            positionOptions = await PpicEmployeeApi.GetPositionsAsync();
             await LoadEmployees();
         }
     }
@@ -266,7 +274,7 @@ else
     private async Task LoadEmployees()
     {
         isLoading = true;
-        pagedResult = await EmployeeApi.GetPagedAsync(new EmployeePagedRequest
+        pagedResult = await PpicEmployeeApi.GetPagedAsync(new EmployeePagedRequest
         {
             Search = string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm,
             PageNumber = currentPage,
@@ -328,7 +336,7 @@ else
     private async Task LoadResourceOptions()
     {
         resourceOptions = formModel.DivisionId > 0
-            ? await ResourceApi.GetActiveByDivisionAsync(formModel.DivisionId)
+            ? await PpicEmployeeApi.GetResourcesByDivisionAsync(formModel.DivisionId)
             : new();
     }
 
@@ -339,7 +347,7 @@ else
         showOverwriteCodeConfirm = false;
         if (formModel.DivisionId <= 0) return;
 
-        var suggested = await EmployeeApi.GetNextCodeAsync(formModel.DivisionId);
+        var suggested = await PpicEmployeeApi.GetNextCodeAsync(formModel.DivisionId);
         if (suggested is null) return;
 
         if (!codeManuallyEdited)
@@ -364,11 +372,10 @@ else
         showOverwriteCodeConfirm = false;
     }
 
-    // Prompt 53: dipanggil dari tombol "Ambil kode berikutnya" saat simpan gagal karena kode bentrok.
     private async Task TakeNextCode()
     {
         if (formModel.DivisionId <= 0) return;
-        var suggested = await EmployeeApi.GetNextCodeAsync(formModel.DivisionId);
+        var suggested = await PpicEmployeeApi.GetNextCodeAsync(formModel.DivisionId);
         if (suggested is not null)
         {
             formModel.EmployeeCode = suggested;
@@ -379,7 +386,7 @@ else
 
     private async Task ToggleActive(EmployeeDto employee)
     {
-        var success = await EmployeeApi.SetActiveAsync(employee.Id, !employee.IsActive);
+        var (success, _) = await PpicEmployeeApi.SetActiveAsync(employee.Id, !employee.IsActive);
         if (success)
             await LoadEmployees();
     }
@@ -408,8 +415,6 @@ else
             ResourceId = employee.ResourceId ?? 0,
             JoinDate = employee.JoinDate
         };
-        // Kode sudah ada (dari data tersimpan) -> perlakukan sebagai "manual" supaya ganti
-        // divisi di form edit minta konfirmasi dulu, bukan langsung menimpa.
         codeManuallyEdited = !string.IsNullOrEmpty(employee.EmployeeCode);
         showOverwriteCodeConfirm = false;
         errorMessage = string.Empty;
@@ -430,7 +435,7 @@ else
         (bool Success, string Error) result;
         if (isEditMode)
         {
-            result = await EmployeeApi.UpdateAsync(new EmployeeUpdateRequest
+            result = await PpicEmployeeApi.UpdateAsync(new EmployeeUpdateRequest
             {
                 Id = formModel.Id,
                 EmployeeCode = formModel.EmployeeCode,
@@ -443,7 +448,7 @@ else
         }
         else
         {
-            result = await EmployeeApi.CreateAsync(new EmployeeCreateRequest
+            result = await PpicEmployeeApi.CreateAsync(new EmployeeCreateRequest
             {
                 EmployeeCode = formModel.EmployeeCode,
                 EmployeeName = formModel.EmployeeName,
@@ -470,6 +475,7 @@ else
     private void HandleDelete(EmployeeDto employee)
     {
         employeePendingDelete = employee;
+        deleteError = string.Empty;
         showDeleteConfirm = true;
     }
 
@@ -484,14 +490,19 @@ else
         if (employeePendingDelete is null) return;
 
         isDeleting = true;
-        var success = await EmployeeApi.DeleteAsync(employeePendingDelete.Id);
+        var (success, error) = await PpicEmployeeApi.DeleteAsync(employeePendingDelete.Id);
         isDeleting = false;
 
-        showDeleteConfirm = false;
-        employeePendingDelete = null;
-
         if (success)
+        {
+            showDeleteConfirm = false;
+            employeePendingDelete = null;
             await LoadEmployees();
+        }
+        else
+        {
+            deleteError = error;
+        }
     }
 
     public class EmployeeFormModel

@@ -73,6 +73,7 @@ builder.Services.AddScoped<ResourceTypeService>();
 builder.Services.AddScoped<ResourceService>();
 builder.Services.AddScoped<BuyerService>();
 builder.Services.AddScoped<EmployeeService>();
+builder.Services.AddScoped<PpicEmployeeService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ProjectAttachmentService>();
 builder.Services.AddScoped<SizePackService>();

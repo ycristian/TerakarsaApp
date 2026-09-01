@@ -525,6 +525,7 @@ else
             buyerOptions = await BuyerApi.GetActiveAsync();
             employeeOptions = await EmployeeApi.GetActiveAsync();
             await LoadProject();
+            EnsureSelectedEmployeesVisible();
             await LoadAttachments();
             await LoadArticles();
         }
@@ -553,6 +554,25 @@ else
             };
         }
         isLoading = false;
+    }
+
+    // Prompt 53: dropdown MD/PIC (employeeOptions) sekarang hanya berisi karyawan AKTIF --
+    // MD/PIC project lama yang orangnya sudah dinonaktifkan tetap harus muncul di form edit
+    // ini (ditandai "(nonaktif)"), supaya simpan ulang project tanpa mengubah apa pun tidak
+    // diam-diam menghapus MD/PIC-nya.
+    private void EnsureSelectedEmployeesVisible()
+    {
+        if (project is null) return;
+
+        if (project.ProjectMd is int mdId && mdId > 0 && employeeOptions.All(e => e.Id != mdId))
+        {
+            employeeOptions.Add(new EmployeeDto { Id = mdId, EmployeeName = $"{project.ProjectMdName} (nonaktif)" });
+        }
+
+        if (project.ProjectPic is int picId && picId > 0 && employeeOptions.All(e => e.Id != picId))
+        {
+            employeeOptions.Add(new EmployeeDto { Id = picId, EmployeeName = $"{project.ProjectPicName} (nonaktif)" });
+        }
     }
 
     private async Task LoadAttachments()

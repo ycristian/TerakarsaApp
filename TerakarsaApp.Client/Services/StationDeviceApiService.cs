@@ -430,4 +430,13 @@ public class StationDeviceApiService
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak rekap." : error.Trim('"'));
     }
+
+    // Ad hoc (2026-08-28): tombol "Cetak WIP" -- terpisah dari Cetak Struk di atas.
+    public async Task<(bool Success, string Error)> PrintRekapWipAsync(RekapWipPrintRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/rekap-wip/print", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak WIP." : error.Trim('"'));
+    }
 }

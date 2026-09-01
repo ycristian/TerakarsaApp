@@ -48,6 +48,7 @@ CREATE TABLE divisions(
  dashboard_mode varchar(20) not null default 'DIVISION',  -- DIVISION | RESOURCE
  dashboard_sort_order int not null default 0,       -- urutan kartu di dashboard
  default_target_per_person int not null default 0,  -- pcs/orang/hari, untuk prefill PPIC
+ ppic_managed bit not null default 0,                -- Prompt 53: divisi ini boleh dikelola lewat module PPIC_EMPLOYEE
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -193,6 +194,7 @@ CREATE TABLE employees(
                                      -- dulu, kode diisi menyusul lewat Edit
  employee_name varchar(150) not null,
  join_date date null,
+ is_active bit not null default 1,  -- Prompt 53: nonaktif = hilang dari dropdown employee, data lama (log/bundle/project) tetap utuh
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,

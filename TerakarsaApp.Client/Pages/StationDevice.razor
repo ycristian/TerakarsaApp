@@ -372,7 +372,7 @@ else
             {
                 @if (outbound.Count == 0)
                 {
-                    <p class="text-muted mb-0">Tidak ada data yang menunggu diterima divisi tujuan.</p>
+                    <p class="text-muted mb-0">Belum ada data yang dikirim hari ini.</p>
                 }
                 else
                 {
@@ -426,6 +426,10 @@ else
                                                 {
                                                     <text>step terakhir — selesai</text>
                                                 }
+                                                else if (!item.IsBundling && item.ReceivedAt is not null)
+                                                {
+                                                    <text>sudah diterima @item.TargetDivisionName</text>
+                                                }
                                                 else
                                                 {
                                                     <text>menunggu diterima @item.TargetDivisionName</text>
@@ -448,7 +452,7 @@ else
                                                 <button class="btn btn-outline-primary btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenEditBundleModal(item)">Edit</button>
                                                 <button class="btn btn-outline-danger btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenDeleteBundleModal(item)">Hapus</button>
                                             }
-                                            else
+                                            else if (item.ReceivedAt is null)
                                             {
                                                 <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseModal(item)">Revisi</button>
                                                 <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(item)">Batal Serah</button>
@@ -467,6 +471,10 @@ else
                                         else if (item.IsLastStep)
                                         {
                                             <text>Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari).</text>
+                                        }
+                                        else if (item.ReceivedAt is not null)
+                                        {
+                                            <text>Sudah diterima @item.TargetDivisionName — riwayat kiriman hari ini, tidak bisa direvisi/dibatalkan lagi.</text>
                                         }
                                         else
                                         {
@@ -513,17 +521,31 @@ else
                                                 }
                                             </ul>
                                             <div class="text-muted">
-                                                @(grp.IsLastStep ? "step terakhir — selesai" : $"menunggu diterima {grp.TargetDivisionName}")
+                                                @(grp.IsLastStep ? "step terakhir — selesai" : (grp.ReceivedAt is not null ? $"sudah diterima {grp.TargetDivisionName}" : $"menunggu diterima {grp.TargetDivisionName}"))
                                                 &middot; @grp.GroupTime.ToString("dd/MM HH:mm")
                                             </div>
                                         </div>
                                         <div class="d-flex gap-2">
-                                            <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseGroupModal(grp)">Revisi</button>
-                                            <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahGroupModal(grp)">Batal Serah</button>
+                                            @if (grp.IsLastStep || grp.ReceivedAt is null)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseGroupModal(grp)">Revisi</button>
+                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahGroupModal(grp)">Batal Serah</button>
+                                            }
                                         </div>
                                     </div>
                                     <div class="text-muted small mt-2 mb-0">
-                                        Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.
+                                        @if (grp.IsLastStep)
+                                        {
+                                            <text>Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari).</text>
+                                        }
+                                        else if (grp.ReceivedAt is not null)
+                                        {
+                                            <text>Sudah diterima @grp.TargetDivisionName — riwayat kiriman hari ini, tidak bisa direvisi/dibatalkan lagi.</text>
+                                        }
+                                        else
+                                        {
+                                            <text>Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.</text>
+                                        }
                                     </div>
                                 </div>
                             </div>
@@ -657,10 +679,17 @@ else
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label">Resource</label>
-                        <SearchableSelect TItem="ResourceLookupDto" Items="rekapResourceOptions" Value="rekapResourceId" ValueChanged="HandleRekapResourceChanged"
-                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
-                                          Disabled="@(rekapDivisionId <= 0)"
-                                          Placeholder="Cari resource..." />
+                        @if (IsLocked)
+                        {
+                            <input type="text" class="form-control" value="@currentOperatorName" disabled />
+                        }
+                        else
+                        {
+                            <SearchableSelect TItem="ResourceLookupDto" Items="rekapResourceOptions" Value="rekapResourceId" ValueChanged="HandleRekapResourceChanged"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                              Disabled="@(rekapDivisionId <= 0)"
+                                              Placeholder="Cari resource..." />
+                        }
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label">Penjahit</label>
@@ -669,11 +698,21 @@ else
                                           Disabled="@(rekapResourceId <= 0)"
                                           Placeholder="Cari penjahit..." />
                     </div>
-                    <div class="col-6 col-md-3">
-                        <button type="button" class="btn btn-primary w-100" disabled="@(rekapDivisionId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
+                    <div class="col-6 col-md-3 d-flex gap-2">
+                        <button type="button" class="btn btn-primary flex-fill" disabled="@(rekapDivisionId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
+                        <button type="button" class="btn btn-outline-primary flex-fill" disabled="@(rekapDivisionId <= 0 || isBusy)" @onclick="PrintRekapWip">Cetak WIP</button>
                     </div>
                 </div>
-                <p class="text-muted mb-0">Pilih Divisi (wajib), lalu Resource dan Penjahit (opsional) untuk mempersempit level rekap -- level rekap mengikuti pilihan terdalam yang diisi.</p>
+                <p class="text-muted mb-0">
+                    @if (IsLocked)
+                    {
+                        <text>Resource terkunci ke operator sesi ini (@currentOperatorName). Pilih Penjahit (opsional) untuk mempersempit level rekap.</text>
+                    }
+                    else
+                    {
+                        <text>Pilih Divisi (wajib), lalu Resource dan Penjahit (opsional) untuk mempersempit level rekap -- level rekap mengikuti pilihan terdalam yang diisi.</text>
+                    }
+                </p>
             }
 
             @if (!string.IsNullOrEmpty(actionError))
@@ -731,11 +770,15 @@ else
                             }
                         </p>
                         <p class="text-muted mb-3">
-                            Periode: <strong>@FormatPeriod(h.PeriodStart) &ndash; @FormatPeriod(h.PeriodEnd)</strong>
+                            Tanggal: <strong>@rekapDate.ToString("dd/MM/yyyy")</strong>
                         </p>
                         <div class="border rounded p-3 text-center">
-                            <div class="text-muted small">Total pcs periode ini</div>
+                            <div class="text-muted small">Total pcs tanggal ini</div>
                             <div class="fs-2 fw-bold">@h.TotalQty</div>
+                            @if (h.TotalQty == 0)
+                            {
+                                <div class="text-warning small mt-1">Tidak ada data produksi di resource &amp; tanggal ini.</div>
+                            }
                         </div>
                     }
 
@@ -940,26 +983,26 @@ else
                                         <td class="align-middle">@row.SizeName</td>
                                         <td class="align-middle">@row.QtyOrder</td>
                                         <td class="align-middle">@row.QtyRecorded</td>
-                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" /></td>
+                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" @bind:after="() => row.QtyOk = Math.Max(0, row.QtyOk)" /></td>
                                         @if (nonBundleShowRejectPrint)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" @bind:after="() => row.QtyRejectPrint = Math.Max(0, row.QtyRejectPrint)" /></td>
                                         }
                                         @if (nonBundleShowRejectFabric)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" @bind:after="() => row.QtyRejectFabric = Math.Max(0, row.QtyRejectFabric)" /></td>
                                         }
                                         @if (nonBundleShowRejectSewing)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" @bind:after="() => row.QtyRejectSewing = Math.Max(0, row.QtyRejectSewing)" /></td>
                                         }
                                         @if (nonBundleShowRejectRework)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" @bind:after="() => row.QtyRejectRework = Math.Max(0, row.QtyRejectRework)" /></td>
                                         }
                                         @if (nonBundleShowLost)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" @bind:after="() => row.QtyLost = Math.Max(0, row.QtyLost)" /></td>
                                         }
                                     </tr>
                                 }
@@ -1065,27 +1108,27 @@ else
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyOk" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectPrint" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectFabric" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectSewing" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectSewing" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyRejectRework" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectRework" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="reviseQtyLost" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyLost" />
                         </div>
                     </div>
 
@@ -1229,26 +1272,26 @@ else
                                 {
                                     <tr>
                                         <td class="align-middle">@row.SizeName</td>
-                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" /></td>
+                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" @bind:after="() => row.QtyOk = Math.Max(0, row.QtyOk)" /></td>
                                         @if (reviseGroupShowRejectPrint)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" @bind:after="() => row.QtyRejectPrint = Math.Max(0, row.QtyRejectPrint)" /></td>
                                         }
                                         @if (reviseGroupShowRejectFabric)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" @bind:after="() => row.QtyRejectFabric = Math.Max(0, row.QtyRejectFabric)" /></td>
                                         }
                                         @if (reviseGroupShowRejectSewing)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" @bind:after="() => row.QtyRejectSewing = Math.Max(0, row.QtyRejectSewing)" /></td>
                                         }
                                         @if (reviseGroupShowRejectRework)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" @bind:after="() => row.QtyRejectRework = Math.Max(0, row.QtyRejectRework)" /></td>
                                         }
                                         @if (reviseGroupShowLost)
                                         {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" /></td>
+                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" @bind:after="() => row.QtyLost = Math.Max(0, row.QtyLost)" /></td>
                                         }
                                         <td><input class="form-control" @bind="row.Remark" /></td>
                                     </tr>
@@ -1860,6 +1903,9 @@ else
         public string? TargetDivisionName;
         public DateTime GroupTime;
         public DateTime? UpdatedAt;
+        // Fix: baris non-bundle dibuat berbarengan (dikelompokkan per menit) jadi selalu
+        // diterima berbarengan juga -- null kalau ADA baris di grup ini yang belum diterima.
+        public DateTime? ReceivedAt;
         public List<StationPendingHandoverDto> Items = new();
     }
 
@@ -1886,6 +1932,7 @@ else
                         TargetDivisionName = g.First().TargetDivisionName,
                         GroupTime = g.Min(x => x.CreatedAt),
                         UpdatedAt = g.Any(x => x.UpdatedAt is not null) ? g.Max(x => x.UpdatedAt) : null,
+                        ReceivedAt = g.Any(x => x.ReceivedAt is null) ? null : g.Max(x => x.ReceivedAt),
                         Items = g.OrderBy(x => x.SizeSortOrder).ToList()
                     }
                 })
@@ -2229,6 +2276,19 @@ else
         else if (tab == "rekap" && rekapDivisions.Count == 0)
         {
             rekapDivisions = await StationApi.GetStationDivisionsAsync();
+
+            // Ad hoc (2026-08-27): default Divisi & Resource ke divisi/operator stasiun ini
+            // sendiri (bukan kosong) -- kalau stasiun terkunci (IsLocked), Resource TIDAK BISA
+            // diganti lagi dari sini (lihat markup field Resource); kalau tidak terkunci, ini
+            // cuma default awal, operator tetap bisa pilih resource lain (akses ke resource lain).
+            if (station is not null && rekapDivisions.Any(d => d.Id == station.DivisionId))
+            {
+                await HandleRekapDivisionChanged(station.DivisionId);
+                if (currentOperatorId is not null && rekapResourceOptions.Any(r => r.Id == currentOperatorId))
+                {
+                    await HandleRekapResourceChanged(currentOperatorId.Value);
+                }
+            }
         }
     }
 
@@ -2251,12 +2311,6 @@ else
     }
 
     private string RekapLevel => rekapEmployeeId > 0 ? "EMPLOYEE" : (rekapResourceId > 0 ? "RESOURCE" : "DIVISION");
-
-    private static string FormatPeriod(DateTime dt)
-    {
-        var hariIndo = new[] { "Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab" };
-        return $"{hariIndo[(int)dt.DayOfWeek]} {dt:dd/MM HH:mm}";
-    }
 
     private async Task OpenRekapStrukModal()
     {
@@ -2319,6 +2373,33 @@ else
             rekapPrintFeedback = "Rekap masuk antrian cetak.";
         else
             rekapError = error;
+    }
+
+    // Ad hoc (2026-08-28): tombol "Cetak WIP" -- terpisah dari "Print Rekap"/modal Cetak Struk
+    // di atas, langsung cetak (tanpa preview) snapshot WIP hari ini utk Divisi/Resource/Penjahit
+    // yang sedang dipilih di panel tab Rekap Produksi.
+    private async Task PrintRekapWip()
+    {
+        if (rekapDivisionId <= 0) return;
+
+        isBusy = true;
+        actionError = string.Empty;
+        reprintFeedback = string.Empty;
+
+        var (success, error) = await StationApi.PrintRekapWipAsync(new RekapWipPrintRequest
+        {
+            DivisionId = rekapDivisionId,
+            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
+            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            Date = DateTime.Today
+        });
+
+        isBusy = false;
+
+        if (success)
+            reprintFeedback = "WIP masuk antrian cetak.";
+        else
+            actionError = error;
     }
 
     // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
@@ -2432,7 +2513,7 @@ else
         if (nonBundleTarget is null || currentOperatorId is null) return;
 
         var entries = nonBundleRows
-            .Where(r => r.QtyOk > 0 || r.QtyRejectPrint > 0 || r.QtyRejectFabric > 0 || r.QtyRejectSewing > 0 || r.QtyRejectRework > 0 || r.QtyLost > 0)
+            .Where(r => r.QtyOk != 0 || r.QtyRejectPrint != 0 || r.QtyRejectFabric != 0 || r.QtyRejectRework != 0 || r.QtyRejectSewing != 0 || r.QtyLost != 0)
             .Select(r => new StationNonBundleBatchEntryRequest
             {
                 ArticleSizeId = r.ArticleSizeId,

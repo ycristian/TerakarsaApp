@@ -60,6 +60,7 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ResourceTypeApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ResourceApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.BuyerApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.EmployeeApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.PpicEmployeeApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProjectApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ProjectAttachmentApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.SizePackApiService>();

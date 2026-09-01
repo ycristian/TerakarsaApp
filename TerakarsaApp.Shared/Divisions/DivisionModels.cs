@@ -9,6 +9,8 @@ public class DivisionDto
     public string DashboardMode { get; set; } = "DIVISION";
     public int DashboardSortOrder { get; set; }
     public int DefaultTargetPerPerson { get; set; }
+    // Prompt 53: divisi ini boleh dikelola lewat module PPIC_EMPLOYEE.
+    public bool PpicManaged { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -23,6 +25,7 @@ public class DivisionCreateRequest
     public string DashboardMode { get; set; } = "DIVISION";
     public int DashboardSortOrder { get; set; }
     public int DefaultTargetPerPerson { get; set; }
+    public bool PpicManaged { get; set; }
 }
 
 public class DivisionUpdateRequest
@@ -34,6 +37,7 @@ public class DivisionUpdateRequest
     public string DashboardMode { get; set; } = "DIVISION";
     public int DashboardSortOrder { get; set; }
     public int DefaultTargetPerPerson { get; set; }
+    public bool PpicManaged { get; set; }
 }
 
 public class DivisionPagedRequest

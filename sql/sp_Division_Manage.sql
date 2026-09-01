@@ -17,6 +17,9 @@ CREATE OR ALTER PROCEDURE SIS_Division_Manage
     @DashboardMode            VARCHAR(20) = 'DIVISION',
     @DashboardSortOrder       INT = 0,
     @DefaultTargetPerPerson   INT = 0,
+    -- Prompt 53: @PpicManaged default NULL (bukan 0) -- COALESCE di UPDATE menjaga caller lama
+    -- tidak diam-diam mematikan flag "Dikelola PPIC".
+    @PpicManaged              BIT = NULL,
     @UserId                   INT = NULL
 AS
 BEGIN
@@ -36,8 +39,8 @@ BEGIN
             RETURN;
         END
 
-        INSERT INTO divisions (division_code, division_name, show_in_dashboard, dashboard_mode, dashboard_sort_order, default_target_per_person, created_at, created_by)
-        VALUES (@DivisionCode, @DivisionName, @ShowInDashboard, @DashboardMode, @DashboardSortOrder, @DefaultTargetPerPerson, SYSDATETIME(), @UserId);
+        INSERT INTO divisions (division_code, division_name, show_in_dashboard, dashboard_mode, dashboard_sort_order, default_target_per_person, ppic_managed, created_at, created_by)
+        VALUES (@DivisionCode, @DivisionName, @ShowInDashboard, @DashboardMode, @DashboardSortOrder, @DefaultTargetPerPerson, ISNULL(@PpicManaged, 0), SYSDATETIME(), @UserId);
 
         SELECT SCOPE_IDENTITY() AS NewId;
     END
@@ -60,6 +63,7 @@ BEGIN
             dashboard_mode = @DashboardMode,
             dashboard_sort_order = @DashboardSortOrder,
             default_target_per_person = @DefaultTargetPerPerson,
+            ppic_managed = COALESCE(@PpicManaged, ppic_managed),
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE division_id = @Id AND deleted_at IS NULL;

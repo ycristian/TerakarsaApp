@@ -161,3 +161,14 @@ public class RekapKaryawanPrintRequest
     public int? EmployeeId { get; set; }
     public DateTime Date { get; set; }
 }
+
+// Ad hoc (2026-08-28): tombol "Cetak WIP" -- terpisah dari struk Rekap Produksi (job_type
+// REKAP_WIP, lihat SIS_Report_WipPrint). Sama bentuk dgn RekapKaryawanPrintRequest (tanpa
+// @Level, @Date SATU HARI/snapshot -- boleh tanggal lampau utk lihat WIP per akhir hari itu).
+public class RekapWipPrintRequest
+{
+    public int DivisionId { get; set; }
+    public int? ResourceId { get; set; }
+    public int? EmployeeId { get; set; }
+    public DateTime Date { get; set; }
+}

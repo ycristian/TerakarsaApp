@@ -94,7 +94,7 @@ BEGIN
         DECLARE @ApplyBundlingDivisionId INT;
         IF @ApplyHasBundle = 1
         BEGIN
-            SELECT @ApplyBundlingDivisionId = division_id FROM divisions WHERE division_code = 'BUNDLING' AND deleted_at IS NULL;
+            SELECT @ApplyBundlingDivisionId = division_id FROM divisions WHERE division_code = 'BD' AND deleted_at IS NULL;
 
             IF @ApplyBundlingDivisionId IS NULL
             BEGIN
@@ -277,7 +277,7 @@ BEGIN
             ELSE IF @SaveHasBundleAfter = 1 AND @SaveBundlingId IS NULL
             BEGIN
                 DECLARE @SaveBundlingDivisionId INT;
-                SELECT @SaveBundlingDivisionId = division_id FROM divisions WHERE division_code = 'BUNDLING' AND deleted_at IS NULL;
+                SELECT @SaveBundlingDivisionId = division_id FROM divisions WHERE division_code = 'BD' AND deleted_at IS NULL;
 
                 IF @SaveBundlingDivisionId IS NULL
                 BEGIN

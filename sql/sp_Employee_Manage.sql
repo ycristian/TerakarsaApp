@@ -17,6 +17,9 @@ CREATE OR ALTER PROCEDURE SIS_Employee_Manage
     @PositionId   INT = NULL,
     @ResourceId   INT = NULL,
     @JoinDate     DATE = NULL,
+    -- Prompt 53: @IsActive default NULL (bukan 1) -- COALESCE di UPDATE menjaga status
+    -- nonaktif tetap nonaktif kalau caller lama (Master Karyawan UPDATE) tidak mengirim field ini.
+    @IsActive     BIT = NULL,
     @UserId       INT = NULL
 AS
 BEGIN
@@ -59,6 +62,7 @@ BEGIN
             employee_code = @EmployeeCode,
             employee_name = @EmployeeName,
             join_date = @JoinDate,
+            is_active = COALESCE(@IsActive, is_active),
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE employee_id = @Id AND deleted_at IS NULL;
@@ -69,6 +73,17 @@ BEGIN
         UPDATE employees
         SET deleted_at = SYSDATETIME(),
             deleted_by = @UserId
+        WHERE employee_id = @Id AND deleted_at IS NULL;
+    END
+
+    -- Prompt 53: toggle is_active saja (Aktifkan/Nonaktifkan di Master Karyawan) -- tanpa
+    -- pengecekan referensi, nonaktifkan selalu boleh.
+    ELSE IF @Action = 'SETACTIVE'
+    BEGIN
+        UPDATE employees
+        SET is_active = @IsActive,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
         WHERE employee_id = @Id AND deleted_at IS NULL;
     END
 END;

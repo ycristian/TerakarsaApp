@@ -79,13 +79,14 @@ public class DivisionService
         var dashboardModeParam = new SqlParameter("@DashboardMode", request.DashboardMode);
         var dashboardSortOrderParam = new SqlParameter("@DashboardSortOrder", request.DashboardSortOrder);
         var defaultTargetParam = new SqlParameter("@DefaultTargetPerPerson", request.DefaultTargetPerPerson);
+        var ppicManagedParam = new SqlParameter("@PpicManaged", request.PpicManaged);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Division_Manage @Action = @Action, @DivisionCode = @DivisionCode, @DivisionName = @DivisionName, @ShowInDashboard = @ShowInDashboard, @DashboardMode = @DashboardMode, @DashboardSortOrder = @DashboardSortOrder, @DefaultTargetPerPerson = @DefaultTargetPerPerson, @UserId = @UserId",
-                actionParam, codeParam, nameParam, showInDashboardParam, dashboardModeParam, dashboardSortOrderParam, defaultTargetParam, userIdParam);
+                "EXEC SIS_Division_Manage @Action = @Action, @DivisionCode = @DivisionCode, @DivisionName = @DivisionName, @ShowInDashboard = @ShowInDashboard, @DashboardMode = @DashboardMode, @DashboardSortOrder = @DashboardSortOrder, @DefaultTargetPerPerson = @DefaultTargetPerPerson, @PpicManaged = @PpicManaged, @UserId = @UserId",
+                actionParam, codeParam, nameParam, showInDashboardParam, dashboardModeParam, dashboardSortOrderParam, defaultTargetParam, ppicManagedParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -104,13 +105,14 @@ public class DivisionService
         var dashboardModeParam = new SqlParameter("@DashboardMode", request.DashboardMode);
         var dashboardSortOrderParam = new SqlParameter("@DashboardSortOrder", request.DashboardSortOrder);
         var defaultTargetParam = new SqlParameter("@DefaultTargetPerPerson", request.DefaultTargetPerPerson);
+        var ppicManagedParam = new SqlParameter("@PpicManaged", request.PpicManaged);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Division_Manage @Action = @Action, @Id = @Id, @DivisionCode = @DivisionCode, @DivisionName = @DivisionName, @ShowInDashboard = @ShowInDashboard, @DashboardMode = @DashboardMode, @DashboardSortOrder = @DashboardSortOrder, @DefaultTargetPerPerson = @DefaultTargetPerPerson, @UserId = @UserId",
-                actionParam, idParam, codeParam, nameParam, showInDashboardParam, dashboardModeParam, dashboardSortOrderParam, defaultTargetParam, userIdParam);
+                "EXEC SIS_Division_Manage @Action = @Action, @Id = @Id, @DivisionCode = @DivisionCode, @DivisionName = @DivisionName, @ShowInDashboard = @ShowInDashboard, @DashboardMode = @DashboardMode, @DashboardSortOrder = @DashboardSortOrder, @DefaultTargetPerPerson = @DefaultTargetPerPerson, @PpicManaged = @PpicManaged, @UserId = @UserId",
+                actionParam, idParam, codeParam, nameParam, showInDashboardParam, dashboardModeParam, dashboardSortOrderParam, defaultTargetParam, ppicManagedParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

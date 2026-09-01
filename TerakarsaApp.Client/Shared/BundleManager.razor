@@ -511,6 +511,14 @@ else
             Remarks = bundle.Remarks
         };
         editEmployeeOptions = editForm.ResourceId > 0 ? await EmployeeApi.GetActiveByResourceAsync(editForm.ResourceId) : new();
+        // Prompt 53: dropdown penjahit sekarang hanya berisi karyawan AKTIF -- penjahit bundle
+        // lama yang orangnya sudah dinonaktifkan tetap harus muncul di form edit ini (ditandai
+        // "(nonaktif)"), supaya simpan ulang bundle tanpa mengubah apa pun tidak diam-diam
+        // menghapus penjahitnya.
+        if (editForm.EmployeeId > 0 && editEmployeeOptions.All(e => e.Id != editForm.EmployeeId))
+        {
+            editEmployeeOptions.Add(new EmployeeLookupDto { Id = editForm.EmployeeId, EmployeeName = $"{bundle.EmployeeName} (nonaktif)" });
+        }
         editError = string.Empty;
         editExceedMessage = string.Empty;
         copyMessage = string.Empty;

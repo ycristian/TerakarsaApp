@@ -14,7 +14,7 @@ public class PrintWorkerOptions
     // SIS_PrintJob_Claim @JobTypesCsv) -- job tetap PENDING murni sampai saklar dinyalakan,
     // tidak ditulis dryrun maupun dilaporkan sukses/gagal.
     public bool PrinterLabelOn { get; set; } = true;   // BUNDLE_LABEL/PACK_LABEL/REJECT_NOTE (TSC, TSPL)
-    public bool PrinterThermalOn { get; set; } = true; // KUPON_BORONGAN/REKAP_PRODUKSI/REKAP_KARYAWAN (struk, ESC/POS)
+    public bool PrinterThermalOn { get; set; } = true; // KUPON_BORONGAN/REKAP_PRODUKSI/REKAP_KARYAWAN/REKAP_WIP (struk, ESC/POS)
 
     // Prompt 48: nama printer & lebar kertas TIDAK LAGI di sini -- diresolusi lewat tabel
     // print_devices SAAT job diklaim (job.PrinterName/CharsPerLine/CharsPerLineSmall di

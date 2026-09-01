@@ -49,6 +49,7 @@ BEGIN
             SELECT division_id AS Id, division_code AS DivisionCode, division_name AS DivisionName,
                    show_in_dashboard AS ShowInDashboard, dashboard_mode AS DashboardMode,
                    dashboard_sort_order AS DashboardSortOrder, default_target_per_person AS DefaultTargetPerPerson,
+                   ppic_managed AS PpicManaged,
                    created_at AS CreatedAt, created_by AS CreatedBy,
                    updated_at AS UpdatedAt, updated_by AS UpdatedBy
             FROM divisions
@@ -81,9 +82,28 @@ BEGIN
     SELECT division_id AS Id, division_code AS DivisionCode, division_name AS DivisionName,
            show_in_dashboard AS ShowInDashboard, dashboard_mode AS DashboardMode,
            dashboard_sort_order AS DashboardSortOrder, default_target_per_person AS DefaultTargetPerPerson,
+           ppic_managed AS PpicManaged,
            created_at AS CreatedAt, created_by AS CreatedBy,
            updated_at AS UpdatedAt, updated_by AS UpdatedBy
     FROM divisions
     WHERE division_id = @Id AND deleted_at IS NULL;
+END;
+GO
+
+-- Prompt 53: lookup divisi yang boleh dikelola PPIC (dropdown Divisi di module PPIC_EMPLOYEE).
+CREATE OR ALTER PROCEDURE SIS_Division_GetPpicManaged
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT division_id AS Id, division_code AS DivisionCode, division_name AS DivisionName,
+           show_in_dashboard AS ShowInDashboard, dashboard_mode AS DashboardMode,
+           dashboard_sort_order AS DashboardSortOrder, default_target_per_person AS DefaultTargetPerPerson,
+           ppic_managed AS PpicManaged,
+           created_at AS CreatedAt, created_by AS CreatedBy,
+           updated_at AS UpdatedAt, updated_by AS UpdatedBy
+    FROM divisions
+    WHERE ppic_managed = 1 AND deleted_at IS NULL
+    ORDER BY division_name ASC;
 END;
 GO

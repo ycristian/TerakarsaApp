@@ -22,6 +22,8 @@ public class ProjectDto
     public string? StatusReason { get; set; }
     public DateTime? StatusChangedAt { get; set; }
     public string? StatusChangedByName { get; set; }
+    // Ada artikel hidup yang belum punya article_workflows sama sekali (workflow belum di-apply).
+    public bool HasUnsetWorkflow { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }

@@ -67,6 +67,7 @@ else
                             <SortableHeader Label="Kode" Column="DivisionCode" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <SortableHeader Label="Nama Divisi" Column="DivisionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
                             <th>Dashboard</th>
+                            <th>Status</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -86,6 +87,16 @@ else
                                         <span class="badge @(d.DashboardMode == "RESOURCE" ? "bg-info" : "bg-primary")">
                                             @(d.DashboardMode == "RESOURCE" ? "Per Resource" : "Per Divisi")
                                         </span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (d.PpicManaged)
+                                    {
+                                        <span class="badge bg-primary">Dikelola PPIC</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-light text-dark">-</span>
                                     }
                                 </td>
                                 <td>
@@ -145,6 +156,11 @@ else
                         <div class="mb-3">
                             <label class="form-label">Target Default (pcs/orang/hari)</label>
                             <InputNumber class="form-control" @bind-Value="formModel.DefaultTargetPerPerson" />
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="formModel.PpicManaged" />
+                            <label class="form-check-label">Dikelola PPIC</label>
+                            <div class="form-text">Divisi ini bisa dikelola lewat module Karyawan (PPIC), termasuk muncul di dropdown divisinya.</div>
                         </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
@@ -268,7 +284,8 @@ else
             ShowInDashboard = division.ShowInDashboard,
             DashboardMode = division.DashboardMode,
             DashboardSortOrder = division.DashboardSortOrder,
-            DefaultTargetPerPerson = division.DefaultTargetPerPerson
+            DefaultTargetPerPerson = division.DefaultTargetPerPerson,
+            PpicManaged = division.PpicManaged
         };
         errorMessage = string.Empty;
         showForm = true;
@@ -295,7 +312,8 @@ else
                 ShowInDashboard = formModel.ShowInDashboard,
                 DashboardMode = formModel.DashboardMode,
                 DashboardSortOrder = formModel.DashboardSortOrder,
-                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson
+                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson,
+                PpicManaged = formModel.PpicManaged
             });
         }
         else
@@ -307,7 +325,8 @@ else
                 ShowInDashboard = formModel.ShowInDashboard,
                 DashboardMode = formModel.DashboardMode,
                 DashboardSortOrder = formModel.DashboardSortOrder,
-                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson
+                DefaultTargetPerPerson = formModel.DefaultTargetPerPerson,
+                PpicManaged = formModel.PpicManaged
             });
         }
 
@@ -367,5 +386,6 @@ else
         public string DashboardMode { get; set; } = "DIVISION";
         public int DashboardSortOrder { get; set; }
         public int DefaultTargetPerPerson { get; set; }
+        public bool PpicManaged { get; set; }
     }
 }

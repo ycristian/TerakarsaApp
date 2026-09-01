@@ -136,6 +136,10 @@ else
                                             {
                                                 <div class="small text-muted">@p.StatusReason</div>
                                             }
+                                            @if (p.HasUnsetWorkflow)
+                                            {
+                                                <div class="small text-danger">Ada artikel belum di-set workflow</div>
+                                            }
                                         </td>
                                         <td @onclick:stopPropagation="true">
                                             <a class="btn btn-sm btn-primary me-1" title="Edit" href="@($"/projects/edit/{p.Id}")" target="_blank"><i class="fe fe-edit"></i></a>

@@ -84,4 +84,20 @@ public class EmployeeController : ControllerBase
         await _employeeService.DeleteAsync(id, CurrentUserId);
         return Ok();
     }
+
+    // Prompt 53: toggle Aktifkan/Nonaktifkan.
+    [HttpPatch("active")]
+    public async Task<IActionResult> SetActive([FromBody] EmployeeSetActiveRequest request)
+    {
+        await _employeeService.SetActiveAsync(request.Id, request.IsActive, CurrentUserId);
+        return Ok();
+    }
+
+    // Prompt 53: saran kode karyawan otomatis {division_code}-{4 digit}.
+    [HttpGet("next-code")]
+    public async Task<IActionResult> GetNextCode([FromQuery] int divisionId)
+    {
+        var code = await _employeeService.GetNextCodeAsync(divisionId);
+        return Ok(new EmployeeNextCodeDto { SuggestedCode = code });
+    }
 }

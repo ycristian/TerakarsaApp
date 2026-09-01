@@ -14,6 +14,8 @@ public class EmployeeDto
     public int? ResourceId { get; set; }
     public string? ResourceName { get; set; }
     public DateTime? JoinDate { get; set; }
+    // Prompt 53: nonaktif = hilang dari dropdown employee, data lama (log/bundle/project) tetap utuh.
+    public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -66,4 +68,19 @@ public class EmployeeLookupDto
     public int Id { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string? EmployeeCode { get; set; }
+}
+
+// Prompt 53: toggle Aktifkan/Nonaktifkan (Master Karyawan & Karyawan PPIC) -- tidak menyentuh
+// field lain, tidak ada pengecekan referensi (nonaktifkan selalu boleh).
+public class EmployeeSetActiveRequest
+{
+    public int Id { get; set; }
+    public bool IsActive { get; set; }
+}
+
+// Prompt 53: saran kode karyawan otomatis {division_code}-{4 digit}, hanya saran -- keunikan
+// tetap divalidasi saat simpan (SIS_Employee_Manage/SIS_PpicEmployee_Manage).
+public class EmployeeNextCodeDto
+{
+    public string? SuggestedCode { get; set; }
 }

@@ -49,7 +49,7 @@ public class Worker : BackgroundService
     }
 
     private static readonly string[] LabelJobTypes = { "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE" };
-    private static readonly string[] KuponJobTypes = { "KUPON_BORONGAN", "REKAP_PRODUKSI", "REKAP_KARYAWAN" };
+    private static readonly string[] KuponJobTypes = { "KUPON_BORONGAN", "REKAP_PRODUKSI", "REKAP_KARYAWAN", "REKAP_WIP" };
 
     private async Task PollOnceAsync(CancellationToken ct)
     {

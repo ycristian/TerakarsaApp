@@ -88,6 +88,14 @@
 --   17. @DeleteReason (baru) -- DELETE sekarang mewajibkan alasan (RAISERROR bila NULL/kosong),
 --      ditulis ke bundles.delete_reason. Pola sama dengan SIS_SuperAdmin_Manage BUNDLE_DELETE/
 --      LOG_DELETE; sebelumnya delete_reason selalu NULL di jalur DELETE biasa (station/admin).
+--   18. Fix: bug aturan #15 (Prompt 34) -- auto-terima log Bundling menulis received_by_resource_id
+--      = @BundlingResourceId (resource divisi Bundling sendiri) alih-alih @ResourceId (Line/
+--      penjahit divisi TUJUAN). Prompt 40 SS7 (sp_WorkflowLog_Manage, "penerima mengikat
+--      pelaksana") lalu mengunci pelaksana step berikutnya harus persis sama dengan
+--      received_by_resource_id itu -- karena resource Bundling tidak pernah ada di divisi
+--      tujuan, bundle buntu permanen ("Bundle ini atas nama X. Batalkan penerimaan dulu...")
+--      sampai di-UNRECEIVE manual. CREATE & UPDATE sekarang selalu pakai @ResourceId. Data lama
+--      yang sudah kena lihat sql/adhoc_repair_bundle_autoreceive_received_by.sql.
 
 SET ANSI_NULLS ON;
 GO
@@ -359,7 +367,16 @@ BEGIN
                 @Qty, 0, 0, 0,
                 NULL, @BundlingTargetDivisionId,
                 CASE WHEN ISNULL(@BundlingTargetAutoReceive, 0) = 1 OR @ResourceId IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
-                CASE WHEN ISNULL(@BundlingTargetAutoReceive, 0) = 1 THEN @BundlingResourceId ELSE @ResourceId END,
+                -- Fix: received_by_resource_id HARUS resource divisi TUJUAN (Line/penjahit,
+                -- @ResourceId -- sama dengan bundles.resource_id) walau step tujuan ber-
+                -- auto_receive -- SEBELUMNYA jatuh ke @BundlingResourceId (resource divisi
+                -- Bundling sendiri), membuat baris "diterima" oleh resource yang bukan milik
+                -- target_division_id. Prompt 40 SS7 (sp_WorkflowLog_Manage) lalu mengunci
+                -- pelaksana step berikutnya HARUS sama dengan received_by_resource_id ini --
+                -- resource Bundling itu tidak pernah ada di divisi tujuan, jadi bundle buntu
+                -- permanen sampai di-UNRECEIVE manual. @ResourceId sudah wajib diisi saat
+                -- CREATE (lihat validasi di atas), jadi selalu tersedia di sini.
+                @ResourceId,
                 CASE WHEN ISNULL(@BundlingTargetAutoReceive, 0) = 1 THEN 'Otomatis: auto-terima'
                      WHEN @ResourceId IS NOT NULL THEN 'Otomatis: bundle langsung ditugaskan ke penjahit/Line'
                      ELSE NULL END,
@@ -531,9 +548,14 @@ BEGIN
         WHERE article_id = @UpdArticleId AND deleted_at IS NULL AND inactive_at IS NULL AND sort_order > @UpdBundlingSortOrder
         ORDER BY sort_order ASC;
 
+        -- Fix: sama dengan CREATE -- received_by_resource_id harus resource divisi TUJUAN
+        -- (@ResourceId, Line/penjahit), BUKAN @BundlingResourceId (resource divisi Bundling).
+        -- ISNULL ke received_by_resource_id lama (bukan awl.resource_id) supaya kalau
+        -- @ResourceId tidak dikirim (bundle lama tanpa penjahit), nilai lama dipertahankan
+        -- apa adanya alih-alih ikut tertimpa resource Bundling.
         UPDATE awl
         SET awl.received_at = SYSDATETIME(),
-            awl.received_by_resource_id = ISNULL(@BundlingResourceId, awl.resource_id),
+            awl.received_by_resource_id = ISNULL(@ResourceId, awl.received_by_resource_id),
             awl.received_remark = 'Otomatis: auto-terima'
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id

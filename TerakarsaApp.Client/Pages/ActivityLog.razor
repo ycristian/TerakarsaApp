@@ -245,6 +245,10 @@ else
                                 <th>Status</th>
                                 <th>Remark</th>
                                 <th>Pencatat</th>
+                                @if (isSuperAdmin)
+                                {
+                                    <th></th>
+                                }
                             </tr>
                         </thead>
                         <tbody>
@@ -277,6 +281,15 @@ else
                                     <td><span class="badge @(item.Status == "DITERIMA" ? "bg-success" : "bg-warning")">@(item.Status == "DITERIMA" ? "Diterima" : "Menunggu")</span></td>
                                     <td>@(item.Remark ?? "-")</td>
                                     <td>@(item.CreatedByName ?? "-")</td>
+                                    @if (isSuperAdmin)
+                                    {
+                                        <td @onclick:stopPropagation="true">
+                                            @if (item.BundleId.HasValue)
+                                            {
+                                                <button class="btn btn-outline-secondary btn-sm p-0" title="Edit Qty" @onclick="() => editPanel!.OpenEditLogAsync(item.WorkflowLogId)"><i class="fe fe-edit"></i></button>
+                                            }
+                                        </td>
+                                    }
                                 </tr>
                             }
                         </tbody>
@@ -295,6 +308,8 @@ else
             }
         </div>
     </div>
+
+    <SuperAdminEditPanel @ref="editPanel" OnSaved="LoadAsync" />
 }
 
 <style>
@@ -305,6 +320,10 @@ else
 
 @code {
     private bool? hasAccess = null;
+    // Fix: tombol "Edit Qty" per baris -- module REPORT_ACTIVITY saja TIDAK cukup, wajib
+    // SUPER_ADMIN juga, pola sama dengan tab Riwayat di ReportBundle.razor (Prompt 36).
+    private bool isSuperAdmin = false;
+    private SuperAdminEditPanel? editPanel;
 
     private List<DivisionDto> divisions = new();
     private List<ResourceLookupDto> resources = new();
@@ -353,6 +372,7 @@ else
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         hasAccess = state.User.HasClaim("module", "REPORT_ACTIVITY");
+        isSuperAdmin = state.User.HasClaim("module", "SUPER_ADMIN");
 
         if (hasAccess != true) return;
 
