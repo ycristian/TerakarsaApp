@@ -115,9 +115,9 @@ public class StationDeviceController : ControllerBase
     [HttpGet("rekap-struk")]
     public async Task<IActionResult> GetRekapStruk(
         [FromQuery] string level, [FromQuery] int divisionId, [FromQuery] int? resourceId,
-        [FromQuery] int? employeeId, [FromQuery] DateTime? date)
+        [FromQuery] int? employeeId, [FromQuery] DateTime? startDateTime, [FromQuery] DateTime? endDateTime)
     {
-        var result = await _rekapProduksiService.GetAsync(level, divisionId, resourceId, employeeId, date);
+        var result = await _rekapProduksiService.GetAsync(level, divisionId, resourceId, employeeId, startDateTime, endDateTime);
         if (result.Header is null) return NotFound("Divisi tidak ditemukan.");
         return Ok(result);
     }

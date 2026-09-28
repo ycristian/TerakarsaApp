@@ -19,7 +19,7 @@ public class RekapProduksiService
         _db = db;
     }
 
-    public async Task<RekapStrukResultDto> GetAsync(string level, int divisionId, int? resourceId, int? employeeId, DateTime? date)
+    public async Task<RekapStrukResultDto> GetAsync(string level, int divisionId, int? resourceId, int? employeeId, DateTime? startDateTime, DateTime? endDateTime)
     {
         var conn = (SqlConnection)_db.Database.GetDbConnection();
         var wasClosed = conn.State != System.Data.ConnectionState.Open;
@@ -34,7 +34,8 @@ public class RekapProduksiService
             cmd.Parameters.Add(new SqlParameter("@DivisionId", divisionId));
             cmd.Parameters.Add(new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value));
             cmd.Parameters.Add(new SqlParameter("@EmployeeId", (object?)employeeId ?? DBNull.Value));
-            cmd.Parameters.Add(new SqlParameter("@Date", (object?)date?.Date ?? DBNull.Value));
+            cmd.Parameters.Add(new SqlParameter("@StartDateTime", (object?)startDateTime ?? DBNull.Value));
+            cmd.Parameters.Add(new SqlParameter("@EndDateTime", (object?)endDateTime ?? DBNull.Value));
 
             using var reader = await cmd.ExecuteReaderAsync();
 
@@ -98,15 +99,16 @@ public class RekapProduksiService
         var divisionIdParam = new SqlParameter("@DivisionId", request.DivisionId);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
         var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
-        var dateParam = new SqlParameter("@Date", request.Date.Date);
+        var startParam = new SqlParameter("@StartDateTime", request.StartDateTime);
+        var endParam = new SqlParameter("@EndDateTime", request.EndDateTime);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Report_RekapStrukPrint @Level = @Level, @DivisionId = @DivisionId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Date = @Date, @UserId = @UserId",
-                    levelParam, divisionIdParam, resourceIdParam, employeeIdParam, dateParam, userIdParam)
+                    "EXEC SIS_Report_RekapStrukPrint @Level = @Level, @DivisionId = @DivisionId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @StartDateTime = @StartDateTime, @EndDateTime = @EndDateTime, @UserId = @UserId",
+                    levelParam, divisionIdParam, resourceIdParam, employeeIdParam, startParam, endParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }

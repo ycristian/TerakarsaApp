@@ -101,4 +101,17 @@ public class PrintJobService
     {
         public string? TokenText { get; set; }
     }
+
+    // Ad hoc (2026-09-01): daftar job_type "kupon" (thermal, render_mode TOKEN) yang boleh
+    // diklaim -- dipindah dari array hardcode Worker.cs KuponJobTypes ke tabel
+    // print_kupon_job_types (lihat sql/adhoc_print_kupon_job_types.sql) supaya job_type struk
+    // BARU tidak butuh update/republish/restart TerakarsaApp.PrintService. Dipanggil worker
+    // SETIAP siklus poll (bukan sekali di startup) lewat GET api/print/kupon-job-types --
+    // baris baru langsung kepakai tanpa restart.
+    public async Task<List<string>> GetKuponJobTypesAsync()
+    {
+        return await _db.Database
+            .SqlQueryRaw<string>("SELECT job_type AS Value FROM print_kupon_job_types WHERE deleted_at IS NULL")
+            .ToListAsync();
+    }
 }

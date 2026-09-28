@@ -13,6 +13,17 @@ public class PrintApiClient
         _http = http;
     }
 
+    // Ad hoc (2026-09-01): daftar job_type "kupon" (thermal, render_mode TOKEN) yang boleh
+    // diklaim -- dipindah dari array hardcode Worker.cs KuponJobTypes ke tabel
+    // print_kupon_job_types (API). Dipanggil SETIAP siklus poll (bukan cache startup) supaya
+    // job_type struk baru langsung kepakai tanpa restart service.
+    public async Task<List<string>> GetKuponJobTypesAsync(CancellationToken ct)
+    {
+        var response = await _http.GetAsync("api/print/kupon-job-types", ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<string>>(cancellationToken: ct) ?? new();
+    }
+
     // dryRun sama dengan PrintWorkerOptions.DryRun (ad hoc lanjutan Prompt 48) -- kalau true,
     // API mengklaim dari print_jobs_dryrun (SIS_PrintJobDryRun_Claim), bukan antrian live.
     public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun, CancellationToken ct)

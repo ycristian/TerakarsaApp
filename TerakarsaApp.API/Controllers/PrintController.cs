@@ -20,6 +20,16 @@ public class PrintController : ControllerBase
         _printJobService = printJobService;
     }
 
+    // Ad hoc (2026-09-01): daftar job_type "kupon" (thermal) yang boleh diklaim, dibaca dari
+    // tabel print_kupon_job_types -- dipanggil worker SETIAP siklus poll (bukan cache startup)
+    // supaya job_type struk baru langsung kepakai tanpa restart PrintService.
+    [HttpGet("kupon-job-types")]
+    public async Task<IActionResult> GetKuponJobTypes()
+    {
+        var result = await _printJobService.GetKuponJobTypesAsync();
+        return Ok(result);
+    }
+
     [HttpPost("claim")]
     public async Task<IActionResult> Claim([FromBody] PrintJobClaimRequest request)
     {

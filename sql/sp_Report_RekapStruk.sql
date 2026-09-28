@@ -90,25 +90,30 @@ DROP PROCEDURE IF EXISTS SIS_Resource_TailorLines;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_Report_RekapStruk
-    @Level      VARCHAR(10),        -- DIVISION | RESOURCE | EMPLOYEE
-    @DivisionId INT,
-    @ResourceId INT = NULL,
-    @EmployeeId INT = NULL,
-    @Date       DATE = NULL
+    @Level         VARCHAR(10),        -- DIVISION | RESOURCE | EMPLOYEE
+    @DivisionId    INT,
+    @ResourceId    INT = NULL,
+    @EmployeeId    INT = NULL,
+    @StartDateTime DATETIME2 = NULL,
+    @EndDateTime   DATETIME2 = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @EffectiveDate DATE = ISNULL(@Date, CAST(SYSDATETIME() AS DATE));
     -- Ad hoc (2026-08-27): cakupan diganti dari periode gajian mingguan (Sabtu-Sabtu) ke 1 HARI
     -- SAJA, supaya Total Qty di modal preview /station SELALU sinkron dgn apa yg akan benar-benar
     -- tercetak lewat SIS_Report_RekapStrukPrint (di bawah, sudah disederhanakan single-day lebih
     -- dulu atas permintaan yg sama) -- preview jadi bisa dipakai sbg "ada data atau tidak" utk
-    -- resource+tanggal yg dipilih SEBELUM menekan Cetak Struk. @PeriodStart/@PeriodEnd
-    -- dipertahankan nama variabelnya (dipakai di seluruh CTE di bawah -- Detail/WIP) supaya diff
-    -- minimal; isinya sekarang cuma rentang 1 hari.
-    DECLARE @PeriodStart DATETIME2 = CAST(@EffectiveDate AS DATETIME2);
-    DECLARE @PeriodEnd DATETIME2 = DATEADD(DAY, 1, @PeriodStart);
+    -- resource+tanggal yg dipilih SEBELUM menekan Cetak Struk.
+    -- Ad hoc (2026-09-01): cakupan diperluas lagi dari 1 HARI PENUH ke RENTANG WAKTU bebas
+    -- (@StartDateTime s/d @EndDateTime, EKSKLUSIF di ujung akhir -- "< dari jam akhir, jam akhir
+    -- ke atas tidak masuk") supaya operator bisa cetak rekap per shift/jam kerja (mis. 06:00 -
+    -- 10:00), bukan cuma per hari kalender. Default kalau tidak diisi: mulai jam 06:00 hari ini,
+    -- selesai SYSDATETIME() (jam berjalan) -- SAMA dgn default form date-time picker di /station.
+    -- @PeriodStart/@PeriodEnd dipertahankan nama variabelnya (dipakai di seluruh CTE di bawah --
+    -- Detail/WIP) supaya diff minimal.
+    DECLARE @PeriodStart DATETIME2 = ISNULL(@StartDateTime, DATEADD(HOUR, 6, CAST(CAST(SYSDATETIME() AS DATE) AS DATETIME2)));
+    DECLARE @PeriodEnd DATETIME2 = ISNULL(@EndDateTime, SYSDATETIME());
 
     -- ================= Result set 1: header =================
     ;WITH DirectAtoms AS (
@@ -349,12 +354,13 @@ GO
 -- milik divisi step ybs) disalin PERSIS dari FIX #1/#2 SIS_Report_RekapStruk di atas -- lihat
 -- komentar lengkap alasannya di sana, TIDAK diulang di sini.
 CREATE OR ALTER PROCEDURE SIS_Report_RekapStrukPrint
-    @Level      VARCHAR(10),        -- dipertahankan utk kompatibilitas signature, TIDAK dipakai
-    @DivisionId INT,
-    @ResourceId INT = NULL,
-    @EmployeeId INT = NULL,
-    @Date       DATE = NULL,
-    @UserId     INT
+    @Level         VARCHAR(10),        -- dipertahankan utk kompatibilitas signature, TIDAK dipakai
+    @DivisionId    INT,
+    @ResourceId    INT = NULL,
+    @EmployeeId    INT = NULL,
+    @StartDateTime DATETIME2 = NULL,
+    @EndDateTime   DATETIME2 = NULL,
+    @UserId        INT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -365,9 +371,10 @@ BEGIN
         RETURN;
     END
 
-    DECLARE @EffectiveDate DATE = ISNULL(@Date, CAST(SYSDATETIME() AS DATE));
-    DECLARE @DayStart DATETIME2 = CAST(@EffectiveDate AS DATETIME2);
-    DECLARE @DayEnd DATETIME2 = DATEADD(DAY, 1, @DayStart);
+    -- Ad hoc (2026-09-01): dari 1 HARI PENUH ke RENTANG WAKTU bebas -- lihat catatan lengkap di
+    -- SIS_Report_RekapStruk (SAMA logika, harus sinkron). Default: 06:00 hari ini s/d sekarang.
+    DECLARE @DayStart DATETIME2 = ISNULL(@StartDateTime, DATEADD(HOUR, 6, CAST(CAST(SYSDATETIME() AS DATE) AS DATETIME2)));
+    DECLARE @DayEnd DATETIME2 = ISNULL(@EndDateTime, SYSDATETIME());
 
     DECLARE @Payload NVARCHAR(MAX);
 
@@ -415,7 +422,8 @@ BEGIN
             dv.division_name AS division_name,
             rs.resource_name AS resource_name,
             emp.employee_name AS employee_name,
-            @EffectiveDate AS tanggal,
+            @DayStart AS start_at,
+            @DayEnd AS end_at,
             ISNULL((
                 SELECT SUM(da.QtyOk) FROM DirectAtoms da
                 WHERE (@ResourceId IS NULL OR da.LineResourceId = @ResourceId)

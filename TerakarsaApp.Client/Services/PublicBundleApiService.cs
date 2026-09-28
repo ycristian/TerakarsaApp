@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Reports;
 
 namespace TerakarsaApp.Client.Services;
 
@@ -20,5 +21,13 @@ public class PublicBundleApiService
         var response = await _http.GetAsync($"api/public/bundles/{Uri.EscapeDataString(serial)}");
         if (!response.IsSuccessStatusCode) return null;
         return await response.Content.ReadFromJsonAsync<PublicBundleDetailDto>();
+    }
+
+    // Fix: /b/{Serial} publik menerima format "{huruf}{nomor}" (mis. "D347") juga.
+    public async Task<List<BundleLookupMatchDto>> LookupByNoAsync(string bundleLetter, int bundleNo)
+    {
+        var response = await _http.GetAsync($"api/public/bundles/lookup-by-no?bundleLetter={Uri.EscapeDataString(bundleLetter)}&bundleNo={bundleNo}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleLookupMatchDto>>() ?? new();
     }
 }

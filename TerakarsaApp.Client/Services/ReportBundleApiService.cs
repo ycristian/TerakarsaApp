@@ -1,8 +1,10 @@
 using System.Net.Http.Json;
 using System.Text;
 using TerakarsaApp.Shared.Divisions;
+using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Reports;
+using TerakarsaApp.Shared.Resources;
 
 namespace TerakarsaApp.Client.Services;
 
@@ -54,6 +56,18 @@ public class ReportBundleApiService
         return await response.Content.ReadFromJsonAsync<List<BundleVarianceDto>>() ?? new();
     }
 
+    // Fix: pencarian Riwayat lewat format "{huruf}{nomor}" (mis. "D346").
+    public async Task<List<BundleLookupMatchDto>> LookupByNoAsync(string bundleLetter, int bundleNo)
+    {
+        var query = BuildQuery(
+            ("bundleLetter", bundleLetter),
+            ("bundleNo", bundleNo.ToString()));
+
+        var response = await _http.GetAsync($"api/report-bundle/lookup-by-no{query}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleLookupMatchDto>>() ?? new();
+    }
+
     public async Task<(bool Success, string Error, BundleHistoryResultDto? Result)> GetHistoryAsync(string? serial, int? projectId, int? bundleNo)
     {
         var query = BuildQuery(
@@ -98,5 +112,45 @@ public class ReportBundleApiService
         var response = await _http.GetAsync("api/report-bundle-picker/divisions");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<DivisionDto>>() ?? new();
+    }
+
+    // Ad hoc (2026-09-01): tab "Pengambilan" -- filter Resource (Line)/Employee (Penjahit) +
+    // preview (Total Bundle/Total Qty) + cetak thermal.
+    public async Task<List<ResourceCounterpartOptionDto>> GetResourcesAsync()
+    {
+        var response = await _http.GetAsync("api/report-bundle-picker/resources");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ResourceCounterpartOptionDto>>() ?? new();
+    }
+
+    public async Task<List<EmployeeLookupDto>> GetEmployeesByResourceAsync(int resourceId)
+    {
+        var response = await _http.GetAsync($"api/report-bundle-picker/resources/{resourceId}/employees");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<EmployeeLookupDto>>() ?? new();
+    }
+
+    public async Task<BundlePengambilanHeaderDto?> GetPengambilanAsync(
+        int? projectId, int? articleId, int? resourceId, int? employeeId, DateTime startDateTime, DateTime endDateTime)
+    {
+        var query = BuildQuery(
+            ("projectId", projectId?.ToString()),
+            ("articleId", articleId?.ToString()),
+            ("resourceId", resourceId?.ToString()),
+            ("employeeId", employeeId?.ToString()),
+            ("startDateTime", startDateTime.ToString("O")),
+            ("endDateTime", endDateTime.ToString("O")));
+
+        var response = await _http.GetAsync($"api/report-bundle/pengambilan{query}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<BundlePengambilanHeaderDto>();
+    }
+
+    public async Task<(bool Success, string Error)> PrintPengambilanAsync(BundlePengambilanPrintRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/report-bundle/pengambilan/print", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak rekap pengambilan." : error.Trim('"'));
     }
 }

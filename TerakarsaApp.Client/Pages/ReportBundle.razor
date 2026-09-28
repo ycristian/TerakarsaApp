@@ -4,8 +4,10 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Employees
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.Reports
+@using TerakarsaApp.Shared.Resources
 @inject ReportBundleApiService ReportApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
@@ -46,6 +48,9 @@ else
                 </li>
                 <li class="nav-item">
                     <a class="nav-link @(activeTab == "selisih" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("selisih")'>Selisih</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link @(activeTab == "pengambilan" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("pengambilan")'>Pengambilan</a>
                 </li>
             </ul>
         </div>
@@ -250,16 +255,12 @@ else
                             <button class="btn btn-primary" disabled="@isLoadingHistory" @onclick="SearchHistoryBySerial">Cari</button>
                         </div>
                     </div>
-                    <div class="col-md-5">
-                        <label class="form-label">Atau pilih Project + Bundle No</label>
+                    <div class="col-md-4">
+                        <label class="form-label">Atau No. Bundle</label>
                         <div class="input-group">
-                            <div style="min-width:220px">
-                                <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="historyProjectId"
-                                                  IdSelector="@(p => p.Id)" TextSelector="@(p => $"{p.ProjectName} / {p.BuyerName} / {p.NoPo ?? "-"}")"
-                                                  Placeholder="Cari project..." />
-                            </div>
-                            <input type="number" min="1" class="form-control" placeholder="No. Bundle" @bind="historyBundleNoText" />
-                            <button class="btn btn-primary" disabled="@isLoadingHistory" @onclick="SearchHistoryByBundleNo">Cari</button>
+                            <input class="form-control" placeholder="mis. D346" @bind="historyBundleNoInput"
+                                   @onkeyup='e => { if (e.Key == "Enter") { _ = SearchHistoryByLetterNo(); } }' />
+                            <button class="btn btn-primary" disabled="@isLoadingHistory" @onclick="SearchHistoryByLetterNo">Cari</button>
                         </div>
                     </div>
                 </div>
@@ -267,6 +268,22 @@ else
                 @if (!string.IsNullOrEmpty(historyError))
                 {
                     <div class="alert alert-danger">@historyError</div>
+                }
+
+                @if (historyMatches.Count > 1)
+                {
+                    <div class="alert alert-warning">
+                        <p class="mb-2">No. Bundle ini ditemukan di @historyMatches.Count project, pilih salah satu:</p>
+                        <div class="list-group">
+                            @foreach (var m in historyMatches)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action" @onclick="() => SelectHistoryMatch(m)">
+                                    <strong>@BundleDisplay.Format(m.BundleLetter, m.BundleNo)</strong> — @m.ProjectName / @m.ArticleName
+                                    <span class="text-muted small d-block">@m.Serial</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
                 }
 
                 @if (isLoadingHistory)
@@ -395,7 +412,7 @@ else
                     <p class="text-muted mb-0">Cari bundle lewat serial atau project + no bundle untuk melihat riwayat.</p>
                 }
             }
-            else
+            else if (activeTab == "selisih")
             {
                 <div class="row g-2 align-items-end mb-3">
                     <div class="col-md-3">
@@ -466,6 +483,115 @@ else
                             </tbody>
                         </table>
                     </div>
+                }
+            }
+            else if (activeTab == "pengambilan")
+            {
+                <div class="row g-2 align-items-end mb-2">
+                    <div class="col-md-3">
+                        <label class="form-label">Project</label>
+                        <SearchableSelect TItem="ProjectDto" Items="projects" @bind-Value="pengambilanProjectId"
+                                          IdSelector="@(p => p.Id)" TextSelector="@(p => $"{p.ProjectName} / {p.BuyerName} / {p.NoPo ?? "-"}")"
+                                          AllowNone="true" NoneLabel="- Semua Project -" Placeholder="Cari project..."
+                                          @bind-Value:after="OnPengambilanProjectChanged" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Artikel</label>
+                        <SearchableSelect TItem="ArticleListItemDto" Items="pengambilanArticles" @bind-Value="pengambilanArticleId"
+                                          IdSelector="@(a => a.Id)" TextSelector="@(a => a.ArticleName)"
+                                          AllowNone="true" NoneLabel="- Semua Artikel -" Placeholder="Cari artikel..." />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Resource (Line)</label>
+                        <SearchableSelect TItem="ResourceCounterpartOptionDto" Items="pengambilanResources" @bind-Value="pengambilanResourceId"
+                                          IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
+                                          AllowNone="true" NoneLabel="- Semua Resource -" Placeholder="Cari resource..."
+                                          @bind-Value:after="OnPengambilanResourceChanged" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Penjahit</label>
+                        <SearchableSelect TItem="EmployeeLookupDto" Items="pengambilanEmployees" @bind-Value="pengambilanEmployeeId"
+                                          IdSelector="@(e => e.Id)" TextSelector="@(e => e.EmployeeName)"
+                                          AllowNone="true" NoneLabel="- Semua Penjahit -" Placeholder="Cari penjahit..."
+                                          Disabled="@(pengambilanResourceId <= 0)" />
+                    </div>
+                </div>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="pengambilanUseTime"
+                           checked="@pengambilanUseTime" @onchange="HandlePengambilanUseTimeChanged" />
+                    <label class="form-check-label" for="pengambilanUseTime">Use Time</label>
+                </div>
+                @if (pengambilanUseTime)
+                {
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Waktu Mulai</label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@pengambilanStartDateTime.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandlePengambilanStartChanged" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Waktu Selesai</label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@pengambilanEndDateTime.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandlePengambilanEndChanged" />
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-primary w-100" disabled="@isLoadingPengambilan" @onclick="LoadPengambilan">Terapkan</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Tanggal</label>
+                            <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                   value="@pengambilanDate.ToString("yyyy-MM-dd")" @onchange="HandlePengambilanDateChanged" />
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-primary w-100" disabled="@isLoadingPengambilan" @onclick="LoadPengambilan">Terapkan</button>
+                        </div>
+                    </div>
+                }
+
+                @if (isLoadingPengambilan)
+                {
+                    <p class="text-muted mb-0">Memuat...</p>
+                }
+                else if (pengambilanResult is not null)
+                {
+                    var h = pengambilanResult;
+                    <div class="border rounded p-3 mb-3">
+                        <p class="mb-1">
+                            @if (!string.IsNullOrEmpty(h.ProjectName)) { <text>@h.ProjectName </text> }
+                            @if (!string.IsNullOrEmpty(h.ArticleName)) { <text>&middot; @h.ArticleName </text> }
+                            @if (!string.IsNullOrEmpty(h.ResourceName)) { <text>&middot; @h.ResourceName </text> }
+                            @if (!string.IsNullOrEmpty(h.EmployeeName)) { <text>&middot; @h.EmployeeName</text> }
+                        </p>
+                        <p class="text-muted mb-2">
+                            Waktu: <strong>@h.PeriodStart.ToString("dd/MM/yyyy HH:mm") - @h.PeriodEnd.ToString(h.PeriodStart.Date == h.PeriodEnd.Date ? "HH:mm" : "dd/MM/yyyy HH:mm")</strong>
+                        </p>
+                        <div class="d-flex gap-4">
+                            <div>
+                                <div class="text-muted small">Total Bundle</div>
+                                <div class="fs-2 fw-bold">@h.TotalBundle</div>
+                            </div>
+                            <div>
+                                <div class="text-muted small">Total Qty</div>
+                                <div class="fs-2 fw-bold">@h.TotalQty <small class="text-muted">pcs</small></div>
+                            </div>
+                        </div>
+                        @if (h.TotalBundle == 0)
+                        {
+                            <div class="text-warning small mt-1">Tidak ada bundle dibuat di filter &amp; periode ini.</div>
+                        }
+                    </div>
+
+                    <button class="btn btn-primary" disabled="@(isPrintingPengambilan || h.TotalBundle == 0)" @onclick="PrintPengambilan">Cetak</button>
+                    @if (!string.IsNullOrEmpty(pengambilanPrintFeedback))
+                    {
+                        <div class="small mt-2 @(pengambilanPrintFeedback.StartsWith("Rekap") ? "text-success" : "text-danger")">@pengambilanPrintFeedback</div>
+                    }
                 }
             }
         </div>
@@ -585,11 +711,16 @@ else
 
     // --- Riwayat ---
     private string historySerial = string.Empty;
-    private int historyProjectId;
-    private string historyBundleNoText = string.Empty;
+    // Fix: pencarian lewat format "{huruf}{nomor}" (mis. "D346") -- ganti dropdown
+    // Project + Bundle No manual, bundle_letter bisa cocok di > 1 project (historyMatches).
+    private string historyBundleNoInput = string.Empty;
+    private List<BundleLookupMatchDto> historyMatches = new();
     private BundleHistoryResultDto? historyResult;
     private string historyError = string.Empty;
     private bool isLoadingHistory = false;
+
+    private static readonly System.Text.RegularExpressions.Regex HistoryBundleNoPattern =
+        new(@"^([A-Za-z])\s*-?\s*(\d+)$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // --- Selisih ---
     private int varianceProjectId;
@@ -613,6 +744,98 @@ else
         isLoadingVariance = false;
     }
 
+    // --- Pengambilan (Ad hoc 2026-09-01) ---
+    private int pengambilanProjectId;
+    private int pengambilanArticleId;
+    private int pengambilanResourceId;
+    private int pengambilanEmployeeId;
+    private List<ArticleListItemDto> pengambilanArticles = new();
+    private List<ResourceCounterpartOptionDto> pengambilanResources = new();
+    private List<EmployeeLookupDto> pengambilanEmployees = new();
+    // Checkbox "Use Time" -- TANPA dicentang (default) form cuma 1 date picker (satu hari
+    // penuh), DICENTANG baru muncul 2 datetime-local picker (rentang jam bebas) -- sama pola
+    // dgn tab Rekap Produksi /station (StationDevice.razor).
+    private bool pengambilanUseTime = false;
+    private DateTime pengambilanDate = DateTime.Today;
+    private DateTime pengambilanStartDateTime = DateTime.Today.AddHours(6);
+    private DateTime pengambilanEndDateTime = DateTime.Today.AddHours(22);
+    private DateTime PengambilanEffectiveStart => pengambilanUseTime ? pengambilanStartDateTime : pengambilanDate.Date;
+    private DateTime PengambilanEffectiveEnd => pengambilanUseTime ? pengambilanEndDateTime : pengambilanDate.Date.AddDays(1);
+    private BundlePengambilanHeaderDto? pengambilanResult;
+    private bool isLoadingPengambilan = false;
+    private bool isPrintingPengambilan = false;
+    private string pengambilanPrintFeedback = string.Empty;
+
+    private async Task OnPengambilanProjectChanged()
+    {
+        pengambilanArticleId = 0;
+        pengambilanArticles = pengambilanProjectId > 0 ? await ReportApi.GetArticlesByProjectAsync(pengambilanProjectId) : new();
+    }
+
+    private async Task OnPengambilanResourceChanged()
+    {
+        pengambilanEmployeeId = 0;
+        pengambilanEmployees = pengambilanResourceId > 0 ? await ReportApi.GetEmployeesByResourceAsync(pengambilanResourceId) : new();
+    }
+
+    private void HandlePengambilanUseTimeChanged(ChangeEventArgs e)
+    {
+        pengambilanUseTime = e.Value is bool b && b;
+    }
+
+    // Fix (2026-09-01): datetime-local/date input pakai value+@onchange manual (BUKAN @bind:format)
+    // -- sama pola dgn StationDevice.razor (Rekap Produksi Use Time) yang sudah teruji, @bind:format
+    // pada datetime-local tidak reliable menulis balik ke field ("gak bisa diupdate").
+    private void HandlePengambilanStartChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+            pengambilanStartDateTime = parsed;
+    }
+
+    private void HandlePengambilanEndChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+            pengambilanEndDateTime = parsed;
+    }
+
+    private void HandlePengambilanDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed) && parsed.Date <= DateTime.Today)
+            pengambilanDate = parsed.Date;
+    }
+
+    private async Task LoadPengambilan()
+    {
+        isLoadingPengambilan = true;
+        pengambilanPrintFeedback = string.Empty;
+        pengambilanResult = await ReportApi.GetPengambilanAsync(
+            pengambilanProjectId > 0 ? pengambilanProjectId : null,
+            pengambilanArticleId > 0 ? pengambilanArticleId : null,
+            pengambilanResourceId > 0 ? pengambilanResourceId : null,
+            pengambilanEmployeeId > 0 ? pengambilanEmployeeId : null,
+            PengambilanEffectiveStart, PengambilanEffectiveEnd);
+        isLoadingPengambilan = false;
+    }
+
+    private async Task PrintPengambilan()
+    {
+        isPrintingPengambilan = true;
+        pengambilanPrintFeedback = string.Empty;
+
+        var (success, error) = await ReportApi.PrintPengambilanAsync(new BundlePengambilanPrintRequest
+        {
+            ProjectId = pengambilanProjectId > 0 ? pengambilanProjectId : null,
+            ArticleId = pengambilanArticleId > 0 ? pengambilanArticleId : null,
+            ResourceId = pengambilanResourceId > 0 ? pengambilanResourceId : null,
+            EmployeeId = pengambilanEmployeeId > 0 ? pengambilanEmployeeId : null,
+            StartDateTime = PengambilanEffectiveStart,
+            EndDateTime = PengambilanEffectiveEnd
+        });
+
+        isPrintingPengambilan = false;
+        pengambilanPrintFeedback = success ? "Rekap Pengambilan masuk antrian cetak." : error;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -625,6 +848,7 @@ else
 
         projects = await ReportApi.GetProjectsAsync();
         divisions = await ReportApi.GetDivisionsAsync();
+        pengambilanResources = await ReportApi.GetResourcesAsync();
     }
 
     private static string StatusLabel(string status) => status switch
@@ -731,6 +955,7 @@ else
 
         isLoadingHistory = true;
         historyError = string.Empty;
+        historyMatches = new();
         var (success, error, result) = await ReportApi.GetHistoryAsync(historySerial.Trim(), null, null);
         isLoadingHistory = false;
 
@@ -744,27 +969,50 @@ else
         historyResult = result;
     }
 
-    private async Task SearchHistoryByBundleNo()
+    // Fix: pencarian lewat format "{huruf}{nomor}" (mis. "D346") -- bundle_letter berputar
+    // A-Z per project, jadi satu kombinasi bisa cocok > 1 project sekaligus (historyMatches
+    // ditampilkan sebagai pilihan, lihat SelectHistoryMatch).
+    private async Task SearchHistoryByLetterNo()
     {
-        if (historyProjectId <= 0 || !int.TryParse(historyBundleNoText, out var bundleNo) || bundleNo <= 0)
+        historyError = string.Empty;
+        historyMatches = new();
+        historyResult = null;
+
+        var input = historyBundleNoInput.Trim();
+        var match = HistoryBundleNoPattern.Match(input);
+        if (!match.Success)
         {
-            historyError = "Project dan No. Bundle wajib diisi.";
+            historyError = "Format No. Bundle tidak valid, contoh: D346.";
             return;
         }
+
+        var letter = match.Groups[1].Value.ToUpperInvariant();
+        var bundleNo = int.Parse(match.Groups[2].Value);
 
         isLoadingHistory = true;
-        historyError = string.Empty;
-        var (success, error, result) = await ReportApi.GetHistoryAsync(null, historyProjectId, bundleNo);
+        var matches = await ReportApi.LookupByNoAsync(letter, bundleNo);
         isLoadingHistory = false;
 
-        if (!success)
+        if (matches.Count == 0)
         {
-            historyError = error;
-            historyResult = null;
+            historyError = "Bundle tidak ditemukan.";
             return;
         }
 
-        historyResult = result;
+        if (matches.Count == 1)
+        {
+            await SelectHistoryMatch(matches[0]);
+            return;
+        }
+
+        historyMatches = matches;
+    }
+
+    private async Task SelectHistoryMatch(BundleLookupMatchDto match)
+    {
+        historyMatches = new();
+        historySerial = match.Serial;
+        await SearchHistoryBySerial();
     }
 
     // Fix: klik baris WIP -- pindah ke tab Riwayat SEPERTI SEBELUMNYA, DAN sekalian buka

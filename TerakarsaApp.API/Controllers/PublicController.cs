@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Reports;
 
 namespace TerakarsaApp.API.Controllers;
 
@@ -18,6 +19,18 @@ public class PublicController : ControllerBase
     {
         _bundleService = bundleService;
         _packService = packService;
+    }
+
+    // Fix: /b/{Serial} publik menerima format "{huruf}{nomor}" (mis. "D347") juga, bukan cuma
+    // serial asli -- client cek 0/1/>1 hasil (kalau >1, tampilkan pilihan project dulu).
+    [HttpGet("bundles/lookup-by-no")]
+    public async Task<IActionResult> LookupBundleByNo([FromQuery] string bundleLetter, [FromQuery] int bundleNo)
+    {
+        if (string.IsNullOrWhiteSpace(bundleLetter) || bundleLetter.Trim().Length != 1 || bundleNo <= 0)
+            return BadRequest("Format No. Bundle tidak valid.");
+
+        var result = await _bundleService.LookupByLetterNoAsync(bundleLetter.Trim().ToUpperInvariant(), bundleNo);
+        return Ok(result);
     }
 
     [HttpGet("bundles/{serial}")]

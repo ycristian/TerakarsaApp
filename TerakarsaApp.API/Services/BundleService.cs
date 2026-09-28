@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TerakarsaApp.API.Data;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Reports;
 
 namespace TerakarsaApp.API.Services;
 
@@ -33,6 +34,21 @@ public class BundleService
         public int NewBundleNo { get; set; }
         public string? NewBundleLetter { get; set; }
         public string NewSerial { get; set; } = string.Empty;
+    }
+
+    // Fix: dipakai /b/{Serial} publik ketika Serial diketik operator dalam format "{huruf}{nomor}"
+    // (mis. "D347") bukan serial asli -- SP sama dengan pencarian Riwayat Laporan Bundle
+    // (SIS_Report_BundleLookupByNo, lihat sql/sp_Report_Bundle.sql), bisa cocok > 1 project.
+    public async Task<List<BundleLookupMatchDto>> LookupByLetterNoAsync(string bundleLetter, int bundleNo)
+    {
+        var letterParam = new SqlParameter("@BundleLetter", bundleLetter);
+        var bundleNoParam = new SqlParameter("@BundleNo", bundleNo);
+
+        return await _db.Database
+            .SqlQueryRaw<BundleLookupMatchDto>(
+                "EXEC SIS_Report_BundleLookupByNo @BundleLetter = @BundleLetter, @BundleNo = @BundleNo",
+                letterParam, bundleNoParam)
+            .ToListAsync();
     }
 
     // Prompt 24: dipisah dari GetByArticleAsync supaya bisa dipakai sendiri oleh station

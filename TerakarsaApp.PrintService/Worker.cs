@@ -48,14 +48,22 @@ public class Worker : BackgroundService
         }
     }
 
+    // Job_type label (TSC TTP-244 Pro, TSPL) TETAP hardcode -- TsplBuilder.cs punya layout
+    // spesifik per jenis label di C#, jadi job_type baru di sini SELALU butuh kode baru juga
+    // (tidak ada untungnya dipindah ke DB).
     private static readonly string[] LabelJobTypes = { "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE" };
-    private static readonly string[] KuponJobTypes = { "KUPON_BORONGAN", "REKAP_PRODUKSI", "REKAP_KARYAWAN", "REKAP_WIP" };
 
+    // Ad hoc (2026-09-01): job_type "kupon" (thermal, render_mode TOKEN) TIDAK LAGI hardcode di
+    // sini -- render TOKEN generik (EscPosRenderer cuma nerjemahin token, tidak peduli
+    // job_type-nya apa), jadi job_type struk baru cukup SP render + baris di
+    // print_kupon_job_types (DB), TANPA update/republish/restart service ini. Diambil ULANG
+    // setiap siklus poll lewat GetKuponJobTypesAsync (bukan cache sekali di startup) supaya
+    // baris baru langsung kepakai.
     private async Task PollOnceAsync(CancellationToken ct)
     {
         var enabledJobTypes = new List<string>();
         if (_options.PrinterLabelOn) enabledJobTypes.AddRange(LabelJobTypes);
-        if (_options.PrinterThermalOn) enabledJobTypes.AddRange(KuponJobTypes);
+        if (_options.PrinterThermalOn) enabledJobTypes.AddRange(await _apiClient.GetKuponJobTypesAsync(ct));
 
         // Semua printer off -- jangan panggil API sama sekali, tidak ada yang boleh diklaim.
         if (enabledJobTypes.Count == 0) return;

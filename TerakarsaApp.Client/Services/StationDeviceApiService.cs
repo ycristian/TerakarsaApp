@@ -412,9 +412,10 @@ public class StationDeviceApiService
 
     // Prompt 42: tab "Rekap Produksi" -- header + detail harian + WIP snapshot, menggantikan
     // Rekap Penjahit Prompt 41.
-    public async Task<RekapStrukResultDto?> GetRekapStrukAsync(string level, int divisionId, int? resourceId, int? employeeId, DateTime date)
+    public async Task<RekapStrukResultDto?> GetRekapStrukAsync(string level, int divisionId, int? resourceId, int? employeeId, DateTime startDateTime, DateTime endDateTime)
     {
-        var url = $"api/station/rekap-struk?level={Uri.EscapeDataString(level)}&divisionId={divisionId}&date={date:yyyy-MM-dd}";
+        var url = $"api/station/rekap-struk?level={Uri.EscapeDataString(level)}&divisionId={divisionId}"
+            + $"&startDateTime={Uri.EscapeDataString(startDateTime.ToString("O"))}&endDateTime={Uri.EscapeDataString(endDateTime.ToString("O"))}";
         if (resourceId.HasValue) url += $"&resourceId={resourceId.Value}";
         if (employeeId.HasValue) url += $"&employeeId={employeeId.Value}";
 

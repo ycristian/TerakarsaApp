@@ -18,7 +18,7 @@
 
 <PageTitle>Stasiun</PageTitle>
 
-<div style="font-size: 1.1rem;">
+<div style="font-size: 0.9rem;">
 
 <div class="mb-3">
     <CloseButton />
@@ -188,45 +188,37 @@ else
                 {
                     @foreach (var card in InCards)
                     {
-                        @if (card.Bundle is { } item)
+                        @if (card.BundleGroup is { Count: > 0 } bundles)
                         {
+                            var first = bundles[0];
                             <div class="card mb-2">
                                 <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <div>
-                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@FormatProject(item.NoPo, item.ProjectName))</span></h5>
-                                            <p class="text-muted mb-0">@item.Style @item.Color</p>
-                                        </div>
-                                        <div class="text-end">
-                                            <span class="badge bg-dark d-block mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial</span>
-                                            @if (!string.IsNullOrEmpty(item.SizeName))
-                                            {
-                                                <span class="badge bg-secondary">@item.SizeName</span>
-                                            }
-                                        </div>
+                                    <div class="mb-2" style="font-size: 0.85rem;">
+                                        <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
+                                        <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
                                     </div>
-                                    <hr class="my-2" />
-                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                        <p class="mb-0">
-                                            Step: <strong>@item.StepName</strong> &middot; Qty kirim: <strong>@item.QtyOk</strong>
-                                            @if (item.IsAdjustment)
-                                            {
-                                                <span class="badge bg-warning text-dark ms-1">Penyesuaian</span>
-                                            }
-                                            @if (item.UpdatedAt is not null)
-                                            {
-                                                <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
-                                            }
-                                            <br />
-                                            <span class="text-muted">Dari: @item.FromDivisionName &middot; @item.SentAt.ToString("dd/MM HH:mm")</span>
-                                            <br />
-                                            <span class="text-muted">Diterima oleh: <strong>@ReceiverDisplayName(item)</strong></span>
-                                        </p>
-                                        <div class="d-flex gap-2">
-                                            <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
-                                            <button class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="() => OpenReceiveNoteModal(item)">Dengan Catatan</button>
-                                            <button class="btn btn-success" disabled="@isBusy" @onclick="() => ReceiveOne(item)">Terima</button>
-                                        </div>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
+                                            <tbody>
+                                                @foreach (var b in bundles)
+                                                {
+                                                    <tr>
+                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
+                                                        <td>@b.QtyOk</td>
+                                                        <td>@b.FromDivisionName</td>
+                                                        <td>
+                                                            <div class="d-flex gap-1">
+                                                                <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
+                                                                <button class="btn btn-outline-secondary btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenReceiveNoteModal(b)">Catatan</button>
+                                                                <button class="btn btn-success btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => ReceiveOne(b)">Terima</button>
+                                                            </div>
+                                                            <span class="text-muted">@FormatDateTime(b.SentAt)</span>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -334,33 +326,37 @@ else
                                 </div>
                             </div>
                         }
-                        else if (card.Bundle is { } item)
+                        else if (card.BundleGroup is { Count: > 0 } bundles)
                         {
+                            var first = bundles[0];
                             <div class="card mb-2 border-warning">
                                 <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                        <div>
-                                            <h5 class="mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial <span class="text-muted">&middot; @item.ArticleName</span></h5>
-                                            <p class="text-muted mb-0">
-                                                @FormatProject(item.NoPo, item.ProjectName)
-                                                @if (!string.IsNullOrEmpty(item.SizeName))
+                                    <div class="mb-2" style="font-size: 0.85rem;">
+                                        <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
+                                        <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
+                                    </div>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
+                                            <tbody>
+                                                @foreach (var b in bundles)
                                                 {
-                                                    <text> &middot; Size @item.SizeName</text>
+                                                    <tr>
+                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
+                                                        <td>@b.Qty</td>
+                                                        <td>@(b.EmployeeName ?? "-")</td>
+                                                        <td>
+                                                            <div class="d-flex gap-1">
+                                                                <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
+                                                                <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(b)">Batal</button>
+                                                                <button class="btn btn-success btn-sm py-0 px-1" disabled="@(isBusy || b.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(b)">Kirim</button>
+                                                            </div>
+                                                            <span class="text-muted">@FormatDateTime(b.ReceivedAt)</span>
+                                                        </td>
+                                                    </tr>
                                                 }
-                                                &middot; Qty @item.Qty
-                                                @if (!string.IsNullOrEmpty(item.TailorName) || !string.IsNullOrEmpty(item.EmployeeName))
-                                                {
-                                                    <text> &middot; Penjahit: @BundleDisplay.FormatPenjahit(item.TailorName, item.EmployeeName)</text>
-                                                }
-                                            </p>
-                                            <p class="text-muted mb-0">Next Step: @(item.IsLastStep ? "Step terakhir" : (item.NextStepName ?? "-"))</p>
-                                            <p class="text-muted small mb-0">diterima @MinutesAgo(item.ReceivedAt) - @FormatDateTime(item.ReceivedAt)</p>
-                                        </div>
-                                        <div class="d-flex gap-2">
-                                            <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
-                                            <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(item)">Batal Terima</button>
-                                            <button class="btn btn-success" disabled="@(isBusy || item.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(item)">Kirim Hasil</button>
-                                        </div>
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -378,108 +374,73 @@ else
                 {
                     @foreach (var card in OutCards)
                     {
-                        @if (card.Single is { } item)
+                        @if (card.BundleGroup is { Count: > 0 } bundles)
                         {
+                            var first = bundles[0];
                             <div class="card mb-2">
                                 <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <div>
-                                            <h5 class="mb-1">@item.ArticleName <span class="text-muted">(@FormatProject(item.NoPo, item.ProjectName))</span></h5>
-                                            <p class="text-muted mb-0">@item.Style @item.Color</p>
-                                        </div>
-                                        <div class="text-end">
-                                            @if (item.BundleId is not null)
-                                            {
-                                                <span class="badge bg-dark d-block mb-1">No. @BundleDisplay.Format(item.BundleLetter, item.BundleNo) &middot; @item.Serial</span>
-                                            }
-                                            @if (!string.IsNullOrEmpty(item.SizeName))
-                                            {
-                                                <span class="badge bg-secondary">@item.SizeName</span>
-                                            }
-                                        </div>
+                                    <div class="mb-2" style="font-size: 0.85rem;">
+                                        <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
+                                        <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
                                     </div>
-                                    <hr class="my-2" />
-                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                        <div>
-                                            <p class="mb-1">
-                                                Step: <strong>@item.StepName</strong>
-                                                @if (!string.IsNullOrEmpty(item.ResourceName))
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
+                                            <tbody>
+                                                @foreach (var b in bundles)
                                                 {
-                                                    <text> &middot; Oleh: <strong>@item.ResourceName</strong></text>
+                                                    <tr>
+                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
+                                                        <td>@b.QtyOk</td>
+                                                        <td>
+                                                            @{ var rejectLines = RejectLines(b); }
+                                                            @if (rejectLines.Count == 0)
+                                                            {
+                                                                <text>-</text>
+                                                            }
+                                                            else
+                                                            {
+                                                                @foreach (var line in rejectLines)
+                                                                {
+                                                                    <div class="text-danger">@line</div>
+                                                                }
+                                                            }
+                                                        </td>
+                                                        <td>
+                                                            <div class="d-flex gap-1">
+                                                                @if (b.BundleId is not null)
+                                                                {
+                                                                    <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
+                                                                }
+                                                                @if (b.IsBundling && b.ReceivedAt is null)
+                                                                {
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenEditBundleModal(b)">Edit</button>
+                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(b)">Hapus</button>
+                                                                }
+                                                                else if (b.IsBundling)
+                                                                {
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@(isBusy || !CanEditOrDeleteBundle(b))" @onclick="() => OpenEditBundleModal(b)">Edit</button>
+                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@(isBusy || !CanEditOrDeleteBundle(b))" @onclick="() => OpenDeleteBundleModal(b)">Hapus</button>
+                                                                }
+                                                                else if (b.ReceivedAt is null)
+                                                                {
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenReviseModal(b)">Revisi</button>
+                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(b)">Batal</button>
+                                                                }
+                                                            </div>
+                                                            <div class="text-muted" style="font-size: 0.65rem;">
+                                                                Krm @FormatDateTime(b.CreatedAt)
+                                                                @if (b.ReceivedAt is not null)
+                                                                {
+                                                                    <br />
+                                                                    <text>Trm @FormatDateTime(b.ReceivedAt.Value)</text>
+                                                                }
+                                                            </div>
+                                                        </td>
+                                                    </tr>
                                                 }
-                                                @if (item.UpdatedAt is not null)
-                                                {
-                                                    <span class="badge bg-info ms-1">Direvisi @item.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
-                                                }
-                                            </p>
-                                            <div>Qty OK: <strong>@item.QtyOk</strong></div>
-                                            @if (item.IsBundling && !string.IsNullOrEmpty(BundleTailorName(item)))
-                                            {
-                                                <div>Penjahit: <strong>@BundleTailorName(item)</strong></div>
-                                            }
-                                            @foreach (var line in RejectLines(item))
-                                            {
-                                                <div class="text-danger">@line</div>
-                                            }
-                                            <div class="text-muted mt-1">
-                                                @if (item.IsLastStep)
-                                                {
-                                                    <text>step terakhir — selesai</text>
-                                                }
-                                                else if (!item.IsBundling && item.ReceivedAt is not null)
-                                                {
-                                                    <text>sudah diterima @item.TargetDivisionName</text>
-                                                }
-                                                else
-                                                {
-                                                    <text>menunggu diterima @item.TargetDivisionName</text>
-                                                }
-                                                &middot; @item.CreatedAt.ToString("dd/MM HH:mm")
-                                            </div>
-                                        </div>
-                                        <div class="d-flex gap-2">
-                                            @if (item.BundleId is not null)
-                                            {
-                                                <button class="btn btn-outline-secondary btn-sm" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(item.BundleId, item.Serial)"><i class="fe fe-printer"></i></button>
-                                            }
-                                            @if (item.IsBundling && item.ReceivedAt is null)
-                                            {
-                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenEditBundleModal(item)">Edit</button>
-                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(item)">Hapus</button>
-                                            }
-                                            else if (item.IsBundling)
-                                            {
-                                                <button class="btn btn-outline-primary btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenEditBundleModal(item)">Edit</button>
-                                                <button class="btn btn-outline-danger btn-sm" disabled="@(isBusy || !CanEditOrDeleteBundle(item))" @onclick="() => OpenDeleteBundleModal(item)">Hapus</button>
-                                            }
-                                            else if (item.ReceivedAt is null)
-                                            {
-                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseModal(item)">Revisi</button>
-                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(item)">Batal Serah</button>
-                                            }
-                                        </div>
-                                    </div>
-                                    <div class="text-muted small mt-2 mb-0">
-                                        @if (item.IsBundling && item.ReceivedAt is null)
-                                        {
-                                            <text>Bisa diedit/dihapus tanpa batas waktu selama divisi berikutnya belum menekan Terima.</text>
-                                        }
-                                        else if (item.IsBundling)
-                                        {
-                                            <text>Sudah diterima @item.TargetDivisionName dan masih WIP — bisa diedit/dihapus sampai 1 jam setelah bundle dibuat.</text>
-                                        }
-                                        else if (item.IsLastStep)
-                                        {
-                                            <text>Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari).</text>
-                                        }
-                                        else if (item.ReceivedAt is not null)
-                                        {
-                                            <text>Sudah diterima @item.TargetDivisionName — riwayat kiriman hari ini, tidak bisa direvisi/dibatalkan lagi.</text>
-                                        }
-                                        else
-                                        {
-                                            <text>Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.</text>
-                                        }
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -739,13 +700,36 @@ else
                     <button type="button" class="btn-close" @onclick="CloseRekapStrukModal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row g-2 mb-3">
-                        <div class="col-8 col-md-6">
-                            <label class="form-label">Tanggal</label>
-                            <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
-                                   value="@rekapDate.ToString("yyyy-MM-dd")" @onchange="HandleRekapDateChanged" />
-                        </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="rekapUseTime"
+                               checked="@rekapUseTime" @onchange="HandleRekapUseTimeChanged" />
+                        <label class="form-check-label" for="rekapUseTime">Use Time</label>
                     </div>
+                    @if (rekapUseTime)
+                    {
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Waktu Mulai</label>
+                                <input type="datetime-local" class="form-control"
+                                       value="@rekapStartDateTime.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandleRekapStartChanged" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Waktu Selesai</label>
+                                <input type="datetime-local" class="form-control"
+                                       value="@rekapEndDateTime.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandleRekapEndChanged" />
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-2 mb-3">
+                            <div class="col-8 col-md-6">
+                                <label class="form-label">Tanggal</label>
+                                <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                       value="@rekapDate.ToString("yyyy-MM-dd")" @onchange="HandleRekapDateChanged" />
+                            </div>
+                        </div>
+                    }
 
                     @if (isLoadingRekap)
                     {
@@ -770,14 +754,14 @@ else
                             }
                         </p>
                         <p class="text-muted mb-3">
-                            Tanggal: <strong>@rekapDate.ToString("dd/MM/yyyy")</strong>
+                            Waktu: <strong>@h.PeriodStart.ToString("dd/MM/yyyy HH:mm") - @h.PeriodEnd.ToString(h.PeriodStart.Date == h.PeriodEnd.Date ? "HH:mm" : "dd/MM/yyyy HH:mm")</strong>
                         </p>
                         <div class="border rounded p-3 text-center">
-                            <div class="text-muted small">Total pcs tanggal ini</div>
+                            <div class="text-muted small">Total pcs periode ini</div>
                             <div class="fs-2 fw-bold">@h.TotalQty</div>
                             @if (h.TotalQty == 0)
                             {
-                                <div class="text-warning small mt-1">Tidak ada data produksi di resource &amp; tanggal ini.</div>
+                                <div class="text-warning small mt-1">Tidak ada data produksi di resource &amp; periode ini.</div>
                             }
                         </div>
                     }
@@ -1815,12 +1799,14 @@ else
     {
         public string ProjectName = string.Empty;
         public string? NoPo;
-        public StationInProgressDto? Bundle;
+        // Kartu bundle sekarang dikelompokkan per artikel jadi satu tabel (bukan satu kartu
+        // per bundle) -- lihat AllWipCards.
+        public List<StationInProgressDto>? BundleGroup;
         public StationActiveWorkDto? NonBundle;
 
-        // Fix: dasar urutan default tab WIP -- ReceivedAt kartu bundle, atau WorkStartedAt
-        // kartu non-bundle (waktu aktivitas terakhir, bisa null kalau belum tersentuh).
-        public DateTime? SortTime => Bundle?.ReceivedAt ?? NonBundle?.WorkStartedAt;
+        // Fix: dasar urutan default tab WIP -- ReceivedAt bundle TERBARU dalam grup, atau
+        // WorkStartedAt kartu non-bundle (waktu aktivitas terakhir, bisa null kalau belum tersentuh).
+        public DateTime? SortTime => BundleGroup is { Count: > 0 } g ? g.Max(b => b.ReceivedAt) : NonBundle?.WorkStartedAt;
     }
 
     // Format tampilan nama project di kartu station: "[No PO] - [Nama Project]".
@@ -1837,7 +1823,9 @@ else
     private class InCard
     {
         public DateTime SortTime;
-        public StationPendingReceiveDto? Bundle;
+        // Kartu bundle dikelompokkan per artikel jadi satu tabel (bukan satu kartu per
+        // bundle) -- sama pola dengan WipCard.BundleGroup di tab WIP.
+        public List<StationPendingReceiveDto>? BundleGroup;
         public NonBundleReceiveGroup? NonBundleGroup;
     }
 
@@ -1857,7 +1845,8 @@ else
 
     private List<InCard> InCards =>
         pendingReceives.Where(i => i.BundleId is not null)
-            .Select(i => new InCard { SortTime = i.SentAt, Bundle = i })
+            .GroupBy(i => i.ArticleWorkflowId)
+            .Select(g => new InCard { SortTime = g.Min(x => x.SentAt), BundleGroup = g.OrderBy(x => x.BundleNo).ToList() })
         .Concat(
             pendingReceives.Where(i => i.BundleId is null)
                 .GroupBy(i => (i.ArticleWorkflowId, Minute: TruncateToMinute(i.SentAt)))
@@ -1885,7 +1874,9 @@ else
     private class OutCard
     {
         public DateTime SortTime;
-        public StationPendingHandoverDto? Single;
+        // Kartu bundle dikelompokkan per artikel jadi satu tabel (bukan satu kartu per
+        // bundle) -- sama pola dengan WipCard.BundleGroup di tab WIP.
+        public List<StationPendingHandoverDto>? BundleGroup;
         public NonBundleHandoverGroup? NonBundleGroup;
     }
 
@@ -1911,7 +1902,8 @@ else
 
     private List<OutCard> OutCards =>
         outbound.Where(i => i.BundleId is not null)
-            .Select(i => new OutCard { SortTime = i.CreatedAt, Single = i })
+            .GroupBy(i => i.ArticleId)
+            .Select(g => new OutCard { SortTime = g.Max(x => x.CreatedAt), BundleGroup = g.OrderBy(x => x.BundleNo).ToList() })
         .Concat(
             outbound.Where(i => i.BundleId is null)
                 .GroupBy(i => (i.ArticleWorkflowId, Minute: TruncateToMinute(i.CreatedAt)))
@@ -2316,7 +2308,10 @@ else
     {
         if (rekapDivisionId <= 0) return;
 
+        rekapUseTime = false;
         rekapDate = DateTime.Today;
+        rekapStartDateTime = DateTime.Today.AddHours(6);
+        rekapEndDateTime = DateTime.Today.AddHours(22);
         rekapError = string.Empty;
         rekapPrintFeedback = string.Empty;
         showRekapStrukModal = true;
@@ -2329,6 +2324,12 @@ else
         rekapResult = null;
     }
 
+    private async Task HandleRekapUseTimeChanged(ChangeEventArgs e)
+    {
+        rekapUseTime = e.Value is bool b && b;
+        await LoadRekapStruk();
+    }
+
     private async Task HandleRekapDateChanged(ChangeEventArgs e)
     {
         if (DateTime.TryParse(e.Value?.ToString(), out var parsed) && parsed.Date <= DateTime.Today)
@@ -2338,12 +2339,31 @@ else
         }
     }
 
+    private async Task HandleRekapStartChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+        {
+            rekapStartDateTime = parsed;
+            await LoadRekapStruk();
+        }
+    }
+
+    private async Task HandleRekapEndChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+        {
+            rekapEndDateTime = parsed;
+            await LoadRekapStruk();
+        }
+    }
+
     private async Task LoadRekapStruk()
     {
         isLoadingRekap = true;
         rekapError = string.Empty;
         rekapResult = await StationApi.GetRekapStrukAsync(RekapLevel, rekapDivisionId,
-            rekapResourceId > 0 ? rekapResourceId : null, rekapEmployeeId > 0 ? rekapEmployeeId : null, rekapDate);
+            rekapResourceId > 0 ? rekapResourceId : null, rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            RekapEffectiveStart, RekapEffectiveEnd);
         isLoadingRekap = false;
 
         if (rekapResult?.Header is null)
@@ -2364,7 +2384,8 @@ else
             DivisionId = rekapDivisionId,
             ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
             EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
-            Date = rekapDate
+            StartDateTime = RekapEffectiveStart,
+            EndDateTime = RekapEffectiveEnd
         });
 
         isBusy = false;
@@ -2406,7 +2427,14 @@ else
     // satu daftar WIP, dikelompokkan per project supaya tetap terbaca saat jumlahnya banyak.
     private IEnumerable<WipCard> AllWipCards =>
         activeWork.Select(a => new WipCard { ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a })
-            .Concat(inProgress.Select(b => new WipCard { ProjectName = b.ProjectName, NoPo = b.NoPo, Bundle = b }));
+            .Concat(inProgress
+                .GroupBy(b => b.ArticleId)
+                .Select(g => new WipCard
+                {
+                    ProjectName = g.First().ProjectName,
+                    NoPo = g.First().NoPo,
+                    BundleGroup = g.OrderBy(b => b.BundleNo).ToList()
+                }));
 
     private static bool ContainsSearch(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
@@ -2435,11 +2463,11 @@ else
             return ContainsSearch(nb.ProjectName, q) || ContainsSearch(nb.ArticleName, q)
                 || ContainsSearch(nb.Style, q) || ContainsSearch(nb.Color, q) || ContainsSearch(nb.StepName, q);
 
-        if (card.Bundle is { } b)
-            return ContainsSearch(b.ProjectName, q) || ContainsSearch(b.ArticleName, q)
+        if (card.BundleGroup is { } grp)
+            return grp.Any(b => ContainsSearch(b.ProjectName, q) || ContainsSearch(b.ArticleName, q)
                 || ContainsSearch(b.Style, q) || ContainsSearch(b.Color, q) || ContainsSearch(b.NextStepName, q)
                 || ContainsSearch(b.Serial, q) || ContainsSearch(b.BundleNo.ToString(), q)
-                || ContainsSearch(b.TailorName, q) || ContainsSearch(b.EmployeeName, q) || ContainsSearch(b.Remarks, q);
+                || ContainsSearch(b.TailorName, q) || ContainsSearch(b.EmployeeName, q) || ContainsSearch(b.Remarks, q));
 
         return false;
     }
@@ -2566,28 +2594,12 @@ else
     private static List<string> RejectLines(StationPendingHandoverDto item)
     {
         var parts = new List<string>();
-        if (item.QtyRejectPrint > 0) parts.Add($"Reject Print: {item.QtyRejectPrint}");
-        if (item.QtyRejectFabric > 0) parts.Add($"Reject Bahan: {item.QtyRejectFabric}");
-        if (item.QtyRejectSewing > 0) parts.Add($"Reject Jahit: {item.QtyRejectSewing}");
-        if (item.QtyRejectRework > 0) parts.Add($"Reject Rework: {item.QtyRejectRework}");
-        if (item.QtyLost > 0) parts.Add($"Hilang: {item.QtyLost}");
+        if (item.QtyRejectPrint > 0) parts.Add($"Print : {item.QtyRejectPrint}");
+        if (item.QtyRejectFabric > 0) parts.Add($"Bahan : {item.QtyRejectFabric}");
+        if (item.QtyRejectSewing > 0) parts.Add($"Jahit : {item.QtyRejectSewing}");
+        if (item.QtyRejectRework > 0) parts.Add($"Rework : {item.QtyRejectRework}");
+        if (item.QtyLost > 0) parts.Add($"Hilang : {item.QtyLost}");
         return parts;
-    }
-
-    // Fix: kartu OUT (tab Dikirim) belum menampilkan penjahit -- "Oleh" di kartu ini berarti
-    // pelaksana Bundling (awl.resource_id), bukan penjahit (bundles.resource_id/employee_id).
-    private static string? BundleTailorName(StationPendingHandoverDto item) =>
-        item.BundleResourceName is null && item.BundleEmployeeName is null
-            ? null
-            : BundleDisplay.FormatPenjahit(item.BundleResourceName, item.BundleEmployeeName);
-
-    private static string MinutesAgo(DateTime at)
-    {
-        var minutes = (int)Math.Max(0, (DateTime.Now - at).TotalMinutes);
-        if (minutes < 60) return $"{minutes} menit lalu";
-        var hours = minutes / 60;
-        if (hours < 24) return $"{hours} jam lalu";
-        return $"{hours / 24} hari lalu";
     }
 
     private static string FormatDateTime(DateTime at) => at.ToString("dd/MM HH:mm");
@@ -3455,7 +3467,17 @@ else
     private List<EmployeeLookupDto> rekapEmployeeOptions = new();
     private int rekapEmployeeId;
     private bool showRekapStrukModal = false;
+    // Ad hoc (2026-09-01): rentang waktu bebas (bukan lagi 1 hari kalender) -- default mulai
+    // 06:00 hari ini, selesai jam berjalan (sekarang), lihat catatan lengkap di
+    // sql/sp_Report_RekapStruk.sql. Checkbox "Use Time" (ad hoc 2026-09-01): TANPA dicentang
+    // (default) form cuma 1 date picker (satu hari penuh, EffectiveStart/End = 00:00 s/d 00:00
+    // hari berikutnya) -- DICENTANG baru muncul 2 datetime-local picker (rentang jam bebas).
+    private bool rekapUseTime = false;
     private DateTime rekapDate = DateTime.Today;
+    private DateTime rekapStartDateTime = DateTime.Today.AddHours(6);
+    private DateTime rekapEndDateTime = DateTime.Today.AddHours(22);
+    private DateTime RekapEffectiveStart => rekapUseTime ? rekapStartDateTime : rekapDate.Date;
+    private DateTime RekapEffectiveEnd => rekapUseTime ? rekapEndDateTime : rekapDate.Date.AddDays(1);
     private bool isLoadingRekap = false;
     private RekapStrukResultDto? rekapResult;
     private string rekapError = string.Empty;

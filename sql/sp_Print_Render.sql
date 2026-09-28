@@ -48,13 +48,18 @@ GO
 -- menjamin kolom TERAKHIR rata kanan, sisanya rata kiri -- di sini semua kolom angka perlu rata
 -- kanan sekaligus, jadi di-padding manual sebelum digabung, "1 spasi 1 karakter", dipotong kalau
 -- kepanjangan supaya alignment tabel tidak berantakan).
+-- Ad hoc (2026-09-03): karakter pengisi diganti spasi -> underscore ("_") supaya sel
+-- kosong/tidak terisi (mis. kolom reject yg 0, No/WF/Time/Emp di baris Total) kelihatan sbg
+-- garis melintang di kertas thermal, bukan celah putih yg susah dibedakan dari tepi kertas.
+-- HANYA pengisi REPLICATE ini yg berubah -- spasi PEMISAH ANTAR KOLOM (literal N' ' di
+-- pemanggil, di luar fungsi ini) TETAP spasi asli, tidak disentuh.
 CREATE OR ALTER FUNCTION SIS_fn_PadRight(@Text NVARCHAR(50), @Width INT)
 RETURNS NVARCHAR(50)
 AS
 BEGIN
     SET @Text = ISNULL(@Text, N'');
     IF LEN(@Text) > @Width SET @Text = LEFT(@Text, @Width);
-    RETURN @Text + REPLICATE(N' ', @Width - LEN(@Text));
+    RETURN @Text + REPLICATE(N'_', @Width - LEN(@Text));
 END;
 GO
 
@@ -64,7 +69,7 @@ AS
 BEGIN
     SET @Text = ISNULL(@Text, N'');
     IF LEN(@Text) > @Width SET @Text = LEFT(@Text, @Width);
-    RETURN REPLICATE(N' ', @Width - LEN(@Text)) + @Text;
+    RETURN REPLICATE(N'_', @Width - LEN(@Text)) + @Text;
 END;
 GO
 
@@ -125,6 +130,10 @@ BEGIN
     ELSE IF @JobType = 'REKAP_WIP'
     BEGIN
         EXEC SIS_Print_RekapWip @RefId = @RefId, @Payload = @Payload;
+    END
+    ELSE IF @JobType = 'REKAP_PENGAMBILAN'
+    BEGIN
+        EXEC SIS_Print_RekapPengambilan @RefId = @RefId, @Payload = @Payload;
     END
     ELSE
     BEGIN
@@ -271,14 +280,25 @@ BEGIN
 
     DECLARE @NL CHAR(1) = CHAR(10);
     DECLARE @DivisionName NVARCHAR(150), @ResourceName NVARCHAR(150), @EmployeeName NVARCHAR(150),
-            @TanggalStr VARCHAR(20), @TotalQty INT;
+            @StartAt DATETIME2, @EndAt DATETIME2, @TotalQty INT;
 
     SELECT
         @DivisionName = JSON_VALUE(@Payload, '$.division_name'),
         @ResourceName = JSON_VALUE(@Payload, '$.resource_name'),
         @EmployeeName = JSON_VALUE(@Payload, '$.employee_name'),
-        @TanggalStr   = JSON_VALUE(@Payload, '$.tanggal'),
+        @StartAt      = JSON_VALUE(@Payload, '$.start_at'),
+        @EndAt        = JSON_VALUE(@Payload, '$.end_at'),
         @TotalQty     = JSON_VALUE(@Payload, '$.total_qty');
+
+    -- Ad hoc (2026-09-01): rentang waktu bebas (bukan lagi 1 hari kalender) -- "Tanggal :
+    -- dd/MM/yyyy HH:mm -> HH:mm" kalau start/end di TANGGAL SAMA (kasus umum, mis. shift 06:00-
+    -- 10:00), atau "dd/MM/yyyy HH:mm -> dd/MM/yyyy HH:mm" kalau beda tanggal (rentang lintas
+    -- hari) supaya tidak ambigu.
+    DECLARE @PeriodeStr NVARCHAR(60) = CASE
+        WHEN CAST(@StartAt AS DATE) = CAST(@EndAt AS DATE)
+            THEN FORMAT(@StartAt, 'dd/MM/yyyy HH:mm') + N' -> ' + FORMAT(@EndAt, 'HH:mm')
+        ELSE FORMAT(@StartAt, 'dd/MM/yyyy HH:mm') + N' -> ' + FORMAT(@EndAt, 'dd/MM/yyyy HH:mm')
+    END;
 
     -- Detail per baris log mentah sbg TABEL (bukan blok multi-baris) -- dikelompokkan visual
     -- per "No PO - Artikel", header grup + header kolom tabel dicetak sekali (RnInGroup = 1).
@@ -301,17 +321,30 @@ BEGIN
     -- {FB} = font B (kecil/rapat) -- dipasang per-baris (header tabel, tiap baris data, baris
     -- Total) supaya bagian tabel tercetak lebih ringkas, terpisah dari baris master/HR di
     -- sekitarnya yang tetap font default.
+    -- Ad hoc (2026-09-01): istilah kolom reject dipersingkat lagi supaya tidak rancu dgn "R1/R2/
+    -- R3" generik -- rPR (reject Print), rBH (reject Bahan/Fabric), rJT (reject Jahit/Sewing),
+    -- RWK (Rework), LST (Lost/Hilang). Lebar kolom TETAP 4 (semua label baru <= 4 char).
     DECLARE @DetailText NVARCHAR(MAX);
     DECLARE @TableHeader NVARCHAR(80) = N'{FB}' +
         dbo.SIS_fn_PadRight(N'NO', 5) + N'|' + dbo.SIS_fn_PadLeft(N'OK', 4) + N'|'
-        + dbo.SIS_fn_PadLeft(N'R1', 4) + N'|' + dbo.SIS_fn_PadLeft(N'R2', 4) + N'|'
-        + dbo.SIS_fn_PadLeft(N'R3', 4) + N'|' + dbo.SIS_fn_PadLeft(N'RW', 4) + N'|'
-        + dbo.SIS_fn_PadLeft(N'LS', 4) + N'|' + dbo.SIS_fn_PadLeft(N'WF', 6) + N'|'
-        + N' ' + dbo.SIS_fn_PadRight(N'Time', 6) + N'|' + N' Emp';
+        + dbo.SIS_fn_PadLeft(N'rPR', 4) + N'|' + dbo.SIS_fn_PadLeft(N'rBH', 4) + N'|'
+        + dbo.SIS_fn_PadLeft(N'rJT', 4) + N'|' + dbo.SIS_fn_PadLeft(N'RWK', 4) + N'|'
+        + dbo.SIS_fn_PadLeft(N'LST', 4) + N'|' + dbo.SIS_fn_PadLeft(N'WF', 6) + N'|'
+        + N'_' + dbo.SIS_fn_PadRight(N'Time', 6) + N'|' + N'_Emp';
+    -- Ad hoc (2026-09-01): rentang waktu bebas (lihat SIS_Report_RekapStrukPrint) skrg bisa
+    -- mencakup LEBIH DARI 1 hari kalender -- kalau begitu, sisipkan header tanggal ("Sabtu,
+    -- 29/01/2026", nama hari Indonesia) + ULANG header tabel setiap kali tanggal baris berganti
+    -- DI DALAM tiap grup No PO/Artikel (RnInDate = 1). Urutan baris ikut berubah jadi tanggal
+    -- dulu (supaya baris per-tanggal kontigu, bisa dikelompokkan header), baru Penjahit lalu jam
+    -- -- utk payload 1 hari (kasus umum) EventDate konstan dlm grup jadi TIDAK mengubah urutan
+    -- lama sama sekali (RnInDate=1 hanya terjadi sekali, sama seperti RnInGroup=1 sebelumnya).
+    DECLARE @IsMultiDay BIT = CASE WHEN CAST(@StartAt AS DATE) = CAST(@EndAt AS DATE) THEN 0 ELSE 1 END;
     ;WITH DetailRows AS (
         SELECT
             *,
-            ROW_NUMBER() OVER (PARTITION BY NoPo, ArticleName ORDER BY PelaksanaName ASC, EventTime ASC) AS RnInGroup,
+            CAST(EventTime AS DATE) AS EventDate,
+            ROW_NUMBER() OVER (PARTITION BY NoPo, ArticleName ORDER BY CAST(EventTime AS DATE) ASC, PelaksanaName ASC, EventTime ASC) AS RnInGroup,
+            ROW_NUMBER() OVER (PARTITION BY NoPo, ArticleName, CAST(EventTime AS DATE) ORDER BY PelaksanaName ASC, EventTime ASC) AS RnInDate,
             COUNT(*) OVER (PARTITION BY NoPo, ArticleName) AS GroupCount,
             SUM(QtyOk) OVER (PARTITION BY NoPo, ArticleName) AS GroupQtyOk,
             SUM(QtyRejectPrint) OVER (PARTITION BY NoPo, ArticleName) AS GroupQtyRejectPrint,
@@ -341,6 +374,10 @@ BEGIN
             CASE WHEN RnInGroup = 1
                 THEN N'{B}' + dbo.SIS_fn_TokenEscape(ISNULL(NoPo, N'-')) + N' - ' + dbo.SIS_fn_TokenEscape(ISNULL(ProjectName, N'-')) + @NL
                      + dbo.SIS_fn_TokenEscape(ArticleName) + @NL
+                ELSE N''
+            END
+            + CASE WHEN RnInDate = 1
+                THEN (CASE WHEN @IsMultiDay = 1 THEN N'{B}{FB}' + FORMAT(EventDate, N'dddd, dd/MM/yyyy', N'id-ID') + @NL ELSE N'' END)
                      + @TableHeader + @NL
                 ELSE N''
             END
@@ -353,8 +390,8 @@ BEGIN
             + dbo.SIS_fn_PadLeft(CASE WHEN QtyRejectRework > 0 THEN CAST(QtyRejectRework AS NVARCHAR(10)) ELSE N'' END, 4) + N'|'
             + dbo.SIS_fn_PadLeft(CASE WHEN QtyLost         > 0 THEN CAST(QtyLost         AS NVARCHAR(10)) ELSE N'' END, 4) + N'|'
             + dbo.SIS_fn_PadLeft(CAST(WorkflowLogId AS NVARCHAR(10)), 6) + N'|'
-            + N' ' + dbo.SIS_fn_PadRight(ISNULL(FORMAT(EventTime, N'HH:mm'), N''), 6) + N'|'
-            + N' ' + dbo.SIS_fn_TokenEscape(LEFT(ISNULL(PelaksanaName, N''), 10))
+            + N'_' + dbo.SIS_fn_PadRight(ISNULL(FORMAT(EventTime, N'HH:mm'), N''), 6) + N'|'
+            + N'_' + dbo.SIS_fn_TokenEscape(LEFT(ISNULL(PelaksanaName, N''), 10))
             + @NL
             + CASE WHEN RnInGroup = GroupCount
                 THEN N'{B}{FB}' + RTRIM(
@@ -369,7 +406,7 @@ BEGIN
                 ELSE N''
             END
         AS NVARCHAR(MAX)), N''
-    ) WITHIN GROUP (ORDER BY NoPo ASC, ArticleName ASC, PelaksanaName ASC, EventTime ASC)
+    ) WITHIN GROUP (ORDER BY NoPo ASC, ArticleName ASC, EventDate ASC, PelaksanaName ASC, EventTime ASC)
     FROM DetailRows;
 
     -- Ad hoc (2026-08-31): segmen Total Keseluruhan di paling bawah struk -- total semua kolom
@@ -388,9 +425,9 @@ BEGIN
         QtyLost          INT '$.qty_lost'
     );
     DECLARE @GrandHeader NVARCHAR(60) = N'{FB}' +
-        dbo.SIS_fn_PadLeft(N'OK', 4) + N'|' + dbo.SIS_fn_PadLeft(N'R1', 4) + N'|'
-        + dbo.SIS_fn_PadLeft(N'R2', 4) + N'|' + dbo.SIS_fn_PadLeft(N'R3', 4) + N'|'
-        + dbo.SIS_fn_PadLeft(N'RW', 4) + N'|' + dbo.SIS_fn_PadLeft(N'LS', 4);
+        dbo.SIS_fn_PadLeft(N'OK', 4) + N'|' + dbo.SIS_fn_PadLeft(N'rPR', 4) + N'|'
+        + dbo.SIS_fn_PadLeft(N'rBH', 4) + N'|' + dbo.SIS_fn_PadLeft(N'rJT', 4) + N'|'
+        + dbo.SIS_fn_PadLeft(N'RWK', 4) + N'|' + dbo.SIS_fn_PadLeft(N'LST', 4);
     DECLARE @GrandTotalRow NVARCHAR(60) = N'{B}{FB}' + RTRIM(
         dbo.SIS_fn_PadLeft(CASE WHEN ISNULL(@GrandQtyOk,0) > 0 THEN CAST(@GrandQtyOk AS NVARCHAR(10)) ELSE N'' END, 4) + N' '
         + dbo.SIS_fn_PadLeft(CASE WHEN ISNULL(@GrandR1,0) > 0 THEN CAST(@GrandR1 AS NVARCHAR(10)) ELSE N'' END, 4) + N' '
@@ -404,7 +441,7 @@ BEGIN
     SET @T += N'{B}Rekap Produksi - ' + dbo.SIS_fn_TokenEscape(ISNULL(@DivisionName, N'-')) + @NL;
     IF @ResourceName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@ResourceName) + @NL;
     IF @EmployeeName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@EmployeeName) + @NL;
-    SET @T += N'Tanggal : ' + FORMAT(CAST(@TanggalStr AS DATE), 'dd/MM/yyyy') + @NL;
+    SET @T += N'Tanggal : ' + @PeriodeStr + @NL;
     SET @T += N'{HR}' + @NL;
     SET @T += N'{B}Total Qty : ' + CAST(ISNULL(@TotalQty, 0) AS NVARCHAR(20)) + N' pcs' + @NL;
     SET @T += N'{HR}' + @NL;
@@ -471,7 +508,7 @@ BEGIN
     DECLARE @WipTableHeader NVARCHAR(80) = N'{FB}' +
         dbo.SIS_fn_PadRight(N'SN', 10) + N'|' + dbo.SIS_fn_PadRight(N'NO', 5) + N'|' + dbo.SIS_fn_PadLeft(N'Qty', 4) + N'|'
         + dbo.SIS_fn_PadLeft(N'RW', 4) + N'|' + dbo.SIS_fn_PadLeft(N'WF', 6) + N'|'
-        + N' ' + dbo.SIS_fn_PadRight(N'Date', 11) + N'|' + N' Emp';
+        + N'_' + dbo.SIS_fn_PadRight(N'Date', 11) + N'|' + N'_Emp';
 
     DECLARE @WipText NVARCHAR(MAX);
     ;WITH WipRows AS (
@@ -509,8 +546,8 @@ BEGIN
             + dbo.SIS_fn_PadLeft(CAST(QtyWip AS NVARCHAR(10)), 4) + N'|'
             + dbo.SIS_fn_PadLeft(CASE WHEN ReworkQty > 0 THEN CAST(ReworkQty AS NVARCHAR(10)) ELSE N'' END, 4) + N'|'
             + dbo.SIS_fn_PadLeft(CAST(WorkflowLogId AS NVARCHAR(10)), 6) + N'|'
-            + N' ' + dbo.SIS_fn_PadRight(ISNULL(FORMAT(ReceivedAt, N'dd/MM HH:mm'), N''), 11) + N'|'
-            + N' ' + dbo.SIS_fn_TokenEscape(LEFT(ISNULL(PelaksanaName, N''), 10))
+            + N'_' + dbo.SIS_fn_PadRight(ISNULL(FORMAT(ReceivedAt, N'dd/MM HH:mm'), N''), 11) + N'|'
+            + N'_' + dbo.SIS_fn_TokenEscape(LEFT(ISNULL(PelaksanaName, N''), 10))
             + @NL
             + CASE WHEN RnInGroup = GroupCount
                 THEN N'{B}{FB}' + RTRIM(
@@ -543,6 +580,123 @@ BEGIN
     BEGIN
         SET @T += N'(tidak ada WIP)' + @NL;
     END
+    SET @T += N'{HR}' + @NL;
+    SET @T += FORMAT(SYSDATETIME(), 'dd/MM/yyyy HH:mm');
+
+    -- Tidak menulis {CUT} -- worker otomatis menambahkan {FEED:4}{CUT} di akhir dokumen.
+    SELECT @T AS TokenText;
+END;
+GO
+
+-- Ad hoc (2026-09-01): render "Rekap Pengambilan" bundle (job_type REKAP_PENGAMBILAN, SP data
+-- di SIS_Report_BundlePengambilanPrint, sql/sp_Report_Bundle.sql). Sumbernya tabel bundles
+-- (bundle DIBUAT), BUKAN article_workflow_logs -- jadi TIDAK ada breakdown reject (bundle belum
+-- diproduksi apa-apa saat dibuat). Layout SAMA pola dgn SIS_Print_RekapProduksi (grup No PO/
+-- Artikel, header tanggal + ulang header tabel kalau rentang > 1 hari, Total per grup) tapi
+-- tabel cuma NO|Qty|WF(bundle_id)|Time|Emp (5 kolom, jauh lebih ringkas -- tidak ada segmen
+-- "Total Keseluruhan" terpisah krn cuma 1 angka utk ditotal, sudah ada di master "Total Qty").
+CREATE OR ALTER PROCEDURE SIS_Print_RekapPengambilan
+    @RefId   INT,
+    @Payload NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Payload IS NULL OR LTRIM(RTRIM(@Payload)) = N''
+    BEGIN
+        RAISERROR('Payload rekap pengambilan kosong utk print job ini.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @NL CHAR(1) = CHAR(10);
+    DECLARE @ProjectName NVARCHAR(200), @ArticleName NVARCHAR(200), @ResourceName NVARCHAR(150), @EmployeeName NVARCHAR(150),
+            @StartAt DATETIME2, @EndAt DATETIME2, @TotalBundle INT, @TotalQty INT;
+
+    SELECT
+        @ProjectName  = JSON_VALUE(@Payload, '$.project_name'),
+        @ArticleName  = JSON_VALUE(@Payload, '$.article_name'),
+        @ResourceName = JSON_VALUE(@Payload, '$.resource_name'),
+        @EmployeeName = JSON_VALUE(@Payload, '$.employee_name'),
+        @StartAt      = JSON_VALUE(@Payload, '$.start_at'),
+        @EndAt        = JSON_VALUE(@Payload, '$.end_at'),
+        @TotalBundle  = JSON_VALUE(@Payload, '$.total_bundle'),
+        @TotalQty     = JSON_VALUE(@Payload, '$.total_qty');
+
+    DECLARE @PeriodeStr NVARCHAR(60) = CASE
+        WHEN CAST(@StartAt AS DATE) = CAST(@EndAt AS DATE)
+            THEN FORMAT(@StartAt, 'dd/MM/yyyy HH:mm') + N' -> ' + FORMAT(@EndAt, 'HH:mm')
+        ELSE FORMAT(@StartAt, 'dd/MM/yyyy HH:mm') + N' -> ' + FORMAT(@EndAt, 'dd/MM/yyyy HH:mm')
+    END;
+    DECLARE @IsMultiDay BIT = CASE WHEN CAST(@StartAt AS DATE) = CAST(@EndAt AS DATE) THEN 0 ELSE 1 END;
+
+    DECLARE @TableHeader NVARCHAR(60) = N'{FB}' +
+        dbo.SIS_fn_PadRight(N'NO', 5) + N'|' + dbo.SIS_fn_PadLeft(N'Qty', 4) + N'|'
+        + dbo.SIS_fn_PadLeft(N'WF', 6) + N'|' + N'_' + dbo.SIS_fn_PadRight(N'Time', 6) + N'|' + N'_Emp';
+
+    DECLARE @DetailText NVARCHAR(MAX);
+    ;WITH DetailRows AS (
+        SELECT
+            *,
+            CAST(EventTime AS DATE) AS EventDate,
+            ROW_NUMBER() OVER (PARTITION BY NoPo, ArticleName ORDER BY CAST(EventTime AS DATE) ASC, EmployeeName ASC, EventTime ASC) AS RnInGroup,
+            ROW_NUMBER() OVER (PARTITION BY NoPo, ArticleName, CAST(EventTime AS DATE) ORDER BY EmployeeName ASC, EventTime ASC) AS RnInDate,
+            COUNT(*) OVER (PARTITION BY NoPo, ArticleName) AS GroupCount,
+            SUM(Qty) OVER (PARTITION BY NoPo, ArticleName) AS GroupQty
+        FROM OPENJSON(@Payload, '$.detail_rows') WITH (
+            NoPo             NVARCHAR(50)  '$.no_po',
+            ProjectName      NVARCHAR(200) '$.project_name',
+            ArticleName      NVARCHAR(200) '$.article_name',
+            BundleId         INT           '$.bundle_id',
+            BundleNo         INT           '$.bundle_no',
+            BundleLetter     VARCHAR(1)    '$.bundle_letter',
+            Qty              INT           '$.qty',
+            EventTime        DATETIME2     '$.event_time',
+            ResourceName     NVARCHAR(150) '$.resource_name',
+            EmployeeName     NVARCHAR(150) '$.employee_name'
+        )
+    )
+    SELECT @DetailText = STRING_AGG(
+        CAST(
+            CASE WHEN RnInGroup = 1
+                THEN N'{B}' + dbo.SIS_fn_TokenEscape(ISNULL(NoPo, N'-')) + N' - ' + dbo.SIS_fn_TokenEscape(ISNULL(ProjectName, N'-')) + @NL
+                     + dbo.SIS_fn_TokenEscape(ArticleName) + @NL
+                ELSE N''
+            END
+            + CASE WHEN RnInDate = 1
+                THEN (CASE WHEN @IsMultiDay = 1 THEN N'{B}{FB}' + FORMAT(EventDate, N'dddd, dd/MM/yyyy', N'id-ID') + @NL ELSE N'' END)
+                     + @TableHeader + @NL
+                ELSE N''
+            END
+            + N'{FB}'
+            + dbo.SIS_fn_PadRight(CASE WHEN BundleNo IS NULL THEN N'' ELSE ISNULL(BundleLetter, N'') + CAST(BundleNo AS NVARCHAR(10)) END, 5) + N'|'
+            + dbo.SIS_fn_PadLeft(CAST(Qty AS NVARCHAR(10)), 4) + N'|'
+            + dbo.SIS_fn_PadLeft(CAST(BundleId AS NVARCHAR(10)), 6) + N'|'
+            + N'_' + dbo.SIS_fn_PadRight(ISNULL(FORMAT(EventTime, N'HH:mm'), N''), 6) + N'|'
+            + N'_' + dbo.SIS_fn_TokenEscape(LEFT(ISNULL(EmployeeName, N''), 10))
+            + @NL
+            + CASE WHEN RnInGroup = GroupCount
+                THEN N'{B}{FB}' + RTRIM(
+                        dbo.SIS_fn_PadRight(N'', 5) + N' '
+                        + dbo.SIS_fn_PadLeft(CAST(GroupQty AS NVARCHAR(10)), 4)
+                     ) + @NL + @NL
+                ELSE N''
+            END
+        AS NVARCHAR(MAX)), N''
+    ) WITHIN GROUP (ORDER BY NoPo ASC, ArticleName ASC, EventDate ASC, EmployeeName ASC, EventTime ASC)
+    FROM DetailRows;
+
+    DECLARE @T NVARCHAR(MAX) = N'';
+    SET @T += N'{B}Rekap Pengambilan Bundle' + @NL;
+    IF @ProjectName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@ProjectName) + @NL;
+    IF @ArticleName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@ArticleName) + @NL;
+    IF @ResourceName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@ResourceName) + @NL;
+    IF @EmployeeName IS NOT NULL SET @T += dbo.SIS_fn_TokenEscape(@EmployeeName) + @NL;
+    SET @T += N'Tanggal : ' + @PeriodeStr + @NL;
+    SET @T += N'{HR}' + @NL;
+    SET @T += N'{B}Total Bundle : ' + CAST(ISNULL(@TotalBundle, 0) AS NVARCHAR(20)) + @NL;
+    SET @T += N'{B}Total Qty : ' + CAST(ISNULL(@TotalQty, 0) AS NVARCHAR(20)) + N' pcs' + @NL;
+    SET @T += N'{HR}' + @NL;
+    SET @T += ISNULL(@DetailText, N'(tidak ada data)' + @NL);
     SET @T += N'{HR}' + @NL;
     SET @T += FORMAT(SYSDATETIME(), 'dd/MM/yyyy HH:mm');
 

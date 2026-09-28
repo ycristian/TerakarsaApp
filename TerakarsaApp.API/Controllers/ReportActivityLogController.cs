@@ -107,7 +107,11 @@ public class ReportActivityLogController : ControllerBase
         [FromQuery] string level, [FromQuery] int divisionId, [FromQuery] int? resourceId,
         [FromQuery] int? employeeId, [FromQuery] DateTime? date)
     {
-        var result = await _rekapProduksiService.GetAsync(level, divisionId, resourceId, employeeId, date);
+        // Kartu ini tetap SATU HARI (bukan rentang jam spt tab Rekap Produksi /station) --
+        // date dikonversi ke rentang 00:00 s/d 00:00 hari berikutnya.
+        DateTime? startDateTime = date?.Date;
+        DateTime? endDateTime = date?.Date.AddDays(1);
+        var result = await _rekapProduksiService.GetAsync(level, divisionId, resourceId, employeeId, startDateTime, endDateTime);
         if (result.Header is null) return NotFound("Divisi tidak ditemukan.");
         return Ok(result);
     }

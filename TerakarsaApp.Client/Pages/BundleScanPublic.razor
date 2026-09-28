@@ -4,6 +4,7 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Reports
 @using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.Stations
 @inject StationDeviceApiService StationApi
@@ -25,6 +26,24 @@ else if (loadError is not null)
 else if (notFound)
 {
     <div class="alert alert-danger mt-5">Bundle dengan serial <strong>@Serial</strong> tidak ditemukan.</div>
+}
+else if (bundleNoMatches.Count > 0)
+{
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <CloseButton />
+    </div>
+    <div class="alert alert-warning">
+        <p class="mb-2">No. Bundle <strong>@Serial</strong> ditemukan di @bundleNoMatches.Count project, pilih salah satu:</p>
+        <div class="list-group">
+            @foreach (var m in bundleNoMatches)
+            {
+                <button type="button" class="list-group-item list-group-item-action" @onclick="() => SelectBundleNoMatch(m)">
+                    <strong>@(string.IsNullOrEmpty(m.BundleLetter) ? m.BundleNo.ToString() : $"{m.BundleLetter}-{m.BundleNo}")</strong> — @m.ProjectName / @m.ArticleName
+                    <span class="text-muted small d-block">@m.Serial</span>
+                </button>
+            }
+        </div>
+    </div>
 }
 else
 {
@@ -88,7 +107,7 @@ else
             <div class="alert alert-warning">Operator belum dipilih di perangkat ini. Buka <a href="/station">/station</a> untuk memilih operator terlebih dahulu.</div>
         }
         <BundleScanCard Info="scanInfo!" ReadOnly="@(operatorId is null)" Busy="actionBusy" ActionError="@actionError"
-                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true"
+                        OnReceive="HandleReceive" OnComplete="HandleComplete" OnCompleteFinished="HandleCompleteFinished" OnEdit="HandleEdit" OnAdjust="HandleAdjust" AllowReprint="true"
                         IsSuperAdmin="isSuperAdmin" OnEditLogRequested="HandleEditLogRequested" OnEditBundleRequested="HandleEditBundleRequested"
                         ResourceOptions="resourceOptions" ActiveResourceId="operatorId" ActiveResourceName="operatorName"
                         AllowResourceChange="@(station?.AllowResourceChange ?? true)" />
@@ -201,6 +220,42 @@ else
     private bool isSuperAdmin = false;
     private SuperAdminEditPanel? editPanel;
 
+    // Fix: /b/{Serial} publik menerima format pendek "{huruf}{nomor}" (mis. "D347"), bukan
+    // cuma serial asli ("B26-002910" -- selalu prefix 'B' + 2 digit tahun + '-' + 6 digit,
+    // lihat @NewSerial di sql/sp_Bundle_Manage.sql). bundle_letter berputar A-Z per project,
+    // jadi satu kombinasi bisa cocok > 1 project -- kalau begitu tampilkan pilihan
+    // (bundleNoMatches), pilih satu baru pindah (forceLoad) ke /b/{serial sebenarnya}.
+    private static readonly System.Text.RegularExpressions.Regex RealSerialPattern =
+        new(@"^[A-Za-z]\d{2}-\d{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex BundleNoShorthandPattern =
+        new(@"^([A-Za-z])\s*-?\s*(\d+)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private List<BundleLookupMatchDto> bundleNoMatches = new();
+
+    private void SelectBundleNoMatch(BundleLookupMatchDto match) =>
+        Nav.NavigateTo($"/b/{match.Serial}", forceLoad: true);
+
+    private async Task ResolveBundleNoShorthandAsync(string letter, int bundleNo)
+    {
+        var matches = await PublicApi.LookupByNoAsync(letter, bundleNo);
+
+        if (matches.Count == 0)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        if (matches.Count == 1)
+        {
+            Nav.NavigateTo($"/b/{matches[0].Serial}", forceLoad: true);
+            return;
+        }
+
+        bundleNoMatches = matches;
+        isLoading = false;
+    }
+
     private Task HandleEditLogRequested(int workflowLogId) => editPanel!.OpenEditLogAsync(workflowLogId);
     private Task HandleEditBundleRequested() => editPanel!.OpenEditBundleAsync(scanInfo!.Bundle.BundleId);
 
@@ -237,6 +292,16 @@ else
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         isSuperAdmin = state.User.HasClaim("module", "SUPER_ADMIN");
+
+        if (!RealSerialPattern.IsMatch(Serial))
+        {
+            var shorthand = BundleNoShorthandPattern.Match(Serial);
+            if (shorthand.Success)
+            {
+                await ResolveBundleNoShorthandAsync(shorthand.Groups[1].Value.ToUpperInvariant(), int.Parse(shorthand.Groups[2].Value));
+                return;
+            }
+        }
 
         try
         {
@@ -451,6 +516,11 @@ else
         if (!success) { actionError = error; return; }
         await Rescan();
     }
+
+    // Kirim Hasil sukses -- BundleScanCard sudah menunggu modal "Print Label Cacat" (kalau ada
+    // reject) ditutup/submit sebelum memanggil ini, jadi aman langsung pindah ke /station supaya
+    // operator fokus lihat status bundle di sana alih-alih tetap di halaman scan ini.
+    private void HandleCompleteFinished() => Nav.NavigateTo("/station");
 
     private async Task HandleEdit(BundleCompleteFormValues values)
     {

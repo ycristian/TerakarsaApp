@@ -149,7 +149,8 @@ public class RekapStrukPrintRequest
     public int DivisionId { get; set; }
     public int? ResourceId { get; set; }
     public int? EmployeeId { get; set; }
-    public DateTime Date { get; set; }
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
 }
 
 // Fix: tombol "Cetak Karyawan" -- terpisah dari RekapStrukPrintRequest (tidak ada @Level,

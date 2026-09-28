@@ -638,6 +638,9 @@
     [Parameter] public string? ActionError { get; set; }
     [Parameter] public EventCallback<string?> OnReceive { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnComplete { get; set; }
+    // Dipanggil saat alur Kirim Hasil BENAR-BENAR selesai -- langsung setelah OnComplete sukses
+    // kalau tidak ada reject, atau setelah modal "Print Label Cacat" ditutup/submit kalau ada.
+    [Parameter] public EventCallback OnCompleteFinished { get; set; }
     [Parameter] public EventCallback<BundleCompleteFormValues> OnEdit { get; set; }
     // Prompt 28: panel Penyesuaian -- lihat OpenAdjustModal/SubmitAdjust di bawah.
     [Parameter] public EventCallback<BundleAdjustFormValues> OnAdjust { get; set; }
@@ -848,6 +851,10 @@
                 defectLabelError = string.Empty;
                 showDefectLabelModal = true;
             }
+            else
+            {
+                await OnCompleteFinished.InvokeAsync();
+            }
         }
     }
 
@@ -864,9 +871,10 @@
     private int defectQtyRejectSewing;
     private string defectRemark = string.Empty;
 
-    private void CloseDefectLabelModal()
+    private async Task CloseDefectLabelModal()
     {
         showDefectLabelModal = false;
+        await OnCompleteFinished.InvokeAsync();
     }
 
     private async Task SubmitDefectLabel()
@@ -889,6 +897,7 @@
         if (success)
         {
             showDefectLabelModal = false;
+            await OnCompleteFinished.InvokeAsync();
         }
         else
         {

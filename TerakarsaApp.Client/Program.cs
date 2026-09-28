@@ -14,11 +14,23 @@ builder.Services.AddAuthorizationCore();
 
 builder.Services.AddScoped<AuthorizedHandler>();
 
-// API selalu di-host di mesin yang sama dengan Client, port beda -- host-nya ikut dari mana
-// halaman ini dibuka (localhost saat dev di PC, IP LAN saat diakses dari device lain).
 var clientUri = new Uri(builder.HostEnvironment.BaseAddress);
-var apiPort = clientUri.Scheme == "https" ? 7130 : 5281;
-var apiBaseUrl = $"{clientUri.Scheme}://{clientUri.Host}:{apiPort}/";
+var apiBaseUrl = ResolveApiBaseUrl(clientUri);
+
+// Dua mode akses:
+// - Publik lewat Cloudflare Tunnel (host *.terakarsa.id) -> API selalu di api.terakarsa.id.
+// - LAN pabrik: API di-host di mesin yang sama dengan Client, port beda -- host-nya ikut
+//   dari mana halaman ini dibuka (localhost saat dev di PC, IP LAN saat diakses dari device lain).
+static string ResolveApiBaseUrl(Uri clientUri)
+{
+    if (clientUri.Host.EndsWith("terakarsa.id", StringComparison.OrdinalIgnoreCase))
+    {
+        return "https://api.terakarsa.id/";
+    }
+
+    var apiPort = clientUri.Scheme == "https" ? 7130 : 5281;
+    return $"{clientUri.Scheme}://{clientUri.Host}:{apiPort}/";
+}
 
 builder.Services.AddHttpClient("AuthAPI", client =>
 {

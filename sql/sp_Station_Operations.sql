@@ -141,7 +141,7 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT awl.workflow_log_id AS WorkflowLogId, awl.article_workflow_id AS ArticleWorkflowId,
-           p.project_name AS ProjectName, p.no_po AS NoPo, a.article_name AS ArticleName,
+           p.project_name AS ProjectName, p.no_po AS NoPo, buy.buyer_name AS BuyerName, a.article_name AS ArticleName,
            a.style AS Style, a.color AS Color,
            aw.step_name AS StepName,
            awl.qty_ok AS QtyOk, awl.created_at AS SentAt,
@@ -159,6 +159,7 @@ BEGIN
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
+    INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
     INNER JOIN divisions d ON d.division_id = awl.division_id
     LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
     LEFT JOIN resources br ON br.resource_id = b.resource_id
@@ -410,7 +411,7 @@ BEGIN
 
     SELECT awl.workflow_log_id AS WorkflowLogId, awl.article_workflow_id AS ArticleWorkflowId,
            a.article_id AS ArticleId,
-           p.project_name AS ProjectName, p.no_po AS NoPo, a.article_name AS ArticleName,
+           p.project_name AS ProjectName, p.no_po AS NoPo, buy.buyer_name AS BuyerName, a.article_name AS ArticleName,
            a.style AS Style, a.color AS Color,
            aw.step_name AS StepName,
            -- Prompt 24: true kalau baris ini log step Bundling implisit (bundle dibuat lewat
@@ -473,6 +474,7 @@ BEGIN
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
+    INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
     LEFT JOIN divisions td ON td.division_id = awl.target_division_id
     LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
     LEFT JOIN article_sizes asz ON asz.article_size_id = COALESCE(b.article_size_id, awl.article_size_id)
@@ -578,6 +580,7 @@ BEGIN
             b.bundle_id, b.serial, b.bundle_no, p.bundle_letter, b.qty,
             a.article_id, a.article_name, a.style, a.color,
             p.project_name, p.no_po,
+            buy.buyer_name,
             spd.size_name,
             rr.resource_name AS tailor_name,
             emp.employee_name AS employee_name,
@@ -587,6 +590,7 @@ BEGIN
         FROM bundles b
         INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
         INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
+        INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
         INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
         INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
         LEFT JOIN resources rr ON rr.resource_id = b.resource_id
@@ -633,8 +637,10 @@ BEGIN
         bs.serial AS Serial,
         bs.bundle_no AS BundleNo,
         bs.bundle_letter AS BundleLetter,
+        bs.article_id AS ArticleId,
         bs.project_name AS ProjectName,
         bs.no_po AS NoPo,
+        bs.buyer_name AS BuyerName,
         bs.article_name AS ArticleName,
         bs.style AS Style, bs.color AS Color,
         bs.size_name AS SizeName,

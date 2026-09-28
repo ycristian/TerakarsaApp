@@ -52,6 +52,8 @@ public class StationPendingReceiveDto
     public int ArticleWorkflowId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    // Prompt: header kartu tabel-per-artikel tab IN, sama format dengan StationInProgressDto.
+    public string? BuyerName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -82,6 +84,8 @@ public class StationPendingHandoverDto
     public int ArticleId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    // Prompt: header kartu tabel-per-artikel tab OUT, sama format dengan StationInProgressDto.
+    public string? BuyerName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -150,8 +154,11 @@ public class StationInProgressDto
     public string Serial { get; set; } = string.Empty;
     public int BundleNo { get; set; }
     public string? BundleLetter { get; set; }
+    public int ArticleId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    // Prompt: header kartu WIP tabel-per-artikel butuh nama customer di samping nama project.
+    public string? BuyerName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     // Prompt 23: murni tambahan data (tidak mengubah alur kartu bundle) supaya pencarian teks
     // WAJIB di tab WIP bisa menyaring kartu bundle dan non-bundle dengan field yang sama.

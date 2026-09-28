@@ -641,7 +641,8 @@ else
             DivisionId = rekapDivisionId,
             ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
             EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
-            Date = rekapDate
+            StartDateTime = rekapDate.Date,
+            EndDateTime = rekapDate.Date.AddDays(1)
         });
 
         isPrintingRekap = false;

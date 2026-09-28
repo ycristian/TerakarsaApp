@@ -435,6 +435,33 @@ BEGIN
 END;
 GO
 
+-- D2. Lookup by huruf+nomor bundle (mis. "D346" -> huruf D, nomor 346). bundle_letter
+-- berputar A-Z per project (alter_27_bundle_letter.sql), jadi satu kombinasi huruf+nomor
+-- bisa cocok di lebih dari satu project sekaligus -- SP ini mengembalikan SEMUA kecocokan
+-- aktif (bundle belum dihapus), client yang menampilkan pilihan project kalau hasilnya > 1.
+CREATE OR ALTER PROCEDURE SIS_Report_BundleLookupByNo
+    @BundleLetter CHAR(1),
+    @BundleNo     INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        b.bundle_id AS BundleId,
+        b.serial AS Serial,
+        b.bundle_no AS BundleNo,
+        p.bundle_letter AS BundleLetter,
+        a.project_id AS ProjectId,
+        p.project_name AS ProjectName,
+        a.article_name AS ArticleName
+    FROM bundles b
+    INNER JOIN articles a ON a.article_id = b.article_id
+    INNER JOIN projects p ON p.project_id = a.project_id
+    WHERE p.bundle_letter = @BundleLetter AND b.bundle_no = @BundleNo AND b.deleted_at IS NULL
+    ORDER BY p.project_name ASC;
+END;
+GO
+
 -- D. Selisih (Prompt 14) -- kebocoran qty per bundle per step ber-bundle, mulai step ke-2
 -- (step pertama qty masuk = qty bundle itu sendiri, tidak relevan dibandingkan). Hanya
 -- menyertakan step yang SUDAH punya log (step yang belum dikerjakan bukan "selisih", cuma
@@ -551,3 +578,154 @@ BEGIN
     ORDER BY article_workflow_id ASC, SizeId ASC;
 END;
 GO
+
+-- Ad hoc (2026-09-01): tab "Pengambilan" -- rekap bundle DIBUAT (bundles.created_at), BEDA
+-- sumber dgn seluruh SP di atas (article_workflow_logs) -- ini murni dari tabel bundles, tidak
+-- ada breakdown reject (bundle belum diproduksi apa-apa, cuma catatan qty rencana + siapa
+-- penjahitnya). Filter Project/Artikel/Resource(Line)/Employee(Penjahit) opsional, rentang
+-- waktu WAJIB (sama pola dgn SIS_Report_RekapStrukPrint, sql/sp_Report_RekapStruk.sql --
+-- checkbox "Use Time" di client: default 06:00 hari ini s/d sekarang).
+-- G1. Preview ringkas (dipakai kartu summary di /report-bundle sebelum tombol Cetak, SAMA pola
+-- dgn SIS_Report_RekapStruk result set 1 -- Total Qty harus SELALU sinkron dgn apa yg nanti
+-- benar-benar tercetak).
+CREATE OR ALTER PROCEDURE SIS_Report_BundlePengambilan
+    @ProjectId     INT = NULL,
+    @ArticleId     INT = NULL,
+    @ResourceId    INT = NULL,
+    @EmployeeId    INT = NULL,
+    @StartDateTime DATETIME2 = NULL,
+    @EndDateTime   DATETIME2 = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PeriodStart DATETIME2 = ISNULL(@StartDateTime, DATEADD(HOUR, 6, CAST(CAST(SYSDATETIME() AS DATE) AS DATETIME2)));
+    DECLARE @PeriodEnd DATETIME2 = ISNULL(@EndDateTime, SYSDATETIME());
+
+    SELECT
+        pr.project_name AS ProjectName,
+        ar.article_name AS ArticleName,
+        rs.resource_name AS ResourceName,
+        emp.employee_name AS EmployeeName,
+        @PeriodStart AS PeriodStart,
+        @PeriodEnd AS PeriodEnd,
+        ISNULL((
+            SELECT COUNT(*) FROM bundles b
+            INNER JOIN articles a ON a.article_id = b.article_id
+            WHERE b.deleted_at IS NULL
+              AND b.created_at >= @PeriodStart AND b.created_at < @PeriodEnd
+              AND (@ProjectId IS NULL OR a.project_id = @ProjectId)
+              AND (@ArticleId IS NULL OR b.article_id = @ArticleId)
+              AND (@ResourceId IS NULL OR b.resource_id = @ResourceId)
+              AND (@EmployeeId IS NULL OR b.employee_id = @EmployeeId)
+        ), 0) AS TotalBundle,
+        ISNULL((
+            SELECT SUM(b.qty) FROM bundles b
+            INNER JOIN articles a ON a.article_id = b.article_id
+            WHERE b.deleted_at IS NULL
+              AND b.created_at >= @PeriodStart AND b.created_at < @PeriodEnd
+              AND (@ProjectId IS NULL OR a.project_id = @ProjectId)
+              AND (@ArticleId IS NULL OR b.article_id = @ArticleId)
+              AND (@ResourceId IS NULL OR b.resource_id = @ResourceId)
+              AND (@EmployeeId IS NULL OR b.employee_id = @EmployeeId)
+        ), 0) AS TotalQty
+    FROM (SELECT 1 AS Dummy) x
+    LEFT JOIN projects pr ON pr.project_id = @ProjectId
+    LEFT JOIN articles ar ON ar.article_id = @ArticleId
+    LEFT JOIN resources rs ON rs.resource_id = @ResourceId
+    LEFT JOIN employees emp ON emp.employee_id = @EmployeeId AND emp.deleted_at IS NULL;
+END;
+GO
+
+-- G2. Cetak struk thermal (job_type REKAP_PENGAMBILAN, render SP SIS_Print_RekapPengambilan
+-- di sql/sp_Print_Render.sql) -- payload JSON dihitung ULANG di sini (bukan requery di render
+-- SP, pola sama dgn SIS_Report_RekapStrukPrint) supaya cetak ulang tetap konsisten dgn snapshot
+-- saat tombol Cetak ditekan. Dikelompokkan per No PO/Artikel di render SP, TIDAK ada breakdown
+-- reject (lihat catatan di atas G1).
+CREATE OR ALTER PROCEDURE SIS_Report_BundlePengambilanPrint
+    @ProjectId     INT = NULL,
+    @ArticleId     INT = NULL,
+    @ResourceId    INT = NULL,
+    @EmployeeId    INT = NULL,
+    @StartDateTime DATETIME2 = NULL,
+    @EndDateTime   DATETIME2 = NULL,
+    @UserId        INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @DayStart DATETIME2 = ISNULL(@StartDateTime, DATEADD(HOUR, 6, CAST(CAST(SYSDATETIME() AS DATE) AS DATETIME2)));
+    DECLARE @DayEnd DATETIME2 = ISNULL(@EndDateTime, SYSDATETIME());
+
+    DECLARE @Payload NVARCHAR(MAX);
+
+    ;WITH DirectAtoms AS (
+        SELECT
+            b.bundle_id AS BundleId,
+            pr.no_po AS NoPo,
+            pr.project_name AS ProjectName,
+            ar.article_name AS ArticleName,
+            b.bundle_no AS BundleNo,
+            pr.bundle_letter AS BundleLetter,
+            b.qty AS Qty,
+            b.created_at AS EventTime,
+            rs.resource_name AS ResourceName,
+            emp.employee_name AS EmployeeName
+        FROM bundles b
+        INNER JOIN articles ar ON ar.article_id = b.article_id AND ar.deleted_at IS NULL
+        INNER JOIN projects pr ON pr.project_id = ar.project_id AND pr.deleted_at IS NULL
+        LEFT JOIN resources rs ON rs.resource_id = b.resource_id
+        LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
+        WHERE b.deleted_at IS NULL
+          AND b.created_at >= @DayStart AND b.created_at < @DayEnd
+          AND (@ProjectId IS NULL OR ar.project_id = @ProjectId)
+          AND (@ArticleId IS NULL OR b.article_id = @ArticleId)
+          AND (@ResourceId IS NULL OR b.resource_id = @ResourceId)
+          AND (@EmployeeId IS NULL OR b.employee_id = @EmployeeId)
+    )
+    SELECT @Payload = (
+        SELECT
+            pr.project_name AS project_name,
+            ar.article_name AS article_name,
+            rs.resource_name AS resource_name,
+            emp.employee_name AS employee_name,
+            @DayStart AS start_at,
+            @DayEnd AS end_at,
+            (SELECT COUNT(*) FROM DirectAtoms) AS total_bundle,
+            ISNULL((SELECT SUM(Qty) FROM DirectAtoms), 0) AS total_qty,
+            JSON_QUERY((
+                SELECT
+                    t.NoPo AS no_po,
+                    t.ProjectName AS project_name,
+                    t.ArticleName AS article_name,
+                    t.BundleId AS bundle_id,
+                    t.BundleNo AS bundle_no,
+                    t.BundleLetter AS bundle_letter,
+                    t.Qty AS qty,
+                    t.EventTime AS event_time,
+                    t.ResourceName AS resource_name,
+                    t.EmployeeName AS employee_name
+                FROM DirectAtoms t
+                ORDER BY t.NoPo ASC, t.ArticleName ASC, t.EmployeeName ASC, t.EventTime ASC
+                FOR JSON PATH
+            )) AS detail_rows
+        FROM (SELECT 1 AS Dummy) x
+        LEFT JOIN projects pr ON pr.project_id = @ProjectId
+        LEFT JOIN articles ar ON ar.article_id = @ArticleId
+        LEFT JOIN resources rs ON rs.resource_id = @ResourceId
+        LEFT JOIN employees emp ON emp.employee_id = @EmployeeId AND emp.deleted_at IS NULL
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+    );
+
+    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+    VALUES ('REKAP_PENGAMBILAN', ISNULL(@ProjectId, 0), @Payload, 'PENDING', SYSDATETIME(), @UserId);
+
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPrintJobId;
+END;
+GO
+
+-- G3. Pemilih filter Resource (Line Jahit)/Employee (Penjahit) khusus tab Pengambilan --
+-- pakai ulang SP existing (SIS_Resource_GetActiveExceptDivision dgn @ExcludeDivisionId NULL =
+-- SEMUA resource aktif lintas divisi, SIS_Employee_GetActiveByResource) lewat
+-- ReportBundleController, TIDAK butuh module MASTER_RESOURCE/MASTER_EMPLOYEE terpisah -- pola
+-- sama dgn report-bundle-picker/projects,articles,divisions yang sudah ada.

@@ -568,6 +568,22 @@ CREATE TABLE print_job_routes(
  deleted_by int null
 );
 
+-- Ad hoc (2026-09-01): daftar job_type "kupon" (thermal, render_mode TOKEN) yang boleh diklaim
+-- TerakarsaApp.PrintService -- dipindah dari array hardcode C# (Worker.cs KuponJobTypes) ke
+-- sini supaya job_type struk BARU tidak butuh update/republish/restart service, cukup INSERT
+-- baris di sini (lihat sql/adhoc_print_kupon_job_types.sql). Job_type LABEL (render_mode
+-- RAW_TSPL, TsplBuilder.cs) TETAP hardcode di Worker.cs, TIDAK disimpan di sini.
+CREATE TABLE print_kupon_job_types(
+ print_kupon_job_type_id int primary key identity(1,1),
+ job_type varchar(30) not null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
 -- Antrian cetak label QR. Dibuat otomatis saat bundle dibuat (job_type BUNDLE_LABEL,
 -- ref_id = bundle_id) atau lewat cetak ulang. Pencetakan fisik (Windows service,
 -- perakitan TSPL dari payload) dikerjakan di Prompt 11 -- di sini hanya antrian.
@@ -982,6 +998,7 @@ CREATE UNIQUE INDEX UX_dashboard_tokens_token  ON dashboard_tokens(dashboard_tok
 CREATE UNIQUE INDEX UX_dashboard_tokens_name   ON dashboard_tokens(token_name) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_print_devices_code      ON print_devices(device_code) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_print_job_routes_type   ON print_job_routes(job_type) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_print_kupon_job_types_job_type ON print_kupon_job_types(job_type) WHERE deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============

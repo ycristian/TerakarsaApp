@@ -148,6 +148,20 @@ public class BundleHistoryResultDto
     public List<BundleHistoryTimelineDto> Timeline { get; set; } = new();
 }
 
+// Fix: pencarian Riwayat lewat format "{huruf}{nomor}" (mis. "D346"). bundle_letter berputar
+// A-Z per project, jadi satu kombinasi bisa cocok di lebih dari satu project -- client
+// menampilkan daftar ini sebagai pilihan kalau Matches.Count > 1.
+public class BundleLookupMatchDto
+{
+    public int BundleId { get; set; }
+    public string Serial { get; set; } = string.Empty;
+    public int BundleNo { get; set; }
+    public string? BundleLetter { get; set; }
+    public int ProjectId { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public string ArticleName { get; set; } = string.Empty;
+}
+
 // Prompt 14: kebocoran qty per bundle per step ber-bundle (mulai step ke-2). Selisih =
 // QtyMasuk - QtyKeluar -- kelebihan tampil negatif. Lihat SIS_Report_BundleVariance.
 public class BundleVarianceDto
@@ -193,4 +207,29 @@ public class ArticleSizeProgressResultDto
     public List<ArticleSizeProgressSizeDto> Sizes { get; set; } = new();
     public List<ArticleSizeProgressStepDto> Steps { get; set; } = new();
     public List<ArticleSizeProgressCellDto> Cells { get; set; } = new();
+}
+
+// Ad hoc (2026-09-01): tab "Pengambilan" -- rekap bundle DIBUAT (bundles.created_at), sumbernya
+// tabel bundles (bukan article_workflow_logs spt tab lain di modul ini). Lihat
+// SIS_Report_BundlePengambilan/SIS_Report_BundlePengambilanPrint, sql/sp_Report_Bundle.sql.
+public class BundlePengambilanHeaderDto
+{
+    public string? ProjectName { get; set; }
+    public string? ArticleName { get; set; }
+    public string? ResourceName { get; set; }
+    public string? EmployeeName { get; set; }
+    public DateTime PeriodStart { get; set; }
+    public DateTime PeriodEnd { get; set; }
+    public int TotalBundle { get; set; }
+    public int TotalQty { get; set; }
+}
+
+public class BundlePengambilanPrintRequest
+{
+    public int? ProjectId { get; set; }
+    public int? ArticleId { get; set; }
+    public int? ResourceId { get; set; }
+    public int? EmployeeId { get; set; }
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
 }

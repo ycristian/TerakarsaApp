@@ -222,6 +222,21 @@ public class ReportBundleService
             .ToListAsync();
     }
 
+    // Fix: pencarian Riwayat lewat format "{huruf}{nomor}" (mis. "D346") -- bundle_letter
+    // berputar A-Z per project, jadi bisa cocok lebih dari satu project sekaligus. Lihat
+    // SIS_Report_BundleLookupByNo di sql/sp_Report_Bundle.sql.
+    public async Task<List<BundleLookupMatchDto>> LookupByNoAsync(string bundleLetter, int bundleNo)
+    {
+        var letterParam = new SqlParameter("@BundleLetter", bundleLetter);
+        var bundleNoParam = new SqlParameter("@BundleNo", bundleNo);
+
+        return await _db.Database
+            .SqlQueryRaw<BundleLookupMatchDto>(
+                "EXEC SIS_Report_BundleLookupByNo @BundleLetter = @BundleLetter, @BundleNo = @BundleNo",
+                letterParam, bundleNoParam)
+            .ToListAsync();
+    }
+
     // SIS_Report_BundleHistory mengembalikan 2 result set (header, timeline). RAISERROR di
     // SP (bundle tidak ditemukan / parameter kurang) muncul sebagai SqlException di sini --
     // ditangkap dan dikembalikan sebagai error, bukan exception mentah ke controller.
@@ -295,6 +310,55 @@ public class ReportBundleService
         finally
         {
             if (wasClosed) await conn.CloseAsync();
+        }
+    }
+
+    // Ad hoc (2026-09-01): tab "Pengambilan" -- preview ringkas (Total Bundle/Total Qty) SEBELUM
+    // tombol Cetak, SAMA pola dgn RekapProduksiService.GetAsync -- harus selalu sinkron dgn apa
+    // yg nanti benar-benar tercetak (PrintPengambilanAsync). Lihat SIS_Report_BundlePengambilan.
+    public async Task<BundlePengambilanHeaderDto?> GetPengambilanAsync(
+        int? projectId, int? articleId, int? resourceId, int? employeeId, DateTime? startDateTime, DateTime? endDateTime)
+    {
+        var projectIdParam = new SqlParameter("@ProjectId", (object?)projectId ?? DBNull.Value);
+        var articleIdParam = new SqlParameter("@ArticleId", (object?)articleId ?? DBNull.Value);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)employeeId ?? DBNull.Value);
+        var startParam = new SqlParameter("@StartDateTime", (object?)startDateTime ?? DBNull.Value);
+        var endParam = new SqlParameter("@EndDateTime", (object?)endDateTime ?? DBNull.Value);
+
+        var result = await _db.Database
+            .SqlQueryRaw<BundlePengambilanHeaderDto>(
+                "EXEC SIS_Report_BundlePengambilan @ProjectId = @ProjectId, @ArticleId = @ArticleId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @StartDateTime = @StartDateTime, @EndDateTime = @EndDateTime",
+                projectIdParam, articleIdParam, resourceIdParam, employeeIdParam, startParam, endParam)
+            .ToListAsync();
+
+        return result.FirstOrDefault();
+    }
+
+    // Ad hoc (2026-09-01): "Cetak" di tab Pengambilan -- snapshot ULANG di SP (bukan payload dari
+    // client), insert print_jobs job_type REKAP_PENGAMBILAN. Lihat SIS_Report_BundlePengambilanPrint.
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintPengambilanAsync(BundlePengambilanPrintRequest request, int userId)
+    {
+        var projectIdParam = new SqlParameter("@ProjectId", (object?)request.ProjectId ?? DBNull.Value);
+        var articleIdParam = new SqlParameter("@ArticleId", (object?)request.ArticleId ?? DBNull.Value);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)request.ResourceId ?? DBNull.Value);
+        var employeeIdParam = new SqlParameter("@EmployeeId", (object?)request.EmployeeId ?? DBNull.Value);
+        var startParam = new SqlParameter("@StartDateTime", request.StartDateTime);
+        var endParam = new SqlParameter("@EndDateTime", request.EndDateTime);
+        var userIdParam = new SqlParameter("@UserId", userId);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<int>(
+                    "EXEC SIS_Report_BundlePengambilanPrint @ProjectId = @ProjectId, @ArticleId = @ArticleId, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @StartDateTime = @StartDateTime, @EndDateTime = @EndDateTime, @UserId = @UserId",
+                    projectIdParam, articleIdParam, resourceIdParam, employeeIdParam, startParam, endParam, userIdParam)
+                .ToListAsync();
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, 0);
         }
     }
 }
