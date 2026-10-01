@@ -41,6 +41,13 @@
 --     SEKALIGUS menyinkronkan qty_ok baris log Bundling bundle ini. Qty baru WAJIB validasi
 --     arah bawah yang sama (>= total step ber-bundle setelah Bundling). Serial & bundle_no
 --     TIDAK PERNAH disentuh aksi ini (beda dengan BUNDLE_UPDATE).
+--
+-- Prompt 55 -- LOCK berlaku untuk SEMUA, Super Admin TIDAK punya jalan pintas: LOG_UPDATE,
+-- LOG_DELETE dan EDIT_LOG ditolak kalau article_workflow_logs.lock_id baris itu terisi;
+-- BUNDLE_UPDATE dan EDIT_BUNDLE ditolak kalau baris log BUNDLING bundle itu terkunci. Pesan
+-- seragam 'LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.' Satu-satunya pelepasan
+-- adalah SIS_UnlockRequest_Manage APPROVE (sql/sp_UnlockRequest_Manage.sql). BUNDLE_DELETE
+-- tidak diberi guard terpisah -- aksi itu sudah menolak bundle yang punya log hidup sama sekali.
 
 SET ANSI_NULLS ON;
 GO
@@ -82,6 +89,18 @@ BEGIN
         IF @UpdArticleId IS NULL
         BEGIN
             RAISERROR('Bundle tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: lock berlaku untuk SEMUA, Super Admin tidak punya jalan pintas.
+        IF EXISTS (
+            SELECT 1 FROM article_workflow_logs awl
+            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+            WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL AND aw.is_bundling = 1
+              AND awl.lock_id IS NOT NULL
+        )
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
             RETURN;
         END
 
@@ -183,6 +202,13 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 55: lock berlaku untuk SEMUA, Super Admin tidak punya jalan pintas.
+        IF EXISTS (SELECT 1 FROM article_workflow_logs WHERE workflow_log_id = @WorkflowLogId AND lock_id IS NOT NULL)
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
+
         IF @UpdLogType = 'ADJUSTMENT'
         BEGIN
             IF @QtyOk < 0
@@ -235,6 +261,13 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 55: lock berlaku untuk SEMUA, Super Admin tidak punya jalan pintas.
+        IF EXISTS (SELECT 1 FROM article_workflow_logs WHERE workflow_log_id = @WorkflowLogId AND lock_id IS NOT NULL)
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
+
         UPDATE article_workflow_logs
         SET deleted_at = SYSDATETIME(),
             deleted_by = @UserId,
@@ -256,6 +289,13 @@ BEGIN
         IF @EditArticleWorkflowId IS NULL
         BEGIN
             RAISERROR('Log tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: lock berlaku untuk SEMUA, Super Admin tidak punya jalan pintas.
+        IF EXISTS (SELECT 1 FROM article_workflow_logs WHERE workflow_log_id = @WorkflowLogId AND lock_id IS NOT NULL)
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
             RETURN;
         END
 
@@ -398,6 +438,18 @@ BEGIN
         IF @EbArticleId IS NULL
         BEGIN
             RAISERROR('Bundle tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: lock berlaku untuk SEMUA, Super Admin tidak punya jalan pintas.
+        IF EXISTS (
+            SELECT 1 FROM article_workflow_logs awl
+            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+            WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL AND aw.is_bundling = 1
+              AND awl.lock_id IS NOT NULL
+        )
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
             RETURN;
         END
 

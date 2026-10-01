@@ -118,6 +118,18 @@
 --   NULL kalau step ini belum tersentuh sama sekali (step pertama artikel, belum ada input) --
 --   client menaruhnya paling bawah.
 --
+-- Prompt 56 -- lock di tab OUT:
+--   SIS_Station_PendingHandover membawa LockId/IsLocked/HasPendingUnlock/CanEdit/CanDelete.
+--   CanEdit/CanDelete SEKARANG murni turunan lock (= lock_id IS NULL) -- SEMUA guard waktu
+--   (jendela 1 jam bundle, H+1 step terakhir, "sudah diterima") DIHAPUS dari SP ini maupun
+--   dari SIS_Station_Counts, sejalan dengan Prompt 55. Validasi saldo tetap di SP tulis.
+--   Filter @Date diperlebar 7 -> 90 hari supaya chip "Belum lock" tetap bisa dituju.
+--   SIS_Station_UnlockedDates (baru): tanggal kirim yang masih punya baris belum lock + jumlah
+--   barisnya, dasar chip merah di atas daftar OUT.
+--   SIS_Station_Counts menambah OutUnlockedCount (semua tanggal) untuk teks "n belum lock"
+--   di bawah angka OUT. Cakupan baris UnlockedDates & OutUnlockedCount sengaja dibatasi ke
+--   baris yang bisa MUNCUL di tab OUT -- lihat catatan di masing-masing.
+--
 -- Prompt 40: SIS_Station_PendingReceives kini membawa SuggestedReceiverResourceId/Name --
 --   counterpart dari resource pengirim (awl.resource_id) yang valid terhadap @DivisionId
 --   (hidup + aktif + division_id = @DivisionId), NULL bila tidak ada. Dipakai client sebagai
@@ -199,6 +211,8 @@ BEGIN
         SELECT aw.article_workflow_id AS ArticleWorkflowId,
                a.article_id AS ArticleId,
                p.project_name AS ProjectName, p.no_po AS NoPo, a.article_name AS ArticleName,
+               -- Prompt 57 (susulan): buyer + PIC project -- dipakai pencarian teks tab WIP.
+               buy.buyer_name AS BuyerName, pic.employee_name AS PicName,
                a.style AS Style, a.color AS Color,
                aw.step_name AS StepName,
                CAST(0 AS BIT) AS IsBundling,
@@ -259,6 +273,8 @@ BEGIN
         FROM article_workflows aw
         INNER JOIN articles a ON a.article_id = aw.article_id
         INNER JOIN projects p ON p.project_id = a.project_id
+        INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
+        LEFT JOIN employees pic ON pic.employee_id = p.project_pic
         WHERE aw.division_id = @DivisionId
           AND aw.deleted_at IS NULL
           AND aw.inactive_at IS NULL
@@ -285,6 +301,7 @@ BEGIN
         SELECT aw.article_workflow_id AS ArticleWorkflowId,
                a.article_id AS ArticleId,
                p.project_name AS ProjectName, p.no_po AS NoPo, a.article_name AS ArticleName,
+               buy.buyer_name AS BuyerName, pic.employee_name AS PicName,
                a.style AS Style, a.color AS Color,
                aw.step_name AS StepName,
                CAST(1 AS BIT) AS IsBundling,
@@ -377,6 +394,8 @@ BEGIN
         FROM article_workflows aw
         INNER JOIN articles a ON a.article_id = aw.article_id
         INNER JOIN projects p ON p.project_id = a.project_id
+        INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
+        LEFT JOIN employees pic ON pic.employee_id = p.project_pic
         WHERE aw.division_id = @DivisionId
           AND aw.deleted_at IS NULL
           AND aw.is_bundling = 1
@@ -400,18 +419,36 @@ GO
 
 CREATE OR ALTER PROCEDURE SIS_Station_PendingHandover
     @DivisionId INT,
-    @ResourceId INT = NULL     -- Prompt 22b: default_resource_id stasiun -- baris ini DIBUAT
+    @ResourceId INT = NULL,    -- Prompt 22b: default_resource_id stasiun -- baris ini DIBUAT
                                 -- oleh divisi ini sendiri, jadi awl.resource_id = pelaksana
                                 -- (dipaksa = resource stasiun saat stasiun terkunci, lihat
                                 -- EffectiveResourceId), bukan bundles.resource_id seperti di
                                 -- PendingReceives/InProgress (itu Line TUJUAN, ini Line PENGIRIM).
+    -- Ad hoc (2026-09-28): filter tanggal tab OUT -- hanya membatasi RIWAYAT (baris yang sudah
+    -- diterima / step terakhir). Baris yang masih menunggu diterima tetap tampil tanpa batas
+    -- hari supaya pekerjaan yang belum tuntas tidak pernah hilang dari layar operator.
+    -- Prompt 56: rentang diperlebar 7 -> 90 hari. Chip "Belum lock" (SIS_Station_UnlockedDates)
+    -- bisa menunjuk tanggal jauh di belakang; kalau filter tetap 7 hari, chip itu jadi buntu
+    -- dan baris lama tidak pernah bisa di-lock dari stasiun.
+    @Date DATE = NULL          -- NULL = hari ini; maksimal 90 hari ke belakang.
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    IF @Date IS NULL SET @Date = CAST(SYSDATETIME() AS DATE);
+
+    IF @Date > CAST(SYSDATETIME() AS DATE)
+        OR @Date < DATEADD(DAY, -90, CAST(SYSDATETIME() AS DATE))
+    BEGIN
+        RAISERROR('Tanggal hanya boleh hari ini sampai 90 hari ke belakang.', 16, 1);
+        RETURN;
+    END
+
     SELECT awl.workflow_log_id AS WorkflowLogId, awl.article_workflow_id AS ArticleWorkflowId,
            a.article_id AS ArticleId,
            p.project_name AS ProjectName, p.no_po AS NoPo, buy.buyer_name AS BuyerName, a.article_name AS ArticleName,
+           -- Prompt 57 (susulan): PIC project -- dipakai pencarian teks tab OUT di client.
+           pic.employee_name AS PicName,
            a.style AS Style, a.color AS Color,
            aw.step_name AS StepName,
            -- Prompt 24: true kalau baris ini log step Bundling implisit (bundle dibuat lewat
@@ -469,12 +506,32 @@ BEGIN
            bres.resource_name AS BundleResourceName,
            b.remarks AS BundleRemarks,
            b.employee_id AS BundleEmployeeId,
-           bemp.employee_name AS BundleEmployeeName
+           bemp.employee_name AS BundleEmployeeName,
+           -- Prompt 56: status lock baris ini. CanEdit/CanDelete SEKARANG murni turunan lock --
+           -- jendela 1 jam / H+1 / "sudah diterima" tidak lagi menentukan apa pun (lihat
+           -- Prompt 55). Validasi saldo tetap di SP tulis; UI tidak menghitungnya, cukup
+           -- menampilkan pesan error dari SP.
+           awl.lock_id AS LockId,
+           CAST(CASE WHEN awl.lock_id IS NULL THEN 0 ELSE 1 END AS BIT) AS IsLocked,
+           CAST(CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM unlock_request_items uri
+                    INNER JOIN unlock_requests ur ON ur.request_id = uri.request_id
+                    WHERE uri.workflow_log_id = awl.workflow_log_id
+                      AND ur.approved_at IS NULL AND ur.rejected_at IS NULL AND ur.deleted_at IS NULL
+                ) THEN 1 ELSE 0 END AS BIT) AS HasPendingUnlock,
+           CAST(CASE WHEN awl.lock_id IS NULL THEN 1 ELSE 0 END AS BIT) AS CanEdit,
+           CAST(CASE WHEN awl.lock_id IS NULL THEN 1 ELSE 0 END AS BIT) AS CanDelete,
+           -- Kode periode gajian lock yang sedang berlaku ('26-w40'), NULL bila belum
+           -- di-lock. Ditampilkan di samping ikon gembok di tab OUT -- periode sebuah baris
+           -- SELALU diturunkan dari lock_id, tidak pernah dari created_at (Prompt 55).
+           lpp.period_code AS LockPeriodCode
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     INNER JOIN articles a ON a.article_id = aw.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
+    LEFT JOIN employees pic ON pic.employee_id = p.project_pic
     LEFT JOIN divisions td ON td.division_id = awl.target_division_id
     LEFT JOIN bundles b ON b.bundle_id = awl.bundle_id
     LEFT JOIN article_sizes asz ON asz.article_size_id = COALESCE(b.article_size_id, awl.article_size_id)
@@ -482,40 +539,36 @@ BEGIN
     LEFT JOIN resources r ON r.resource_id = awl.resource_id
     LEFT JOIN resources bres ON bres.resource_id = b.resource_id
     LEFT JOIN employees bemp ON bemp.employee_id = b.employee_id AND bemp.deleted_at IS NULL
+    -- Prompt 57 (susulan): periode gajian lock aktif baris ini.
+    LEFT JOIN workflow_locks lwl ON lwl.lock_id = awl.lock_id
+    LEFT JOIN payroll_periods lpp ON lpp.payroll_period_id = lwl.payroll_period_id
     WHERE awl.division_id = @DivisionId
       AND awl.deleted_at IS NULL
       AND (
             -- Prompt 28: baris qty_ok = 0 tidak pernah butuh diterima -- jangan tampilkan
             -- sebagai "menunggu diterima" di tab Dikirim juga.
-            -- Fix: baris yang DIBUAT hari ini tetap tampil walau sudah diterima (received_at
-            -- terisi) -- supaya operator tetap bisa melihat riwayat kiriman hari ini di tab
+            -- Fix: baris yang DIKIRIM pada @Date tetap tampil walau sudah diterima (received_at
+            -- terisi) -- supaya operator tetap bisa melihat riwayat kiriman tanggal itu di tab
             -- OUT, bukan cuma yang masih menunggu. Baris begitu jadi read-only di client
             -- (tanpa Revisi/Batal Serah, lihat StationDevice.razor) karena sudah terkunci.
             -- Baris LAWAS yang belum diterima tetap tampil tanpa batas hari (received_at IS
             -- NULL saja, tanpa syarat tanggal) -- perilaku lama dipertahankan.
             (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0
-             AND (awl.received_at IS NULL OR CAST(awl.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
+             AND (awl.received_at IS NULL OR CAST(awl.created_at AS DATE) = @Date))
             -- Prompt 28: baris ADJUSTMENT dengan qty_ok = 0 SELALU target_division_id NULL
             -- (lihat SIS_WorkflowLog_Manage ADJUST) terlepas dari step ini step terakhir
-            -- artikel atau bukan -- batasi cabang "step terakhir, jendela H+1" ini ke baris
-            -- NORMAL saja supaya baris ADJUSTMENT begitu tidak nyasar tampil di sini.
+            -- artikel atau bukan -- batasi cabang "step terakhir" ini ke baris NORMAL saja
+            -- supaya baris ADJUSTMENT begitu tidak nyasar tampil di sini.
+            -- Prompt 56: jendela H+1 DIHAPUS -- baris step terakhir tampil murni berdasarkan
+            -- tanggal kirim. Baris lama yang belum di-lock ditemukan lewat chip "Belum lock"
+            -- (SIS_Station_UnlockedDates) yang memindahkan filter tanggal ke sana.
             OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL'
-                AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl.created_at) AS DATE))
-            -- Fix: bundle Bundling yang langsung auto-diterima Line tujuan saat dibuat (lihat
-            -- SIS_Bundle_Manage CREATE @ResourceId) tetap tampil di OUT selama masih WIP murni
-            -- (belum ada log step berikutnya, is_bundling = 0, utk bundle ini) DAN masih dalam
-            -- jendela 1 jam sejak dibuat -- supaya operator bisa menemukan & menghapus bundle
-            -- yang salah lewat tombol Hapus (lihat SIS_Bundle_Manage DELETE).
-            OR (
-                  aw.is_bundling = 1
-                  AND awl.received_at IS NOT NULL
-                  AND awl.created_at >= DATEADD(HOUR, -1, SYSDATETIME())
-                  AND NOT EXISTS (
-                      SELECT 1 FROM article_workflow_logs awl2
-                      INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl2.article_workflow_id
-                      WHERE awl2.bundle_id = awl.bundle_id AND awl2.deleted_at IS NULL AND aw2.is_bundling = 0
-                  )
-               )
+                AND CAST(awl.created_at AS DATE) = @Date)
+            -- Prompt 56: cabang khusus "bundle Bundling auto-diterima, jendela 1 jam" DIHAPUS.
+            -- Tanpa batas waktunya, cabang itu sepenuhnya tertutup cabang pertama di atas
+            -- (baris Bundling selalu punya target_division_id dan qty_ok > 0), jadi tidak ada
+            -- baris yang hilang -- yang berubah cuma: bundle lama tetap bisa diedit/dihapus
+            -- selama belum di-lock, bukan cuma 1 jam pertama.
           )
       AND (@ResourceId IS NULL OR awl.resource_id IS NULL OR awl.resource_id = @ResourceId)
     ORDER BY awl.created_at DESC;
@@ -581,6 +634,8 @@ BEGIN
             a.article_id, a.article_name, a.style, a.color,
             p.project_name, p.no_po,
             buy.buyer_name,
+            -- Prompt 57 (susulan): PIC project -- dipakai pencarian teks tab WIP di client.
+            pic.employee_name AS pic_name,
             spd.size_name,
             rr.resource_name AS tailor_name,
             emp.employee_name AS employee_name,
@@ -591,6 +646,7 @@ BEGIN
         INNER JOIN articles a ON a.article_id = b.article_id AND a.deleted_at IS NULL
         INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
         INNER JOIN buyers buy ON buy.buyer_id = p.customer_id
+        LEFT JOIN employees pic ON pic.employee_id = p.project_pic
         INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
         INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
         LEFT JOIN resources rr ON rr.resource_id = b.resource_id
@@ -641,6 +697,7 @@ BEGIN
         bs.project_name AS ProjectName,
         bs.no_po AS NoPo,
         bs.buyer_name AS BuyerName,
+        bs.pic_name AS PicName,
         bs.article_name AS ArticleName,
         bs.style AS Style, bs.color AS Color,
         bs.size_name AS SizeName,
@@ -817,35 +874,70 @@ BEGIN
                   )
         ) AS DikerjakanCount,
         (
-            -- Prompt 23: selaraskan dengan SIS_Station_PendingHandover -- ikut hitung baris
-            -- step terakhir (H+1) supaya angka OUT cocok dengan isi tabnya.
-            -- Fix: ikut hitung bundle Bundling yang auto-diterima tapi masih WIP murni dalam
-            -- jendela 1 jam -- lihat kondisi OR ketiga yang sama di SIS_Station_PendingHandover.
+            -- Prompt 23: selaraskan dengan SIS_Station_PendingHandover supaya angka OUT cocok
+            -- dengan isi tabnya (@Date = hari ini).
+            -- Prompt 56: jendela H+1 dan cabang "Bundling auto-diterima 1 jam" ikut DIHAPUS
+            -- di sini juga -- lihat catatan yang sama di SIS_Station_PendingHandover.
             SELECT COUNT(*)
             FROM article_workflow_logs awl3
             INNER JOIN article_workflows aw3 ON aw3.article_workflow_id = awl3.article_workflow_id
             WHERE awl3.division_id = @DivisionId AND awl3.deleted_at IS NULL
               AND (
-                    -- Prompt 28: samakan dengan SIS_Station_PendingHandover.
-                    -- Fix: samakan juga syarat "dibuat hari ini tetap kehitung walau sudah
-                    -- diterima" dengan SIS_Station_PendingHandover.
                     (awl3.target_division_id IS NOT NULL AND awl3.qty_ok > 0
                      AND (awl3.received_at IS NULL OR CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
                     OR (awl3.target_division_id IS NULL AND awl3.log_type = 'NORMAL'
-                        AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, awl3.created_at) AS DATE))
-                    OR (
-                          aw3.is_bundling = 1
-                          AND awl3.received_at IS NOT NULL
-                          AND awl3.created_at >= DATEADD(HOUR, -1, SYSDATETIME())
-                          AND NOT EXISTS (
-                              SELECT 1 FROM article_workflow_logs awl4
-                              INNER JOIN article_workflows aw4 ON aw4.article_workflow_id = awl4.article_workflow_id
-                              WHERE awl4.bundle_id = awl3.bundle_id AND awl4.deleted_at IS NULL AND aw4.is_bundling = 0
-                          )
-                       )
+                        AND CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE))
                   )
               AND (@ResourceId IS NULL OR awl3.resource_id IS NULL OR awl3.resource_id = @ResourceId)
-        ) AS DikirimCount;
+        ) AS DikirimCount,
+        (
+            -- Prompt 56: teks kecil merah "n belum lock" di bawah angka OUT. SEMUA tanggal
+            -- (bukan cuma hari ini) -- ini pengingat tunggakan, bukan angka tab.
+            -- Cakupan barisnya WAJIB sama dengan yang bisa MUNCUL di tab OUT (dua cabang di
+            -- SIS_Station_PendingHandover, tanpa syarat tanggal) -- kalau tidak, baris yang
+            -- tidak pernah tampil (mis. ADJUSTMENT qty_ok = 0) ikut terhitung dan angka ini
+            -- tidak akan pernah bisa dinolkan operator.
+            SELECT COUNT(*)
+            FROM article_workflow_logs awl5
+            WHERE awl5.division_id = @DivisionId AND awl5.deleted_at IS NULL
+              AND awl5.lock_id IS NULL
+              AND (
+                    (awl5.target_division_id IS NOT NULL AND awl5.qty_ok > 0)
+                    OR (awl5.target_division_id IS NULL AND awl5.log_type = 'NORMAL')
+                  )
+              AND (@ResourceId IS NULL OR awl5.resource_id IS NULL OR awl5.resource_id = @ResourceId)
+        ) AS OutUnlockedCount;
+END;
+GO
+
+-- Prompt 56: chip pengingat "Belum lock" di atas daftar tab OUT -- tanggal (basis yang sama
+-- dengan filter "Tanggal Kirim", yaitu CAST(created_at AS DATE)) yang masih punya baris hidup
+-- divisi ini dengan lock_id IS NULL, plus jumlah barisnya. Urut tanggal naik (yang terlama
+-- dulu -- itu yang paling mendesak dibereskan).
+-- @ResourceId ikut disediakan (tidak diminta eksplisit di prompt) supaya angka chip memakai
+-- filter Line yang SAMA dengan daftar OUT di layar -- tanpa itu, stasiun yang terkunci ke satu
+-- resource bisa melihat chip "3 belum lock" tapi daftarnya kosong.
+CREATE OR ALTER PROCEDURE SIS_Station_UnlockedDates
+    @DivisionId INT,
+    @ResourceId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(awl.created_at AS DATE) AS [Date],
+           COUNT(*) AS [Count]
+    FROM article_workflow_logs awl
+    WHERE awl.division_id = @DivisionId AND awl.deleted_at IS NULL
+      AND awl.lock_id IS NULL
+      -- Cakupan baris SAMA dengan yang bisa muncul di tab OUT (lihat catatan yang sama di
+      -- OutUnlockedCount) -- chip harus selalu bisa ditindaklanjuti operator.
+      AND (
+            (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0)
+            OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL')
+          )
+      AND (@ResourceId IS NULL OR awl.resource_id IS NULL OR awl.resource_id = @ResourceId)
+    GROUP BY CAST(awl.created_at AS DATE)
+    ORDER BY [Date] ASC;
 END;
 GO
 

@@ -3,6 +3,7 @@ using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Divisions;
 using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Packs;
+using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Resources;
 using TerakarsaApp.Shared.Stations;
@@ -166,9 +167,13 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<StationPendingReceiveDto>>() ?? new();
     }
 
-    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int? resourceId)
+    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int? resourceId, DateTime? date = null)
     {
-        var response = await _http.GetAsync($"api/station/pending-handover{ResourceIdQuery(resourceId)}");
+        var url = $"api/station/pending-handover{ResourceIdQuery(resourceId)}";
+        if (date.HasValue)
+            url += (url.Contains('?') ? "&" : "?") + $"date={date.Value:yyyy-MM-dd}";
+
+        var response = await _http.GetAsync(url);
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<StationPendingHandoverDto>>() ?? new();
     }
@@ -235,7 +240,44 @@ public class StationDeviceApiService
 
     // Prompt 12e: tab "Dikirim" (dulu "Menunggu Diserahkan") -- ulang pakai endpoint
     // pending-handover yang sudah cocok dengan definisi Dikirim, hanya rename di sisi client.
-    public async Task<List<StationPendingHandoverDto>> GetOutboundAsync(int? resourceId) => await GetPendingHandoverAsync(resourceId);
+    public async Task<List<StationPendingHandoverDto>> GetOutboundAsync(int? resourceId, DateTime? date = null) => await GetPendingHandoverAsync(resourceId, date);
+
+    // Prompt 56: chip pengingat "Belum lock" di tab OUT.
+    public async Task<List<StationUnlockedDateDto>> GetOutUnlockedDatesAsync(int? resourceId)
+    {
+        var response = await _http.GetAsync($"api/station/out/unlocked-dates{ResourceIdQuery(resourceId)}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationUnlockedDateDto>>() ?? new();
+    }
+
+    // Prompt 56: dropdown "Periode Gajian" pada modal LOCK -- defaultAt = created_at terbaru
+    // di antara baris terpilih.
+    public async Task<List<PayrollPeriodOptionDto>> GetPayrollPeriodsAsync(DateTime? defaultAt)
+    {
+        var url = "api/station/payroll-periods";
+        if (defaultAt.HasValue) url += $"?defaultAt={defaultAt.Value:yyyy-MM-ddTHH:mm:ss}";
+
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PayrollPeriodOptionDto>>() ?? new();
+    }
+
+    // Prompt 56: LOCK baris terpilih. Pesan error SP diteruskan apa adanya -- client yang
+    // mengupas prefix 'LOCKED|'.
+    public async Task<(bool Success, string Error)> LockOutRowsAsync(StationLockRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/locks", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await response.Content.ReadAsStringAsync());
+    }
+
+    // Prompt 56: ajukan unlock untuk baris terpilih (approval-nya di halaman admin).
+    public async Task<(bool Success, string Error)> CreateUnlockRequestAsync(StationUnlockRequestCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/unlock-requests", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await response.Content.ReadAsStringAsync());
+    }
 
     private static string ResourceIdQuery(int? resourceId) =>
         resourceId.HasValue ? $"?resourceId={resourceId.Value}" : string.Empty;

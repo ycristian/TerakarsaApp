@@ -50,6 +50,11 @@ perubahan dieksekusi lewat prompt file bernomor di folder `claude prompt/`.
   operator dipilih per sesi → `resource_id`.
 - Log workflow model 1 baris: baris dibuat saat divisi selesai/serah;
   `received_at IS NULL` = menunggu diterima. Tidak ada kolom status.
+- Lock log workflow (Prompt 55): baris dengan `lock_id` terisi tidak boleh diubah/dihapus
+  lewat SP mana pun (termasuk Super Admin) — pesan `LOCKED|`. Baris belum lock boleh
+  diubah kapan pun selama saldo tidak jadi minus. Periode gajian log = periode di
+  `workflow_locks`, bukan dari `created_at`. Pelepasan lock hanya lewat
+  `SIS_UnlockRequest_Manage` APPROVE.
 - Upload gambar: ImageSharp, max 1920px, JPEG 80; nama file GUID di disk,
   nama asli di DB.
 - Navigasi halaman anak: full page + `CloseButton.razor` (`history.back()` +

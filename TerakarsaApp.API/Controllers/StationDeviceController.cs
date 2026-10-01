@@ -4,6 +4,7 @@ using TerakarsaApp.API.Authorization;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Packs;
+using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Stations;
 using TerakarsaApp.Shared.WorkflowLogs;
@@ -21,6 +22,7 @@ namespace TerakarsaApp.API.Controllers;
 public class StationDeviceController : ControllerBase
 {
     private readonly WorkflowLogService _workflowLogService;
+    private readonly WorkflowLockService _workflowLockService;
     private readonly ResourceService _resourceService;
     private readonly BundleService _bundleService;
     private readonly EmployeeService _employeeService;
@@ -33,6 +35,7 @@ public class StationDeviceController : ControllerBase
 
     public StationDeviceController(
         WorkflowLogService workflowLogService,
+        WorkflowLockService workflowLockService,
         ResourceService resourceService,
         BundleService bundleService,
         EmployeeService employeeService,
@@ -44,6 +47,7 @@ public class StationDeviceController : ControllerBase
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
+        _workflowLockService = workflowLockService;
         _resourceService = resourceService;
         _bundleService = bundleService;
         _employeeService = employeeService;
@@ -295,10 +299,70 @@ public class StationDeviceController : ControllerBase
     // (received_at IS NULL) -- masih boleh direvisi lewat PUT logs/{id}/revise-handover di
     // bawah. Prompt 12e: ini sumber data tab "Dikirim" (dulu "Menunggu Diserahkan").
     [HttpGet("pending-handover")]
-    public async Task<IActionResult> GetPendingHandover([FromQuery] int? resourceId)
+    public async Task<IActionResult> GetPendingHandover([FromQuery] int? resourceId, [FromQuery] DateTime? date)
     {
-        var result = await _workflowLogService.GetPendingHandoverAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
+        var result = await _workflowLogService.GetPendingHandoverAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId), date);
         return Ok(result);
+    }
+
+    // Prompt 56: chip pengingat "Belum lock" di atas daftar tab OUT -- tanggal kirim yang
+    // masih punya baris belum di-lock, semua tanggal (bukan hanya rentang filter).
+    [HttpGet("out/unlocked-dates")]
+    public async Task<IActionResult> GetOutUnlockedDates([FromQuery] int? resourceId)
+    {
+        var result = await _workflowLogService.GetUnlockedDatesAsync(CurrentStation.DivisionId, EffectiveResourceId(resourceId));
+        return Ok(result);
+    }
+
+    // Prompt 56: dropdown "Periode Gajian" pada modal LOCK. defaultAt = created_at TERBARU
+    // di antara baris yang dipilih operator.
+    [HttpGet("payroll-periods")]
+    public async Task<IActionResult> GetPayrollPeriods([FromQuery] DateTime? defaultAt)
+    {
+        var result = await _workflowLockService.GetPayrollPeriodOptionsAsync(defaultAt);
+        return Ok(result);
+    }
+
+    // Prompt 56: tombol LOCK di bar aksi tab OUT -- SIS_WorkflowLock_Manage LOCK.
+    // Divisi & stasiun SELALU dari token (tidak dipercaya dari body), UserId = user sistem
+    // station. Pesan error SP diteruskan apa adanya (prefix 'LOCKED|' dikenali client).
+    [HttpPost("locks")]
+    public async Task<IActionResult> CreateLock([FromBody] StationLockRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.WorkflowLogIds is null || request.WorkflowLogIds.Count == 0)
+            return BadRequest("Pilih minimal satu baris untuk di-lock.");
+
+        if (request.PayrollPeriodId <= 0)
+            return BadRequest("Periode gajian wajib dipilih.");
+
+        var (success, error) = await _workflowLockService.LockAsync(
+            request.WorkflowLogIds, request.PayrollPeriodId,
+            CurrentStation.DivisionId, CurrentStation.StationId, resourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Prompt 56: tombol AJUKAN UNLOCK -- SIS_UnlockRequest_Manage CREATE. Approval-nya di
+    // halaman admin (Prompt 57); dari stasiun hanya bisa mengajukan.
+    [HttpPost("unlock-requests")]
+    public async Task<IActionResult> CreateUnlockRequest([FromBody] StationUnlockRequestCreateRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.WorkflowLogIds is null || request.WorkflowLogIds.Count == 0)
+            return BadRequest("Pilih minimal satu baris untuk diajukan.");
+
+        var (success, error) = await _workflowLockService.CreateUnlockRequestAsync(
+            request.WorkflowLogIds, request.Reason,
+            CurrentStation.DivisionId, CurrentStation.StationId, resourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
     }
 
     // Prompt 15: 20 baris terakhir yang diterima divisi ini -- dasar tab "Baru Diterima".

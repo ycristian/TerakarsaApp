@@ -118,6 +118,8 @@ public class WorkflowLogService
         public int ArticleId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
         public string? NoPo { get; set; }
+        public string? BuyerName { get; set; }
+        public string? PicName { get; set; }
         public string ArticleName { get; set; } = string.Empty;
         public string? Style { get; set; }
         public string? Color { get; set; }
@@ -144,6 +146,11 @@ public class WorkflowLogService
         public int ArticleId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
         public string? NoPo { get; set; }
+        // BuyerName sebelumnya TIDAK ada di sini padahal SP mengembalikannya dan DTO punya
+        // propertinya -- akibatnya header kartu OUT menampilkan "Project ·" dengan nama
+        // customer kosong. Ditambahkan sekalian bersama PicName.
+        public string? BuyerName { get; set; }
+        public string? PicName { get; set; }
         public string ArticleName { get; set; } = string.Empty;
         public string? Style { get; set; }
         public string? Color { get; set; }
@@ -177,6 +184,12 @@ public class WorkflowLogService
         public string? BundleRemarks { get; set; }
         public int? BundleEmployeeId { get; set; }
         public string? BundleEmployeeName { get; set; }
+        public int? LockId { get; set; }
+        public bool IsLocked { get; set; }
+        public bool HasPendingUnlock { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanDelete { get; set; }
+        public string? LockPeriodCode { get; set; }
     }
 
     public async Task<List<WorkflowLogDto>> ListByArticleAsync(int articleId)
@@ -234,15 +247,16 @@ public class WorkflowLogService
 
     // Prompt 22b: lineResourceId, lihat komentar GetPendingReceivesAsync (di sini dicocokkan
     // ke awl.resource_id -- Line PENGIRIM, bukan bundles.resource_id).
-    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int divisionId, int? lineResourceId)
+    public async Task<List<StationPendingHandoverDto>> GetPendingHandoverAsync(int divisionId, int? lineResourceId, DateTime? date)
     {
         var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
         var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
+        var dateParam = new SqlParameter("@Date", (object?)date?.Date ?? DBNull.Value);
 
         var rows = await _db.Database
             .SqlQueryRaw<StationPendingHandoverRow>(
-                "EXEC SIS_Station_PendingHandover @DivisionId = @DivisionId, @ResourceId = @ResourceId",
-                divisionIdParam, resourceIdParam)
+                "EXEC SIS_Station_PendingHandover @DivisionId = @DivisionId, @ResourceId = @ResourceId, @Date = @Date",
+                divisionIdParam, resourceIdParam, dateParam)
             .ToListAsync();
 
         return rows.Select(row => new StationPendingHandoverDto
@@ -252,6 +266,8 @@ public class WorkflowLogService
             ArticleId = row.ArticleId,
             ProjectName = row.ProjectName,
             NoPo = row.NoPo,
+            BuyerName = row.BuyerName,
+            PicName = row.PicName,
             ArticleName = row.ArticleName,
             Style = row.Style,
             Color = row.Color,
@@ -288,8 +304,27 @@ public class WorkflowLogService
             BundleResourceName = row.BundleResourceName,
             BundleRemarks = row.BundleRemarks,
             BundleEmployeeId = row.BundleEmployeeId,
-            BundleEmployeeName = row.BundleEmployeeName
+            BundleEmployeeName = row.BundleEmployeeName,
+            LockId = row.LockId,
+            IsLocked = row.IsLocked,
+            HasPendingUnlock = row.HasPendingUnlock,
+            CanEdit = row.CanEdit,
+            CanDelete = row.CanDelete,
+            LockPeriodCode = row.LockPeriodCode
         }).ToList();
+    }
+
+    // Prompt 56: chip "Belum lock" di tab OUT -- lihat SIS_Station_UnlockedDates.
+    public async Task<List<StationUnlockedDateDto>> GetUnlockedDatesAsync(int divisionId, int? lineResourceId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+        var resourceIdParam = new SqlParameter("@ResourceId", (object?)lineResourceId ?? DBNull.Value);
+
+        return await _db.Database
+            .SqlQueryRaw<StationUnlockedDateDto>(
+                "EXEC SIS_Station_UnlockedDates @DivisionId = @DivisionId, @ResourceId = @ResourceId",
+                divisionIdParam, resourceIdParam)
+            .ToListAsync();
     }
 
     // Prompt 23: kartu permanen (artikel x step non-bundle) di tab WIP -- lihat
@@ -308,6 +343,8 @@ public class WorkflowLogService
             ArticleId = row.ArticleId,
             ProjectName = row.ProjectName,
             NoPo = row.NoPo,
+            BuyerName = row.BuyerName,
+            PicName = row.PicName,
             ArticleName = row.ArticleName,
             Style = row.Style,
             Color = row.Color,

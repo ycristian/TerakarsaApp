@@ -86,6 +86,8 @@ public class StationPendingHandoverDto
     public string? NoPo { get; set; }
     // Prompt: header kartu tabel-per-artikel tab OUT, sama format dengan StationInProgressDto.
     public string? BuyerName { get; set; }
+    // Prompt 57 (susulan): PIC project -- target pencarian teks tab OUT.
+    public string? PicName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
@@ -141,6 +143,44 @@ public class StationPendingHandoverDto
     // Prompt 32: penjahit dari master employees, diutamakan di atas BundleRemarks.
     public int? BundleEmployeeId { get; set; }
     public string? BundleEmployeeName { get; set; }
+    // Prompt 55/56: status lock baris. IsLocked = lock_id terisi -> baris beku (tombol
+    // Edit/Hapus diganti ikon gembok). HasPendingUnlock = baris ada di pengajuan unlock yang
+    // masih menunggu approval admin -> tidak bisa dipilih di mode mana pun.
+    // CanEdit/CanDelete kini MURNI turunan lock (lihat SIS_Station_PendingHandover) -- tidak
+    // ada lagi jendela 1 jam / H+1 / "sudah diterima". Validasi saldo tetap di SP tulis;
+    // client tidak menghitungnya, cukup menampilkan pesan error apa adanya.
+    public int? LockId { get; set; }
+    public bool IsLocked { get; set; }
+    public bool HasPendingUnlock { get; set; }
+    public bool CanEdit { get; set; }
+    public bool CanDelete { get; set; }
+    // Kode periode gajian lock yang sedang berlaku ('26-w40'), NULL kalau belum di-lock.
+    // Ditampilkan di samping ikon gembok supaya operator tahu baris itu masuk periode mana.
+    public string? LockPeriodCode { get; set; }
+}
+
+// Prompt 56: chip pengingat "Belum lock" di tab OUT -- lihat SIS_Station_UnlockedDates.
+public class StationUnlockedDateDto
+{
+    public DateTime Date { get; set; }
+    public int Count { get; set; }
+}
+
+// Prompt 56: POST api/station/locks -- SIS_WorkflowLock_Manage LOCK. DivisionId/StationId
+// diambil dari token stasiun, UserId dari user sistem station (tidak dikirim client).
+public class StationLockRequest
+{
+    public List<int> WorkflowLogIds { get; set; } = new();
+    public int PayrollPeriodId { get; set; }
+    public int ResourceId { get; set; }
+}
+
+// Prompt 56: POST api/station/unlock-requests -- SIS_UnlockRequest_Manage CREATE.
+public class StationUnlockRequestCreateRequest
+{
+    public List<int> WorkflowLogIds { get; set; } = new();
+    public string Reason { get; set; } = string.Empty;
+    public int ResourceId { get; set; }
 }
 
 // Prompt 12e: tab "Dikerjakan" -- bundle sudah diterima divisi ini, belum ada baris step
@@ -159,6 +199,9 @@ public class StationInProgressDto
     public string? NoPo { get; set; }
     // Prompt: header kartu WIP tabel-per-artikel butuh nama customer di samping nama project.
     public string? BuyerName { get; set; }
+    // Prompt 57 (susulan): PIC project (projects.project_pic) -- tidak ditampilkan di kartu,
+    // hanya menjadi target pencarian teks tab WIP/OUT.
+    public string? PicName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     // Prompt 23: murni tambahan data (tidak mengubah alur kartu bundle) supaya pencarian teks
     // WAJIB di tab WIP bisa menyaring kartu bundle dan non-bundle dengan field yang sama.
@@ -184,6 +227,9 @@ public class StationCountsDto
     public int MasukCount { get; set; }
     public int DikerjakanCount { get; set; }
     public int DikirimCount { get; set; }
+    // Prompt 56: teks kecil merah "n belum lock" di bawah angka OUT -- SEMUA tanggal, bukan
+    // cuma hari ini (pengingat tunggakan, bukan angka tab). Sembunyikan kalau 0.
+    public int OutUnlockedCount { get; set; }
 }
 
 public class StationLogUpdateRequest
@@ -312,6 +358,9 @@ public class StationActiveWorkDto
     public int ArticleId { get; set; }
     public string ProjectName { get; set; } = string.Empty;
     public string? NoPo { get; set; }
+    // Prompt 57 (susulan): customer + PIC project -- target pencarian teks tab WIP.
+    public string? BuyerName { get; set; }
+    public string? PicName { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }

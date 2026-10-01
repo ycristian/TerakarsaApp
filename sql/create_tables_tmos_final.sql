@@ -531,7 +531,17 @@ CREATE TABLE article_workflow_logs(
    constraint FK_awl_updated_by_resource foreign key references resources(resource_id),
  deleted_at datetime2 null,
  deleted_by int null,
- delete_reason varchar(255) null
+ delete_reason varchar(255) null,
+ lock_id int null                           -- Prompt 55: lock yang SEDANG berlaku untuk baris ini.
+                                             -- NULL = bebas diubah/dihapus (selama saldo tidak jadi
+                                             -- minus). Terisi = beku di SEMUA jalur, termasuk
+                                             -- SIS_SuperAdmin_Manage -- pesan 'LOCKED|...'.
+                                             -- Periode gajian baris ini = lock_id ->
+                                             -- workflow_locks.payroll_period_id (TIDAK ada kolom
+                                             -- periode di sini). FK_awl_workflow_locks ditambahkan
+                                             -- di bagian 12 (workflow_locks baru dibuat di 9g,
+                                             -- setelah tabel ini -- dan workflow_lock_items sendiri
+                                             -- menunjuk balik ke sini).
 );
 
 -- Prompt 48: daftar printer fisik. Menambah/mengganti printer = INSERT/UPDATE di sini,
@@ -967,6 +977,122 @@ CREATE TABLE app_settings(
 );
 GO
 
+-- ============ 9g. LOCK LOG WORKFLOW & PERIODE GAJIAN ============
+-- Prompt 55: baris article_workflow_logs yang belum di-lock boleh diubah/dihapus kapan pun
+-- (asal saldo tidak jadi minus); yang sudah di-lock beku di semua jalur (termasuk Super Admin).
+-- Pelepasan lock HANYA lewat unlock_requests yang disetujui admin. Tidak ada kolom status di
+-- keempat tabel ini -- keadaan diturunkan dari timestamp (finalized_at, released_at,
+-- approved_at/rejected_at, deleted_at).
+
+-- Periode gajian: rumus Sabtu 10:00 Prompt 30, sekarang jadi baris bernomor. Periode ke-N
+-- tahun Y BERAKHIR di Sabtu ke-N tahun itu jam 10:00, period_start = period_end - 7 hari.
+-- Diisi lewat SIS_PayrollPeriod_Manage GENERATE_YEAR (sql/sp_PayrollPeriod_Manage.sql).
+CREATE TABLE payroll_periods(
+ payroll_period_id int primary key identity(1,1),
+ period_year smallint not null,
+ period_no tinyint not null,                -- 1..52/53 (jumlah Sabtu di tahun itu)
+ period_code varchar(10) not null,          -- 'YY-wNN', mis. '26-w40' -- nomor periode internal, bukan ISO week
+ period_start datetime2 not null,           -- inklusif
+ period_end datetime2 not null,             -- eksklusif
+ finalized_at datetime2 null,               -- disiapkan, UI finalisasi menyusul
+ finalized_by int null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Header satu kali tekan Lock di stasiun (atau lock sistem dari golive_55_lock_existing.sql).
+CREATE TABLE workflow_locks(
+ lock_id int primary key identity(1,1),
+ division_id int not null                   -- divisi pemilik baris OUT yang di-lock
+   constraint FK_wl_divisions foreign key references divisions(division_id),
+ station_id int null                        -- NULL untuk lock sistem (go-live)
+   constraint FK_wl_stations foreign key references stations(station_id),
+ payroll_period_id int not null             -- dipilih PIC saat menekan Lock
+   constraint FK_wl_payroll_periods foreign key references payroll_periods(payroll_period_id),
+ locked_by_resource_id int null             -- operator sesi stasiun
+   constraint FK_wl_resources foreign key references resources(resource_id),
+ locked_by_name varchar(150) null,          -- hanya lock sistem ('SYSTEM - GO LIVE');
+                                             -- nanti dipakai identitas kartu NFC
+ locked_at datetime2 not null default sysdatetime(),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Pengajuan buka lock dari stasiun. Menunggu = approved_at IS NULL AND rejected_at IS NULL
+-- AND deleted_at IS NULL; pembatalan oleh pengaju = soft delete.
+CREATE TABLE unlock_requests(
+ request_id int primary key identity(1,1),
+ division_id int not null
+   constraint FK_ur_divisions foreign key references divisions(division_id),
+ station_id int null
+   constraint FK_ur_stations foreign key references stations(station_id),
+ reason varchar(500) not null,              -- wajib, minimal 5 karakter
+ requested_by_resource_id int null          -- operator sesi stasiun
+   constraint FK_ur_resources foreign key references resources(resource_id),
+ approved_at datetime2 null,
+ approved_by int null,
+ rejected_at datetime2 null,
+ rejected_by int null,
+ admin_note varchar(500) null,              -- wajib saat REJECT
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Isi lock + riwayat. Lock yang dilepas TIDAK dihapus (released_at terisi) supaya jejak
+-- "baris ini pernah di-lock ke periode mana, dibuka oleh request mana" tetap utuh.
+CREATE TABLE workflow_lock_items(
+ lock_item_id int primary key identity(1,1),
+ lock_id int not null
+   constraint FK_wli_workflow_locks foreign key references workflow_locks(lock_id),
+ workflow_log_id int not null
+   constraint FK_wli_article_workflow_logs foreign key references article_workflow_logs(workflow_log_id),
+ -- Snapshot nilai baris saat di-lock (bukti isi periode gajian tidak berubah diam-diam).
+ snap_qty_ok int not null default 0,
+ snap_qty_reject_print int not null default 0,
+ snap_qty_reject_fabric int not null default 0,
+ snap_qty_reject_sewing int not null default 0,
+ snap_qty_reject_rework int not null default 0,
+ snap_qty_lost int not null default 0,
+ snap_article_size_id int null,
+ snap_resource_id int null,
+ snap_target_division_id int null,
+ released_at datetime2 null,                -- terisi saat lock dilepas oleh request yang disetujui
+ released_by_request_id int null
+   constraint FK_wli_unlock_requests foreign key references unlock_requests(request_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Detail pengajuan. Tanpa updated_*/deleted_* -- ikut nasib header.
+CREATE TABLE unlock_request_items(
+ request_item_id int primary key identity(1,1),
+ request_id int not null
+   constraint FK_uri_unlock_requests foreign key references unlock_requests(request_id),
+ workflow_log_id int not null
+   constraint FK_uri_article_workflow_logs foreign key references article_workflow_logs(workflow_log_id),
+ lock_item_id int not null                  -- lock aktif yang diminta dilepas
+   constraint FK_uri_workflow_lock_items foreign key references workflow_lock_items(lock_item_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
 
@@ -999,6 +1125,11 @@ CREATE UNIQUE INDEX UX_dashboard_tokens_name   ON dashboard_tokens(token_name) W
 CREATE UNIQUE INDEX UX_print_devices_code      ON print_devices(device_code) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_print_job_routes_type   ON print_job_routes(job_type) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_print_kupon_job_types_job_type ON print_kupon_job_types(job_type) WHERE deleted_at IS NULL;
+-- Prompt 55.
+CREATE UNIQUE INDEX UX_payroll_periods_year_no ON payroll_periods(period_year, period_no) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_payroll_periods_code   ON payroll_periods(period_code)             WHERE deleted_at IS NULL;
+-- Satu baris log maksimal punya SATU lock aktif.
+CREATE UNIQUE INDEX UX_wli_log_active         ON workflow_lock_items(workflow_log_id)     WHERE released_at IS NULL AND deleted_at IS NULL;
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
@@ -1018,4 +1149,17 @@ CREATE INDEX IX_print_jobs_status   ON print_jobs([status]) WHERE deleted_at IS 
 CREATE INDEX IX_print_jobs_ref      ON print_jobs(job_type, ref_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_packs_project       ON packs(project_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_pack_items_pack     ON pack_items(pack_id) WHERE deleted_at IS NULL;
+-- Prompt 55.
+CREATE INDEX IX_awl_lock_id         ON article_workflow_logs(lock_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_wli_lock_id         ON workflow_lock_items(lock_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_uri_request_id      ON unlock_request_items(request_id);
+GO
+
+-- ============ 12. FK YANG BARU BISA DIPASANG SETELAH SEMUA TABEL ADA ============
+-- article_workflow_logs (bagian 5) menunjuk workflow_locks (bagian 9g) sementara
+-- workflow_lock_items menunjuk balik ke article_workflow_logs -- siklus ini dipecah dengan
+-- memasang FK arah ini paling akhir. Lihat juga sql/alter_55_workflow_lock.sql.
+
+ALTER TABLE article_workflow_logs ADD CONSTRAINT FK_awl_workflow_locks
+    FOREIGN KEY (lock_id) REFERENCES workflow_locks(lock_id);
 GO

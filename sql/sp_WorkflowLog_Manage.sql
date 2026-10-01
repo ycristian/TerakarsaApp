@@ -45,17 +45,14 @@
 --   exceed -- pesan format tetap 'QTY_SHORT|...'. Exceed dan short independen, tidak
 --   mungkin terjadi bersamaan (satu baris tidak bisa sekaligus > dan < qty masuk).
 --
--- @Action = 'UPDATE' (revisi data SEBELUM diterima -- dipakai oleh divisi PEMBUAT baris,
--- bukan divisi tujuan): boleh mengubah qty_*, remark, article_size_id selama baris masih
--- hidup DAN received_at masih NULL (belum diserahkan/diterima). @ActingDivisionId (bila
--- diisi) harus = division_id baris ini (divisi yang membuatnya), bukan target_division_id.
--- Begitu received_at terisi (lewat RECEIVE), baris terkunci -- UPDATE ditolak.
--- Prompt 23: baris step TERAKHIR artikel (target_division_id NULL) tidak pernah punya
--- received_at (tidak ada divisi tujuan yang "menerima"), jadi tanpa batas lain baris ini
--- bisa direvisi selamanya -- dibatasi jendela H+1 (hari dibuat + 1 hari kalender) alih-alih.
--- Baris dengan target_division_id NOT NULL tidak kena batas ini (tetap dikunci oleh RECEIVE
--- seperti biasa). Guard sama juga ditegakkan di SIS_Bundle_ScanInfo supaya UI tidak
--- menawarkan tombol Edit di luar jendela ini.
+-- @Action = 'UPDATE' (revisi data -- dipakai oleh divisi PEMBUAT baris, bukan divisi tujuan):
+-- boleh mengubah qty_*, remark, article_size_id selama baris masih hidup.
+-- @ActingDivisionId (bila diisi) harus = division_id baris ini (divisi yang membuatnya),
+-- bukan target_division_id.
+-- [diganti Prompt 55: lock + saldo] Dulu ada dua pembatas waktu yang kini DIHAPUS: guard
+-- "received_at masih NULL" (baris terkunci begitu diterima) dan jendela H+1 Prompt 23 untuk
+-- baris step TERAKHIR (target_division_id NULL, yang tidak pernah punya received_at).
+-- Gantinya: baris boleh diubah kapan pun selama lock_id masih NULL DAN saldo tidak jadi minus.
 -- Prompt 12d: @UserId WAJIB (pengganti pencatat -- user login yang merevisi; API stasiun
 -- mengirim user sistem 'station', halaman login mengirim user JWT). @UpdatedByResourceId
 -- opsional (pelaksana/operator sesi aktif saat revisi dari stasiun) -- kalau diisi, resource
@@ -83,27 +80,27 @@
 -- @UpdatedByResourceId wajib diisi (operator sesi aktif) dan harus resource hidup milik
 -- divisi tsb. Tidak menyentuh alasan/kolom baru -- pembatalan tidak dicatat alasannya.
 --
--- @Action = 'DELETE': soft delete + alasan wajib. Tambahan (Prompt 12b): tolak kalau
--- baris ber-bundle ini sudah dipakai sebagai dasar step berikutnya -- ada baris hidup
--- di step sesudahnya (sort_order lebih besar, artikel sama) untuk bundle yang sama.
+-- @Action = 'DELETE': soft delete + alasan wajib. [diganti Prompt 55: lock + saldo] Guard
+-- Prompt 12b "baris ber-bundle ini sudah dipakai sebagai dasar step berikutnya" DIHAPUS --
+-- penghapusan kini diatur lock_id + saldo.
 --
 -- Prompt 12e -- tab "Dikirim" di /station (dulu "Menunggu Diserahkan"):
---   @Action = 'CANCEL_HANDOVER' ("Batal Serah"): soft delete baris serah yang salah,
---   guard received_at IS NULL (begitu diterima, harus lewat UNRECEIVE di divisi penerima,
---   bukan ini). @ActingDivisionId (bila diisi) harus = division_id baris (divisi pembuat).
+--   @Action = 'CANCEL_HANDOVER' ("Batal Serah"): soft delete baris serah yang salah.
+--   @ActingDivisionId (bila diisi) harus = division_id baris (divisi pembuat).
 --   delete_reason diisi tetap ('Batal serah (stasiun)') -- UI tidak menyediakan input alasan
---   bebas untuk aksi ini, beda dengan DELETE biasa.
---   Prompt 23: baris step TERAKHIR (target_division_id NULL) juga boleh dibatalkan lewat
---   aksi yang sama selama masih dalam jendela H+1 (received_at selalu NULL utk baris ini,
---   jadi guard itu otomatis lolos) -- delete_reason jadi 'Batal step terakhir (stasiun)'
---   untuk kasus ini. Baris target_division_id NOT NULL yang sudah lewat H+1 tapi belum
---   diterima TETAP bisa dibatalkan kapan saja (tidak kena guard H+1, beda dengan UPDATE).
+--   bebas untuk aksi ini, beda dengan DELETE biasa; baris step TERAKHIR (target_division_id
+--   NULL) memakai 'Batal step terakhir (stasiun)'.
+--   [diganti Prompt 55: lock + saldo] Guard received_at IS NULL dan jendela H+1 Prompt 23
+--   DIHAPUS -- pembatalan kini diatur lock_id + saldo.
 --
 --   @Action = 'REVISE_HANDOVER' ("Revisi" di tab Dikirim): superset dari UPDATE khusus baris
 --   serah -- selain qty_*/remark, boleh juga mengubah target_division_id (@NewTargetDivisionId,
 --   wajib, harus divisi yang dipakai step manapun di workflow artikel ini) dan resource_id
 --   (@ResourceId, penjahit/pelaksana baris ini, opsional, harus resource hidup milik divisi
---   baris ini). Guard received_at IS NULL, sama dengan UPDATE. SENGAJA tidak menjalankan
+--   baris ini). [diganti Prompt 55: lock + saldo] Guard received_at IS NULL tidak lagi
+--   berlaku untuk qty/remark/resource -- TAPI perubahan target_division_id tetap hanya boleh
+--   selama received_at masih NULL (penerimaan melekat pada divisi tujuan lama), dan baris yang
+--   sudah diterima MEMPERTAHANKAN trio received_* apa adanya. SENGAJA tidak menjalankan
 --   validasi kuota QTY_EXCEED/QTY_SHORT (di luar cakupan Prompt 12e) -- nilai disimpan apa
 --   adanya, murni koreksi data sebelum diterima. Mengisi trio updated_at/updated_by/
 --   updated_by_resource_id (Prompt 12d) seperti UPDATE.
@@ -213,6 +210,24 @@
 -- NULL) -- turun ke alur RECEIVE manual biasa di divisi tujuan, tanpa RAISERROR yang
 -- menghalangi penyimpanan penyesuaian. Tidak menyentuh kupon borongan (Prompt 41) --
 -- ADJUST tetap di luar tiga jalur yang memicu kupon (RECEIVE manual/CREATE/REVISE_HANDOVER).
+--
+-- Prompt 55 -- LOCK + SALDO, mengganti SEMUA aturan revisi berbasis waktu di atas:
+--   1. Baris dengan article_workflow_logs.lock_id TERISI ditolak keras di UPDATE,
+--      REVISE_HANDOVER, CANCEL_HANDOVER dan DELETE -- pesan seragam
+--      'LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.' (prefix tetap, dikenali UI).
+--      TIDAK dikunci: CREATE & ADJUST (keduanya membuat baris BARU, bukan mengubah yang lama)
+--      dan RECEIVE/UNRECEIVE (lock hanya menyangkut sisi pengirim; sisi penerima bebas).
+--      Lock dipasang SIS_WorkflowLock_Manage, dilepas HANYA lewat SIS_UnlockRequest_Manage
+--      APPROVE -- lihat sql/sp_WorkflowLock_Manage.sql & sql/sp_UnlockRequest_Manage.sql.
+--   2. Baris yang BELUM di-lock boleh diubah/dihapus kapan pun, termasuk setelah diterima
+--      divisi berikutnya, selama saldo tidak jadi minus. Prinsip guard saldo: ditolak HANYA
+--      kalau saldo baru negatif DAN lebih buruk dari saldo sekarang -- data lama yang sudah
+--      minus tetap bisa dikoreksi ke arah yang membaik, dan kenaikan qty selalu lolos.
+--      Rumus saldo ada di dbo.SIS_fn_BundleNextStepTotal / dbo.SIS_fn_NonBundleSaldo
+--      (sql/fn_55_workflow_saldo.sql) -- satu definisi, dipakai SP ini, SIS_Bundle_Manage
+--      dan SIS_SuperAdmin_Manage.
+--   3. Validasi lain TIDAK berubah: kuota QTY_EXCEED|/QTY_SHORT| (Prompt 14/14b), qty negatif,
+--      project terkunci (Prompt 18), divisi pembuat, resource milik divisi.
 
 SET ANSI_NULLS ON;
 GO
@@ -639,11 +654,13 @@ BEGIN
     ELSE IF @Action = 'UPDATE'
     BEGIN
         DECLARE @UpdDivisionId INT, @UpdBundleId INT, @UpdReceivedAt DATETIME2, @UpdArticleId INT,
-                @UpdArticleWorkflowId INT, @UpdSortOrder INT, @UpdTargetDivisionId INT, @UpdCreatedAt DATETIME2;
+                @UpdArticleWorkflowId INT, @UpdSortOrder INT, @UpdTargetDivisionId INT, @UpdCreatedAt DATETIME2,
+                @UpdLockId INT, @UpdOldQtyOk INT, @UpdOldArticleSizeId INT;
         SELECT @UpdDivisionId = awl.division_id, @UpdBundleId = awl.bundle_id,
                @UpdReceivedAt = awl.received_at, @UpdArticleId = aw.article_id,
                @UpdArticleWorkflowId = awl.article_workflow_id, @UpdSortOrder = aw.sort_order,
-               @UpdTargetDivisionId = awl.target_division_id, @UpdCreatedAt = awl.created_at
+               @UpdTargetDivisionId = awl.target_division_id, @UpdCreatedAt = awl.created_at,
+               @UpdLockId = awl.lock_id, @UpdOldQtyOk = awl.qty_ok, @UpdOldArticleSizeId = awl.article_size_id
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
@@ -651,6 +668,13 @@ BEGIN
         IF @UpdDivisionId IS NULL
         BEGIN
             RAISERROR('Log tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: baris yang sudah di-lock tidak bisa diubah lewat jalur apa pun.
+        IF @UpdLockId IS NOT NULL
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
             RETURN;
         END
 
@@ -674,18 +698,8 @@ BEGIN
             RETURN;
         END
 
-        IF @UpdReceivedAt IS NOT NULL
-        BEGIN
-            RAISERROR('Log ini sudah diterima, tidak bisa diubah lagi.', 16, 1);
-            RETURN;
-        END
-
-        -- Prompt 23: step terakhir artikel (tidak ada serah lanjutan) -- jendela revisi H+1.
-        IF @UpdTargetDivisionId IS NULL AND CAST(SYSDATETIME() AS DATE) > CAST(DATEADD(DAY, 1, @UpdCreatedAt) AS DATE)
-        BEGIN
-            RAISERROR('Batas waktu revisi (H+1) untuk step terakhir ini sudah lewat.', 16, 1);
-            RETURN;
-        END
+        -- Prompt 55: guard "received_at IS NULL" dan jendela H+1 step terakhir (Prompt 23)
+        -- DIHAPUS -- diganti lock (di atas) + guard saldo (di bawah, sebelum UPDATE).
 
         IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @UpdDivisionId
         BEGIN
@@ -803,6 +817,46 @@ BEGIN
                 RAISERROR('QTY_SHORT|Total baru %d dari %d - serahan tidak lengkap. Sisa bisa dicatat sebagai baris susulan.', 16, 1, @NewTotalUpdate, @UpdQtyMasuk);
                 RETURN;
             END
+        END
+
+        -- Prompt 55 -- guard saldo, pengganti guard received_at/H+1 yang dihapus di atas.
+        -- Ditolak HANYA kalau saldo baru negatif DAN lebih buruk dari saldo sekarang (data
+        -- lama yang sudah minus tetap boleh dikoreksi ke arah yang membaik). Lihat
+        -- sql/fn_55_workflow_saldo.sql.
+        DECLARE @UpdSaldoBefore INT, @UpdSaldoAfter INT, @UpdSisaAfter INT, @UpdDipakai INT;
+
+        IF @UpdBundleId IS NOT NULL
+        BEGIN
+            DECLARE @UpdSumOkOther INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @UpdArticleWorkflowId AND bundle_id = @UpdBundleId
+                  AND deleted_at IS NULL AND workflow_log_id <> @Id), 0);
+
+            SET @UpdDipakai = dbo.SIS_fn_BundleNextStepTotal(@UpdArticleWorkflowId, @UpdBundleId);
+            SET @UpdSisaAfter = @UpdSumOkOther + @QtyOk;
+            SET @UpdSaldoBefore = @UpdSumOkOther + @UpdOldQtyOk - @UpdDipakai;
+            SET @UpdSaldoAfter = @UpdSisaAfter - @UpdDipakai;
+        END
+        ELSE
+        BEGIN
+            -- Perubahan size dihitung sebagai pengurangan di size LAMA (+ penambahan di size
+            -- baru, yang selalu lolos karena menaikkan saldo) -- jadi yang dicek size lama.
+            DECLARE @UpdSumOkOldSize INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @UpdArticleWorkflowId AND article_size_id = @UpdOldArticleSizeId
+                  AND deleted_at IS NULL), 0);
+
+            SET @UpdSaldoBefore = dbo.SIS_fn_NonBundleSaldo(@UpdArticleWorkflowId, @UpdOldArticleSizeId);
+            SET @UpdDipakai = @UpdSumOkOldSize - @UpdSaldoBefore;
+            SET @UpdSisaAfter = @UpdSumOkOldSize - @UpdOldQtyOk
+                + CASE WHEN @ArticleSizeId = @UpdOldArticleSizeId THEN @QtyOk ELSE 0 END;
+            SET @UpdSaldoAfter = @UpdSisaAfter - @UpdDipakai;
+        END
+
+        IF @UpdSaldoAfter < 0 AND @UpdSaldoAfter < @UpdSaldoBefore
+        BEGIN
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, @UpdSisaAfter, @UpdDipakai);
+            RETURN;
         END
 
         DECLARE @LockResource_Update VARCHAR(60) = 'article_workflow_restructure_' + CAST(@UpdArticleId AS VARCHAR(20));
@@ -1089,9 +1143,13 @@ BEGIN
 
     ELSE IF @Action = 'CANCEL_HANDOVER'
     BEGIN
-        DECLARE @CancelDivisionId INT, @CancelReceivedAt DATETIME2, @CancelTargetDivisionId INT, @CancelCreatedAt DATETIME2;
+        DECLARE @CancelDivisionId INT, @CancelReceivedAt DATETIME2, @CancelTargetDivisionId INT, @CancelCreatedAt DATETIME2,
+                @CancelLockId INT, @CancelBundleId INT, @CancelArticleWorkflowId INT, @CancelArticleSizeId INT, @CancelQtyOk INT;
         SELECT @CancelDivisionId = division_id, @CancelReceivedAt = received_at,
-               @CancelTargetDivisionId = target_division_id, @CancelCreatedAt = created_at
+               @CancelTargetDivisionId = target_division_id, @CancelCreatedAt = created_at,
+               @CancelLockId = lock_id, @CancelBundleId = bundle_id,
+               @CancelArticleWorkflowId = article_workflow_id, @CancelArticleSizeId = article_size_id,
+               @CancelQtyOk = qty_ok
         FROM article_workflow_logs
         WHERE workflow_log_id = @Id AND deleted_at IS NULL;
 
@@ -1101,25 +1159,53 @@ BEGIN
             RETURN;
         END
 
-        -- Prompt 23: baris step terakhir (tanpa tujuan serah) -- jendela H+1 alih-alih guard
-        -- received_at (baris ini tidak pernah "diterima").
-        IF @CancelTargetDivisionId IS NULL
+        -- Prompt 55: baris yang sudah di-lock tidak bisa dibatalkan lewat jalur apa pun.
+        IF @CancelLockId IS NOT NULL
         BEGIN
-            IF CAST(SYSDATETIME() AS DATE) > CAST(DATEADD(DAY, 1, @CancelCreatedAt) AS DATE)
-            BEGIN
-                RAISERROR('Batas waktu pembatalan (H+1) untuk step terakhir ini sudah lewat.', 16, 1);
-                RETURN;
-            END
-        END
-        ELSE IF @CancelReceivedAt IS NOT NULL
-        BEGIN
-            RAISERROR('Baris ini sudah diterima, tidak bisa dibatalkan lewat Batal Serah.', 16, 1);
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
             RETURN;
         END
+
+        -- Prompt 55: guard received_at dan jendela H+1 (Prompt 23) DIHAPUS -- diganti lock
+        -- di atas + guard saldo di bawah.
 
         IF @ActingDivisionId IS NOT NULL AND @ActingDivisionId <> @CancelDivisionId
         BEGIN
             RAISERROR('Baris serah ini bukan milik divisi Anda.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: saldo dihitung TANPA baris ini (dihapus) -- lihat sql/fn_55_workflow_saldo.sql.
+        DECLARE @CancelSaldoBefore INT, @CancelSaldoAfter INT, @CancelSisaAfter INT, @CancelDipakai INT;
+
+        IF @CancelBundleId IS NOT NULL
+        BEGIN
+            DECLARE @CancelSumOkOther INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @CancelArticleWorkflowId AND bundle_id = @CancelBundleId
+                  AND deleted_at IS NULL AND workflow_log_id <> @Id), 0);
+
+            SET @CancelDipakai = dbo.SIS_fn_BundleNextStepTotal(@CancelArticleWorkflowId, @CancelBundleId);
+            SET @CancelSisaAfter = @CancelSumOkOther;
+            SET @CancelSaldoBefore = @CancelSumOkOther + @CancelQtyOk - @CancelDipakai;
+            SET @CancelSaldoAfter = @CancelSisaAfter - @CancelDipakai;
+        END
+        ELSE
+        BEGIN
+            DECLARE @CancelSumOk INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @CancelArticleWorkflowId AND article_size_id = @CancelArticleSizeId
+                  AND deleted_at IS NULL), 0);
+
+            SET @CancelSaldoBefore = dbo.SIS_fn_NonBundleSaldo(@CancelArticleWorkflowId, @CancelArticleSizeId);
+            SET @CancelDipakai = @CancelSumOk - @CancelSaldoBefore;
+            SET @CancelSisaAfter = @CancelSumOk - @CancelQtyOk;
+            SET @CancelSaldoAfter = @CancelSisaAfter - @CancelDipakai;
+        END
+
+        IF @CancelSaldoAfter < 0 AND @CancelSaldoAfter < @CancelSaldoBefore
+        BEGIN
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, @CancelSisaAfter, @CancelDipakai);
             RETURN;
         END
 
@@ -1133,9 +1219,13 @@ BEGIN
 
     ELSE IF @Action = 'REVISE_HANDOVER'
     BEGIN
-        DECLARE @RevDivisionId INT, @RevReceivedAt DATETIME2, @RevArticleId INT, @RevBundleId INT;
+        DECLARE @RevDivisionId INT, @RevReceivedAt DATETIME2, @RevArticleId INT, @RevBundleId INT,
+                @RevLockId INT, @RevArticleWorkflowId INT, @RevArticleSizeId INT, @RevOldQtyOk INT,
+                @RevOldTargetDivisionId INT;
         SELECT @RevDivisionId = awl.division_id, @RevReceivedAt = awl.received_at, @RevArticleId = aw.article_id,
-               @RevBundleId = awl.bundle_id
+               @RevBundleId = awl.bundle_id, @RevLockId = awl.lock_id,
+               @RevArticleWorkflowId = awl.article_workflow_id, @RevArticleSizeId = awl.article_size_id,
+               @RevOldQtyOk = awl.qty_ok, @RevOldTargetDivisionId = awl.target_division_id
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
@@ -1146,9 +1236,20 @@ BEGIN
             RETURN;
         END
 
-        IF @RevReceivedAt IS NOT NULL
+        -- Prompt 55: baris yang sudah di-lock tidak bisa direvisi lewat jalur apa pun.
+        IF @RevLockId IS NOT NULL
         BEGIN
-            RAISERROR('Baris ini sudah diterima, tidak bisa direvisi.', 16, 1);
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: guard "received_at IS NULL" untuk qty/remark/resource DIHAPUS (diganti
+        -- lock di atas + guard saldo di bawah). Perubahan target_division_id TETAP hanya boleh
+        -- selama belum diterima -- penerimaan melekat pada divisi tujuan LAMA, memindahkannya
+        -- setelah diterima berarti baris "diterima" oleh divisi yang bukan tujuannya.
+        IF @RevReceivedAt IS NOT NULL AND ISNULL(@NewTargetDivisionId, -1) <> ISNULL(@RevOldTargetDivisionId, -1)
+        BEGIN
+            RAISERROR('Baris ini sudah diterima -- divisi tujuan tidak bisa diubah. Batalkan penerimaan dulu.', 16, 1);
             RETURN;
         END
 
@@ -1236,6 +1337,49 @@ BEGIN
         END
         DECLARE @RevWillAutoReceive BIT = CASE WHEN @RevAutoReceive = 1 AND @RevCounterpartResourceId IS NOT NULL THEN 1 ELSE 0 END;
 
+        -- Prompt 55: baris yang SUDAH diterima kini boleh direvisi (qty/remark/resource saja --
+        -- divisi tujuannya dijamin tidak berubah oleh guard di atas). Trio received_* baris
+        -- seperti itu DIPERTAHANKAN apa adanya -- perhitungan auto-terima di bawah hanya
+        -- berlaku untuk baris yang memang belum diterima, supaya revisi dari sisi pengirim
+        -- tidak diam-diam membatalkan penerimaan divisi tujuan.
+        DECLARE @RevKeepReceived BIT = CASE WHEN @RevReceivedAt IS NOT NULL THEN 1 ELSE 0 END;
+        IF @RevKeepReceived = 1 SET @RevWillAutoReceive = 0;
+
+        -- Prompt 55 -- guard saldo (pengganti guard received_at yang dihapus di atas).
+        -- Ditolak hanya kalau saldo baru negatif DAN lebih buruk dari sekarang.
+        DECLARE @RevSaldoBefore INT, @RevSaldoAfter INT, @RevSisaAfter INT, @RevDipakai INT;
+
+        IF @RevBundleId IS NOT NULL
+        BEGIN
+            DECLARE @RevSumOkOther INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @RevArticleWorkflowId AND bundle_id = @RevBundleId
+                  AND deleted_at IS NULL AND workflow_log_id <> @Id), 0);
+
+            SET @RevDipakai = dbo.SIS_fn_BundleNextStepTotal(@RevArticleWorkflowId, @RevBundleId);
+            SET @RevSisaAfter = @RevSumOkOther + @QtyOk;
+            SET @RevSaldoBefore = @RevSumOkOther + @RevOldQtyOk - @RevDipakai;
+            SET @RevSaldoAfter = @RevSisaAfter - @RevDipakai;
+        END
+        ELSE
+        BEGIN
+            DECLARE @RevSumOk INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @RevArticleWorkflowId AND article_size_id = @RevArticleSizeId
+                  AND deleted_at IS NULL), 0);
+
+            SET @RevSaldoBefore = dbo.SIS_fn_NonBundleSaldo(@RevArticleWorkflowId, @RevArticleSizeId);
+            SET @RevDipakai = @RevSumOk - @RevSaldoBefore;
+            SET @RevSisaAfter = @RevSumOk - @RevOldQtyOk + @QtyOk;
+            SET @RevSaldoAfter = @RevSisaAfter - @RevDipakai;
+        END
+
+        IF @RevSaldoAfter < 0 AND @RevSaldoAfter < @RevSaldoBefore
+        BEGIN
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, @RevSisaAfter, @RevDipakai);
+            RETURN;
+        END
+
         DECLARE @LockResource_Revise VARCHAR(60) = 'article_workflow_restructure_' + CAST(@RevArticleId AS VARCHAR(20));
 
         -- Prompt 41: UPDATE baris + INSERT print_jobs kupon (kalau berlaku, jalur auto-terima)
@@ -1263,9 +1407,14 @@ BEGIN
                 remark = @Remark,
                 target_division_id = @NewTargetDivisionId,
                 resource_id = ISNULL(@ResourceId, resource_id),
-                received_at = CASE WHEN @RevWillAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
-                received_by_resource_id = CASE WHEN @RevWillAutoReceive = 1 THEN @RevCounterpartResourceId ELSE NULL END,
-                received_remark = CASE WHEN @RevWillAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
+                -- Prompt 55: baris yang sudah diterima (@RevKeepReceived = 1) mempertahankan
+                -- trio received_* -- revisi sisi pengirim tidak membatalkan penerimaan.
+                received_at = CASE WHEN @RevKeepReceived = 1 THEN received_at
+                                   WHEN @RevWillAutoReceive = 1 THEN SYSDATETIME() ELSE NULL END,
+                received_by_resource_id = CASE WHEN @RevKeepReceived = 1 THEN received_by_resource_id
+                                               WHEN @RevWillAutoReceive = 1 THEN @RevCounterpartResourceId ELSE NULL END,
+                received_remark = CASE WHEN @RevKeepReceived = 1 THEN received_remark
+                                       WHEN @RevWillAutoReceive = 1 THEN 'Otomatis: auto-terima' ELSE NULL END,
                 updated_at = SYSDATETIME(),
                 updated_by = @UserId,
                 updated_by_resource_id = @UpdatedByResourceId
@@ -1543,21 +1692,55 @@ BEGIN
             RETURN;
         END
 
-        DECLARE @DelBundleId INT, @DelSortOrder INT, @DelArticleId INT;
-        SELECT @DelBundleId = awl.bundle_id, @DelSortOrder = aw.sort_order, @DelArticleId = aw.article_id
+        DECLARE @DelBundleId INT, @DelSortOrder INT, @DelArticleId INT, @DelLockId INT,
+                @DelArticleWorkflowId INT, @DelArticleSizeId INT, @DelQtyOk INT;
+        SELECT @DelBundleId = awl.bundle_id, @DelSortOrder = aw.sort_order, @DelArticleId = aw.article_id,
+               @DelLockId = awl.lock_id, @DelArticleWorkflowId = awl.article_workflow_id,
+               @DelArticleSizeId = awl.article_size_id, @DelQtyOk = awl.qty_ok
         FROM article_workflow_logs awl
         INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
         WHERE awl.workflow_log_id = @Id AND awl.deleted_at IS NULL;
 
-        IF @DelBundleId IS NOT NULL AND EXISTS (
-            SELECT 1
-            FROM article_workflow_logs awl2
-            INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl2.article_workflow_id
-            WHERE awl2.bundle_id = @DelBundleId AND awl2.deleted_at IS NULL
-              AND aw2.article_id = @DelArticleId AND aw2.sort_order > @DelSortOrder
-        )
+        -- Prompt 55: baris yang sudah di-lock tidak bisa dihapus lewat jalur apa pun.
+        IF @DelLockId IS NOT NULL
         BEGIN
-            RAISERROR('Baris ini sudah dipakai sebagai dasar step berikutnya, tidak bisa dihapus.', 16, 1);
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
+
+        -- Prompt 55: guard "sudah dipakai sebagai dasar step berikutnya" DIHAPUS -- diganti
+        -- guard saldo di bawah (baris boleh dihapus selama sisanya masih menutupi pemakaian
+        -- step berikutnya). Lihat sql/fn_55_workflow_saldo.sql.
+        DECLARE @DelSaldoBefore INT, @DelSaldoAfter INT, @DelSisaAfter INT, @DelDipakai INT;
+
+        IF @DelBundleId IS NOT NULL
+        BEGIN
+            DECLARE @DelSumOkOther INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @DelArticleWorkflowId AND bundle_id = @DelBundleId
+                  AND deleted_at IS NULL AND workflow_log_id <> @Id), 0);
+
+            SET @DelDipakai = dbo.SIS_fn_BundleNextStepTotal(@DelArticleWorkflowId, @DelBundleId);
+            SET @DelSisaAfter = @DelSumOkOther;
+            SET @DelSaldoBefore = @DelSumOkOther + @DelQtyOk - @DelDipakai;
+            SET @DelSaldoAfter = @DelSisaAfter - @DelDipakai;
+        END
+        ELSE
+        BEGIN
+            DECLARE @DelSumOk INT = ISNULL((
+                SELECT SUM(qty_ok) FROM article_workflow_logs
+                WHERE article_workflow_id = @DelArticleWorkflowId AND article_size_id = @DelArticleSizeId
+                  AND deleted_at IS NULL), 0);
+
+            SET @DelSaldoBefore = dbo.SIS_fn_NonBundleSaldo(@DelArticleWorkflowId, @DelArticleSizeId);
+            SET @DelDipakai = @DelSumOk - @DelSaldoBefore;
+            SET @DelSisaAfter = @DelSumOk - @DelQtyOk;
+            SET @DelSaldoAfter = @DelSisaAfter - @DelDipakai;
+        END
+
+        IF @DelSaldoAfter < 0 AND @DelSaldoAfter < @DelSaldoBefore
+        BEGIN
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, @DelSisaAfter, @DelDipakai);
             RETURN;
         END
 

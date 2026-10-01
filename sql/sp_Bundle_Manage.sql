@@ -11,12 +11,9 @@
 --      appsettings.json (App:PublicBaseUrl) di layer API dan dikirim sebagai parameter --
 --      serial baru diketahui hanya di dalam transaksi ini (sp_getapplock), jadi qr_content
 --      lengkap dirakit di sini, bukan di API.
---   4. UPDATE ditolak bila bundle sudah punya log hidup di step station (is_bundling =
---      0, artinya sudah disentuh divisi produksi) ATAU log Bundling-nya sudah received_at
---      terisi (sudah diserah-terimakan ke divisi berikutnya) -- selama belum, supervisor masih
---      bisa ganti line/qty. Perbaikan Prompt 17: pengecekan lama memakai kolom
---      [status] = 'COMPLETED' yang sudah dihapus sejak Prompt 12b (bug, selalu gagal).
---      DELETE memakai aturan waktu, bukan status -- lihat catatan di action DELETE.
+--   4. [diganti Prompt 55: lock + saldo] UPDATE dulu ditolak bila bundle sudah punya log hidup
+--      di step station (is_bundling = 0) ATAU log Bundling-nya sudah received_at terisi, dengan
+--      kelonggaran jendela 1 jam. SEMUA itu dihapus -- lihat catatan #19 di bawah.
 --   5. Serial tidak pernah berubah setelah dibuat.
 --   6. bundle_no = nomor urut pendek per project (1, 2, 3, ...), naik terus lintas artikel
 --      sampai project selesai, dihitung atas SEMUA bundle project ini (termasuk yang
@@ -52,16 +49,8 @@
 --      Fix: CREATE sekarang mewajibkan @ResourceId (RAISERROR bila NULL) -- cabang "tanpa
 --      penjahit" di atas jadi tidak pernah kejadian lagi dari CREATE, tapi dibiarkan (bukan
 --      dihapus) karena UPDATE tidak ikut diwajibkan (bundle lama boleh tetap tanpa penjahit).
---   11. Fix: jendela 1 jam pada DELETE hanya berlaku KALAU log Bundling-nya sudah received_at
---      terisi (auto-diterima Line tujuan saat dibuat) -- selama belum diterima divisi
---      berikutnya, Hapus boleh kapan pun (tidak ada batas waktu). Begitu diterima, Hapus
---      hanya boleh selama masih dalam 1 jam sejak bundles.created_at; lewat itu harus
---      direvisi manual dari divisi tujuan (dipakai tombol "Hapus" tab OUT station Bundling).
---   12. Fix: UPDATE mengikuti aturan jendela 1 jam yang sama dengan DELETE -- begitu log
---      Bundling sudah received_at terisi, UPDATE tetap diizinkan selama masih dalam 1 jam
---      sejak bundles.created_at (dipakai tombol "Edit" di tab OUT station, berdampingan
---      dengan "Hapus"). Lewat 1 jam, harus direvisi manual dari divisi tujuan. Selama belum
---      diterima, UPDATE tidak dibatasi waktu sama sekali.
+--   11. [diganti Prompt 55: lock + saldo] Jendela 1 jam pada DELETE -- DIHAPUS, lihat #19.
+--   12. [diganti Prompt 55: lock + saldo] Jendela 1 jam pada UPDATE -- DIHAPUS, lihat #19.
 --   13. Fix: UPDATE bisa ikut mengubah ukuran (@ArticleSizeId, opsional -- NULL berarti tidak
 --      diubah, dipakai admin /bundles yang belum mengirim field ini). Kalau ukuran berubah,
 --      sort_order dihitung ulang relatif ke grup ukuran baru (pola sama dengan CREATE) supaya
@@ -96,6 +85,19 @@
 --      tujuan, bundle buntu permanen ("Bundle ini atas nama X. Batalkan penerimaan dulu...")
 --      sampai di-UNRECEIVE manual. CREATE & UPDATE sekarang selalu pakai @ResourceId. Data lama
 --      yang sudah kena lihat sql/adhoc_repair_bundle_autoreceive_received_by.sql.
+--   19. Prompt 55 -- lock + saldo, MENGGANTIKAN #4, #11 dan #12 di atas:
+--      - UPDATE & DELETE ditolak keras kalau baris log BUNDLING bundle ini sudah di-lock
+--        (article_workflow_logs.lock_id terisi) -- pesan 'LOCKED|Data sudah di-lock. Ajukan
+--        unlock untuk mengubah.' Lock dipasang SIS_WorkflowLock_Manage, dilepas hanya lewat
+--        SIS_UnlockRequest_Manage APPROVE.
+--      - Selama belum di-lock, tidak ada batas waktu sama sekali. Yang membatasi cuma saldo:
+--        qty baru tidak boleh turun di bawah total step ber-bundle berikutnya
+--        (dbo.SIS_fn_BundleNextStepTotal, sql/fn_55_workflow_saldo.sql), kecuali perubahan itu
+--        tidak memperburuk saldo yang memang sudah minus. DELETE = qty 0, jadi ditolak kalau
+--        step berikutnya sudah punya baris hidup.
+--      - Tambahan UPDATE: begitu step berikutnya punya baris hidup, HANYA qty yang boleh
+--        berubah -- ukuran dan line/penjahit ditolak ('Bundle sudah diproses step berikutnya,
+--        hanya qty yang bisa diubah.') karena sudah melekat pada hasil kerja di step itu.
 
 SET ANSI_NULLS ON;
 GO
@@ -413,11 +415,26 @@ BEGIN
         -- Prompt 17: perbaikan bug -- [status] sudah dihapus sejak Prompt 12b. Tolak bila
         -- bundle sudah punya log hidup di step station (sudah dikerjakan) atau log Bundling-
         -- nya sudah diserah-terimakan (received_at terisi).
-        DECLARE @UpdArticleId INT, @UpdBundlingDivisionId INT, @UpdCreatedAt DATETIME2, @UpdCurrentSizeId INT, @UpdEmployeeId INT, @UpdBundlingSortOrder INT;
-        SELECT @UpdArticleId = b.article_id, @UpdBundlingDivisionId = aw.division_id, @UpdCreatedAt = b.created_at, @UpdCurrentSizeId = b.article_size_id, @UpdEmployeeId = b.employee_id, @UpdBundlingSortOrder = aw.sort_order
+        DECLARE @UpdArticleId INT, @UpdBundlingDivisionId INT, @UpdCreatedAt DATETIME2, @UpdCurrentSizeId INT, @UpdEmployeeId INT, @UpdBundlingSortOrder INT,
+                @UpdBundlingStepId INT, @UpdCurrentQty INT, @UpdCurrentResourceId INT;
+        SELECT @UpdArticleId = b.article_id, @UpdBundlingDivisionId = aw.division_id, @UpdCreatedAt = b.created_at, @UpdCurrentSizeId = b.article_size_id, @UpdEmployeeId = b.employee_id, @UpdBundlingSortOrder = aw.sort_order,
+               @UpdBundlingStepId = aw.article_workflow_id, @UpdCurrentQty = b.qty, @UpdCurrentResourceId = b.resource_id
         FROM bundles b
         LEFT JOIN article_workflows aw ON aw.article_id = b.article_id AND aw.deleted_at IS NULL AND aw.is_bundling = 1
         WHERE b.bundle_id = @Id AND b.deleted_at IS NULL;
+
+        -- Prompt 55: bundle mengikuti lock baris log BUNDLING-nya -- kalau baris itu sudah
+        -- di-lock, induk bundle-nya ikut beku (qty bundle = qty_ok baris Bundling).
+        IF EXISTS (
+            SELECT 1 FROM article_workflow_logs awl
+            INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl.article_workflow_id
+            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw2.is_bundling = 1
+              AND awl.lock_id IS NOT NULL
+        )
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
 
         -- Prompt 32: validasi kecocokan Line hanya kalau @EmployeeId diisi DAN berbeda dari
         -- employee_id yang sudah tersimpan (lihat catatan #14) -- bundle lama yang employee-nya
@@ -460,33 +477,33 @@ BEGIN
             RETURN;
         END
 
-        IF EXISTS (
-            SELECT 1
-            FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 0
-        )
-        BEGIN
-            RAISERROR('Bundle sudah diproses, tidak bisa diubah.', 16, 1);
-            RETURN;
-        END
+        -- [diganti Prompt 55: lock + saldo] Guard "Bundle sudah diproses, tidak bisa diubah"
+        -- (ada log hidup di step is_bundling = 0) dan jendela 1 jam sejak bundles.created_at
+        -- untuk bundle yang log Bundling-nya sudah diterima -- DUA-DUANYA DIHAPUS. Gantinya
+        -- lock (di atas) + dua aturan di bawah: qty tidak boleh turun di bawah pemakaian step
+        -- berikutnya, dan begitu step berikutnya sudah punya baris hidup, hanya qty yang boleh
+        -- berubah (ukuran & line/penjahit sudah terlanjur melekat pada hasil kerja di sana).
+        DECLARE @UpdNextTotal INT = dbo.SIS_fn_BundleNextStepTotal(@UpdBundlingStepId, @Id);
 
-        -- Prompt 24: guard terpisah, pesan jelas -- log Bundling bundle ini sendiri sudah
-        -- diserah-terimakan ke divisi berikutnya (received_at terisi).
-        -- Fix: selama masih dalam jendela 1 jam sejak bundles.created_at (aturan sama dengan
-        -- DELETE), UPDATE tetap diizinkan meski received_at sudah terisi -- lihat catatan #12.
-        IF EXISTS (
-            SELECT 1
-            FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 1 AND awl.received_at IS NOT NULL
-        )
+        IF @UpdNextTotal > 0
         BEGIN
-            IF @UpdCreatedAt < DATEADD(HOUR, -1, SYSDATETIME())
+            DECLARE @UpdNewSizeCheck INT = ISNULL(@ArticleSizeId, @UpdCurrentSizeId);
+            IF @UpdNewSizeCheck <> @UpdCurrentSizeId
+                OR ISNULL(@ResourceId, -1) <> ISNULL(@UpdCurrentResourceId, -1)
+                OR ISNULL(@EmployeeId, -1) <> ISNULL(@UpdEmployeeId, -1)
             BEGIN
-                RAISERROR('Bundle sudah diterima divisi berikutnya dan lebih dari 1 jam sejak dibuat, tidak bisa diubah.', 16, 1);
+                RAISERROR('Bundle sudah diproses step berikutnya, hanya qty yang bisa diubah.', 16, 1);
                 RETURN;
             END
+        END
+
+        -- Guard saldo: qty baru < pemakaian step berikutnya ditolak, KECUALI kalau qty lama
+        -- pun sudah di bawahnya dan perubahan ini tidak memperburuk (pola sama dengan
+        -- SIS_WorkflowLog_Manage, lihat sql/fn_55_workflow_saldo.sql).
+        IF @Qty - @UpdNextTotal < 0 AND @Qty < @UpdCurrentQty
+        BEGIN
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, @Qty, @UpdNextTotal);
+            RETURN;
         END
 
         IF @BundlingResourceId IS NOT NULL AND NOT EXISTS (
@@ -574,6 +591,18 @@ BEGIN
         DECLARE @DelArticleId INT, @DelCreatedAt DATETIME2;
         SELECT @DelArticleId = article_id, @DelCreatedAt = created_at FROM bundles WHERE bundle_id = @Id AND deleted_at IS NULL;
 
+        -- Prompt 55: bundle mengikuti lock baris log Bundling-nya (lihat catatan di UPDATE).
+        IF EXISTS (
+            SELECT 1 FROM article_workflow_logs awl
+            INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl.article_workflow_id
+            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw2.is_bundling = 1
+              AND awl.lock_id IS NOT NULL
+        )
+        BEGIN
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
+
         -- Prompt 18: project terkunci (manual_status) menolak penghapusan bundle.
         DECLARE @LockStatus_Delete VARCHAR(20), @LockReason_Delete VARCHAR(255);
         SELECT @LockStatus_Delete = p.manual_status, @LockReason_Delete = p.status_reason
@@ -594,32 +623,20 @@ BEGIN
             RETURN;
         END
 
-        IF EXISTS (
-            SELECT 1
-            FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 0
-        )
-        BEGIN
-            RAISERROR('Bundle sudah diproses, tidak bisa dihapus.', 16, 1);
-            RETURN;
-        END
+        -- [diganti Prompt 55: lock + saldo] Guard "Bundle sudah diproses, tidak bisa dihapus"
+        -- dan jendela 1 jam sejak bundles.created_at DIHAPUS. Hapus bundle = qty jadi 0, jadi
+        -- cukup satu aturan: ditolak kalau step berikutnya sudah memakai bundle ini.
+        DECLARE @DelBundlingStepId INT;
+        SELECT @DelBundlingStepId = article_workflow_id
+        FROM article_workflows
+        WHERE article_id = @DelArticleId AND deleted_at IS NULL AND is_bundling = 1;
 
-        -- Fix: jendela 1 jam hanya berlaku kalau log Bundling-nya sudah received_at (mis.
-        -- auto-diterima Line tujuan saat dibuat, lihat catatan #10 di atas) -- lihat #11.
-        -- Selama belum diterima divisi berikutnya, Hapus boleh kapan pun.
-        IF EXISTS (
-            SELECT 1
-            FROM article_workflow_logs awl
-            INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
-            WHERE awl.bundle_id = @Id AND awl.deleted_at IS NULL AND aw.is_bundling = 1 AND awl.received_at IS NOT NULL
-        )
+        DECLARE @DelNextTotal INT = dbo.SIS_fn_BundleNextStepTotal(@DelBundlingStepId, @Id);
+
+        IF @DelNextTotal > 0
         BEGIN
-            IF @DelCreatedAt < DATEADD(HOUR, -1, SYSDATETIME())
-            BEGIN
-                RAISERROR('Bundle sudah diterima divisi berikutnya dan lebih dari 1 jam sejak dibuat, tidak bisa dihapus.', 16, 1);
-                RETURN;
-            END
+            RAISERROR('Perubahan membuat saldo minus (sisa %d, dipakai step berikutnya %d). Ubah step berikutnya terlebih dahulu.', 16, 1, 0, @DelNextTotal);
+            RETURN;
         END
 
         UPDATE bundles

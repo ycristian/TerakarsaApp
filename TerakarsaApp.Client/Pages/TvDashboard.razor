@@ -26,7 +26,7 @@ else if (me is null)
                 <h3 class="card-title mb-3">Aktivasi Dashboard TV</h3>
                 <p class="text-muted">Tempelkan token yang diberikan admin, atau buka link lengkap yang sudah dibagikan.</p>
                 <div class="mb-3">
-                    <input class="form-control form-control-lg" placeholder="Tempel token..." @bind="tokenInput" @bind:event="oninput" />
+                    <input class="form-control" placeholder="Tempel token..." @bind="tokenInput" @bind:event="oninput" />
                 </div>
                 @if (!string.IsNullOrEmpty(setupError))
                 {

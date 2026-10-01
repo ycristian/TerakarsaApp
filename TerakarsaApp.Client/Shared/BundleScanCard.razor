@@ -364,27 +364,27 @@
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyOk" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectPrint" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectFabric" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectSewing" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyRejectSewing" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyRejectRework" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyRejectRework" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="editQtyLost" />
+                            <input type="number" min="0" class="form-control" @bind="editQtyLost" />
                         </div>
                     </div>
 
@@ -458,7 +458,7 @@
                     </div>
 
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control form-control-lg" @bind="defectLabelCopies" />
+                    <input type="number" min="1" class="form-control" @bind="defectLabelCopies" />
 
                     @if (!string.IsNullOrEmpty(defectLabelError))
                     {
@@ -486,7 +486,7 @@
                 <div class="modal-body">
                     <p class="mb-2">Cetak ulang label @Info.Bundle.Serial.</p>
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control form-control-lg" @bind="reprintCopies" />
+                    <input type="number" min="1" class="form-control" @bind="reprintCopies" />
                     @if (!string.IsNullOrEmpty(reprintModalError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@reprintModalError</div>
@@ -522,7 +522,7 @@
                         else
                         {
                             <label class="form-label">Pelaksana</label>
-                            <div class="form-control form-control-lg bg-light"><i class="fe fe-lock"></i> @ActiveResourceName</div>
+                            <div class="form-control bg-light"><i class="fe fe-lock"></i> @ActiveResourceName</div>
                         }
                     </div>
 
@@ -532,27 +532,27 @@
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyOk" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectPrint" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectFabric" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectSewing" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectSewing" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyRejectRework" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectRework" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="completeQtyLost" />
+                            <input type="number" min="0" class="form-control" @bind="completeQtyLost" />
                         </div>
                     </div>
 
@@ -563,7 +563,7 @@
 
                     <div class="mb-2">
                         <label class="form-label">Divisi Tujuan</label>
-                        <div class="form-control form-control-lg bg-light">
+                        <div class="form-control bg-light">
                             @(Info.Action.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (Info.Action.NextDivisionName ?? "-"))
                         </div>
                     </div>

@@ -1,0 +1,480 @@
+@page "/unlock-requests/{Id:int}"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.UnlockRequests
+@inject UnlockRequestApiService UnlockRequestApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+@* Prompt 57: halaman keputusan satu pengajuan buka lock. Halaman turunan -- dibuka dari
+   /unlock-requests lewat target="_blank", ditutup lewat CloseButton.
+   Aksi tulis tetap SIS_UnlockRequest_Manage APPROVE/REJECT (Prompt 55): seluruh aturan
+   (pengajuan masih menunggu, periode belum final, lock item belum bergeser, catatan wajib saat
+   menolak) ditegakkan di SP -- halaman ini hanya menampilkan pesannya. *@
+
+<PageTitle>Periksa Request Unlock</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Periksa Request Unlock</h1>
+    <div class="d-flex align-items-center gap-2">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item"><a href="/unlock-requests">Request Unlock</a></li>
+            <li class="breadcrumb-item active" aria-current="page">#@Id</li>
+        </ol>
+        <CloseButton />
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (isLoading)
+{
+    <p>Memuat data...</p>
+}
+else if (header is null)
+{
+    <div class="alert alert-danger">@(string.IsNullOrEmpty(loadError) ? "Pengajuan tidak ditemukan." : loadError)</div>
+}
+else
+{
+    @if (decisionDone)
+    {
+        <div class="alert alert-success">
+            @decisionMessage Tutup tab ini dan tekan "Muat ulang" di daftar pengajuan.
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h3 class="card-title mb-0">
+                Pengajuan #@header.RequestId
+                @{
+                    var (badgeClass, badgeText) = StateBadge(header.State);
+                }
+                <span class="badge @badgeClass ms-2">@badgeText</span>
+                @if (header.PeriodeFinal)
+                {
+                    <span class="badge bg-danger ms-1">Periode sudah final</span>
+                }
+            </h3>
+            @if (header.State == "PENDING" && !decisionDone)
+            {
+                <div class="d-flex gap-2">
+                    <button class="btn btn-success" @onclick="OpenApproveModal">
+                        <i class="fe fe-unlock"></i> Setujui
+                    </button>
+                    <button class="btn btn-outline-danger" @onclick="OpenRejectModal">
+                        <i class="fe fe-x-circle"></i> Tolak
+                    </button>
+                </div>
+            }
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-6 col-md-3">
+                    <div class="text-muted small">Waktu Ajukan</div>
+                    <div>@header.CreatedAt.ToString("dd/MM/yyyy HH:mm")</div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="text-muted small">Divisi</div>
+                    <div>@header.DivisionName</div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="text-muted small">Stasiun</div>
+                    <div>@(header.StationName ?? "-")</div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="text-muted small">Operator</div>
+                    <div>@(header.RequestedByResourceName ?? "-")</div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="text-muted small">Jumlah Baris</div>
+                    <div>@header.JumlahBaris baris &middot; @header.TotalQty pcs</div>
+                </div>
+                @if (header.DecidedAt.HasValue)
+                {
+                    <div class="col-6 col-md-3">
+                        <div class="text-muted small">Diputus</div>
+                        <div>@header.DecidedAt.Value.ToString("dd/MM/yyyy HH:mm") @(string.IsNullOrEmpty(header.DecidedByName) ? "" : "· " + header.DecidedByName)</div>
+                    </div>
+                }
+            </div>
+
+            <hr />
+
+            <div class="text-muted small">Alasan Pengaju</div>
+            <p class="mb-0" style="white-space: pre-wrap;">@header.Reason</p>
+
+            @if (!string.IsNullOrEmpty(header.AdminNote))
+            {
+                <div class="text-muted small mt-3">Catatan Admin</div>
+                <p class="mb-0" style="white-space: pre-wrap;">@header.AdminNote</p>
+            }
+        </div>
+    </div>
+
+    @if (header.PeriodeFinal && header.State == "PENDING")
+    {
+        <div class="alert alert-danger">
+            Sebagian baris berada di periode gajian yang sudah final. Pengajuan ini akan ditolak sistem
+            kalau disetujui -- tolak saja dengan catatan yang menjelaskan alasannya.
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Baris yang diminta dibuka (@items.Count)</h3>
+        </div>
+        <div class="card-body">
+            @if (items.Count == 0)
+            {
+                <p class="text-muted mb-0">Tidak ada baris.</p>
+            }
+            else
+            {
+                @if (ShowCompare)
+                {
+                    <p class="text-muted small">
+                        Kolom menampilkan <em>sebelum</em> &rarr; <em>sekarang</em>; sel yang berubah disorot.
+                        Nilai "sebelum" diambil dari snapshot saat baris di-lock.
+                    </p>
+                }
+                else
+                {
+                    <p class="text-muted small">
+                        Baris masih terkunci, jadi nilainya belum bisa berubah -- yang tampil adalah nilai
+                        saat ini (sama dengan snapshot lock).
+                    </p>
+                }
+
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0">
+                        <thead>
+                            <tr>
+                                <th>Project / Artikel</th>
+                                <th>Step</th>
+                                <th>Bundle</th>
+                                <th>Ukuran</th>
+                                <th>Penjahit</th>
+                                <th>Periode Lock</th>
+                                <th class="text-end">OK</th>
+                                <th class="text-end">Rj Sablon</th>
+                                <th class="text-end">Rj Bahan</th>
+                                <th class="text-end">Rj Jahit</th>
+                                <th class="text-end">Rework</th>
+                                <th class="text-end">Hilang</th>
+                                <th>Ukuran Baris</th>
+                                <th>Pelaksana</th>
+                                @if (ShowRelock)
+                                {
+                                    <th>Lock Ulang</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var it in items)
+                            {
+                                var ok = NumCell(it.SebelumQtyOk, it.SekarangQtyOk);
+                                var rp = NumCell(it.SebelumQtyRejectPrint, it.SekarangQtyRejectPrint);
+                                var rf = NumCell(it.SebelumQtyRejectFabric, it.SekarangQtyRejectFabric);
+                                var rs = NumCell(it.SebelumQtyRejectSewing, it.SekarangQtyRejectSewing);
+                                var rw = NumCell(it.SebelumQtyRejectRework, it.SekarangQtyRejectRework);
+                                var hl = NumCell(it.SebelumQtyLost, it.SekarangQtyLost);
+                                var sz = TextCell(it.SebelumSizeName, it.SekarangSizeName);
+                                var rc = TextCell(it.SebelumResourceName, it.SekarangResourceName);
+
+                                <tr class="@(it.IsDeleted ? "table-danger" : "")">
+                                    <td class="text-wrap">
+                                        <div>@it.ProjectName</div>
+                                        <div class="text-muted small">
+                                            @it.ArticleName
+                                            @if (!string.IsNullOrEmpty(it.Color))
+                                            {
+                                                <text> &middot; @it.Color</text>
+                                            }
+                                        </div>
+                                        @if (it.IsDeleted)
+                                        {
+                                            <span class="badge bg-danger mt-1">Baris sudah dihapus</span>
+                                        }
+                                    </td>
+                                    <td>@it.StepName</td>
+                                    <td>@BundleLabel(it)</td>
+                                    <td>@(it.SizeName ?? "-")</td>
+                                    <td>@(it.PenjahitName ?? "-")</td>
+                                    <td>
+                                        @it.PeriodeLock
+                                        <div class="text-muted small">@it.LockedAt.ToString("dd/MM HH:mm")</div>
+                                    </td>
+                                    <td class="text-end @(ok.Changed ? "table-warning fw-bold" : "")">@ok.Text</td>
+                                    <td class="text-end @(rp.Changed ? "table-warning fw-bold" : "")">@rp.Text</td>
+                                    <td class="text-end @(rf.Changed ? "table-warning fw-bold" : "")">@rf.Text</td>
+                                    <td class="text-end @(rs.Changed ? "table-warning fw-bold" : "")">@rs.Text</td>
+                                    <td class="text-end @(rw.Changed ? "table-warning fw-bold" : "")">@rw.Text</td>
+                                    <td class="text-end @(hl.Changed ? "table-warning fw-bold" : "")">@hl.Text</td>
+                                    <td class="@(sz.Changed ? "table-warning fw-bold" : "")">@sz.Text</td>
+                                    <td class="@(rc.Changed ? "table-warning fw-bold" : "")">@rc.Text</td>
+                                    @if (ShowRelock)
+                                    {
+                                        <td>
+                                            @if (string.IsNullOrEmpty(it.LockUlangPeriode))
+                                            {
+                                                <span class="badge bg-warning text-dark">belum lock ulang</span>
+                                            }
+                                            else
+                                            {
+                                                @it.LockUlangPeriode
+                                                <div class="text-muted small">@it.LockUlangLockedAt?.ToString("dd/MM HH:mm")</div>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (showApproveModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Setujui Pengajuan #@Id</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModals"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        @items.Count baris akan dibuka kembali dan bisa diedit/dihapus stasiun
+                        (selama saldo tidak jadi minus). Lock lama tetap tercatat sebagai riwayat.
+                    </p>
+                    <div class="mb-0">
+                        <label class="form-label">Catatan (opsional)</label>
+                        <textarea class="form-control" rows="3" maxlength="500" @bind="adminNote"
+                                  placeholder="Mis. alasan disetujui / instruksi ke PIC"></textarea>
+                    </div>
+                    @if (!string.IsNullOrEmpty(decisionError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@decisionError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseModals" disabled="@isDeciding">Batal</button>
+                    <button class="btn btn-success" @onclick="ConfirmApprove" disabled="@isDeciding">
+                        @(isDeciding ? "Menyimpan..." : "Ya, setujui & buka lock")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showRejectModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tolak Pengajuan #@Id</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModals"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Baris tetap terkunci. Catatan di bawah dibaca PIC yang mengajukan.</p>
+                    <div class="mb-0">
+                        <label class="form-label">Catatan <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="3" maxlength="500" @bind="adminNote"
+                                  placeholder="Alasan penolakan (wajib)"></textarea>
+                    </div>
+                    @if (!string.IsNullOrEmpty(decisionError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@decisionError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="CloseModals" disabled="@isDeciding">Batal</button>
+                    <button class="btn btn-danger" @onclick="ConfirmReject" disabled="@isDeciding">
+                        @(isDeciding ? "Menyimpan..." : "Ya, tolak")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool? hasAccess = null;
+    private bool isLoading = true;
+    private string loadError = string.Empty;
+
+    private UnlockRequestListItemDto? header;
+    private List<UnlockRequestItemDto> items = new();
+
+    private bool showApproveModal = false;
+    private bool showRejectModal = false;
+    private bool isDeciding = false;
+    private string adminNote = string.Empty;
+    private string decisionError = string.Empty;
+    private bool decisionDone = false;
+    private string decisionMessage = string.Empty;
+
+    // Sebelum vs Sekarang hanya relevan setelah pengajuan diputus -- selama menunggu, baris
+    // masih terkunci sehingga tidak ada jalur yang bisa mengubahnya.
+    private bool ShowCompare => header is not null && header.State != "PENDING";
+    private bool ShowRelock => header is not null && header.State == "APPROVED";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "UNLOCK_REQUEST");
+
+        if (hasAccess == true) await LoadAsync();
+        else isLoading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        loadError = string.Empty;
+
+        var (detail, error) = await UnlockRequestApi.GetDetailAsync(Id);
+        if (detail?.Header is null)
+        {
+            header = null;
+            items = new();
+            loadError = error;
+        }
+        else
+        {
+            header = detail.Header;
+            items = detail.Items;
+        }
+
+        isLoading = false;
+    }
+
+    private void OpenApproveModal()
+    {
+        adminNote = string.Empty;
+        decisionError = string.Empty;
+        showApproveModal = true;
+    }
+
+    private void OpenRejectModal()
+    {
+        adminNote = string.Empty;
+        decisionError = string.Empty;
+        showRejectModal = true;
+    }
+
+    private void CloseModals()
+    {
+        showApproveModal = false;
+        showRejectModal = false;
+        decisionError = string.Empty;
+    }
+
+    private async Task ConfirmApprove()
+    {
+        isDeciding = true;
+        decisionError = string.Empty;
+
+        var (success, error) = await UnlockRequestApi.ApproveAsync(Id, string.IsNullOrWhiteSpace(adminNote) ? null : adminNote.Trim());
+        isDeciding = false;
+
+        if (!success)
+        {
+            decisionError = error;
+            return;
+        }
+
+        await FinishDecisionAsync("Pengajuan disetujui, lock baris sudah dibuka.");
+    }
+
+    private async Task ConfirmReject()
+    {
+        if (string.IsNullOrWhiteSpace(adminNote))
+        {
+            decisionError = "Catatan wajib diisi saat menolak.";
+            return;
+        }
+
+        isDeciding = true;
+        decisionError = string.Empty;
+
+        var (success, error) = await UnlockRequestApi.RejectAsync(Id, adminNote.Trim());
+        isDeciding = false;
+
+        if (!success)
+        {
+            decisionError = error;
+            return;
+        }
+
+        await FinishDecisionAsync("Pengajuan ditolak, baris tetap terkunci.");
+    }
+
+    // Halaman ini dibuka sebagai tab terpisah, jadi "kembali ke daftar" = menutup tab ini.
+    // Kalau window.close() diblokir browser (halaman dibuka langsung, bukan lewat target="_blank"),
+    // halaman tetap berguna: statusnya dimuat ulang dan hasil keputusan terlihat.
+    private async Task FinishDecisionAsync(string message)
+    {
+        CloseModals();
+        decisionDone = true;
+        decisionMessage = message;
+        await LoadAsync();
+
+        try
+        {
+            await JS.InvokeVoidAsync("close");
+        }
+        catch (JSException)
+        {
+            // dibiarkan -- alert sukses di atas sudah menjelaskan hasilnya
+        }
+    }
+
+    private (string Text, bool Changed) NumCell(int before, int after)
+    {
+        if (!ShowCompare) return (before.ToString(), false);
+        return before == after ? (after.ToString(), false) : ($"{before} → {after}", true);
+    }
+
+    private (string Text, bool Changed) TextCell(string? before, string? after)
+    {
+        var b = string.IsNullOrEmpty(before) ? "-" : before;
+        var a = string.IsNullOrEmpty(after) ? "-" : after;
+        if (!ShowCompare) return (b, false);
+        return b == a ? (a, false) : ($"{b} → {a}", true);
+    }
+
+    // Prompt 27: format nomor bundle dipusatkan di BundleDisplay.Format -- jangan dirakit
+    // sendiri di sini.
+    private static string BundleLabel(UnlockRequestItemDto it)
+    {
+        if (it.BundleId is null) return "-";
+        if (it.BundleNo.HasValue) return BundleDisplay.Format(it.BundleLetter, it.BundleNo);
+        return it.Serial ?? "-";
+    }
+
+    private static (string Class, string Text) StateBadge(string s) => s switch
+    {
+        "APPROVED" => ("bg-success", "Disetujui"),
+        "REJECTED" => ("bg-secondary", "Ditolak"),
+        _ => ("bg-warning text-dark", "Menunggu")
+    };
+}

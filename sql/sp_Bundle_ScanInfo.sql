@@ -22,10 +22,11 @@
 --          sebelumnya (bundle sama) sudah received_at + target_division_id = divisi ini.
 --        - 'EDIT' (Prompt 23) kalau baris log TERAKHIR bundle ini adalah step terakhir
 --          artikel (target_division_id NULL, tidak ada serah lanjutan sehingga tidak pernah
---          "diterima"), dibuat oleh @DivisionId sendiri, DAN masih dalam jendela H+1 (hari
---          dibuat + 1 hari kalender) -- dipakai supaya divisi terakhir (mis. Packing) bisa
---          membetulkan salah input tanpa lewat supervisor. IsLastStep = 1 menandai kasus ini
---          (beda pesan di client dari EDIT baris pending-handover biasa).
+--          "diterima"), dibuat oleh @DivisionId sendiri, DAN belum di-lock -- dipakai supaya
+--          divisi terakhir (mis. Packing) bisa membetulkan salah input tanpa lewat supervisor.
+--          IsLastStep = 1 menandai kasus ini (beda pesan di client dari EDIT baris
+--          pending-handover biasa). [Prompt 56: jendela H+1 diganti lock_id IS NULL -- kedua
+--          cabang EDIT di bawah kini disyaratkan lock_id IS NULL, lihat Prompt 55.]
 --        - Selain itu 'NONE' + pesan posisi (kalau @DivisionId NULL/pengunjung publik,
 --          selalu NONE tanpa pesan negatif).
 --      Aksi juga membawa NextDivisionId/NextDivisionName -- divisi tujuan yang akan
@@ -198,7 +199,10 @@ BEGIN
             FROM article_workflow_logs awl
             INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
             WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
-              AND awl.division_id = @DivisionId AND awl.target_division_id IS NOT NULL AND awl.received_at IS NULL;
+              AND awl.division_id = @DivisionId AND awl.target_division_id IS NOT NULL AND awl.received_at IS NULL
+              -- Prompt 56: baris yang sudah di-lock tidak ditawarkan Edit -- SP tulis akan
+              -- menolaknya dengan 'LOCKED|', jadi tombolnya jangan dimunculkan sejak awal.
+              AND awl.lock_id IS NULL;
 
             IF @EditWorkflowLogId IS NOT NULL
             BEGIN
@@ -218,11 +222,12 @@ BEGIN
                 -- /station (tab WIP) sudah benar menampilkannya di sini.
                 DECLARE @LastLogId INT, @LastLogArticleWorkflowId INT, @LastLogSort INT,
                         @LastLogReceivedAt DATETIME2, @LastLogTargetDivisionId INT,
-                        @LastLogDivisionId INT, @LastLogCreatedAt DATETIME2;
+                        @LastLogDivisionId INT, @LastLogCreatedAt DATETIME2, @LastLogLockId INT;
                 SELECT TOP 1 @LastLogId = awl.workflow_log_id, @LastLogArticleWorkflowId = awl.article_workflow_id,
                              @LastLogSort = aw.sort_order, @LastLogReceivedAt = awl.received_at,
                              @LastLogTargetDivisionId = awl.target_division_id,
-                             @LastLogDivisionId = awl.division_id, @LastLogCreatedAt = awl.created_at
+                             @LastLogDivisionId = awl.division_id, @LastLogCreatedAt = awl.created_at,
+                             @LastLogLockId = awl.lock_id
                 FROM article_workflow_logs awl
                 INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
                 WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
@@ -255,13 +260,14 @@ BEGIN
                     END
                 END
                 -- Prompt 23: step terakhir (target_division_id NULL, mis. Packing) tidak
-                -- pernah "diterima" -- tanpa ini baris ini terkunci permanen begitu dibuat.
-                -- Beri jendela revisi H+1 (hari dibuat + 1 hari kalender) ke divisi pembuatnya
-                -- sendiri supaya salah input bisa diperbaiki tanpa lewat supervisor. Guard
-                -- waktu yang sama ditegakkan ulang di SIS_WorkflowLog_Manage (Action UPDATE)
-                -- supaya tidak bisa dilewati lewat panggilan API langsung.
+                -- pernah "diterima" -- tanpa ini baris ini terkunci permanen begitu dibuat,
+                -- jadi divisi pembuatnya sendiri diberi jalan membetulkan salah input.
+                -- Prompt 56: jendela H+1 DIGANTI lock -- selama baris belum di-lock
+                -- (lock_id IS NULL), tombol Edit tetap ditawarkan tanpa batas waktu. Guard
+                -- yang sama ditegakkan ulang di SIS_WorkflowLog_Manage (Action UPDATE, pesan
+                -- 'LOCKED|') supaya tidak bisa dilewati lewat panggilan API langsung.
                 ELSE IF @LastLogTargetDivisionId IS NULL AND @LastLogDivisionId = @DivisionId
-                     AND CAST(SYSDATETIME() AS DATE) <= CAST(DATEADD(DAY, 1, @LastLogCreatedAt) AS DATE)
+                     AND @LastLogLockId IS NULL
                 BEGIN
                     SET @AllowedAction = 'EDIT';
                     SET @ActionArticleWorkflowId = @LastLogArticleWorkflowId;

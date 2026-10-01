@@ -93,5 +93,6 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.SuperAdminApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkScheduleApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.DailyPlanApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.DashboardTokenApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.UnlockRequestApiService>();
 
 await builder.Build().RunAsync();

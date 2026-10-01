@@ -1,0 +1,276 @@
+@page "/unlock-requests"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.UnlockRequests
+@inject UnlockRequestApiService UnlockRequestApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Prompt 57: daftar pengajuan buka lock dari stasiun (module UNLOCK_REQUEST). Keputusan
+   Setujui/Tolak TIDAK ada di halaman ini -- admin wajib membuka detail dulu supaya melihat
+   baris mana yang akan dibuka. Baris dibuka di TAB BARU (target="_blank" + CloseButton di
+   halaman detail, pola halaman turunan yang berlaku di app ini). *@
+
+<PageTitle>Request Unlock</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Request Unlock</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Request Unlock</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <ul class="nav nav-tabs mb-3">
+        @foreach (var t in tabs)
+        {
+            <li class="nav-item">
+                <a class="nav-link @(state == t.Key ? "active" : "")" href="javascript:void(0)" @onclick="() => SetState(t.Key)">
+                    @t.Label
+                    @if (t.Key == "PENDING" && pendingCount > 0)
+                    {
+                        <span class="badge bg-danger ms-1">@pendingCount</span>
+                    }
+                </a>
+            </li>
+        }
+    </ul>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Divisi</label>
+                    <SearchableSelect TItem="DivisionDto" Items="divisions" Value="divisionFilterId" ValueChanged="HandleDivisionChanged"
+                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                      AllowNone="true" NoneLabel="Semua divisi"
+                                      Placeholder="Semua divisi..." />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label">Diajukan dari</label>
+                    <input type="date" class="form-control" value="@dateFrom?.ToString("yyyy-MM-dd")" @onchange="HandleDateFromChanged" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label">sampai</label>
+                    <input type="date" class="form-control" value="@dateTo?.ToString("yyyy-MM-dd")" @onchange="HandleDateToChanged" />
+                </div>
+                <div class="col-12 col-md-2 d-flex gap-2">
+                    <button class="btn btn-light w-100" @onclick="LoadAsync" disabled="@isLoading">
+                        <i class="fe fe-refresh-cw"></i> Muat ulang
+                    </button>
+                </div>
+            </div>
+            @if (divisionFilterId > 0 || dateFrom is not null || dateTo is not null)
+            {
+                <button class="btn btn-link btn-sm px-0 mt-2" @onclick="ClearFilters">Hapus filter</button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (isLoading)
+    {
+        <p>Memuat data...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <p class="text-muted">Tidak ada pengajuan @(StateLabel(state).ToLower()).</p>
+    }
+    else
+    {
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">@StateLabel(state) &middot; @items.Count pengajuan</h3>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered border text-nowrap mb-0">
+                        <thead>
+                            <tr>
+                                <th>Waktu Ajukan</th>
+                                <th>Divisi</th>
+                                <th>Stasiun</th>
+                                <th>Operator</th>
+                                <th class="text-end">Baris</th>
+                                <th class="text-end">Total Qty</th>
+                                <th style="min-width: 220px;">Alasan</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in items)
+                            {
+                                <tr>
+                                    <td>@r.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@r.DivisionName</td>
+                                    <td>@(r.StationName ?? "-")</td>
+                                    <td>@(r.RequestedByResourceName ?? "-")</td>
+                                    <td class="text-end">@r.JumlahBaris</td>
+                                    <td class="text-end">@r.TotalQty</td>
+                                    <td class="text-wrap" title="@r.Reason">@Truncate(r.Reason, 80)</td>
+                                    <td>
+                                        @{
+                                            var (badgeClass, badgeText) = StateBadge(r.State);
+                                        }
+                                        <span class="badge @badgeClass">@badgeText</span>
+                                        @if (r.PeriodeFinal)
+                                        {
+                                            <span class="badge bg-danger ms-1" title="Pengajuan ini pasti ditolak sistem saat disetujui.">Periode sudah final</span>
+                                        }
+                                        @if (r.DecidedAt.HasValue)
+                                        {
+                                            <div class="text-muted small">
+                                                @r.DecidedAt.Value.ToString("dd/MM/yyyy HH:mm")
+                                                @if (!string.IsNullOrEmpty(r.DecidedByName))
+                                                {
+                                                    <text> &middot; @r.DecidedByName</text>
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                    <td>
+                                        <a class="btn btn-sm btn-primary" href="@($"/unlock-requests/{r.RequestId}")" target="_blank">
+                                            <i class="fe fe-search"></i> Periksa
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted small mb-0 mt-2">
+                    Keputusan dibuat di halaman detail (tab baru). Setelah menyetujui/menolak, tutup tab itu lalu tekan "Muat ulang" di sini.
+                </p>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private record TabDef(string Key, string Label);
+
+    private static readonly TabDef[] tabs =
+    {
+        new("PENDING", "Menunggu"),
+        new("APPROVED", "Disetujui"),
+        new("REJECTED", "Ditolak"),
+        new("ALL", "Semua")
+    };
+
+    private bool? hasAccess = null;
+    private bool isLoading = false;
+    private string errorMessage = string.Empty;
+    private string state = "PENDING";
+    private int pendingCount = 0;
+
+    private List<UnlockRequestListItemDto> items = new();
+    private List<DivisionDto> divisions = new();
+    private int divisionFilterId = 0;
+    private DateTime? dateFrom;
+    private DateTime? dateTo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "UNLOCK_REQUEST");
+
+        if (hasAccess == true)
+        {
+            divisions = await UnlockRequestApi.GetDivisionsAsync();
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        int? divisionId = divisionFilterId > 0 ? divisionFilterId : null;
+        items = await UnlockRequestApi.GetListAsync(state, divisionId, dateFrom, dateTo);
+
+        // Badge tab Menunggu memakai filter divisi/tanggal yang SAMA dengan daftar, supaya
+        // angkanya tidak pernah bertentangan dengan apa yang terlihat.
+        if (state == "PENDING")
+        {
+            pendingCount = items.Count;
+        }
+        else
+        {
+            var pending = await UnlockRequestApi.GetListAsync("PENDING", divisionId, dateFrom, dateTo);
+            pendingCount = pending.Count;
+        }
+
+        isLoading = false;
+    }
+
+    private async Task SetState(string newState)
+    {
+        if (state == newState) return;
+        state = newState;
+        await LoadAsync();
+    }
+
+    private async Task HandleDivisionChanged(int id)
+    {
+        divisionFilterId = id;
+        await LoadAsync();
+    }
+
+    private async Task HandleDateFromChanged(ChangeEventArgs e)
+    {
+        dateFrom = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null;
+        await LoadAsync();
+    }
+
+    private async Task HandleDateToChanged(ChangeEventArgs e)
+    {
+        dateTo = DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null;
+        await LoadAsync();
+    }
+
+    private async Task ClearFilters()
+    {
+        divisionFilterId = 0;
+        dateFrom = null;
+        dateTo = null;
+        await LoadAsync();
+    }
+
+    private static string StateLabel(string s) => s switch
+    {
+        "PENDING" => "Menunggu",
+        "APPROVED" => "Disetujui",
+        "REJECTED" => "Ditolak",
+        _ => "Semua"
+    };
+
+    private static (string Class, string Text) StateBadge(string s) => s switch
+    {
+        "APPROVED" => ("bg-success", "Disetujui"),
+        "REJECTED" => ("bg-secondary", "Ditolak"),
+        _ => ("bg-warning text-dark", "Menunggu")
+    };
+
+    private static string Truncate(string text, int max)
+        => string.IsNullOrEmpty(text) || text.Length <= max ? text : text.Substring(0, max) + "...";
+}

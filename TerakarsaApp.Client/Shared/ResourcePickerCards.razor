@@ -1,5 +1,7 @@
-@* Prompt 49: grid pilih pelaksana kartu kecil -- pola sama dengan picker "Penjahit (Tim)" di
-   modal Buat Bundle (col-6 col-md-4, w-100 py-2, tanpa btn-lg). *@
+@* Prompt 49: pilih pelaksana lewat tombol kartu kecil.
+   Dulu grid col-6 col-md-4 (tetap 2 kolom di layar sempit) -- diganti flex-wrap: tombol
+   selebar isinya dan baru turun baris kalau memang tidak muat lagi ke samping. Nama resource
+   panjang-pendeknya berbeda-beda, jadi kolom tetap menyisakan banyak ruang kosong. *@
 @using TerakarsaApp.Shared.Resources
 
 <div>
@@ -7,15 +9,13 @@
     {
         <label class="form-label">@Label</label>
     }
-    <div class="row g-2">
+    <div class="d-flex flex-wrap gap-2">
         @foreach (var r in Resources)
         {
-            <div class="col-6 col-md-4">
-                <button type="button" class="btn @(SelectedId == r.Id ? "btn-primary" : "btn-outline-primary") w-100 py-2"
-                        disabled="@Disabled" @onclick="() => Select(r.Id)">
-                    @r.ResourceName
-                </button>
-            </div>
+            <button type="button" class="btn btn-sm @(SelectedId == r.Id ? "btn-primary" : "btn-outline-primary")"
+                    disabled="@Disabled" @onclick="() => Select(r.Id)">
+                @r.ResourceName
+            </button>
         }
     </div>
 </div>

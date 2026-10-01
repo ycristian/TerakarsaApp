@@ -7,6 +7,7 @@
 @using TerakarsaApp.Shared.Divisions
 @using TerakarsaApp.Shared.Employees
 @using TerakarsaApp.Shared.Packs
+@using TerakarsaApp.Shared.Payroll
 @using TerakarsaApp.Shared.Projects
 @using TerakarsaApp.Shared.Resources
 @using TerakarsaApp.Shared.Stations
@@ -35,7 +36,7 @@ else if (station is null)
             <h3 class="card-title mb-3">Setup Perangkat Stasiun</h3>
             <p class="text-muted">Masukkan kode pairing 5 karakter yang diberikan admin untuk mengaktifkan perangkat ini.</p>
             <div class="mb-3">
-                <input class="form-control form-control-lg text-uppercase" maxlength="5" placeholder="Kode pairing..." @bind="tokenInput" @bind:event="oninput" />
+                <input class="form-control text-uppercase" maxlength="5" placeholder="Kode pairing..." @bind="tokenInput" @bind:event="oninput" />
             </div>
             @if (!string.IsNullOrEmpty(setupError))
             {
@@ -98,10 +99,10 @@ else
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-primary btn-sm" @onclick="() => showQrScanner = true">
-                    <i class="fe fe-camera"></i> Scan QR
+                    <i class="fe fe-camera"></i> QR
                 </button>
-                <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshLists" disabled="@isLoadingLists">
-                    <i class="fe fe-refresh-cw"></i> Refresh
+                <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshLists" disabled="@isLoadingLists" title="Refresh">
+                    <i class="fe fe-refresh-cw"></i>
                 </button>
                 @if (!IsLocked)
                 {
@@ -120,25 +121,40 @@ else
     <div class="row g-2 mb-3">
         <div class="col-4">
             <div class="card bg-primary text-white h-100 border border-3 border-warning shadow-sm" style="cursor: pointer;" @onclick='() => SetTab("masuk")'>
-                <div class="card-body py-2 px-3">
-                    <div class="small">IN</div>
-                    <div class="fs-1 fw-bold lh-1">@counts.MasukCount</div>
+                @* py-1 + lh-1 di semua baris: kartu angka ini cuma pintasan tab, tidak perlu
+                   tinggi. Ketiganya h-100 jadi tingginya mengikuti kartu OUT yang punya baris
+                   tunggakan lock. *@
+                <div class="card-body py-1 px-3">
+                    <div class="small lh-1">IN</div>
+                    <div class="fs-2 fw-bold lh-1">@counts.MasukCount</div>
                 </div>
             </div>
         </div>
         <div class="col-4">
             <div class="card bg-warning text-dark h-100 border border-3 border-warning shadow-sm" style="cursor: pointer;" @onclick='() => SetTab("kerja")'>
-                <div class="card-body py-2 px-3">
-                    <div class="small">WIP</div>
-                    <div class="fs-1 fw-bold lh-1">@counts.DikerjakanCount</div>
+                <div class="card-body py-1 px-3">
+                    <div class="small lh-1">WIP</div>
+                    <div class="fs-2 fw-bold lh-1">@counts.DikerjakanCount</div>
                 </div>
             </div>
         </div>
         <div class="col-4">
             <div class="card bg-light text-dark h-100 border border-3 border-warning shadow-sm" style="cursor: pointer;" @onclick='() => SetTab("kirim")'>
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">OUT</div>
-                    <div class="fs-1 fw-bold lh-1">@counts.DikirimCount</div>
+                <div class="card-body py-1 px-3">
+                    <div class="small lh-1 text-muted">OUT</div>
+                    <div class="fs-2 fw-bold lh-1">@counts.DikirimCount</div>
+                    @* Tunggakan lock (Prompt 56) -- baris sendiri di bawah angka, sembunyi
+                       kalau sudah beres. text-nowrap supaya ikon dan angkanya tidak pernah
+                       terpisah ke dua baris di kolom sesempit ini. *@
+                    @if (counts.OutUnlockedCount > 0)
+                    {
+                        @* Ikon gembok terbuka menggantikan teks "belum lock" -- sama dengan
+                           metrik Lock di header kartu OUT, jadi artinya konsisten. title
+                           dipertahankan karena ikon sendirian tidak menjelaskan apa-apa. *@
+                        <div class="text-danger lh-1 text-nowrap text-end" style="font-size: 0.7rem;" title="@counts.OutUnlockedCount baris belum di-lock">
+                            <i class="bi bi-unlock"></i> @counts.OutUnlockedCount
+                        </div>
+                    }
                 </div>
             </div>
         </div>
@@ -146,33 +162,33 @@ else
 
     <div class="card">
         <div class="card-header">
-            <ul class="nav nav-tabs card-header-tabs">
+            <ul class="nav nav-tabs card-header-tabs flex-nowrap">
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "masuk" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("masuk")'>
-                        IN <span class="badge bg-primary ms-1">@pendingReceives.Count</span>
+                    <a class="nav-link small py-1 px-2 @(activeTab == "masuk" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("masuk")'>
+                        IN
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "kerja" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kerja")'>
-                        WIP <span class="badge bg-warning text-dark ms-1">@(inProgress.Count + activeWork.Count)</span>
+                    <a class="nav-link small py-1 px-2 @(activeTab == "kerja" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kerja")'>
+                        WIP
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "kirim" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kirim")'>
-                        OUT <span class="badge bg-secondary ms-1">@outbound.Count</span>
+                    <a class="nav-link small py-1 px-2 @(activeTab == "kirim" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kirim")'>
+                        OUT
                     </a>
                 </li>
                 @if (station.EnablePacking)
                 {
                     <li class="nav-item">
-                        <a class="nav-link @(activeTab == "packing" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("packing")'>
+                        <a class="nav-link small py-1 px-2 @(activeTab == "packing" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("packing")'>
                             Packing
                         </a>
                     </li>
                 }
                 <li class="nav-item">
-                    <a class="nav-link @(activeTab == "rekap" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekap")'>
-                        Rekap Produksi
+                    <a class="nav-link small py-1 px-2 @(activeTab == "rekap" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekap")'>
+                        Settlement
                     </a>
                 </li>
             </ul>
@@ -203,7 +219,7 @@ else
                                                 @foreach (var b in bundles)
                                                 {
                                                     <tr>
-                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        <td style="font-size: 0.65rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
                                                         <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
                                                         <td>@b.QtyOk</td>
                                                         <td>@b.FromDivisionName</td>
@@ -264,8 +280,14 @@ else
             }
             else if (activeTab == "kerja")
             {
-                <div class="mb-3">
-                    <input class="form-control" placeholder="Cari project, artikel, step, atau serial" @bind="wipSearchText" @bind:event="oninput" />
+                @* Kartu WIP bisa ditutup/dibuka seperti tab OUT (chevron di kanan header).
+                   Ringkasan angka SELALU terlihat supaya kartu yang ditutup tetap informatif;
+                   yang disembunyikan hanya tabel/tombol aksinya. *@
+                <div class="d-flex gap-2 mb-3">
+                    <input class="form-control" placeholder="Cari No PO, customer, PIC, project, artikel, step, atau serial" @bind="wipSearchText" @bind:event="oninput" />
+                    <button class="btn btn-light flex-shrink-0" title="@(AllWipExpanded ? "Tutup semua kartu" : "Buka semua kartu")" @onclick="ToggleAllWipCards">
+                        <i class="fe @(AllWipExpanded ? "fe-minimize-2" : "fe-maximize-2")"></i>
+                    </button>
                 </div>
 
                 @if (FilteredWipCards.Count == 0)
@@ -276,30 +298,39 @@ else
                 {
                     @foreach (var card in FilteredWipCards)
                     {
+                        var wipExpanded = expandedWipCards.Contains(card.Key);
                         @if (card.NonBundle is { IsBundling: true } bl)
                         {
                             <div class="card mb-2 border-primary">
                                 <div class="card-body">
-                                    <div class="d-flex align-items-start gap-2 mb-2">
-                                        @{ articlePhotoCache.TryGetValue(bl.ArticleId, out var blPhotoSrc); }
-                                        @if (blPhotoSrc is not null)
-                                        {
-                                            <img src="@blPhotoSrc" alt="@bl.ArticleName" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;" @onclick="() => OpenPhotoModal(blPhotoSrc)" />
-                                        }
-                                        <div class="d-flex justify-content-between align-items-start flex-grow-1">
-                                            <div>
-                                                <h5 class="mb-1">@bl.ArticleName</h5>
-                                                <p class="text-muted mb-0">
-                                                    @FormatProject(bl.NoPo, bl.ProjectName) &middot; @bl.Style @bl.Color &middot; @(bl.BundleCount ?? 0) bundle &middot; total @(bl.TotalBundleQty ?? 0) dari @(bl.TotalOrderQty ?? 0) &middot; Stock Cutting: @StockCuttingText(bl)
-                                                </p>
+                                    <div style="cursor: pointer;" @onclick="() => ToggleWipCard(card.Key)">
+                                        <div class="d-flex align-items-start gap-2 @(wipExpanded ? "mb-2" : "mb-0")">
+                                            @{ articlePhotoCache.TryGetValue(bl.ArticleId, out var blPhotoSrc); }
+                                            @if (blPhotoSrc is not null)
+                                            {
+                                                @* stopPropagation: klik foto membuka pratinjau, bukan menutup kartu. *@
+                                                <img src="@blPhotoSrc" alt="@bl.ArticleName" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;"
+                                                     @onclick:stopPropagation="true" @onclick="() => OpenPhotoModal(blPhotoSrc)" />
+                                            }
+                                            <div class="d-flex justify-content-between align-items-start flex-grow-1" style="font-size: 0.85rem;">
+                                                <div>
+                                                    <div class="fw-bold">@bl.ProjectName</div>
+                                                    <div class="text-muted">@(bl.NoPo ?? "-") &middot; @bl.ArticleName</div>
+                                                </div>
+                                                <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                    <span class="badge bg-primary text-light">Bundling</span>
+                                                    <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted"></i>
+                                                </div>
                                             </div>
-                                            <span class="badge bg-primary text-light">Bundling</span>
                                         </div>
                                     </div>
-                                    <hr class="my-2" />
-                                    <div class="d-flex justify-content-end">
-                                        <button class="btn btn-primary" disabled="@isBusy" @onclick="() => OpenBuatBundleModal(bl)">Buat Bundle</button>
-                                    </div>
+                                    @if (wipExpanded)
+                                    {
+                                        <hr class="my-2" />
+                                        <div class="d-flex justify-content-end">
+                                            <button class="btn btn-primary btn-sm" disabled="@isBusy" @onclick="() => OpenBuatBundleModal(bl)">Buat Bundle</button>
+                                        </div>
+                                    }
                                 </div>
                             </div>
                         }
@@ -307,22 +338,33 @@ else
                         {
                             <div class="card mb-2">
                                 <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <div>
-                                            <h5 class="mb-1">@nb.ArticleName</h5>
-                                            <p class="text-muted mb-0">
-                                                @FormatProject(nb.NoPo, nb.ProjectName) &middot; @nb.Style @nb.Color &middot; Tujuan berikutnya: @(nb.IsLastStep ? "Step terakhir" : (nb.NextDivisionName ?? "-"))
-                                            </p>
+                                    <div style="cursor: pointer;" @onclick="() => ToggleWipCard(card.Key)">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h5 class="mb-1">@nb.ArticleName</h5>
+                                                <p class="text-muted mb-0">
+                                                    @FormatProject(nb.NoPo, nb.ProjectName) &middot; @nb.Style @nb.Color &middot; Tujuan berikutnya: @(nb.IsLastStep ? "Step terakhir" : (nb.NextDivisionName ?? "-"))
+                                                </p>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                <span class="badge bg-info text-light"><i class="fe fe-clipboard"></i> Step: @nb.StepName</span>
+                                                <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted"></i>
+                                            </div>
                                         </div>
-                                        <span class="badge bg-info text-light"><i class="fe fe-clipboard"></i> Step: @nb.StepName</span>
-                                    </div>
-                                    <hr class="my-2" />
-                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                        <p class="mb-0 text-muted">
-                                            Tercatat <strong>@(nb.Sizes.Sum(s => s.QtyRecorded))</strong> dari @(nb.Sizes.Sum(s => s.QtyOrder)) &middot; input bisa nyicil
+                                        @* Dipindah ke header (dari baris tombol) supaya progres tetap
+                                           terbaca saat kartu ditutup. *@
+                                        <p class="mb-0 text-muted" style="font-size: 0.8rem;">
+                                            Tercatat <strong>@(nb.Sizes.Sum(s => s.QtyRecorded))</strong> dari @(nb.Sizes.Sum(s => s.QtyOrder))
                                         </p>
-                                        <button class="btn btn-primary" disabled="@isBusy" @onclick="() => OpenNonBundleModal(nb)">Kirim Hasil</button>
                                     </div>
+                                    @if (wipExpanded)
+                                    {
+                                        <hr class="my-2" />
+                                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                            <p class="mb-0 text-muted">Input bisa nyicil.</p>
+                                            <button class="btn btn-primary" disabled="@isBusy" @onclick="() => OpenNonBundleModal(nb)">Kirim Hasil</button>
+                                        </div>
+                                    }
                                 </div>
                             </div>
                         }
@@ -331,24 +373,65 @@ else
                             var first = bundles[0];
                             <div class="card mb-2 border-warning">
                                 <div class="card-body">
-                                    <div class="mb-2" style="font-size: 0.85rem;">
-                                        <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
-                                        <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
+                                    <div style="cursor: pointer;" @onclick="() => ToggleWipCard(card.Key)">
+                                        <div class="d-flex justify-content-between align-items-start mb-2" style="font-size: 0.85rem;">
+                                            <div>
+                                                <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
+                                                <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
+                                                @* Rentang waktu terima bundle dalam kartu ini -- terawal s/d terakhir.
+                                                   Satu bundle (atau semua diterima bersamaan) cukup satu waktu. *@
+                                                @{
+                                                    var recFirst = bundles.Min(x => x.ReceivedAt);
+                                                    var recLast = bundles.Max(x => x.ReceivedAt);
+                                                    // Selisih HARI KALENDER, bukan jam dibagi 24 -- '23/09 17:17 - 29/09 16:27'
+                                                    // dibaca 6 hari, bukan 5 (selisih jamnya kurang sedikit dari 6x24).
+                                                    var recSpanDays = (recLast.Date - recFirst.Date).Days;
+                                                }
+                                                <div class="text-muted" style="font-size: 0.65rem;" title="Waktu terima bundle: terawal - terakhir">
+                                                    @if (recFirst == recLast)
+                                                    {
+                                                        @FormatDateTime(recFirst)
+                                                    }
+                                                    else
+                                                    {
+                                                        <text>@FormatDateTime(recFirst) - @FormatDateTime(recLast)</text>
+                                                        @* Rentang di hari yang sama tidak perlu '(0 hari)'. *@
+                                                        @if (recSpanDays > 0)
+                                                        {
+                                                            <text> (@recSpanDays hari)</text>
+                                                        }
+                                                    }
+                                                </div>
+                                            </div>
+                                            <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
+                                        </div>
+                                        <div class="row g-2 text-center @(wipExpanded ? "mb-2" : "mb-0")">
+                                            <div class="col-6">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Bundle</div>
+                                                <div class="fw-bold">@bundles.Count</div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Qty</div>
+                                                <div class="fw-bold">@bundles.Sum(x => x.Qty)</div>
+                                            </div>
+                                        </div>
                                     </div>
+                                    @if (wipExpanded)
+                                    {
                                     <div class="table-responsive">
                                         <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
                                             <tbody>
                                                 @foreach (var b in bundles)
                                                 {
                                                     <tr>
-                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
-                                                        <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
-                                                        <td>@b.Qty</td>
-                                                        <td>@(b.EmployeeName ?? "-")</td>
+                                                        <td style="font-size: 0.7rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        <td style="font-size: 0.7rem;">@(b.SizeName ?? "-")</td>
+                                                        <td style="font-size: 0.7rem;">@b.Qty</td>
+                                                        <td style="font-size: 0.7rem;">@(b.EmployeeName ?? "-")</td>
                                                         <td>
                                                             <div class="d-flex gap-1">
                                                                 <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
-                                                                <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(b)">Batal</button>
+                                                                <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Batal Terima" disabled="@isBusy" @onclick="() => OpenBatalTerimaModal(b)"><i class="fe fe-x"></i></button>
                                                                 <button class="btn btn-success btn-sm py-0 px-1" disabled="@(isBusy || b.NextArticleWorkflowId is null)" @onclick="() => OpenSerahkanModal(b)">Kirim</button>
                                                             </div>
                                                             <span class="text-muted">@FormatDateTime(b.ReceivedAt)</span>
@@ -358,6 +441,7 @@ else
                                             </tbody>
                                         </table>
                                     </div>
+                                    }
                                 </div>
                             </div>
                         }
@@ -366,152 +450,318 @@ else
             }
             else if (activeTab == "kirim")
             {
+                @* Pencarian tab OUT -- menyaring per BARIS (bukan per kartu), jadi kartu yang
+                   tampil hanya memuat baris yang cocok. Field yang dicari sama dengan tab WIP
+                   plus nomor bundle/ukuran. Ditaruh PALING ATAS, sejajar dengan tab WIP yang
+                   kotak carinya juga di atas. *@
+                <div class="mb-2">
+                    <input class="form-control" placeholder="Cari No PO, Customer, PIC, Project, Artikel, Bundle, Penjahit"
+                           @bind="outSearchText" @bind:event="oninput" />
+                </div>
+
+                <div class="d-flex align-items-end gap-2 flex-wrap mb-2">
+                    <div style="max-width: 220px;">
+                        @* Periode gajian yang memuat tanggal ini -- sekadar keterangan, tidak
+                           mengikat: periode baris tetap ditentukan saat Lock, bukan dari tanggal
+                           kirim. Ditaruh di label supaya lebar input tanggal tidak terganggu. *@
+                        <label class="form-label mb-1">
+                            Tanggal Kirim
+                            @if (!string.IsNullOrEmpty(outboundDatePeriodCode))
+                            {
+                                @* bg-primary (solid) WAJIB kalau memakai .badge -- teks .badge
+                                   putih, jadi latar tint/transparan bikin tidak terbaca. *@
+                                <span class="badge bg-primary ms-1"
+                                      style="font-size: 0.6rem;" title="Periode gajian tanggal ini">@outboundDatePeriodCode</span>
+                            }
+                        </label>
+                        <input type="date" class="form-control form-control-sm"
+                               min="@DateTime.Today.AddDays(-90).ToString("yyyy-MM-dd")"
+                               max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                               value="@outboundDate.ToString("yyyy-MM-dd")" @onchange="HandleOutboundDateChanged" />
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="outShowTailor"
+                               checked="@showOutTailor" @onchange="e => showOutTailor = e.Value is bool v && v" />
+                        <label class="form-check-label" for="outShowTailor">Penjahit</label>
+                    </div>
+                    @* Prompt 56: mode pilihan baris -- Lock (pilih baris belum lock) atau Unlock
+                       (pilih baris sudah lock untuk diajukan ke admin). Default Lock. *@
+                    <div class="btn-group btn-group-sm mb-2" role="group">
+                        <button type="button" class="btn @(outLockMode == "lock" ? "btn-primary" : "btn-outline-primary")"
+                                @onclick='() => SetOutLockMode("lock")'>Lock</button>
+                        <button type="button" class="btn @(outLockMode == "unlock" ? "btn-warning" : "btn-outline-warning")"
+                                @onclick='() => SetOutLockMode("unlock")'>Unlock</button>
+                    </div>
+                </div>
+
+                @* Prompt 56: chip merah tanggal yang masih punya baris belum lock -- tap untuk
+                   memindahkan filter tanggal ke sana. Tidak ada chip = semua beres. *@
+                @if (OutUnlockedChips.Count > 0)
+                {
+                    <div class="d-flex flex-wrap align-items-center gap-1 mb-3">
+                        @* Ikon gembok terbuka menggantikan label "Belum lock:" -- lambang yang
+                           sama dipakai di kartu angka OUT dan metrik Lock tiap kartu. *@
+                        <span class="text-danger fw-bold" style="font-size: 0.75rem;" title="Tanggal yang masih punya baris belum di-lock">
+                            <i class="bi bi-unlock"></i>
+                        </span>
+                        @foreach (var chip in OutUnlockedChips)
+                        {
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                                    @onclick="() => JumpToUnlockedDate(chip.Date)">
+                                @chip.Date.ToString("dd/MM") (@chip.Count)
+                            </button>
+                        }
+                        @if (OutUnlockedChipsMore > 0)
+                        {
+                            <span class="text-danger" style="font-size: 0.75rem;">+@OutUnlockedChipsMore lagi</span>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(outToast))
+                {
+                    <div class="alert alert-success py-2 mb-3">@outToast</div>
+                }
+
                 @if (outbound.Count == 0)
                 {
-                    <p class="text-muted mb-0">Belum ada data yang dikirim hari ini.</p>
+                    <p class="text-muted mb-0">Belum ada data yang dikirim pada tanggal ini.</p>
                 }
                 else
                 {
+                    @* Prompt 56: satu kartu per ARTIKEL, isinya baris bundle DAN non-bundle
+                       (mis. Cutting) dengan pola tabel yang sama -- lihat OutCards. *@
                     @foreach (var card in OutCards)
                     {
-                        @if (card.BundleGroup is { Count: > 0 } bundles)
-                        {
-                            var first = bundles[0];
-                            <div class="card mb-2">
-                                <div class="card-body">
-                                    <div class="mb-2" style="font-size: 0.85rem;">
-                                        <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
-                                        <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
-                                    </div>
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
-                                            <tbody>
-                                                @foreach (var b in bundles)
+                        var rows = card.Items;
+                        var first = rows[0];
+                        var outExpanded = expandedOutArticles.Contains(card.ArticleId);
+                        var cardUnlocked = rows.Count(r => !r.IsLocked);
+                        var cardSelectable = rows.Where(IsOutRowSelectable).ToList();
+                        var cardAllSelected = cardSelectable.Count > 0 && cardSelectable.All(r => outSelected.Contains(r.WorkflowLogId));
+                        <div class="card mb-2" style="@(cardUnlocked == 0 ? "opacity: 0.6;" : "")">
+                            <div class="card-body">
+                                <div class="d-flex align-items-start gap-2">
+                                    @* Pilih semua baris kartu ini yang bisa dipilih pada mode aktif --
+                                       bisa dipakai tanpa membuka kartu. *@
+                                    @if (cardSelectable.Count > 0)
+                                    {
+                                        @* position/margin inline: lihat catatan di sel centang baris. *@
+                                        <input class="form-check-input flex-shrink-0" type="checkbox"
+                                               style="position: static; margin: 0.25rem 0 0 0;"
+                                               checked="@cardAllSelected" @onchange="() => ToggleOutCardSelection(card)" />
+                                    }
+                                    <div class="flex-grow-1" style="cursor: pointer;" @onclick="() => ToggleOutCard(card.ArticleId)">
+                                        <div class="d-flex justify-content-between align-items-start mb-2" style="font-size: 0.85rem;">
+                                            <div>
+                                                <div class="fw-bold">@first.ProjectName <span class="text-muted fw-normal">&middot; @first.BuyerName</span></div>
+                                                <div class="text-muted">@(first.NoPo ?? "-") &middot; @first.ArticleName</div>
+                                            </div>
+                                            <i class="fe @(outExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
+                                        </div>
+                                        <div class="row g-2 text-center @(outExpanded ? "mb-2" : "mb-0")">
+                                            <div class="col-3">
+                                                @* Label "Bundle" hanya benar kalau kartu ini murni bundle --
+                                                   kartu yang memuat baris non-bundle memakai "Baris". *@
+                                                <div class="text-muted" style="font-size: 0.65rem;">@(rows.Any(r => r.BundleId is null) ? "Baris" : "Bundle")</div>
+                                                <div class="fw-bold">@rows.Count</div>
+                                            </div>
+                                            <div class="col-3">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Qty</div>
+                                                <div class="fw-bold">@rows.Sum(x => x.QtyOk)</div>
+                                            </div>
+                                            <div class="col-3">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Reject</div>
+                                                <div class="fw-bold @(rows.Sum(RejectTotal) > 0 ? "text-danger" : "")">@rows.Sum(RejectTotal)</div>
+                                            </div>
+                                            <div class="col-3">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Lock</div>
+                                                @if (cardUnlocked > 0)
                                                 {
-                                                    <tr>
-                                                        <td style="font-size: 0.9rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
-                                                        <td style="font-size: 0.9rem;">@(b.SizeName ?? "-")</td>
-                                                        <td>@b.QtyOk</td>
-                                                        <td>
-                                                            @{ var rejectLines = RejectLines(b); }
-                                                            @if (rejectLines.Count == 0)
+                                                    <div class="fw-bold text-danger"><i class="bi bi-unlock"></i> @cardUnlocked</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="fw-bold text-success"><i class="bi bi-lock-fill"></i></div>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                @if (outExpanded)
+                                {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
+                                        <tbody>
+                                            @foreach (var lineGroup in OutRowGroups(rows))
+                                            {
+                                                @if (lineGroup.Header is not null)
+                                                {
+                                                    <tr class="table-light">
+                                                        @* 5 kolom sejak centang digabung ke sel nomor bundle. *@
+                                                        <td colspan="5" class="fw-bold">@lineGroup.Header</td>
+                                                    </tr>
+                                                }
+                                                @foreach (var b in lineGroup.Items)
+                                                {
+                                                <tr class="@(outSelected.Contains(b.WorkflowLogId) ? "table-primary" : "")"
+                                                    style="@(IsOutRowSelectable(b) ? "cursor: pointer;" : "")"
+                                                    @onclick="() => ToggleOutRow(b)">
+                                                    @* Centang pilih baris DISATUKAN ke sel nomor bundle -- sebagai <td> sendiri
+                                                       (width 1%) checkbox-nya terlempar ke luar garis tabel di browser.
+                                                       Placeholder selebar checkbox dipertahankan untuk baris yang tidak bisa
+                                                       dipilih, supaya nomor bundle semua baris tetap sejajar. *@
+                                                    <td class="align-middle">
+                                                        <div class="d-flex align-items-center gap-2">
+                                                            @if (IsOutRowSelectable(b))
                                                             {
-                                                                <text>-</text>
+                                                                @* position/margin inline WAJIB: assets/css/style.css memberi
+                                                                   .form-check-input telanjang position:absolute + margin-left:-1.25rem
+                                                                   (sisa Bootstrap 4), yang membuat checkbox keluar dari alur dan
+                                                                   menutupi teks di sebelahnya. Kelas utility m-0 tidak cukup. *@
+                                                                <input class="form-check-input flex-shrink-0" type="checkbox"
+                                                                       style="position: static; margin: 0;"
+                                                                       checked="@outSelected.Contains(b.WorkflowLogId)" />
                                                             }
                                                             else
                                                             {
-                                                                @foreach (var line in rejectLines)
-                                                                {
-                                                                    <div class="text-danger">@line</div>
-                                                                }
+                                                                <span class="flex-shrink-0" style="width: 1em;"></span>
                                                             }
-                                                        </td>
-                                                        <td>
-                                                            <div class="d-flex gap-1">
+                                                            <div>
                                                                 @if (b.BundleId is not null)
                                                                 {
-                                                                    <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
+                                                                    <div style="font-size: 0.65rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</div>
+                                                                    @if (showOutTailor && BundleTailorName(b) is { } tailorName)
+                                                                    {
+                                                                        <div class="text-muted" style="font-size: 0.65rem;">@tailorName</div>
+                                                                    }
                                                                 }
-                                                                @if (b.IsBundling && b.ReceivedAt is null)
+                                                                else
                                                                 {
-                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenEditBundleModal(b)">Edit</button>
-                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(b)">Hapus</button>
-                                                                }
-                                                                else if (b.IsBundling)
-                                                                {
-                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@(isBusy || !CanEditOrDeleteBundle(b))" @onclick="() => OpenEditBundleModal(b)">Edit</button>
-                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@(isBusy || !CanEditOrDeleteBundle(b))" @onclick="() => OpenDeleteBundleModal(b)">Hapus</button>
-                                                                }
-                                                                else if (b.ReceivedAt is null)
-                                                                {
-                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenReviseModal(b)">Revisi</button>
-                                                                    <button class="btn btn-outline-danger btn-sm py-0 px-1" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(b)">Batal</button>
+                                                                    @* Baris non-bundle: tidak ada nomor bundle, kolom pertama = size. *@
+                                                                    <div style="font-size: 0.9rem;">@(b.SizeName ?? "-")</div>
                                                                 }
                                                             </div>
-                                                            <div class="text-muted" style="font-size: 0.65rem;">
-                                                                Krm @FormatDateTime(b.CreatedAt)
-                                                                @if (b.ReceivedAt is not null)
-                                                                {
-                                                                    <br />
-                                                                    <text>Trm @FormatDateTime(b.ReceivedAt.Value)</text>
-                                                                }
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                }
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                        }
-                        else if (card.NonBundleGroup is { } grp)
-                        {
-                            <div class="card mb-2">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <div>
-                                            <h5 class="mb-1">@grp.ArticleName <span class="text-muted">(@FormatProject(grp.NoPo, grp.ProjectName))</span></h5>
-                                            <p class="text-muted mb-0">@grp.Style @grp.Color</p>
-                                        </div>
-                                        <span class="badge bg-secondary">@grp.Items.Count ukuran</span>
-                                    </div>
-                                    <hr class="my-2" />
-                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                        <div class="flex-grow-1">
-                                            <p class="mb-1">
-                                                Step: <strong>@grp.StepName</strong>
-                                                @if (grp.UpdatedAt is not null)
-                                                {
-                                                    <span class="badge bg-info ms-1">Direvisi @grp.UpdatedAt.Value.ToString("dd/MM HH:mm")</span>
-                                                }
-                                            </p>
-                                            <ul class="list-group list-group-flush mb-2">
-                                                @foreach (var row in grp.Items)
-                                                {
-                                                    <li class="list-group-item px-0 py-1">
-                                                        <div class="d-flex justify-content-between">
-                                                            <span>@row.SizeName</span>
-                                                            <strong>Qty OK: @row.QtyOk</strong>
                                                         </div>
-                                                        @foreach (var line in RejectLines(row))
+                                                    </td>
+                                                    <td class="align-middle" style="font-size: 0.9rem;">
+                                                        @(b.BundleId is not null ? (b.SizeName ?? "-") : b.StepName)
+                                                    </td>
+                                                    <td class="align-middle" style="font-size: 0.9rem;">@b.QtyOk</td>
+                                                    <td class="align-middle" style="font-size: 0.65rem;">
+                                                        @{ var rejectLines = RejectLines(b); }
+                                                        @if (rejectLines.Count == 0)
                                                         {
-                                                            <div class="text-danger small">@line</div>
+                                                            <text>-</text>
                                                         }
-                                                    </li>
+                                                        else
+                                                        {
+                                                            @foreach (var line in rejectLines)
+                                                            {
+                                                                <div class="text-danger">@line</div>
+                                                            }
+                                                        }
+                                                    </td>
+                                                    <td class="align-middle" @onclick:stopPropagation="true">
+                                                        <div class="d-flex gap-1 align-items-center">
+                                                            @* Print hanya untuk baris bundle -- baris non-bundle tidak punya label. *@
+                                                            @if (b.BundleId is not null)
+                                                            {
+                                                                <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(b.BundleId, b.Serial)"><i class="fe fe-printer"></i></button>
+                                                            }
+                                                            @if (b.HasPendingUnlock)
+                                                            {
+                                                                <span class="text-warning" title="Menunggu approval unlock"><i class="bi bi-hourglass-split"></i></span>
+                                                            }
+                                                            else if (b.IsLocked)
+                                                            {
+                                                                @* Sudah lock: Edit & Hapus hilang, diganti ikon gembok di posisi yang sama,
+                                                                   diikuti kode periode gajian supaya operator tahu baris ini masuk
+                                                                   periode mana (periode selalu dari lock, bukan dari tanggal kirim). *@
+                                                                <span class="text-success" title="Sudah di-lock"><i class="bi bi-lock-fill"></i></span>
+                                                                @if (!string.IsNullOrEmpty(b.LockPeriodCode))
+                                                                {
+                                                                    @* Teks polos, BUKAN .badge: tema menimpa .badge tanpa memberi warna,
+                                                                       sedangkan warna teks .badge dari Bootstrap = putih. Tanpa latar
+                                                                       solid hasilnya putih di atas putih (tidak terlihat). *@
+                                                                    <span class="text-success" style="font-size: 0.6rem;">@b.LockPeriodCode</span>
+                                                                }
+                                                            }
+                                                            else if (b.IsBundling)
+                                                            {
+                                                                <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Edit" disabled="@isBusy" @onclick="() => OpenEditBundleModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Hapus" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(b)"><i class="fe fe-x"></i></button>
+                                                            }
+                                                            else
+                                                            {
+                                                                @* Ikon, bukan teks -- sejajar dengan cabang IsBundling di atas. title
+                                                                   dipertahankan supaya aksinya tetap jelas saat di-hover/ditekan lama. *@
+                                                                <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Revisi" disabled="@isBusy" @onclick="() => OpenReviseModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Batal Serah" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(b)"><i class="fe fe-x"></i></button>
+                                                            }
+                                                        </div>
+                                                        @if (b.HasPendingUnlock)
+                                                        {
+                                                            <div class="text-warning" style="font-size: 0.65rem;">menunggu approval</div>
+                                                        }
+                                                        <div class="text-muted" style="font-size: 0.65rem;">
+                                                            @if (b.ReceivedAt is not null)
+                                                            {
+                                                                <text>Trm @FormatDateTime(b.ReceivedAt.Value)</text>
+                                                            }
+                                                            else
+                                                            {
+                                                                <text>Krm @FormatDateTime(b.CreatedAt)</text>
+                                                            }
+                                                        </div>
+                                                    </td>
+                                                </tr>
                                                 }
-                                            </ul>
-                                            <div class="text-muted">
-                                                @(grp.IsLastStep ? "step terakhir — selesai" : (grp.ReceivedAt is not null ? $"sudah diterima {grp.TargetDivisionName}" : $"menunggu diterima {grp.TargetDivisionName}"))
-                                                &middot; @grp.GroupTime.ToString("dd/MM HH:mm")
-                                            </div>
-                                        </div>
-                                        <div class="d-flex gap-2">
-                                            @if (grp.IsLastStep || grp.ReceivedAt is null)
-                                            {
-                                                <button class="btn btn-outline-primary btn-sm" disabled="@isBusy" @onclick="() => OpenReviseGroupModal(grp)">Revisi</button>
-                                                <button class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="() => OpenBatalSerahGroupModal(grp)">Batal Serah</button>
                                             }
-                                        </div>
-                                    </div>
-                                    <div class="text-muted small mt-2 mb-0">
-                                        @if (grp.IsLastStep)
-                                        {
-                                            <text>Step terakhir — masih bisa direvisi/dibatalkan sampai H+1 (hari dibuat + 1 hari).</text>
-                                        }
-                                        else if (grp.ReceivedAt is not null)
-                                        {
-                                            <text>Sudah diterima @grp.TargetDivisionName — riwayat kiriman hari ini, tidak bisa direvisi/dibatalkan lagi.</text>
-                                        }
-                                        else
-                                        {
-                                            <text>Bisa direvisi/dibatalkan selama divisi tujuan belum menekan Terima.</text>
-                                        }
-                                    </div>
+                                        </tbody>
+                                    </table>
                                 </div>
+                                }
                             </div>
-                        }
+                        </div>
                     }
+
+                    @* Ruang bawah supaya kartu terakhir tidak tertutup bar aksi saat menggulir. *@
+                    <div style="height: 3rem;"></div>
+
+                    @* Bar aksi bawah: sticky DI DALAM wadah tab (bukan fixed -- halaman stasiun
+                       bisa berada di panel). *@
+                    @* Bar ini MELAYANG di atas daftar, jadi latarnya wajib PADAT -- bg-body
+                       (= --bs-body-bg, ikut tema terang/gelap) dipasang di pembungkus luar.
+                       Tanda mode Unlock ditaruh di lapisan DALAM memakai bg-warning-transparent
+                       (rgba alpha 0.1): tint itu jadi menumpuk di atas bg-body yang padat,
+                       bukan di atas isi kartu yang lewat di belakang bar. Memakainya langsung
+                       di pembungkus luar membuat bar tembus pandang. *@
+                    @* Margin negatif 25px = membatalkan padding .card-body tema (style.css
+                       .card-body { padding: 25px }), supaya pita bar mencapai tepi kartu.
+                       Padding-nya dikembalikan di lapisan DALAM, jadi teks & tombol tetap
+                       sejajar dengan isi kartu di atasnya sementara warnanya penuh. *@
+                    <div class="bg-body"
+                         style="position: sticky; bottom: 0; z-index: 5; border-top: 1px solid var(--bs-border-color); margin-left: -25px; margin-right: -25px; padding-bottom: env(safe-area-inset-bottom);">
+                        <div class="d-flex align-items-center justify-content-between gap-2 py-2 @(outLockMode == "unlock" ? "bg-warning-transparent" : "")"
+                             style="padding-left: 25px; padding-right: 25px;">
+                            <div style="font-size: 0.8rem;">
+                                @OutSelectedRows.Count baris &middot; @OutSelectedRows.Sum(x => x.QtyOk) pcs &middot; reject @OutSelectedRows.Sum(RejectTotal)
+                            </div>
+                            @if (outLockMode == "lock")
+                            {
+                                <button class="btn btn-primary" disabled="@(isBusy || OutSelectedRows.Count == 0)" @onclick="OpenLockModal">
+                                    LOCK (@OutSelectedRows.Count)
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-warning" disabled="@(isBusy || OutSelectedRows.Count == 0)" @onclick="OpenUnlockRequestModal">
+                                    AJUKAN UNLOCK (@OutSelectedRows.Count)
+                                </button>
+                            }
+                        </div>
+                    </div>
                 }
             }
             else if (activeTab == "packing")
@@ -631,48 +881,12 @@ else
             }
             else if (activeTab == "rekap")
             {
-                <div class="row g-2 align-items-end mb-2" style="max-width: 960px;">
-                    <div class="col-6 col-md-3">
-                        <label class="form-label">Divisi</label>
-                        <SearchableSelect TItem="DivisionDto" Items="rekapDivisions" Value="rekapDivisionId" ValueChanged="HandleRekapDivisionChanged"
-                                          IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
-                                          Placeholder="Cari divisi..." />
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <label class="form-label">Resource</label>
-                        @if (IsLocked)
-                        {
-                            <input type="text" class="form-control" value="@currentOperatorName" disabled />
-                        }
-                        else
-                        {
-                            <SearchableSelect TItem="ResourceLookupDto" Items="rekapResourceOptions" Value="rekapResourceId" ValueChanged="HandleRekapResourceChanged"
-                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)"
-                                              Disabled="@(rekapDivisionId <= 0)"
-                                              Placeholder="Cari resource..." />
-                        }
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <label class="form-label">Penjahit</label>
-                        <SearchableSelect TItem="EmployeeLookupDto" Items="rekapEmployeeOptions" @bind-Value="rekapEmployeeId"
-                                          IdSelector="@(e => e.Id)" TextSelector="@(e => BundleDisplay.FormatEmployeeOption(e.EmployeeCode, e.EmployeeName))"
-                                          Disabled="@(rekapResourceId <= 0)"
-                                          Placeholder="Cari penjahit..." />
-                    </div>
-                    <div class="col-6 col-md-3 d-flex gap-2">
-                        <button type="button" class="btn btn-primary flex-fill" disabled="@(rekapDivisionId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
-                        <button type="button" class="btn btn-outline-primary flex-fill" disabled="@(rekapDivisionId <= 0 || isBusy)" @onclick="PrintRekapWip">Cetak WIP</button>
-                    </div>
+                <div class="d-flex gap-2 mb-2" style="max-width: 480px;">
+                    <button type="button" class="btn btn-primary flex-fill" disabled="@(RekapResourceId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
+                    <button type="button" class="btn btn-outline-primary flex-fill" disabled="@(RekapResourceId <= 0 || isBusy)" @onclick="PrintRekapWip">Cetak WIP</button>
                 </div>
                 <p class="text-muted mb-0">
-                    @if (IsLocked)
-                    {
-                        <text>Resource terkunci ke operator sesi ini (@currentOperatorName). Pilih Penjahit (opsional) untuk mempersempit level rekap.</text>
-                    }
-                    else
-                    {
-                        <text>Pilih Divisi (wajib), lalu Resource dan Penjahit (opsional) untuk mempersempit level rekap -- level rekap mengikuti pilihan terdalam yang diisi.</text>
-                    }
+                    Rekap dicetak untuk <strong>@station.DivisionName</strong> &middot; <strong>@currentOperatorName</strong>.
                 </p>
             }
 
@@ -826,27 +1040,27 @@ else
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyOk" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectPrint" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectFabric" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectSewing" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectSewing" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyRejectRework" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectRework" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control form-control-lg" @bind="serahkanQtyLost" />
+                            <input type="number" min="0" class="form-control" @bind="serahkanQtyLost" />
                         </div>
                     </div>
 
@@ -857,7 +1071,7 @@ else
 
                     <div class="mb-2">
                         <label class="form-label">Divisi Tujuan</label>
-                        <div class="form-control form-control-lg bg-light">
+                        <div class="form-control bg-light">
                             @(serahkanTarget.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (serahkanTarget.NextDivisionName ?? "-"))
                         </div>
                     </div>
@@ -1082,7 +1296,7 @@ else
                         else
                         {
                             <label class="form-label">Pelaksana</label>
-                            <div class="form-control form-control-lg bg-light"><i class="fe fe-lock"></i> @station?.DefaultResourceName</div>
+                            <div class="form-control bg-light"><i class="fe fe-lock"></i> @station?.DefaultResourceName</div>
                         }
                     </div>
 
@@ -1092,27 +1306,27 @@ else
                     <div class="row g-2 mb-2">
                         <div class="col-6">
                             <label class="form-label">Qty OK</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyOk" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyOk" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Print</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectPrint" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyRejectPrint" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectFabric" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyRejectFabric" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectSewing" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyRejectSewing" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Reject Rework</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyRejectRework" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyRejectRework" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Hilang</label>
-                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control form-control-lg" @bind="reviseQtyLost" />
+                            <input type="number" min="@(reviseTarget.BundleId is not null ? "0" : null)" class="form-control" @bind="reviseQtyLost" />
                         </div>
                     </div>
 
@@ -1125,7 +1339,7 @@ else
                     {
                         <div class="mb-2">
                             <label class="form-label">Divisi Tujuan</label>
-                            <div class="form-control form-control-lg bg-light">
+                            <div class="form-control bg-light">
                                 @(reviseTarget.TargetDivisionName ?? "-")
                             </div>
                         </div>
@@ -1189,137 +1403,141 @@ else
     </div>
 }
 
-@if (showReviseGroupModal && reviseGroupTarget is not null)
+@* Prompt 56: konfirmasi LOCK -- ringkasan per artikel + pilihan periode gajian. Operator
+   diambil dari sesi aktif (tidak bisa diganti di sini). *@
+@if (showLockModal)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Revisi Gabungan &middot; @reviseGroupTarget.StepName</h5>
-                    <button type="button" class="btn-close" @onclick="CloseReviseGroupModal"></button>
+                    <h5 class="modal-title">Lock Hasil Kerja</h5>
+                    <button type="button" class="btn-close" @onclick="CloseLockModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-muted mb-2">@reviseGroupTarget.ArticleName</p>
-                    <div class="d-flex flex-wrap gap-3 mb-2">
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="rgShowRejectPrint" @bind="reviseGroupShowRejectPrint" @bind:after="OnReviseGroupShowRejectPrintChanged" />
-                            <label class="form-check-label" for="rgShowRejectPrint">Reject Print</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="rgShowRejectFabric" @bind="reviseGroupShowRejectFabric" @bind:after="OnReviseGroupShowRejectFabricChanged" />
-                            <label class="form-check-label" for="rgShowRejectFabric">Reject Bahan</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="rgShowRejectSewing" @bind="reviseGroupShowRejectSewing" @bind:after="OnReviseGroupShowRejectSewingChanged" />
-                            <label class="form-check-label" for="rgShowRejectSewing">Reject Jahit</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="rgShowRejectRework" @bind="reviseGroupShowRejectRework" @bind:after="OnReviseGroupShowRejectReworkChanged" />
-                            <label class="form-check-label" for="rgShowRejectRework">Reject Rework</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="rgShowLost" @bind="reviseGroupShowLost" @bind:after="OnReviseGroupShowLostChanged" />
-                            <label class="form-check-label" for="rgShowLost">Hilang</label>
-                        </div>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-bordered border mb-0">
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-bordered border mb-0 align-middle">
                             <thead>
                                 <tr>
-                                    <th>Size</th>
-                                    <th>Qty OK</th>
-                                    @if (reviseGroupShowRejectPrint)
-                                    {
-                                        <th>Reject Print</th>
-                                    }
-                                    @if (reviseGroupShowRejectFabric)
-                                    {
-                                        <th>Reject Bahan</th>
-                                    }
-                                    @if (reviseGroupShowRejectSewing)
-                                    {
-                                        <th>Reject Jahit</th>
-                                    }
-                                    @if (reviseGroupShowRejectRework)
-                                    {
-                                        <th>Reject Rework</th>
-                                    }
-                                    @if (reviseGroupShowLost)
-                                    {
-                                        <th>Hilang</th>
-                                    }
-                                    <th>Catatan</th>
+                                    <th>Artikel</th>
+                                    <th class="text-end">Baris</th>
+                                    <th class="text-end">Pcs</th>
+                                    <th class="text-end">Reject</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var row in reviseGroupRows)
+                                @foreach (var g in OutSelectedRows.GroupBy(r => r.ArticleName).OrderBy(g => g.Key))
                                 {
                                     <tr>
-                                        <td class="align-middle">@row.SizeName</td>
-                                        <td><input type="number" min="0" class="form-control" @bind="row.QtyOk" @bind:after="() => row.QtyOk = Math.Max(0, row.QtyOk)" /></td>
-                                        @if (reviseGroupShowRejectPrint)
-                                        {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectPrint" @bind:after="() => row.QtyRejectPrint = Math.Max(0, row.QtyRejectPrint)" /></td>
-                                        }
-                                        @if (reviseGroupShowRejectFabric)
-                                        {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectFabric" @bind:after="() => row.QtyRejectFabric = Math.Max(0, row.QtyRejectFabric)" /></td>
-                                        }
-                                        @if (reviseGroupShowRejectSewing)
-                                        {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectSewing" @bind:after="() => row.QtyRejectSewing = Math.Max(0, row.QtyRejectSewing)" /></td>
-                                        }
-                                        @if (reviseGroupShowRejectRework)
-                                        {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyRejectRework" @bind:after="() => row.QtyRejectRework = Math.Max(0, row.QtyRejectRework)" /></td>
-                                        }
-                                        @if (reviseGroupShowLost)
-                                        {
-                                            <td><input type="number" min="0" class="form-control" @bind="row.QtyLost" @bind:after="() => row.QtyLost = Math.Max(0, row.QtyLost)" /></td>
-                                        }
-                                        <td><input class="form-control" @bind="row.Remark" /></td>
+                                        <td>@g.Key</td>
+                                        <td class="text-end">@g.Count()</td>
+                                        <td class="text-end">@g.Sum(x => x.QtyOk)</td>
+                                        <td class="text-end @(g.Sum(RejectTotal) > 0 ? "text-danger" : "")">@g.Sum(RejectTotal)</td>
                                     </tr>
                                 }
                             </tbody>
                         </table>
                     </div>
 
-                    @if (!string.IsNullOrEmpty(reviseGroupError))
+                    <div class="mb-3">
+                        <label class="form-label">Periode Gajian</label>
+                        @if (lockPeriodOptions.Count == 0)
+                        {
+                            <div class="alert alert-warning mb-0">
+                                Periode gajian belum di-generate. Hubungi admin.
+                            </div>
+                        }
+                        else
+                        {
+                            <select class="form-select" @bind="lockPeriodId">
+                                @foreach (var p in lockPeriodOptions)
+                                {
+                                    <option value="@p.PayrollPeriodId">@FormatPayrollPeriod(p)</option>
+                                }
+                            </select>
+                        }
+                    </div>
+
+                    @if (lockMultiPeriodWarning)
                     {
-                        <div class="alert alert-danger mt-2 mb-0">@reviseGroupError</div>
+                        <div class="alert alert-warning">
+                            Baris yang dipilih berasal dari dua periode. Semua akan masuk periode yang
+                            dipilih. Lock terpisah kalau perlu dibagi.
+                        </div>
+                    }
+
+                    <div class="mb-2">
+                        <label class="form-label">Operator</label>
+                        <div class="form-control bg-light">@(currentOperatorName ?? "-")</div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(lockError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@lockError</div>
                     }
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseReviseGroupModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmReviseGroup">Simpan</button>
+                    <button class="btn btn-light" @onclick="CloseLockModal">Batal</button>
+                    <button class="btn btn-primary" disabled="@(isBusy || lockPeriodId <= 0)" @onclick="ConfirmLock">
+                        Ya, data sudah sesuai &mdash; Lock
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 }
 
-@if (showBatalSerahGroupModal && batalSerahGroupTarget is not null)
+@* Prompt 56: pengajuan unlock -- baris baru bisa diedit setelah admin menyetujui (Prompt 57). *@
+@if (showUnlockRequestModal)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Batal Serah</h5>
-                    <button type="button" class="btn-close" @onclick="CloseBatalSerahGroupModal"></button>
+                    <h5 class="modal-title">Ajukan Unlock</h5>
+                    <button type="button" class="btn-close" @onclick="CloseUnlockRequestModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-1">
-                        Yakin batal kirim hasil @batalSerahGroupTarget.StepName untuk @batalSerahGroupTarget.Items.Count ukuran (@string.Join(", ", batalSerahGroupTarget.Items.Select(i => i.SizeName)))?
-                    </p>
-                    <p class="text-muted mb-0">Semua baris ukuran pada kartu ini akan dihapus.</p>
-                    @if (!string.IsNullOrEmpty(batalSerahGroupError))
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.8rem;">
+                            <thead>
+                                <tr>
+                                    <th>Artikel</th>
+                                    <th>Bundle / Size</th>
+                                    <th class="text-end">Qty</th>
+                                    <th>Periode</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in OutSelectedRows)
+                                {
+                                    <tr>
+                                        <td>@r.ArticleName</td>
+                                        <td>@(r.BundleId is not null ? BundleDisplay.Format(r.BundleLetter, r.BundleNo) : (r.SizeName ?? "-"))</td>
+                                        <td class="text-end">@r.QtyOk</td>
+                                        <td>@(LockPeriodCodeOf(r) ?? "-")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <label class="form-label">Alasan (wajib, minimal 5 karakter)</label>
+                    <textarea class="form-control" rows="3" @bind="unlockReason"></textarea>
+
+                    @if (!string.IsNullOrEmpty(unlockRequestError))
                     {
-                        <div class="alert alert-danger mt-2 mb-0">@batalSerahGroupError</div>
+                        <div class="alert alert-danger mt-2 mb-0">@unlockRequestError</div>
                     }
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseBatalSerahGroupModal">Batal</button>
-                    <button class="btn btn-danger" disabled="@isBusy" @onclick="ConfirmBatalSerahGroup">Ya, Batalkan</button>
+                <div class="modal-footer flex-column align-items-stretch">
+                    <div class="d-flex justify-content-end gap-2">
+                        <button class="btn btn-light" @onclick="CloseUnlockRequestModal">Batal</button>
+                        <button class="btn btn-warning" disabled="@isBusy" @onclick="ConfirmUnlockRequest">Ajukan</button>
+                    </div>
+                    <div class="text-muted mt-2" style="font-size: 0.75rem;">
+                        Baris baru bisa diedit setelah disetujui admin.
+                    </div>
                 </div>
             </div>
         </div>
@@ -1374,7 +1592,7 @@ else
                             @foreach (var r in buatBundleTailorOptions)
                             {
                                 <div class="col-6 col-md-4">
-                                    <button type="button" class="btn @(buatBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                    <button type="button" class="btn @(buatBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary")"
                                             @onclick="() => HandleBuatBundleTailorResourceChanged(r.Id)">
                                         @r.ResourceName
                                     </button>
@@ -1391,7 +1609,7 @@ else
                         </div>
                         <div class="col-6 col-md-3">
                             <label class="form-label">Qty</label>
-                            <input type="number" min="1" class="form-control form-control-lg" @bind="buatBundleQty" />
+                            <input type="number" min="1" class="form-control" @bind="buatBundleQty" />
                         </div>
                         <div class="col-12 col-md-5">
                             <label class="form-label">Penjahit</label>
@@ -1446,14 +1664,14 @@ else
                         </div>
                         <div class="col-5">
                             <label class="form-label">Qty</label>
-                            <input type="number" min="1" class="form-control form-control-lg" @bind="editBundleQty" />
+                            <input type="number" min="1" class="form-control" @bind="editBundleQty" />
                         </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Penjahit (Tim, opsional)</label>
                         <div class="row g-2">
                             <div class="col-6 col-md-4">
-                                <button type="button" class="btn @(editBundleTailorResourceId == 0 ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                <button type="button" class="btn @(editBundleTailorResourceId == 0 ? "btn-primary" : "btn-outline-secondary")"
                                         @onclick="() => HandleEditBundleTailorResourceChanged(0)">
                                     - Tidak ada -
                                 </button>
@@ -1461,7 +1679,7 @@ else
                             @foreach (var r in editBundleTailorOptions)
                             {
                                 <div class="col-6 col-md-4">
-                                    <button type="button" class="btn @(editBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary") w-100 py-2"
+                                    <button type="button" class="btn @(editBundleTailorResourceId == r.Id ? "btn-primary" : "btn-outline-secondary")"
                                             @onclick="() => HandleEditBundleTailorResourceChanged(r.Id)">
                                         @r.ResourceName
                                     </button>
@@ -1534,7 +1752,7 @@ else
                 <div class="modal-body">
                     <p class="mb-2">Cetak ulang label @reprintBundleSerial.</p>
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control form-control-lg" @bind="reprintBundleCopies" />
+                    <input type="number" min="1" class="form-control" @bind="reprintBundleCopies" />
                     @if (!string.IsNullOrEmpty(reprintBundleError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@reprintBundleError</div>
@@ -1693,7 +1911,7 @@ else
                 <div class="modal-body">
                     <p class="mb-2">Cetak ulang label @reprintPackSerial.</p>
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control form-control-lg" @bind="reprintPackCopies" />
+                    <input type="number" min="1" class="form-control" @bind="reprintPackCopies" />
                     @if (!string.IsNullOrEmpty(reprintPackError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@reprintPackError</div>
@@ -1742,6 +1960,24 @@ else
     private List<StationInProgressDto> inProgress = new();
     private List<StationActiveWorkDto> activeWork = new();
     private List<StationPendingHandoverDto> outbound = new();
+    // Ad hoc (2026-09-28): filter tanggal Kirim tab OUT, maksimal 7 hari ke belakang
+    // (batas ditegakkan juga di SIS_Station_PendingHandover).
+    private DateTime outboundDate = DateTime.Today;
+    // Ad hoc (2026-09-28): kartu OUT default tertutup (hanya header + ringkasan) -- isi
+    // ArticleId yang sedang dibuka operator.
+    private HashSet<int> expandedOutArticles = new();
+    // Ad hoc (2026-09-29): tombol "Penjahit" tab OUT -- menampilkan Line + penjahit di atas
+    // nomor bundle. Default mati supaya tabel tetap ringkas.
+    private bool showOutTailor = false;
+    // Prompt 56: mode pilihan baris tab OUT -- "lock" (pilih baris belum lock) atau "unlock"
+    // (pilih baris sudah lock untuk diajukan ke admin). Default "lock".
+    private string outLockMode = "lock";
+    // workflow_log_id yang sedang dicentang. Dikosongkan saat mode/tanggal diganti, pindah
+    // tab, dan setelah lock/ajukan berhasil.
+    private HashSet<int> outSelected = new();
+    // Tanggal kirim yang masih punya baris belum lock (chip merah di atas daftar).
+    private List<StationUnlockedDateDto> outUnlockedDates = new();
+    private string outToast = string.Empty;
     // Fix: cache foto utama per ArticleId untuk kartu "Buat Bundle" -- null berarti sudah
     // dicoba tapi artikel tidak punya foto, supaya tidak fetch ulang tiap refresh.
     private Dictionary<int, string?> articlePhotoCache = new();
@@ -1803,6 +2039,12 @@ else
         // per bundle) -- lihat AllWipCards.
         public List<StationInProgressDto>? BundleGroup;
         public StationActiveWorkDto? NonBundle;
+
+        // Identitas kartu untuk state buka/tutup -- harus stabil antar refresh dan unik antar
+        // kartu. Kartu non-bundle dikunci ke ArticleWorkflowId (artikel x step, karena satu
+        // artikel bisa punya beberapa step di divisi ini), kartu bundle ke ArticleId (itulah
+        // dasar pengelompokannya di AllWipCards). Prefiks membedakan keduanya.
+        public string Key = string.Empty;
 
         // Fix: dasar urutan default tab WIP -- ReceivedAt bundle TERBARU dalam grup, atau
         // WorkStartedAt kartu non-bundle (waktu aktivitas terakhir, bisa null kalau belum tersentuh).
@@ -1871,66 +2113,107 @@ else
         .OrderBy(c => c.SortTime)
         .ToList();
 
+    // Prompt 56: satu kartu per ARTIKEL, memuat baris bundle DAN non-bundle (mis. Cutting)
+    // dalam tabel yang sama. Kartu non-bundle terpisah (grid per size + Revisi/Batal Serah
+    // gabungan) DIHAPUS -- baris non-bundle kini punya checkbox, ikon lock, dan Revisi/Batal
+    // per baris seperti baris bundle.
     private class OutCard
     {
-        public DateTime SortTime;
-        // Kartu bundle dikelompokkan per artikel jadi satu tabel (bukan satu kartu per
-        // bundle) -- sama pola dengan WipCard.BundleGroup di tab WIP.
-        public List<StationPendingHandoverDto>? BundleGroup;
-        public NonBundleHandoverGroup? NonBundleGroup;
-    }
-
-    private class NonBundleHandoverGroup
-    {
-        public int ArticleWorkflowId;
         public int ArticleId;
-        public string ArticleName = string.Empty;
-        public string ProjectName = string.Empty;
-        public string? NoPo;
-        public string? Style;
-        public string? Color;
-        public string StepName = string.Empty;
-        public bool IsLastStep;
-        public string? TargetDivisionName;
-        public DateTime GroupTime;
-        public DateTime? UpdatedAt;
-        // Fix: baris non-bundle dibuat berbarengan (dikelompokkan per menit) jadi selalu
-        // diterima berbarengan juga -- null kalau ADA baris di grup ini yang belum diterima.
-        public DateTime? ReceivedAt;
+        public DateTime SortTime;
         public List<StationPendingHandoverDto> Items = new();
     }
 
     private List<OutCard> OutCards =>
-        outbound.Where(i => i.BundleId is not null)
+        outbound
+            .Where(MatchesOutSearch)
             .GroupBy(i => i.ArticleId)
-            .Select(g => new OutCard { SortTime = g.Max(x => x.CreatedAt), BundleGroup = g.OrderBy(x => x.BundleNo).ToList() })
-        .Concat(
-            outbound.Where(i => i.BundleId is null)
-                .GroupBy(i => (i.ArticleWorkflowId, Minute: TruncateToMinute(i.CreatedAt)))
-                .Select(g => new OutCard
-                {
-                    SortTime = g.Min(x => x.CreatedAt),
-                    NonBundleGroup = new NonBundleHandoverGroup
-                    {
-                        ArticleWorkflowId = g.Key.ArticleWorkflowId,
-                        ArticleId = g.First().ArticleId,
-                        ArticleName = g.First().ArticleName,
-                        ProjectName = g.First().ProjectName,
-                        NoPo = g.First().NoPo,
-                        Style = g.First().Style,
-                        Color = g.First().Color,
-                        StepName = g.First().StepName,
-                        IsLastStep = g.First().IsLastStep,
-                        TargetDivisionName = g.First().TargetDivisionName,
-                        GroupTime = g.Min(x => x.CreatedAt),
-                        UpdatedAt = g.Any(x => x.UpdatedAt is not null) ? g.Max(x => x.UpdatedAt) : null,
-                        ReceivedAt = g.Any(x => x.ReceivedAt is null) ? null : g.Max(x => x.ReceivedAt),
-                        Items = g.OrderBy(x => x.SizeSortOrder).ToList()
-                    }
-                })
-        )
-        .OrderByDescending(c => c.SortTime)
-        .ToList();
+            .Select(g => new OutCard
+            {
+                ArticleId = g.Key,
+                SortTime = g.Max(x => x.CreatedAt),
+                // Ad hoc (2026-09-28): baris tabel kartu OUT urut dari kiriman terbaru ke terlama.
+                Items = g.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.BundleNo).ToList()
+            })
+            // Prompt 56: kartu yang masih punya baris belum lock di atas (itu yang butuh
+            // tindakan); kartu yang sudah lock semua turun ke bawah dan tampil pudar.
+            .OrderBy(c => c.Items.Any(r => !r.IsLocked) ? 0 : 1)
+            .ThenByDescending(c => c.SortTime)
+            .ToList();
+
+    // ---- Prompt 56: pilihan baris di tab OUT --------------------------------------------
+    // Mode Lock hanya boleh memilih baris BELUM lock; mode Unlock hanya baris SUDAH lock.
+    // Baris yang sedang menunggu approval unlock tidak bisa dipilih di mode mana pun.
+    private bool IsOutRowSelectable(StationPendingHandoverDto row) =>
+        !row.HasPendingUnlock && (outLockMode == "lock" ? !row.IsLocked : row.IsLocked);
+
+    private List<StationPendingHandoverDto> OutSelectedRows =>
+        outbound.Where(r => outSelected.Contains(r.WorkflowLogId)).ToList();
+
+    // Chip tanggal belum lock: tanggal yang SEDANG dipilih tidak perlu dijadikan chip; lebih
+    // dari 6 tanggal -> tampilkan 6 TERLAMA + "+n lagi" (yang terlama paling mendesak).
+    private const int OutUnlockedChipLimit = 6;
+
+    private List<StationUnlockedDateDto> OutUnlockedChipSource =>
+        outUnlockedDates.Where(d => d.Date.Date != outboundDate.Date).ToList();
+
+    private List<StationUnlockedDateDto> OutUnlockedChips =>
+        OutUnlockedChipSource.Take(OutUnlockedChipLimit).ToList();
+
+    private int OutUnlockedChipsMore =>
+        Math.Max(0, OutUnlockedChipSource.Count - OutUnlockedChipLimit);
+
+    private void SetOutLockMode(string mode)
+    {
+        if (outLockMode == mode) return;
+        outLockMode = mode;
+        ClearOutSelection();
+    }
+
+    private void ClearOutSelection()
+    {
+        outSelected.Clear();
+        outToast = string.Empty;
+    }
+
+    private void ToggleOutRow(StationPendingHandoverDto row)
+    {
+        if (!IsOutRowSelectable(row)) return;
+        if (!outSelected.Add(row.WorkflowLogId)) outSelected.Remove(row.WorkflowLogId);
+    }
+
+    private void ToggleOutCardSelection(OutCard card)
+    {
+        var selectable = card.Items.Where(IsOutRowSelectable).ToList();
+        if (selectable.Count == 0) return;
+
+        if (selectable.All(r => outSelected.Contains(r.WorkflowLogId)))
+        {
+            foreach (var r in selectable) outSelected.Remove(r.WorkflowLogId);
+        }
+        else
+        {
+            foreach (var r in selectable) outSelected.Add(r.WorkflowLogId);
+        }
+    }
+
+    private async Task JumpToUnlockedDate(DateTime date)
+    {
+        outboundDate = date.Date;
+        ClearOutSelection();
+        await RefreshLists();
+    }
+
+    private static string FormatPayrollPeriod(PayrollPeriodOptionDto p) =>
+        $"{p.PeriodCode} · {p.PeriodStart:dd MMM HH:mm} – {p.PeriodEnd:dd MMM HH:mm}";
+
+    // Kode periode lock sebuah baris, untuk daftar di modal AJUKAN UNLOCK. Diambil dari opsi
+    // periode yang sudah dimuat kalau kebetulan ada di sana; kalau tidak, LockId mentah dipakai
+    // sebagai penanda (daftar opsi sengaja sempit, periode lama tidak selalu termuat).
+    // Prompt 57 (susulan): kode periode asli dari SIS_Station_PendingHandover.LockPeriodCode.
+    // Sebelumnya placeholder "lock #{LockId}" karena SP belum membawa period_code.
+    private string? LockPeriodCodeOf(StationPendingHandoverDto row) =>
+        row.LockId is null ? null : (row.LockPeriodCode ?? $"lock #{row.LockId}");
 
     // Prompt 24: modal "Buat Bundle" -- kartu WIP station Bundling.
     private bool showBuatBundleModal = false;
@@ -2002,34 +2285,18 @@ else
     private StationPendingHandoverDto? batalSerahTarget;
     private string batalSerahError = string.Empty;
 
-    // Prompt: Revisi/Batal Serah untuk kartu gabungan non-bundle (semua size sekaligus).
-    private bool showReviseGroupModal = false;
-    private NonBundleHandoverGroup? reviseGroupTarget;
-    private List<ReviseGroupRow> reviseGroupRows = new();
-    private string reviseGroupError = string.Empty;
-    private bool reviseGroupShowRejectPrint = false;
-    private bool reviseGroupShowRejectFabric = false;
-    private bool reviseGroupShowRejectSewing = false;
-    private bool reviseGroupShowRejectRework = false;
-    private bool reviseGroupShowLost = false;
+    // Prompt 56: modal LOCK & AJUKAN UNLOCK untuk baris terpilih di tab OUT.
+    private bool showLockModal = false;
+    private List<PayrollPeriodOptionDto> lockPeriodOptions = new();
+    private int lockPeriodId;
+    // Baris terpilih berasal dari lebih dari satu periode default -- semua tetap masuk periode
+    // yang dipilih, tapi operator diberi peringatan dulu.
+    private bool lockMultiPeriodWarning = false;
+    private string lockError = string.Empty;
 
-    private class ReviseGroupRow
-    {
-        public int WorkflowLogId;
-        public int? ArticleSizeId;
-        public string SizeName = string.Empty;
-        public int QtyOk;
-        public int QtyRejectPrint;
-        public int QtyRejectFabric;
-        public int QtyRejectSewing;
-        public int QtyRejectRework;
-        public int QtyLost;
-        public string Remark = string.Empty;
-    }
-
-    private bool showBatalSerahGroupModal = false;
-    private NonBundleHandoverGroup? batalSerahGroupTarget;
-    private string batalSerahGroupError = string.Empty;
+    private bool showUnlockRequestModal = false;
+    private string unlockReason = string.Empty;
+    private string unlockRequestError = string.Empty;
 
     private System.Threading.Timer? pollTimer;
 
@@ -2213,6 +2480,24 @@ else
         pollTimer = null;
     }
 
+    private void ToggleOutCard(int articleId)
+    {
+        if (!expandedOutArticles.Add(articleId))
+            expandedOutArticles.Remove(articleId);
+    }
+
+    private async Task HandleOutboundDateChanged(ChangeEventArgs e)
+    {
+        if (!DateTime.TryParse(e.Value?.ToString(), out var parsed)) return;
+
+        // Prompt 56: rentang 7 -> 90 hari, selaras dengan SIS_Station_PendingHandover -- chip
+        // "Belum lock" bisa menunjuk tanggal jauh di belakang.
+        var min = DateTime.Today.AddDays(-90);
+        outboundDate = parsed.Date < min ? min : (parsed.Date > DateTime.Today ? DateTime.Today : parsed.Date);
+        ClearOutSelection();
+        await RefreshLists();
+    }
+
     private async Task RefreshLists()
     {
         isLoadingLists = true;
@@ -2220,19 +2505,56 @@ else
         var pendingReceivesTask = StationApi.GetPendingReceivesAsync(currentOperatorId);
         var inProgressTask = StationApi.GetInProgressAsync(currentOperatorId);
         var activeWorkTask = StationApi.GetActiveWorkAsync();
-        var outboundTask = StationApi.GetOutboundAsync(currentOperatorId);
+        var outboundTask = StationApi.GetOutboundAsync(currentOperatorId, outboundDate);
         var countsTask = StationApi.GetCountsAsync(currentOperatorId);
-        await Task.WhenAll(pendingReceivesTask, inProgressTask, activeWorkTask, outboundTask, countsTask);
+        // Prompt 56: chip "Belum lock" -- lintas tanggal, jadi tidak ikut filter outboundDate.
+        var unlockedDatesTask = StationApi.GetOutUnlockedDatesAsync(currentOperatorId);
+        await Task.WhenAll(pendingReceivesTask, inProgressTask, activeWorkTask, outboundTask, countsTask, unlockedDatesTask);
 
         pendingReceives = pendingReceivesTask.Result;
         inProgress = inProgressTask.Result;
         activeWork = activeWorkTask.Result;
         outbound = outboundTask.Result;
         counts = countsTask.Result;
+        outUnlockedDates = unlockedDatesTask.Result;
+        // Prompt 56: buang pilihan yang barisnya sudah tidak ada / berubah status (mis. hasil
+        // polling atau setelah lock dari perangkat lain).
+        outSelected.RemoveWhere(id => !outbound.Any(r => r.WorkflowLogId == id && IsOutRowSelectable(r)));
         isLoadingLists = false;
         StateHasChanged();
 
+        await LoadOutboundDatePeriodAsync();
         await LoadMissingArticlePhotos();
+    }
+
+    // Keterangan periode gajian di samping label "Tanggal Kirim". Memakai ULANG
+    // SIS_PayrollPeriod_Options (@DefaultAt = tanggal terpilih, IsDefault = periode yang
+    // memuatnya) -- tidak ada SP/endpoint baru. Dipanggil dari RefreshLists tapi hanya
+    // benar-benar menembak API saat tanggalnya berganti, supaya polling tidak ikut menambah
+    // request. NULL kalau periode tanggal itu belum di-generate -- badge disembunyikan.
+    private string? outboundDatePeriodCode;
+    private DateTime? outboundDatePeriodLoadedFor;
+
+    private async Task LoadOutboundDatePeriodAsync()
+    {
+        if (outboundDatePeriodLoadedFor == outboundDate.Date) return;
+
+        var options = await StationApi.GetPayrollPeriodsAsync(outboundDate.Date);
+
+        // Periode berganti Sabtu 10:00, jadi satu TANGGAL bisa jatuh di DUA periode (baris
+        // sebelum jam 10 vs sesudahnya). Ambil semua periode yang beririsan dengan hari itu,
+        // bukan sekadar IsDefault -- kalau dua, tampilkan keduanya supaya tidak menyesatkan.
+        var dayStart = outboundDate.Date;
+        var dayEnd = dayStart.AddDays(1);
+        var overlapping = options
+            .Where(o => o.PeriodStart < dayEnd && o.PeriodEnd > dayStart)
+            .OrderBy(o => o.PeriodStart)
+            .Select(o => o.PeriodCode)
+            .ToList();
+
+        outboundDatePeriodCode = overlapping.Count == 0 ? null : string.Join(" / ", overlapping);
+        outboundDatePeriodLoadedFor = outboundDate.Date;
+        StateHasChanged();
     }
 
     // Fix: foto kartu "Buat Bundle" -- fetch lazy per ArticleId yang belum ada di cache,
@@ -2261,52 +2583,24 @@ else
     private async Task SetTab(string tab)
     {
         activeTab = tab;
+        // Prompt 56: pindah tab mengosongkan pilihan baris tab OUT.
+        ClearOutSelection();
         if (tab == "packing" && packingProjects.Count == 0)
         {
             packingProjects = await StationApi.GetPackingProjectsAsync();
         }
-        else if (tab == "rekap" && rekapDivisions.Count == 0)
+        // Ad hoc (2026-09-28): tab OUT selalu dibuka di tanggal hari ini -- tanggal lama dari
+        // kunjungan sebelumnya tidak ikut terbawa.
+        else if (tab == "kirim" && outboundDate != DateTime.Today)
         {
-            rekapDivisions = await StationApi.GetStationDivisionsAsync();
-
-            // Ad hoc (2026-08-27): default Divisi & Resource ke divisi/operator stasiun ini
-            // sendiri (bukan kosong) -- kalau stasiun terkunci (IsLocked), Resource TIDAK BISA
-            // diganti lagi dari sini (lihat markup field Resource); kalau tidak terkunci, ini
-            // cuma default awal, operator tetap bisa pilih resource lain (akses ke resource lain).
-            if (station is not null && rekapDivisions.Any(d => d.Id == station.DivisionId))
-            {
-                await HandleRekapDivisionChanged(station.DivisionId);
-                if (currentOperatorId is not null && rekapResourceOptions.Any(r => r.Id == currentOperatorId))
-                {
-                    await HandleRekapResourceChanged(currentOperatorId.Value);
-                }
-            }
+            outboundDate = DateTime.Today;
+            await RefreshLists();
         }
     }
 
-    // Prompt 42: dropdown cascading Divisi -> Resource -> Penjahit di tab Rekap Produksi
-    // (pola Prompt 32) -- level rekap = pilihan terdalam yang diisi (lihat RekapLevel).
-    private async Task HandleRekapDivisionChanged(int divisionId)
-    {
-        rekapDivisionId = divisionId;
-        rekapResourceId = 0;
-        rekapEmployeeId = 0;
-        rekapEmployeeOptions = new();
-        rekapResourceOptions = divisionId > 0 ? await StationApi.GetResourcesByDivisionAsync(divisionId) : new();
-    }
-
-    private async Task HandleRekapResourceChanged(int resourceId)
-    {
-        rekapResourceId = resourceId;
-        rekapEmployeeId = 0;
-        rekapEmployeeOptions = resourceId > 0 ? await StationApi.GetEmployeesByResourceAsync(resourceId) : new();
-    }
-
-    private string RekapLevel => rekapEmployeeId > 0 ? "EMPLOYEE" : (rekapResourceId > 0 ? "RESOURCE" : "DIVISION");
-
     private async Task OpenRekapStrukModal()
     {
-        if (rekapDivisionId <= 0) return;
+        if (RekapResourceId <= 0) return;
 
         rekapUseTime = false;
         rekapDate = DateTime.Today;
@@ -2361,9 +2655,8 @@ else
     {
         isLoadingRekap = true;
         rekapError = string.Empty;
-        rekapResult = await StationApi.GetRekapStrukAsync(RekapLevel, rekapDivisionId,
-            rekapResourceId > 0 ? rekapResourceId : null, rekapEmployeeId > 0 ? rekapEmployeeId : null,
-            RekapEffectiveStart, RekapEffectiveEnd);
+        rekapResult = await StationApi.GetRekapStrukAsync(RekapLevel, RekapDivisionId,
+            RekapResourceId, null, RekapEffectiveStart, RekapEffectiveEnd);
         isLoadingRekap = false;
 
         if (rekapResult?.Header is null)
@@ -2372,7 +2665,7 @@ else
 
     private async Task ConfirmPrintRekapStruk()
     {
-        if (rekapDivisionId <= 0) return;
+        if (RekapResourceId <= 0) return;
 
         isBusy = true;
         rekapError = string.Empty;
@@ -2381,9 +2674,9 @@ else
         var (success, error) = await StationApi.PrintRekapStrukAsync(new RekapStrukPrintRequest
         {
             Level = RekapLevel,
-            DivisionId = rekapDivisionId,
-            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
-            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            DivisionId = RekapDivisionId,
+            ResourceId = RekapResourceId,
+            EmployeeId = null,
             StartDateTime = RekapEffectiveStart,
             EndDateTime = RekapEffectiveEnd
         });
@@ -2397,11 +2690,10 @@ else
     }
 
     // Ad hoc (2026-08-28): tombol "Cetak WIP" -- terpisah dari "Print Rekap"/modal Cetak Struk
-    // di atas, langsung cetak (tanpa preview) snapshot WIP hari ini utk Divisi/Resource/Penjahit
-    // yang sedang dipilih di panel tab Rekap Produksi.
+    // di atas, langsung cetak (tanpa preview) snapshot WIP hari ini.
     private async Task PrintRekapWip()
     {
-        if (rekapDivisionId <= 0) return;
+        if (RekapResourceId <= 0) return;
 
         isBusy = true;
         actionError = string.Empty;
@@ -2409,9 +2701,9 @@ else
 
         var (success, error) = await StationApi.PrintRekapWipAsync(new RekapWipPrintRequest
         {
-            DivisionId = rekapDivisionId,
-            ResourceId = rekapResourceId > 0 ? rekapResourceId : null,
-            EmployeeId = rekapEmployeeId > 0 ? rekapEmployeeId : null,
+            DivisionId = RekapDivisionId,
+            ResourceId = RekapResourceId,
+            EmployeeId = null,
             Date = DateTime.Today
         });
 
@@ -2426,25 +2718,23 @@ else
     // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
     // satu daftar WIP, dikelompokkan per project supaya tetap terbaca saat jumlahnya banyak.
     private IEnumerable<WipCard> AllWipCards =>
-        activeWork.Select(a => new WipCard { ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a })
+        activeWork.Select(a => new WipCard
+            {
+                ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a,
+                Key = $"w{a.ArticleWorkflowId}"
+            })
             .Concat(inProgress
                 .GroupBy(b => b.ArticleId)
                 .Select(g => new WipCard
                 {
                     ProjectName = g.First().ProjectName,
                     NoPo = g.First().NoPo,
-                    BundleGroup = g.OrderBy(b => b.BundleNo).ToList()
+                    BundleGroup = g.OrderBy(b => b.BundleNo).ToList(),
+                    Key = $"b{g.Key}"
                 }));
 
     private static bool ContainsSearch(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
-
-    // Fix: teks ringkas "Stock Cutting" kartu Buat Bundle -- per size (bukan total gabungan),
-    // supaya operator langsung tahu size mana yang siap dibundle tanpa buka modal.
-    private static string StockCuttingText(StationActiveWorkDto card) =>
-        card.StockCutting.Count == 0
-            ? "0"
-            : string.Join(", ", card.StockCutting.Select(s => $"{s.SizeName} {s.StockCutting}"));
 
     // Fix: pencarian antar-atribut -- tiap kata dipisah spasi dicek independen ke SEMUA field
     // (boleh field berbeda per kata), kartu cocok kalau SEMUA kata ketemu di suatu field.
@@ -2461,16 +2751,39 @@ else
     {
         if (card.NonBundle is { } nb)
             return ContainsSearch(nb.ProjectName, q) || ContainsSearch(nb.ArticleName, q)
+                || ContainsSearch(nb.NoPo, q) || ContainsSearch(nb.BuyerName, q) || ContainsSearch(nb.PicName, q)
                 || ContainsSearch(nb.Style, q) || ContainsSearch(nb.Color, q) || ContainsSearch(nb.StepName, q);
 
         if (card.BundleGroup is { } grp)
             return grp.Any(b => ContainsSearch(b.ProjectName, q) || ContainsSearch(b.ArticleName, q)
+                || ContainsSearch(b.NoPo, q) || ContainsSearch(b.BuyerName, q) || ContainsSearch(b.PicName, q)
                 || ContainsSearch(b.Style, q) || ContainsSearch(b.Color, q) || ContainsSearch(b.NextStepName, q)
                 || ContainsSearch(b.Serial, q) || ContainsSearch(b.BundleNo.ToString(), q)
                 || ContainsSearch(b.TailorName, q) || ContainsSearch(b.EmployeeName, q) || ContainsSearch(b.Remarks, q));
 
         return false;
     }
+
+    // Pencarian tab OUT -- pola sama dengan WIP: semua token harus cocok (AND), tiap token
+    // dicocokkan ke salah satu field baris. Kartu ditampilkan kalau ADA barisnya yang cocok,
+    // dan hanya baris yang cocok itu yang ditampilkan -- lihat OutCards.
+    private string outSearchText = string.Empty;
+
+    private bool MatchesOutSearch(StationPendingHandoverDto r)
+    {
+        if (string.IsNullOrWhiteSpace(outSearchText)) return true;
+        var tokens = outSearchText.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return tokens.All(t => MatchesOutSearchToken(r, t));
+    }
+
+    private static bool MatchesOutSearchToken(StationPendingHandoverDto r, string q) =>
+        ContainsSearch(r.ProjectName, q) || ContainsSearch(r.ArticleName, q)
+        || ContainsSearch(r.NoPo, q) || ContainsSearch(r.BuyerName, q) || ContainsSearch(r.PicName, q)
+        || ContainsSearch(r.Style, q) || ContainsSearch(r.Color, q) || ContainsSearch(r.StepName, q)
+        || ContainsSearch(r.SizeName, q) || ContainsSearch(r.Serial, q)
+        || ContainsSearch(BundleDisplay.Format(r.BundleLetter, r.BundleNo), q)
+        || ContainsSearch(r.ResourceName, q) || ContainsSearch(r.BundleResourceName, q)
+        || ContainsSearch(r.BundleEmployeeName, q) || ContainsSearch(r.Remark, q);
 
     // Fix: default urutan tab WIP -- flat (tanpa grouping project), waktu diterima/dikerjakan
     // paling baru di atas. Kartu tanpa aktivitas sama sekali (WorkStartedAt null) ditaruh
@@ -2479,6 +2792,39 @@ else
         AllWipCards.Where(MatchesWipSearch)
             .OrderByDescending(c => c.SortTime ?? DateTime.MinValue)
             .ToList();
+
+    // Buka/tutup kartu tab WIP -- pola & default SAMA dengan expandedOutArticles di tab OUT:
+    // yang disimpan adalah kartu yang DIBUKA, jadi default semua kartu tertutup. Tombol
+    // buka/tutup semua di sebelah kotak pencarian dipakai kalau operator ingin membentangkan
+    // seluruh antrean sekaligus.
+    private HashSet<string> expandedWipCards = new();
+
+    private void ToggleWipCard(string key)
+    {
+        if (!expandedWipCards.Add(key))
+            expandedWipCards.Remove(key);
+    }
+
+    private bool AllWipExpanded
+    {
+        get
+        {
+            var cards = FilteredWipCards;
+            return cards.Count > 0 && cards.All(c => expandedWipCards.Contains(c.Key));
+        }
+    }
+
+    private void ToggleAllWipCards()
+    {
+        if (AllWipExpanded)
+        {
+            expandedWipCards.Clear();
+            return;
+        }
+
+        foreach (var c in FilteredWipCards)
+            expandedWipCards.Add(c.Key);
+    }
 
     private void OpenNonBundleModal(StationActiveWorkDto item)
     {
@@ -2591,6 +2937,35 @@ else
         await RefreshLists();
     }
 
+    // Ad hoc (2026-09-29): nama penjahit di bawah nomor bundle tab OUT. Diambil dari master
+    // employees (bundles.employee_id); kalau bundle itu tidak punya penjahit, catatan bebas
+    // bundle (remarks) dipakai sebagai gantinya. Nama Line TIDAK ikut di sini -- Line sudah
+    // jadi baris header grup, lihat OutRowGroups.
+    private static string? BundleTailorName(StationPendingHandoverDto b) =>
+        !string.IsNullOrWhiteSpace(b.BundleEmployeeName) ? b.BundleEmployeeName
+            : (!string.IsNullOrWhiteSpace(b.BundleRemarks) ? b.BundleRemarks : null);
+
+    // Ad hoc (2026-09-29): saat tombol "Penjahit" aktif, baris tabel OUT dikelompokkan per
+    // Line dengan baris header; kalau mati, satu grup tanpa header (tampilan datar seperti
+    // semula). Urutan grup mengikuti kiriman terbaru, sama arah dengan urutan barisnya.
+    private List<OutRowGroup> OutRowGroups(List<StationPendingHandoverDto> bundles) =>
+        showOutTailor
+            ? bundles
+                .GroupBy(b => b.BundleResourceName ?? "-")
+                .OrderByDescending(g => g.Max(x => x.CreatedAt))
+                .Select(g => new OutRowGroup { Header = g.Key, Items = g.ToList() })
+                .ToList()
+            : new List<OutRowGroup> { new() { Items = bundles } };
+
+    private class OutRowGroup
+    {
+        public string? Header;
+        public List<StationPendingHandoverDto> Items = new();
+    }
+
+    private static int RejectTotal(StationPendingHandoverDto item) =>
+        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework + item.QtyLost;
+
     private static List<string> RejectLines(StationPendingHandoverDto item)
     {
         var parts = new List<string>();
@@ -2603,11 +2978,6 @@ else
     }
 
     private static string FormatDateTime(DateTime at) => at.ToString("dd/MM HH:mm");
-
-    // Fix: tombol Edit/Hapus di kartu OUT bundle yang sudah auto-diterima (ReceivedAt terisi) --
-    // jendela 1 jam murni informatif di sini, server (SIS_Bundle_Manage UPDATE/DELETE) yang menegakkan.
-    private static bool CanEditOrDeleteBundle(StationPendingHandoverDto item) =>
-        DateTime.Now - item.CreatedAt < TimeSpan.FromHours(1);
 
     // Prompt 40: penerima default saat "Terima" manual -- counterpart resource pengirim
     // (SuggestedReceiverResourceId, lihat SIS_Station_PendingReceives) kalau ada, selain itu
@@ -2915,7 +3285,7 @@ else
 
             if (!okLastStep)
             {
-                reviseError = errorLastStep;
+                reviseError = StripLockedPrefix(errorLastStep);
                 return;
             }
 
@@ -2949,7 +3319,7 @@ else
 
         if (!success)
         {
-            reviseError = error;
+            reviseError = StripLockedPrefix(error);
             return;
         }
 
@@ -2987,7 +3357,7 @@ else
 
         if (!success)
         {
-            batalSerahError = error;
+            batalSerahError = StripLockedPrefix(error);
             return;
         }
 
@@ -2995,154 +3365,136 @@ else
         await RefreshLists();
     }
 
-    // Gabungan: "Revisi" -- grid semua ukuran dalam kartu, simpan sekaligus per baris
-    // (ConfirmExceed/ConfirmShort selalu false -- kuota bundle tidak relevan utk non-bundle).
-    private void OpenReviseGroupModal(NonBundleHandoverGroup group)
+    // ---- Prompt 56: LOCK & AJUKAN UNLOCK ------------------------------------------------
+
+    private async Task OpenLockModal()
     {
-        reviseGroupTarget = group;
-        reviseGroupRows = group.Items.Select(i => new ReviseGroupRow
+        var selected = OutSelectedRows;
+        if (selected.Count == 0) return;
+
+        lockError = string.Empty;
+        // defaultAt = created_at TERBARU di antara baris terpilih (lihat SIS_PayrollPeriod_Options).
+        var defaultAt = selected.Max(r => r.CreatedAt);
+        lockPeriodOptions = await StationApi.GetPayrollPeriodsAsync(defaultAt);
+        lockPeriodId = (lockPeriodOptions.FirstOrDefault(p => p.IsDefault) ?? lockPeriodOptions.LastOrDefault())?.PayrollPeriodId ?? 0;
+
+        // Peringatan kalau baris terpilih jatuh di lebih dari satu periode: batasnya Sabtu
+        // 10:00, jadi cukup dicek lewat periode mana yang memuat created_at masing-masing --
+        // didekati dengan rentang periode yang sedang dimuat.
+        lockMultiPeriodWarning = lockPeriodOptions.Count > 0 && selected
+            .Select(r => lockPeriodOptions.FirstOrDefault(p => r.CreatedAt >= p.PeriodStart && r.CreatedAt < p.PeriodEnd)?.PayrollPeriodId ?? 0)
+            .Distinct().Count() > 1;
+
+        showLockModal = true;
+    }
+
+    private void CloseLockModal()
+    {
+        showLockModal = false;
+        lockError = string.Empty;
+    }
+
+    private async Task ConfirmLock()
+    {
+        if (currentOperatorId is null)
         {
-            WorkflowLogId = i.WorkflowLogId,
-            ArticleSizeId = i.ArticleSizeId,
-            SizeName = i.SizeName ?? string.Empty,
-            QtyOk = i.QtyOk,
-            QtyRejectPrint = i.QtyRejectPrint,
-            QtyRejectFabric = i.QtyRejectFabric,
-            QtyRejectSewing = i.QtyRejectSewing,
-            QtyRejectRework = i.QtyRejectRework,
-            QtyLost = i.QtyLost,
-            Remark = i.Remark ?? string.Empty
-        }).ToList();
-        reviseGroupError = string.Empty;
-        // Prompt: kolom reject hanya tampil kalau sudah dipakai -- default checklist
-        // mengikuti data yang sudah tersimpan, bukan selalu unchecked seperti modal input baru.
-        reviseGroupShowRejectPrint = reviseGroupRows.Any(r => r.QtyRejectPrint > 0);
-        reviseGroupShowRejectFabric = reviseGroupRows.Any(r => r.QtyRejectFabric > 0);
-        reviseGroupShowRejectSewing = reviseGroupRows.Any(r => r.QtyRejectSewing > 0);
-        reviseGroupShowRejectRework = reviseGroupRows.Any(r => r.QtyRejectRework > 0);
-        reviseGroupShowLost = reviseGroupRows.Any(r => r.QtyLost > 0);
-        showReviseGroupModal = true;
-    }
-
-    private void CloseReviseGroupModal()
-    {
-        showReviseGroupModal = false;
-        reviseGroupTarget = null;
-    }
-
-    private void OnReviseGroupShowRejectPrintChanged()
-    {
-        if (!reviseGroupShowRejectPrint)
-            foreach (var row in reviseGroupRows) row.QtyRejectPrint = 0;
-    }
-
-    private void OnReviseGroupShowRejectFabricChanged()
-    {
-        if (!reviseGroupShowRejectFabric)
-            foreach (var row in reviseGroupRows) row.QtyRejectFabric = 0;
-    }
-
-    private void OnReviseGroupShowRejectSewingChanged()
-    {
-        if (!reviseGroupShowRejectSewing)
-            foreach (var row in reviseGroupRows) row.QtyRejectSewing = 0;
-    }
-
-    private void OnReviseGroupShowRejectReworkChanged()
-    {
-        if (!reviseGroupShowRejectRework)
-            foreach (var row in reviseGroupRows) row.QtyRejectRework = 0;
-    }
-
-    private void OnReviseGroupShowLostChanged()
-    {
-        if (!reviseGroupShowLost)
-            foreach (var row in reviseGroupRows) row.QtyLost = 0;
-    }
-
-    private async Task ConfirmReviseGroup()
-    {
-        if (reviseGroupTarget is null || currentOperatorId is null) return;
-
-        var reviseGroupBadRow = reviseGroupRows.FirstOrDefault(r =>
-            r.QtyRejectPrint + r.QtyRejectFabric + r.QtyRejectSewing + r.QtyRejectRework + r.QtyLost > 0 && string.IsNullOrWhiteSpace(r.Remark));
-        if (reviseGroupBadRow is not null)
-        {
-            reviseGroupError = $"{reviseGroupBadRow.SizeName}: catatan wajib diisi jika ada reject.";
+            lockError = "Operator wajib dipilih.";
             return;
         }
 
+        var ids = OutSelectedRows.Select(r => r.WorkflowLogId).ToList();
+        if (ids.Count == 0 || lockPeriodId <= 0) return;
+
         isBusy = true;
-        reviseGroupError = string.Empty;
+        lockError = string.Empty;
 
-        foreach (var row in reviseGroupRows)
+        var (success, error) = await StationApi.LockOutRowsAsync(new StationLockRequest
         {
-            var (success, error) = await StationApi.UpdateLogAsync(row.WorkflowLogId, new StationLogUpdateRequest
-            {
-                ArticleSizeId = row.ArticleSizeId,
-                QtyOk = row.QtyOk,
-                QtyRejectPrint = row.QtyRejectPrint,
-                QtyRejectFabric = row.QtyRejectFabric,
-                QtyRejectSewing = row.QtyRejectSewing,
-                QtyRejectRework = row.QtyRejectRework,
-                QtyLost = row.QtyLost,
-                Remark = string.IsNullOrWhiteSpace(row.Remark) ? null : row.Remark,
-                ResourceId = currentOperatorId.Value
-            });
-
-            if (!success)
-            {
-                reviseGroupError = $"{row.SizeName}: {error}";
-                isBusy = false;
-                return;
-            }
-        }
+            WorkflowLogIds = ids,
+            PayrollPeriodId = lockPeriodId,
+            ResourceId = currentOperatorId.Value
+        });
 
         isBusy = false;
-        CloseReviseGroupModal();
+
+        if (!success)
+        {
+            lockError = StripLockedPrefix(error);
+            await RefreshLists();
+            return;
+        }
+
+        var periodCode = lockPeriodOptions.FirstOrDefault(p => p.PayrollPeriodId == lockPeriodId)?.PeriodCode ?? "-";
+        showLockModal = false;
+        ClearOutSelection();
+        outToast = $"{ids.Count} baris di-lock ke {periodCode}";
         await RefreshLists();
     }
 
-    // Gabungan: "Batal Serah" berlaku ke semua baris ukuran dalam kartu sekaligus.
-    private void OpenBatalSerahGroupModal(NonBundleHandoverGroup group)
+    private void OpenUnlockRequestModal()
     {
-        batalSerahGroupTarget = group;
-        batalSerahGroupError = string.Empty;
-        showBatalSerahGroupModal = true;
+        if (OutSelectedRows.Count == 0) return;
+        unlockReason = string.Empty;
+        unlockRequestError = string.Empty;
+        showUnlockRequestModal = true;
     }
 
-    private void CloseBatalSerahGroupModal()
+    private void CloseUnlockRequestModal()
     {
-        showBatalSerahGroupModal = false;
-        batalSerahGroupTarget = null;
-        batalSerahGroupError = string.Empty;
+        showUnlockRequestModal = false;
+        unlockRequestError = string.Empty;
     }
 
-    private async Task ConfirmBatalSerahGroup()
+    private async Task ConfirmUnlockRequest()
     {
-        if (batalSerahGroupTarget is null || currentOperatorId is null) return;
-
-        isBusy = true;
-        batalSerahGroupError = string.Empty;
-
-        foreach (var item in batalSerahGroupTarget.Items)
+        if (currentOperatorId is null)
         {
-            var (success, error) = await StationApi.CancelHandoverAsync(item.WorkflowLogId, new StationCancelHandoverRequest
-            {
-                ResourceId = currentOperatorId.Value
-            });
-
-            if (!success)
-            {
-                batalSerahGroupError = $"{item.SizeName}: {error}";
-                isBusy = false;
-                return;
-            }
+            unlockRequestError = "Operator wajib dipilih.";
+            return;
         }
 
+        if (string.IsNullOrWhiteSpace(unlockReason) || unlockReason.Trim().Length < 5)
+        {
+            unlockRequestError = "Alasan wajib diisi, minimal 5 karakter.";
+            return;
+        }
+
+        var ids = OutSelectedRows.Select(r => r.WorkflowLogId).ToList();
+        if (ids.Count == 0) return;
+
+        isBusy = true;
+        unlockRequestError = string.Empty;
+
+        var (success, error) = await StationApi.CreateUnlockRequestAsync(new StationUnlockRequestCreateRequest
+        {
+            WorkflowLogIds = ids,
+            Reason = unlockReason.Trim(),
+            ResourceId = currentOperatorId.Value
+        });
+
         isBusy = false;
-        CloseBatalSerahGroupModal();
+
+        if (!success)
+        {
+            unlockRequestError = StripLockedPrefix(error);
+            await RefreshLists();
+            return;
+        }
+
+        showUnlockRequestModal = false;
+        ClearOutSelection();
+        outToast = "Pengajuan unlock terkirim";
         await RefreshLists();
+    }
+
+    // Prompt 55: pesan SP berprefix 'LOCKED|' -- tampilkan bagian setelah '|' saja (prefix itu
+    // penanda untuk client, bukan untuk operator). Pemanggil selalu memuat ulang daftar setelah
+    // menerimanya karena datanya sudah basi.
+    private static string StripLockedPrefix(string error)
+    {
+        const string prefix = "LOCKED|";
+        var idx = error.IndexOf(prefix, StringComparison.Ordinal);
+        return idx >= 0 ? error[(idx + prefix.Length)..].Trim() : error;
     }
 
     // Prompt 24: "Buat Bundle" -- kartu WIP station Bundling. Modal TETAP terbuka setelah
@@ -3353,7 +3705,7 @@ else
 
         if (!success)
         {
-            editBundleError = error;
+            editBundleError = StripLockedPrefix(error);
             return;
         }
 
@@ -3397,7 +3749,7 @@ else
 
         if (!success)
         {
-            deleteBundleError = error;
+            deleteBundleError = StripLockedPrefix(error);
             return;
         }
 
@@ -3458,14 +3810,12 @@ else
     private string packingError = string.Empty;
     private string packingFeedback = string.Empty;
 
-    // Prompt 42: tab "Rekap Produksi" -- dropdown cascading Divisi -> Resource -> Penjahit,
-    // menggantikan Rekap Penjahit Prompt 41 (Line lintas-divisi, tanpa Divisi).
-    private List<DivisionDto> rekapDivisions = new();
-    private int rekapDivisionId;
-    private List<ResourceLookupDto> rekapResourceOptions = new();
-    private int rekapResourceId;
-    private List<EmployeeLookupDto> rekapEmployeeOptions = new();
-    private int rekapEmployeeId;
+    // Ad hoc (2026-09-28): tab Settlement dikunci ke divisi stasiun + resource operator sesi ini.
+    // Dropdown Divisi/Resource/Penjahit (Prompt 42) dihapus supaya operator tidak bisa mencetak
+    // rekap milik divisi/resource lain; level per penjahit tidak dipakai.
+    private const string RekapLevel = "RESOURCE";
+    private int RekapDivisionId => station?.DivisionId ?? 0;
+    private int RekapResourceId => currentOperatorId ?? 0;
     private bool showRekapStrukModal = false;
     // Ad hoc (2026-09-01): rentang waktu bebas (bukan lagi 1 hari kalender) -- default mulai
     // 06:00 hari ini, selesai jam berjalan (sekarang), lihat catatan lengkap di
