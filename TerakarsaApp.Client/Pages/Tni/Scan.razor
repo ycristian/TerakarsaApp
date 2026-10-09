@@ -1,0 +1,832 @@
+@page "/tni/scan"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniScanApiService ScanApi
+@inject TniBoxApiService BoxApi
+@inject TniPersonelApiService PersonelApi
+@inject TniOrderState OrderState
+@inject TniPerangkatState Sesi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 66: scan "Set Jadi" (mockup layar 5).
+   Kamera TETAP MENYALA dan scan beruntun tanpa menekan tombol -- ratusan kartu
+   per hari. Stok berkurang otomatis; scan TIDAK PERNAH ditolak karena stok.
+   Tab "Masuk Box" diaktifkan di Prompt 67.
+   Prompt 68: tombol "Ajukan pembatalan" di banner hasil + tombol "Batal" di tiap
+   baris riwayat -> sheet "Ajukan batal" (scan tidak bisa dihapus langsung, harus
+   lewat persetujuan). Berlaku juga untuk hasil SUDAH.
+   2026-10-06: mode Set Jadi TIDAK lagi langsung mencatat -- scan membuka pop up
+   berisi isi label kartu; "Sudah Set Lengkap" (hijau) mencatat set, kartu yang
+   sudah set mendapat "Batalkan Set Lengkap" (merah, lewat persetujuan).
+   Mode Masuk Box tetap scan beruntun langsung tercatat. *@
+
+<PageTitle>Scan — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-maximize"></i> Scan</div>
+                <div class="tni-s">@namaUser · sesi ini <b>@jumlahSesi</b> set</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    <div class="tni-seg">
+        <button class="@(mode == "SET" ? "on" : "")" @onclick="@(() => GantiMode("SET"))">Set Jadi</button>
+        <button class="@(mode == "BOX" ? "on" : "")" @onclick="@(() => GantiMode("BOX"))">Masuk Box</button>
+    </div>
+
+    @* ---------- mode Masuk Box: pilih box dulu ---------- *@
+    @if (mode == "BOX")
+    {
+        @if (boxAktif is null)
+        {
+            <div class="tni-card">
+                <div class="tni-k">Pilih box terbuka dulu</div>
+                @if (boxTerbuka.Count == 0)
+                {
+                    <div class="tni-note" style="margin-top:6px">
+                        Belum ada box terbuka. Buka box baru di menu <b>Box</b>.
+                    </div>
+                }
+                else
+                {
+                    @foreach (var b in boxTerbuka)
+                    {
+                        <div class="tni-card tni-tap" style="margin:6px 0 0"
+                             @onclick="@(() => PilihBoxAsync(b))">
+                            <div class="tni-row">
+                                <span>
+                                    <span class="tni-chip tni-chip-navy" style="margin-right:4px">No. @b.BoxNo</span>
+                                    <span class="tni-pola-lg" style="font-size:15px">@b.BoxCode</span>
+                                </span>
+                                <span class="tni-k">@b.Isi / @b.Kapasitas</span>
+                            </div>
+                            <div class="tni-note">@b.SatuanName · @b.AreaCode</div>
+                        </div>
+                    }
+                }
+            </div>
+        }
+        else
+        {
+            @* kartu box aktif di atas kamera *@
+            <div class="tni-card" style="border:1.5px solid var(--tni-navy)">
+                <div class="tni-row">
+                    <span>
+                        <span class="tni-chip tni-chip-navy" style="margin-right:4px">No. @boxAktif.BoxNo</span>
+                        <span class="tni-pola-lg">@boxAktif.BoxCode</span>
+                    </span>
+                    <button class="tni-btn tni-btn-o" style="padding:4px 10px" @onclick="GantiBox">
+                        Ganti box
+                    </button>
+                </div>
+                <div class="tni-note" style="margin-top:3px">@boxAktif.SatuanName · @boxAktif.AreaCode</div>
+                <div class="tni-row" style="margin-top:5px">
+                    <span class="tni-k">Isi <b>@isiBox</b> / @boxAktif.Kapasitas</span>
+                    @if (isiBox >= boxAktif.Kapasitas)
+                    {
+                        <span class="tni-chip tni-chip-bad">penuh</span>
+                    }
+                </div>
+                <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+                    <div style="height:100%;width:@PersenBox%;background:@(isiBox >= boxAktif.Kapasitas ? "var(--tni-coral)" : "var(--tni-navy2)")"></div>
+                </div>
+                @if (isiBox >= boxAktif.Kapasitas)
+                {
+                    <div style="font-size:11.5px;color:var(--tni-coral);margin-top:5px;font-weight:600">
+                        Box penuh — tutup box di menu Box.
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    @if (!string.IsNullOrEmpty(kameraError))
+    {
+        <div class="alert alert-warning">
+            @kameraError
+            <div class="tni-note" style="margin-top:4px">
+                Kamera butuh HTTPS. Kode masih bisa diketik manual di bawah.
+            </div>
+        </div>
+    }
+
+    @* ---------- kamera ---------- *@
+    <div id="tni-cam" style="width:100%;border-radius:12px;overflow:hidden;background:#11161c;min-height:220px"></div>
+    <div class="tni-note" style="text-align:center;margin:6px 0 10px">
+        Arahkan ke QR di kartu — kamera tetap menyala.
+    </div>
+
+    @* ---------- banner hasil ---------- *@
+    @if (hasil is not null)
+    {
+        <div style="border-radius:10px;padding:10px 12px;margin-bottom:10px;@BannerStyle">
+            <b style="font-size:14px">@BannerJudul</b>
+            <div style="font-size:12.5px;margin-top:2px">@BannerDetail</div>
+
+            @if (hasil.Ok && hasil.StokMinus)
+            {
+                <div style="font-size:11.5px;color:var(--tni-bad);margin-top:4px;font-weight:600">
+                    Stok @hasil.PolaMinus minus — setoran belum dicatat?
+                </div>
+            }
+
+            @* Kartu dikenal (OK / SUDAH) -> bisa langsung diajukan batal dari sini. *@
+            @if (hasil.PersonelId.HasValue && (hasil.Ok || hasil.Sudah))
+            {
+                <button class="tni-btn tni-btn-r" style="width:100%;margin-top:8px"
+                        @onclick="@(() => BukaSheetAksiAsync(riwayat.FirstOrDefault(x => x.PersonelId == hasil.PersonelId)))">
+                    <i class="fe fe-corner-up-left"></i> Ajukan pembatalan
+                </button>
+            }
+        </div>
+    }
+
+    @* ---------- input manual ---------- *@
+    <div class="tni-card">
+        <div class="tni-k">Input manual (QR rusak)</div>
+        <div style="display:flex;gap:6px;margin-top:5px">
+            <input class="tni-inp" style="flex:1" placeholder="kode personel / token"
+                   @bind="kodeManual" @bind:event="oninput"
+                   @onkeydown="@(async e => { if (e.Key == "Enter") await ScanManualAsync(); })" />
+            <button class="tni-btn tni-btn-p" style="flex:0 0 auto"
+                    disabled="@(string.IsNullOrWhiteSpace(kodeManual) || isBusy)"
+                    @onclick="ScanManualAsync">
+                Catat
+            </button>
+        </div>
+    </div>
+
+    @* ---------- riwayat sesi ---------- *@
+    <div class="tni-sec">Riwayat sesi (@riwayat.Count)</div>
+    @if (riwayat.Count == 0)
+    {
+        <div class="tni-card"><span class="tni-note">Belum ada kartu di-scan.</span></div>
+    }
+    else
+    {
+        <div class="tni-card">
+            @foreach (var r in riwayat)
+            {
+                @* Prompt 68: kartu yang dikenal punya tombol "Batal" -> sheet aksi. *@
+                <div class="tni-li">
+                    <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:@DotColor(r.Hasil)"></span>
+                    <span style="flex:1">
+                        <b>@(r.KodeRef ?? "—")</b>
+                        <span class="tni-note" style="margin-left:4px">@r.Nama</span>
+                        @if (r.Hasil != "OK")
+                        {
+                            <div class="tni-note">@r.Pesan</div>
+                        }
+                    </span>
+                    <span class="tni-k">@r.Jam.ToString("HH:mm:ss")</span>
+                    @if (r.BolehAjukanBatal)
+                    {
+                        <button class="tni-btn tni-btn-r" style="padding:5px 9px;font-size:11.5px"
+                                @onclick="@(() => BukaSheetAksiAsync(r))">
+                            Batal
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ---------- pop up konfirmasi Set Jadi (2026-10-06) ----------
+   Susunan mengikuti label kartu 80mm (TniKartuEscPosBuilder): kepala, identitas,
+   pola, ukuran badan. Backdrop TIDAK menutup pop up -- harus lewat tombol, supaya
+   ketukan tak sengaja tidak menghilangkan kartu yang sedang dicek. *@
+@if (konfirmasi is not null)
+{
+    var k = konfirmasi;
+    <div class="tni-sheet-backdrop">
+        <div class="tni-sheet tni">
+            @* 1. kepala *@
+            <div style="text-align:center;padding-bottom:8px;border-bottom:2px solid var(--tni-line)">
+                <div class="tni-k" style="font-weight:700">@JudulOrder</div>
+                <div class="tni-pola-lg" style="font-size:24px">@k.KodeRef</div>
+                <div class="tni-note">@k.SatuanName — @k.AreaName</div>
+            </div>
+
+            @* 2. identitas *@
+            <table class="tni-mini" style="margin:6px 0">
+                <tr><td class="tni-k">Pangkat</td><td class="tni-n">@k.Pangkat</td></tr>
+                <tr><td class="tni-k">Nama</td><td class="tni-n">@k.Nama</td></tr>
+                <tr><td class="tni-k">NRP</td><td class="tni-n">@k.Nrp</td></tr>
+                <tr><td class="tni-k">No HP</td><td class="tni-n">@(k.NoHp ?? "-")</td></tr>
+                <tr><td class="tni-k">TB / BB</td><td class="tni-n">@(k.TinggiBadan?.ToString() ?? "-") cm / @(k.BeratBadan?.ToString() ?? "-") kg</td></tr>
+            </table>
+
+            @* 3. pola -- info utama untuk mengambil barang *@
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+                <div style="flex:1;text-align:center;background:#E3ECF5;border-radius:8px;padding:6px">
+                    <div class="tni-k">KEMEJA</div>
+                    <div class="tni-pola-lg">@k.PolaKemejaKode</div>
+                </div>
+                <div style="flex:1;text-align:center;background:#E3ECF5;border-radius:8px;padding:6px">
+                    <div class="tni-k">CELANA</div>
+                    <div class="tni-pola-lg">@k.PolaCelanaKode</div>
+                </div>
+            </div>
+
+            @* 4. ukuran badan *@
+            @if (k.TidakHadirUkur)
+            {
+                <div class="tni-card" style="text-align:center">
+                    <b>TIDAK HADIR PENGUKURAN</b>
+                    <div class="tni-note">Memakai pola standar sesuai size di atas</div>
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;gap:10px">
+                    <div style="flex:1">
+                        <div class="tni-sec" style="margin-top:0">Ukuran badan — kemeja</div>
+                        <table class="tni-mini">
+                            @foreach (var (label, nilai) in UkuranKemeja(k))
+                            {
+                                <tr><td>@label</td><td class="tni-n">@Num(nilai)</td></tr>
+                            }
+                        </table>
+                    </div>
+                    <div style="flex:1">
+                        <div class="tni-sec" style="margin-top:0">Ukuran badan — celana</div>
+                        <table class="tni-mini">
+                            @foreach (var (label, nilai) in UkuranCelana(k))
+                            {
+                                <tr><td>@label</td><td class="tni-n">@Num(nilai)</td></tr>
+                            }
+                        </table>
+                    </div>
+                </div>
+            }
+
+            @* 5. aksi *@
+            <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+                @if (!k.SetAt.HasValue)
+                {
+                    <button class="tni-btn tni-btn-g" style="width:100%;padding:14px;font-size:15px"
+                            disabled="@menyimpanSet" @onclick="SudahSetLengkapAsync">
+                        <i class="fe fe-check"></i> @(menyimpanSet ? "Menyimpan..." : "Sudah Set Lengkap")
+                    </button>
+                }
+                else
+                {
+                    <div style="border-radius:8px;padding:8px 10px;background:var(--tni-okbg);color:var(--tni-ok);font-size:12.5px">
+                        <b>Sudah set lengkap</b> @k.SetAt.Value.ToString("dd/MM HH:mm")
+                        @if (!string.IsNullOrEmpty(k.SetByNama))
+                        {
+                            <text> oleh @k.SetByNama</text>
+                        }
+                        @if (!string.IsNullOrEmpty(k.BoxCode))
+                        {
+                            <text> · box @k.BoxCode</text>
+                        }
+                    </div>
+
+                    @if (k.StatusProgres is "SET_JADI" or "MASUK_BOX")
+                    {
+                        <TniAjukanBatal PersonelId="k.PersonelId"
+                                        StatusProgres="@k.StatusProgres"
+                                        BoxCode="@k.BoxCode"
+                                        LabelSet="Batalkan Set Lengkap"
+                                        OnDiajukan="TutupKonfirmasi" />
+                    }
+                    else if (k.StatusProgres == "TERKIRIM")
+                    {
+                        <div class="tni-note">Box sudah terkirim — set tidak bisa dibatalkan.</div>
+                    }
+                }
+
+                <button class="tni-btn tni-btn-o" style="width:100%" disabled="@menyimpanSet"
+                        @onclick="TutupKonfirmasi">
+                    Tutup
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------- pop up "beda satuan" saat Masuk Box (2026-10-07) ----------
+   SP menjawab KONFIRMASI (belum menulis apa pun). "Ya, masukkan" memanggil ulang
+   dengan Paksa = true. Backdrop tidak menutup -- harus lewat tombol. *@
+@if (bedaSatuan is not null)
+{
+    var b = bedaSatuan;
+    <div class="tni-sheet-backdrop">
+        <div class="tni-sheet tni">
+            <div style="text-align:center;padding-bottom:8px;border-bottom:2px solid var(--tni-line)">
+                <div style="font-size:30px;line-height:1;color:var(--tni-warn)"><i class="fe fe-alert-triangle"></i></div>
+                <div class="tni-t" style="color:var(--tni-ink);margin-top:4px">Yakin, beda satuan?</div>
+            </div>
+
+            <table class="tni-mini" style="margin:8px 0">
+                <tr><td class="tni-k">Kode</td><td class="tni-n">@b.KodeRef</td></tr>
+                <tr><td class="tni-k">Nama</td><td class="tni-n">@b.Pangkat @b.Nama</td></tr>
+                <tr><td class="tni-k">Satuan personel</td><td class="tni-n" style="color:var(--tni-bad)">@b.SatuanName</td></tr>
+                <tr><td class="tni-k">Box</td><td class="tni-n">@boxAktif?.BoxCode</td></tr>
+            </table>
+
+            <div style="border-radius:8px;padding:8px 10px;background:var(--tni-warnbg);color:#7a5210;font-size:12.5px">
+                @b.Pesan
+            </div>
+
+            <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+                <button class="tni-btn tni-btn-c" style="width:100%;padding:14px;font-size:15px"
+                        disabled="@menyimpanBeda" @onclick="MasukkanBedaSatuanAsync">
+                    @(menyimpanBeda ? "Menyimpan..." : "Ya, masukkan ke box ini")
+                </button>
+                <button class="tni-btn tni-btn-o" style="width:100%" disabled="@menyimpanBeda"
+                        @onclick="TutupBedaSatuan">
+                    Batal
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------- sheet aksi item riwayat (Prompt 68) ---------- *@
+@if (sheetAksi is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => sheetAksi = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-k">@(sheetDetail?.StatusProgres.Replace('_', ' ') ?? "...")</div>
+                    <div class="tni-pola-lg">@sheetAksi.KodeRef</div>
+                    <div class="tni-note">@sheetAksi.Nama · @sheetAksi.Jam.ToString("HH:mm:ss")</div>
+                </div>
+                <button class="tni-btn" @onclick="@(() => sheetAksi = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (sheetDetail is null)
+            {
+                <p class="tni-note">Memuat status kartu...</p>
+            }
+            else if (sheetDetail.StatusProgres is "SET_JADI" or "MASUK_BOX")
+            {
+                <TniAjukanBatal PersonelId="sheetAksi.PersonelId!.Value"
+                                StatusProgres="@sheetDetail.StatusProgres"
+                                BoxCode="@sheetDetail.BoxCode"
+                                OnDiajukan="@(() => sheetAksi = null)" />
+            }
+            else
+            {
+                <div class="tni-card" style="margin:0">
+                    <span class="tni-note">
+                        @(sheetDetail.StatusProgres == "TERKIRIM"
+                            ? $"Box {sheetDetail.BoxCode} sudah terkirim — kartu ini tidak bisa dibatalkan."
+                            : $"Status kartu {sheetDetail.StatusProgres} — tidak ada scan yang bisa dibatalkan.")
+                    </span>
+                </div>
+            }
+        </div>
+    </div>
+}
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isBusy;
+    private string kameraError = string.Empty;
+    private string kodeManual = string.Empty;
+    private string namaUser = string.Empty;
+    private int jumlahSesi;
+
+    private TniScanHasilDto? hasil;
+    private readonly List<TniScanRiwayatItem> riwayat = new();
+
+    // Prompt 68: item riwayat yang sedang dibuka di sheet aksi.
+    private TniScanRiwayatItem? sheetAksi;
+    private TniPersonelDetailDto? sheetDetail;   // status terkini kartu di sheet
+
+    // Prompt 67: mode scan. SET = Set Jadi, BOX = Masuk Box (butuh box aktif).
+    private string mode = "SET";
+    private List<TniBoxListItemDto> boxTerbuka = new();
+    private TniBoxListItemDto? boxAktif;
+    private int isiBox;
+
+    private int PersenBox =>
+        boxAktif is null || boxAktif.Kapasitas == 0
+            ? 0
+            : Math.Min(100, (int)Math.Round(isiBox * 100.0 / boxAktif.Kapasitas));
+
+    private DotNetObjectReference<Scan>? selfRef;
+    private bool kameraJalan;
+
+    // Scan berikutnya diANTREKAN saat permintaan ke API masih jalan -- JANGAN dibuang,
+    // staff sudah menempelkan kartu berikutnya.
+    private readonly Queue<string> antrean = new();
+    private bool sedangProses;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+
+        // Nama di header = petugas PERANGKAT (alter_75), bukan user login (tidak ada login).
+        await Sesi.EnsureLoadedAsync();
+        namaUser = Sesi.PetugasNama ?? string.Empty;
+
+        await OrderState.EnsureLoadedAsync();
+    }
+
+    // ---------- mode & box (Prompt 67) ----------
+
+    private async Task GantiMode(string m)
+    {
+        if (mode == m) return;
+        mode = m;
+        hasil = null;
+
+        if (m == "BOX")
+        {
+            boxTerbuka = await BoxApi.GetTerbukaAsync();
+
+            // Ingat box terakhir -- staff biasanya lanjut mengisi box yang sama.
+            try
+            {
+                var simpan = await JS.InvokeAsync<string>("localStorage.getItem", "tni.scan.boxId");
+                if (int.TryParse(simpan, out var bid))
+                {
+                    var b = boxTerbuka.FirstOrDefault(x => x.BoxId == bid);
+                    if (b is not null) { boxAktif = b; isiBox = b.Isi; }
+                }
+            }
+            catch { /* localStorage tidak tersedia -- abaikan */ }
+        }
+    }
+
+    private async Task PilihBoxAsync(TniBoxListItemDto b)
+    {
+        boxAktif = b;
+        isiBox = b.Isi;
+        hasil = null;
+
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "tni.scan.boxId", b.BoxId.ToString()); }
+        catch { }
+    }
+
+    private async Task GantiBox()
+    {
+        boxAktif = null;
+        hasil = null;
+        boxTerbuka = await BoxApi.GetTerbukaAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (hasAccess != true || kameraJalan) return;
+
+        // Elemen kamera baru ada setelah render pertama yang lolos cek akses.
+        kameraJalan = true;
+        selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("tniScanner.start", "tni-cam", selfRef);
+        }
+        catch (Exception ex)
+        {
+            kameraError = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    // ---------- callback dari tniScanner.js ----------
+
+    [JSInvokable]
+    public async Task OnScanned(string decodedText)
+    {
+        // Ambil token dari teks hasil scan: kalau mengandung '/t/', ambil segmen
+        // sesudahnya; selain itu pakai apa adanya (mis. kode_ref diketik manual).
+        var kode = AmbilToken(decodedText);
+        antrean.Enqueue(kode);
+        await ProsesAntreanAsync();
+    }
+
+    [JSInvokable]
+    public Task OnScanError(string message)
+    {
+        kameraError = message;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private static string AmbilToken(string raw)
+    {
+        var text = (raw ?? string.Empty).Trim();
+        var idx = text.IndexOf("/t/", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0) return text.Substring(idx + 3).Trim('/');
+        return text;
+    }
+
+    private async Task ProsesAntreanAsync()
+    {
+        if (sedangProses) return;
+        sedangProses = true;
+
+        try
+        {
+            while (antrean.Count > 0)
+            {
+                var kode = antrean.Dequeue();
+
+                // Mode SET: scan TIDAK langsung mencatat -- buka pop up konfirmasi.
+                // Selama pop up terbuka, scan lain diabaikan (kamera terus membaca
+                // kartu yang sama), dan kartu yang barusan ditutup diberi jeda.
+                if (mode == "SET")
+                {
+                    if (konfirmasi is not null) continue;
+                    if (kode == kodeDitutup && DateTime.Now - ditutupAt < JedaSetelahTutup) continue;
+
+                    await BukaKonfirmasiAsync(kode);
+                    continue;
+                }
+
+                // 2026-10-07: selama pop up "beda satuan" terbuka, scan lain diabaikan;
+                // kartu yang barusan dibatalkan diberi jeda (kamera terus membacanya).
+                if (bedaSatuan is not null) continue;
+                if (kode == kodeDitutup && DateTime.Now - ditutupAt < JedaSetelahTutup) continue;
+
+                isBusy = true;
+                StateHasChanged();
+
+                // Mode BOX butuh box aktif; kalau belum dipilih, jangan diam-diam
+                // mencatat sebagai Set Jadi.
+                if (boxAktif is null)
+                {
+                    hasil = new TniScanHasilDto { Hasil = "DITOLAK", Pesan = "Pilih box terbuka dulu." };
+                }
+                else
+                {
+                    var jawab = await BoxApi.MasukBoxAsync(kode, boxAktif.BoxId);
+
+                    // Beda satuan / rawatan: BELUM dicatat -- tanya petugas dulu.
+                    if (jawab.PerluKonfirmasi)
+                    {
+                        bedaSatuan = jawab;
+                        kodeBeda = kode;
+                        isBusy = false;
+                        await Umpan("SUDAH");   // bunyi peringatan, bukan gagal
+                        StateHasChanged();
+                        continue;
+                    }
+
+                    hasil = jawab;
+                    // isi box diambil dari jawaban SP (dihitung sesudah update)
+                    if (hasil.Isi.HasValue) isiBox = hasil.Isi.Value;
+                }
+
+                await CatatHasilAsync();
+
+                isBusy = false;
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            sedangProses = false;
+        }
+    }
+
+    // ---------- pop up konfirmasi Set Jadi (2026-10-06) ----------
+    // Isi pop up = isi label kartu yang dicetak. Tombol hijau "Sudah Set Lengkap"
+    // baru mencatat set; kartu yang sudah set mendapat tombol merah "Batalkan
+    // Set Lengkap" (pengajuan pembatalan -> persetujuan, alur Prompt 68).
+
+    private TniPersonelDetailDto? konfirmasi;
+    private string kodeKonfirmasi = string.Empty;
+    private bool menyimpanSet;
+
+    // Baris 1 label: "PDH OPMAT 2026 - KODAM III/SILIWANGI".
+    private string JudulOrder => OrderState.Order is null
+        ? string.Empty
+        : string.Join(" - ", new[] { OrderState.Order.OrderName, OrderState.Order.Instansi }
+            .Where(x => !string.IsNullOrWhiteSpace(x))).ToUpperInvariant();
+
+    // Label & urutan sama dengan kartu cetak (tni.SIS_Personel_Cetak).
+    private static (string, decimal?)[] UkuranKemeja(TniPersonelDetailDto k) => new[]
+    {
+        ("Lingkar Leher", k.LingkarLeher), ("Lebar Bahu", k.LebarBahu),
+        ("Lingkar Dada", k.LingkarDada), ("Lingkar Perut", k.LingkarPerut),
+        ("Panjang Badan Depan", k.PanjangBadanDepan), ("Panjang Lengan", k.PanjangLengan),
+        ("Lingkar Lengan", k.LingkarLengan), ("Lingkar Ketiak", k.LingkarKetiak)
+    };
+
+    private static (string, decimal?)[] UkuranCelana(TniPersonelDetailDto k) => new[]
+    {
+        ("Lingkar Pinggang", k.LingkarPinggangCelana), ("Lingkar Pinggul", k.LingkarPinggul),
+        ("Lingkar Pesak", k.LingkarPesak), ("Lingkar Paha", k.LingkarPaha),
+        ("Lingkar Lutut", k.LingkarLutut), ("Lingkar Celana Bawah", k.LingkarCelanaBawah),
+        ("Panjang Celana", k.PanjangCelana)
+    };
+
+    // 42.0 -> "42", 38.5 -> "38.5", NULL -> "-" (sama dengan kartu).
+    private static string Num(decimal? v) => v.HasValue ? v.Value.ToString("0.##") : "-";
+
+    private string kodeDitutup = string.Empty;
+    private DateTime ditutupAt;
+    private static readonly TimeSpan JedaSetelahTutup = TimeSpan.FromSeconds(3);
+
+    private async Task BukaKonfirmasiAsync(string kode)
+    {
+        isBusy = true;
+        StateHasChanged();
+
+        var (ok, detail, error) = await ScanApi.LookupAsync(kode);
+
+        isBusy = false;
+
+        if (!ok || detail is null)
+        {
+            hasil = string.IsNullOrEmpty(error)
+                ? new TniScanHasilDto { Hasil = "TIDAK_DIKENAL", Pesan = $"Kode \"{kode}\" tidak dikenal." }
+                : new TniScanHasilDto { Hasil = "DITOLAK", Pesan = error };
+
+            await CatatHasilAsync();
+            StateHasChanged();
+            return;
+        }
+
+        hasil = null;
+        konfirmasi = detail;
+        kodeKonfirmasi = kode;
+        await Umpan(detail.SetAt.HasValue ? "SUDAH" : "OK");
+        StateHasChanged();
+    }
+
+    private void TutupKonfirmasi()
+    {
+        kodeDitutup = kodeKonfirmasi;
+        ditutupAt = DateTime.Now;
+        konfirmasi = null;
+        kodeKonfirmasi = string.Empty;
+    }
+
+    private async Task SudahSetLengkapAsync()
+    {
+        if (konfirmasi is null) return;
+
+        menyimpanSet = true;
+        hasil = await ScanApi.SetJadiAsync(kodeKonfirmasi);
+        menyimpanSet = false;
+
+        TutupKonfirmasi();
+        await CatatHasilAsync();
+    }
+
+    // ---------- pop up beda satuan (Masuk Box, 2026-10-07) ----------
+    private TniScanHasilDto? bedaSatuan;
+    private string kodeBeda = string.Empty;
+    private bool menyimpanBeda;
+
+    private void TutupBedaSatuan()
+    {
+        kodeDitutup = kodeBeda;
+        ditutupAt = DateTime.Now;
+        bedaSatuan = null;
+        kodeBeda = string.Empty;
+    }
+
+    private async Task MasukkanBedaSatuanAsync()
+    {
+        if (bedaSatuan is null || boxAktif is null) return;
+
+        menyimpanBeda = true;
+        hasil = await BoxApi.MasukBoxAsync(kodeBeda, boxAktif.BoxId, paksa: true);
+        menyimpanBeda = false;
+
+        if (hasil.Isi.HasValue) isiBox = hasil.Isi.Value;
+
+        TutupBedaSatuan();
+        await CatatHasilAsync();
+    }
+
+    // Banner + riwayat sesi + bunyi untuk satu hasil scan.
+    private async Task CatatHasilAsync()
+    {
+        if (hasil is null) return;
+
+        if (hasil.Ok) jumlahSesi++;
+
+        riwayat.Insert(0, new TniScanRiwayatItem
+        {
+            Hasil = hasil.Hasil,
+            KodeRef = hasil.KodeRef,
+            Nama = hasil.Nama,
+            Pesan = hasil.Pesan,
+            // Prompt 68: kartu yang DIKENAL (OK maupun SUDAH) bisa diajukan
+            // batal -- status terkini dibaca ulang saat sheet dibuka.
+            // TIDAK_DIKENAL / DITOLAK tidak punya kartu untuk dibatalkan.
+            PersonelId = hasil.Ok || hasil.Sudah ? hasil.PersonelId : null,
+            StatusProgres = hasil.Ok ? (mode == "BOX" ? "MASUK_BOX" : "SET_JADI") : null,
+            BoxCode = hasil.BoxCode
+        });
+
+        // simpan 20 terakhir saja (hanya di memori halaman)
+        while (riwayat.Count > 20) riwayat.RemoveAt(riwayat.Count - 1);
+
+        // bunyi mencerminkan hasil SEBENARNYA dari server
+        await Umpan(hasil.Hasil);
+    }
+
+    private async Task Umpan(string hasilKode)
+    {
+        var jenis = hasilKode switch
+        {
+            "OK" => "ok",
+            "SUDAH" => "sudah",
+            _ => "gagal"
+        };
+
+        try { await JS.InvokeVoidAsync("tniScanner.feedback", jenis); }
+        catch { /* perangkat tanpa audio -- abaikan */ }
+    }
+
+    private async Task ScanManualAsync()
+    {
+        if (string.IsNullOrWhiteSpace(kodeManual)) return;
+
+        var kode = AmbilToken(kodeManual);
+        kodeManual = string.Empty;
+
+        // Supaya kartu yang sama boleh langsung di-scan kamera lagi setelahnya.
+        try { await JS.InvokeVoidAsync("tniScanner.resetDedupe"); } catch { }
+        kodeDitutup = string.Empty;   // input manual = disengaja, tanpa jeda pop up
+
+        antrean.Enqueue(kode);
+        await ProsesAntreanAsync();
+    }
+
+    // ---------- tampilan ----------
+
+    private string BannerStyle => hasil?.Hasil switch
+    {
+        "OK" => "background:var(--tni-okbg);border:1.5px solid var(--tni-ok);color:#0f5c39",
+        "SUDAH" => "background:var(--tni-warnbg);border:1.5px solid var(--tni-warn);color:#7a5210",
+        _ => "background:var(--tni-badbg);border:1.5px solid var(--tni-bad);color:#8a2318"
+    };
+
+    private string BannerJudul => hasil?.Hasil switch
+    {
+        "OK" => $"✓ {hasil.KodeRef} · {hasil.Nama}",
+        "SUDAH" => $"! {hasil.KodeRef} · {hasil.Nama}",
+        _ => "✕ Tidak dikenal"
+    };
+
+    private string BannerDetail => hasil?.Hasil switch
+    {
+        "OK" when mode == "BOX" =>
+            $"{hasil.PolaKemejaKode} · {hasil.PolaCelanaKode} — masuk {hasil.BoxCode} ({hasil.Isi}/{hasil.Kapasitas})",
+        "OK" => $"{hasil.PolaKemejaKode} · {hasil.PolaCelanaKode} — set tercatat",
+        "SUDAH" => hasil.Pesan,
+        _ => hasil?.Pesan ?? string.Empty
+    };
+
+    // Kartu yang dikenal (OK / SUDAH) bisa diajukan batal. Status TERKINI dibaca
+    // ulang dari server: kartu "SUDAH" di mode Set Jadi bisa saja sudah masuk
+    // box atau terkirim, dan jenis pembatalan mengikuti status itu.
+    private async Task BukaSheetAksiAsync(TniScanRiwayatItem? r)
+    {
+        if (r is null || !r.BolehAjukanBatal) return;
+
+        sheetAksi = r;
+        sheetDetail = null;
+        StateHasChanged();
+
+        sheetDetail = await PersonelApi.GetByIdAsync(r.PersonelId!.Value);
+        if (sheetDetail is null) sheetAksi = null;   // kartu terhapus / tak terbaca
+    }
+
+    private static string DotColor(string hasilKode) => hasilKode switch
+    {
+        "OK" => "var(--tni-ok)",
+        "SUDAH" => "var(--tni-warn)",
+        _ => "var(--tni-bad)"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("tniScanner.stop"); } catch { }
+        selfRef?.Dispose();
+    }
+}

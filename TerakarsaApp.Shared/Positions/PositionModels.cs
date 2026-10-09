@@ -4,6 +4,11 @@ public class PositionDto
 {
     public int Id { get; set; }
     public string PositionName { get; set; } = string.Empty;
+    // Prompt 70: jabatan ini boleh membuka menu satpam di aplikasi gate (positions.is_gate_operator).
+    public bool IsGateOperator { get; set; }
+    // Prompt 58 (lanjutan): divisi yang boleh memakai jabatan ini, sudah digabung jadi satu
+    // teks oleh SP -- kosong berarti belum dibatasi (berlaku di semua divisi).
+    public string DivisionNames { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -13,12 +18,17 @@ public class PositionDto
 public class PositionCreateRequest
 {
     public string PositionName { get; set; } = string.Empty;
+    public bool IsGateOperator { get; set; }
+    // NULL = jangan sentuh pemetaan divisi; daftar kosong = jabatan tidak dibatasi divisi.
+    public List<int>? DivisionIds { get; set; }
 }
 
 public class PositionUpdateRequest
 {
     public int Id { get; set; }
     public string PositionName { get; set; } = string.Empty;
+    public bool IsGateOperator { get; set; }
+    public List<int>? DivisionIds { get; set; }
 }
 
 public class PositionPagedRequest

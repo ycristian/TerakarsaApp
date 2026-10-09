@@ -98,6 +98,34 @@ builder.Services.AddScoped<DailyPlanService>();
 builder.Services.AddScoped<DashboardTokenService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<RekapProduksiService>();
+// Prompt 58: absensi + pengelolaan pegawai dari perangkat stasiun.
+builder.Services.AddScoped<StationAttendanceService>();
+// Prompt 59: tab "Rekap Produksi" + output non-PO di perangkat stasiun (BUKAN
+// RekapProduksiService di atas -- itu rekap struk Prompt 42, kini blok
+// Settlement di dasar tab yang sama).
+builder.Services.AddScoped<StationRekapProduksiService>();
+// Prompt 60-69: module PDH TNI AD (schema SQL `tni`).
+builder.Services.AddScoped<TniOrderService>();
+builder.Services.AddScoped<TniPolaService>();
+builder.Services.AddScoped<TniImportService>();
+builder.Services.AddScoped<TniPersonelService>();
+builder.Services.AddScoped<TniStokService>();
+builder.Services.AddScoped<TniPerintahKerjaService>();
+builder.Services.AddScoped<TniScanService>();
+builder.Services.AddScoped<TniBoxService>();
+builder.Services.AddScoped<TniBoxPdfService>();
+builder.Services.AddScoped<TniPembatalanService>();
+builder.Services.AddScoped<TniDashboardService>();
+// Perangkat TNI tanpa login (pairing, seperti stasiun) + petugas per sesi.
+builder.Services.AddScoped<TniPerangkatService>();
+builder.Services.AddScoped<TniKomplainService>();
+builder.Services.Configure<TniOptions>(builder.Configuration.GetSection("Tni"));
+// Prompt 70: absensi RFID. GateService dipakai perangkat gate (tanpa login, X-Gate-Api-Key),
+// AttendanceService dipakai halaman admin /attendance (JWT + module HR_ATTENDANCE).
+builder.Services.AddScoped<GateService>();
+builder.Services.AddScoped<AttendanceService>();
+builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
+builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
 builder.Services.Configure<PrintServiceOptions>(builder.Configuration.GetSection("PrintService"));
@@ -113,7 +141,11 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowBlazor", policy =>
         policy.SetIsOriginAllowed(origin => IsAllowedOrigin(origin))
               .AllowAnyHeader()
-              .AllowAnyMethod());
+              .AllowAnyMethod()
+              // Client beda origin (port lain) -- tanpa ini header Content-Disposition
+              // tidak terbaca JS, sehingga nama file unduhan (Excel/PDF) jatuh ke
+              // nama default di client.
+              .WithExposedHeaders("Content-Disposition"));
 });
 
 var app = builder.Build();

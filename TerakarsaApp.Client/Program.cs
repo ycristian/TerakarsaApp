@@ -94,5 +94,35 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.WorkScheduleApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.DailyPlanApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.DashboardTokenApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.UnlockRequestApiService>();
+// Prompt 70: halaman Absensi (kartu karyawan, rekap, koreksi anomali).
+builder.Services.AddScoped<TerakarsaApp.Client.Services.AttendanceApiService>();
+// Module PDH TNI AD -- dipakai SEPERTI STASIUN, TANPA LOGIN: tiap service di
+// bawah ini memakai HttpClient sendiri yang menyisipkan header X-Tni-Token
+// (TniDeviceTokenHandler), BUKAN JWT. Petugas dikenali server dari perangkat.
+// Satu-satunya yang masih lewat JWT: endpoint PUTUSAN pembatalan -- lihat
+// TniPembatalanApiService, yang memegang dua client sekaligus.
+builder.Services.AddScoped<TerakarsaApp.Client.Auth.TniDeviceTokenHandler>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.TniOrderState>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.TniPerangkatState>();
+
+void AddTniClient<T>() where T : class
+{
+    builder.Services
+        .AddHttpClient<T>(c => c.BaseAddress = new Uri(apiBaseUrl))
+        .AddHttpMessageHandler<TerakarsaApp.Client.Auth.TniDeviceTokenHandler>();
+}
+
+AddTniClient<TerakarsaApp.Client.Services.TniOrderApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPolaApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniImportApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPersonelApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniStokApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPerintahKerjaApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniScanApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPublicApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniBoxApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniDashboardApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPembatalanApiService>();
+AddTniClient<TerakarsaApp.Client.Services.TniPerangkatApiService>();
 
 await builder.Build().RunAsync();

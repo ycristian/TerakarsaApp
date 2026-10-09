@@ -31,6 +31,10 @@ public class PpicEmployeeService
 
     public Task<List<PositionDto>> GetPositionsAsync() => _positionService.GetActiveAsync();
 
+    // Prompt 58 (lanjutan): jabatan dibatasi ke divisi yang dipilih di form.
+    public Task<List<PositionDto>> GetPositionsByDivisionAsync(int divisionId) =>
+        _positionService.GetByDivisionAsync(divisionId);
+
     public Task<List<ResourceLookupDto>> GetResourcesByDivisionAsync(int divisionId) =>
         _resourceService.GetActiveByDivisionAsync(divisionId);
 
@@ -105,13 +109,15 @@ public class PpicEmployeeService
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);
         var resourceIdParam = new SqlParameter("@ResourceId", request.ResourceId ?? (object)DBNull.Value);
         var joinDateParam = new SqlParameter("@JoinDate", request.JoinDate ?? (object)DBNull.Value);
+        // Prompt 58: NULL = tidak mengubah no. telp yang sudah ada (COALESCE di SP).
+        var phoneParam = new SqlParameter("@PhoneNo", (object?)request.PhoneNo ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_PpicEmployee_Manage @Action = @Action, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @UserId = @UserId",
-                actionParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, userIdParam);
+                "EXEC SIS_PpicEmployee_Manage @Action = @Action, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @PhoneNo = @PhoneNo, @UserId = @UserId",
+                actionParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, phoneParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -130,13 +136,15 @@ public class PpicEmployeeService
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);
         var resourceIdParam = new SqlParameter("@ResourceId", request.ResourceId ?? (object)DBNull.Value);
         var joinDateParam = new SqlParameter("@JoinDate", request.JoinDate ?? (object)DBNull.Value);
+        // Prompt 58: NULL = tidak mengubah no. telp yang sudah ada (COALESCE di SP).
+        var phoneParam = new SqlParameter("@PhoneNo", (object?)request.PhoneNo ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_PpicEmployee_Manage @Action = @Action, @Id = @Id, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @UserId = @UserId",
-                actionParam, idParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, userIdParam);
+                "EXEC SIS_PpicEmployee_Manage @Action = @Action, @Id = @Id, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @PhoneNo = @PhoneNo, @UserId = @UserId",
+                actionParam, idParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, phoneParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

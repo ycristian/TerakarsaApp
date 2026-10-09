@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mockup Tampilan PDH TNI AD</title>
+<style>
+:root{--navy:#042C53;--navy2:#0B3D6E;--coral:#C8553D;--gold:#C99A2E;--ok:#1E8E5A;--okbg:#E6F4EC;--warn:#B7791F;--warnbg:#FDF3DC;--bad:#C0392B;--badbg:#FBE7E4;--ink:#1B2430;--mut:#6B7685;--line:#E3E7EC;--bg:#F3F5F8;--card:#fff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#DDE2E8;color:var(--ink);padding:24px}
+h1.pg{font-size:20px;margin-bottom:4px}p.pg{color:#4a5563;margin-bottom:20px;font-size:13px;max-width:900px}
+.grid{display:flex;flex-wrap:wrap;gap:28px 22px}
+.wrap{width:300px}
+.cap{font-size:12.5px;font-weight:600;margin-bottom:8px}.cap span{display:block;font-weight:400;color:#4a5563;margin-top:2px;line-height:1.35}
+.ph{width:300px;height:620px;background:var(--bg);border-radius:30px;border:8px solid #111;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.sb{height:18px;background:var(--navy);flex-shrink:0}
+.top{background:var(--navy);color:#fff;padding:8px 12px 10px;flex-shrink:0}
+.top .t{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}.top .t i{font-style:normal;opacity:.8}
+.top .s{font-size:11px;opacity:.8;margin-top:2px}
+.body{flex:1;overflow:hidden;padding:10px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.k{font-size:11px;color:var(--mut)}.b{font-weight:700}
+.bar{height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--navy2)}
+.chip{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap}
+.c-ok{background:var(--okbg);color:var(--ok)}.c-warn{background:var(--warnbg);color:var(--warn)}.c-bad{background:var(--badbg);color:var(--bad)}.c-mut{background:#EEF1F4;color:var(--mut)}.c-navy{background:#E3ECF5;color:var(--navy)}
+.tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+.tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 4px;text-align:center;font-size:11px;font-weight:600;position:relative}
+.tile .ic{font-size:20px;display:block;margin-bottom:3px}
+.badge{position:absolute;top:4px;right:6px;background:var(--coral);color:#fff;font-size:9px;border-radius:10px;padding:1px 5px}
+.stat4{display:grid;grid-template-columns:1fr 1fr;gap:6px}.stat4 div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 8px}.stat4 b{display:block;font-size:16px}
+.seg{display:flex;background:#E3E8EE;border-radius:9px;padding:3px}.seg div{flex:1;text-align:center;font-size:12px;font-weight:600;padding:6px 0;border-radius:7px;color:var(--mut)}.seg .on{background:var(--navy);color:#fff}
+.cam{height:190px;border-radius:12px;background:linear-gradient(135deg,#2b3440,#11161c);position:relative;flex-shrink:0}
+.cam:before{content:"";position:absolute;inset:38px 70px;border:3px solid rgba(255,255,255,.85);border-radius:10px}
+.cam span{position:absolute;bottom:8px;left:0;right:0;text-align:center;color:#cfd6de;font-size:10.5px}
+.res{border-radius:10px;padding:9px 10px;font-size:12px}.res b{font-size:13px;display:block}
+.r-ok{background:var(--okbg);border:1.5px solid var(--ok);color:#0f5c39}.r-warn{background:var(--warnbg);border:1.5px solid var(--warn);color:#7a5210}.r-bad{background:var(--badbg);border:1.5px solid var(--bad);color:#8a2318}
+.li{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:11.5px}.li:last-child{border:0}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ck{width:16px;height:16px;border-radius:4px;border:2px solid var(--navy);background:var(--navy);flex-shrink:0;position:relative}.ck:after{content:"✓";color:#fff;font-size:11px;position:absolute;top:-2px;left:2px}
+.ck.off{background:#fff}.ck.off:after{content:""}
+.pola{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--navy);font-weight:700}
+.bot{flex-shrink:0;background:#fff;border-top:1px solid var(--line);padding:8px 10px;display:flex;align-items:center;gap:8px}
+.btn{border-radius:9px;padding:9px 12px;font-weight:700;font-size:12.5px;text-align:center}.btn.p{background:var(--navy);color:#fff;flex:1}.btn.c{background:var(--coral);color:#fff;flex:1}.btn.o{border:1.5px solid var(--navy);color:var(--navy)}.btn.g{background:var(--ok);color:#fff}.btn.r{border:1.5px solid var(--bad);color:var(--bad)}
+.inp{border:1px solid #CBD3DC;border-radius:8px;padding:7px 9px;font-size:12px;background:#fff;color:var(--mut)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}.tabs div{font-size:12px;padding:6px 8px;color:var(--mut);font-weight:600}.tabs .on{color:var(--navy);border-bottom:2.5px solid var(--navy)}
+.sec{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.boxc{font-family:ui-monospace,Consolas,monospace;font-weight:800;font-size:14px;color:var(--navy)}
+.note{font-size:10.5px;color:var(--mut);line-height:1.35}
+table.mini{width:100%;border-collapse:collapse;font-size:11px}table.mini td{padding:4px 2px;border-bottom:1px solid var(--line)}table.mini td.n{text-align:right;font-weight:700}
+</style></head><body>
+<h1 class="pg">Mockup Tampilan — Module PDH TNI AD</h1>
+<p class="pg">Semua layar dirancang untuk HP. Nama dan angka hanya contoh (fiktif).</p>
+<div class="grid">
+
+<!-- 1 BERANDA -->
+<div class="wrap"><div class="cap">1. Beranda module<span>Ringkasan progres + pintu ke semua menu.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t">PDH TNI AD 2026</div><div class="s">Kodam III/Siliwangi · 7.279 personel</div></div>
+<div class="body">
+<div class="stat4"><div><span class="k">Kartu dicetak</span><b>2.140</b></div><div><span class="k">Dapat set</span><b>1.865</b></div><div><span class="k">Masuk box</span><b>1.610</b></div><div><span class="k">Terkirim</span><b>960</b></div></div>
+<div class="card"><div class="row"><span class="k">Progres masuk box</span><span class="b">22%</span></div><div class="bar"><i style="width:22%"></i></div>
+<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px"><span class="chip c-warn">255 set belum masuk box</span><span class="chip c-mut">275 kartu belum di-scan</span></div></div>
+<div class="tiles">
+<div class="tile"><span class="ic">📋</span>Perintah Kerja</div><div class="tile"><span class="ic">📷</span>Scan</div><div class="tile"><span class="ic">📦</span>Box</div>
+<div class="tile"><span class="ic">🧺</span>Stok</div><div class="tile"><span class="ic">👤</span>Personel</div><div class="tile"><span class="badge">3</span><span class="ic">↩️</span>Pembatalan</div>
+<div class="tile"><span class="ic">📊</span>Dashboard</div><div class="tile"><span class="ic">⬆️</span>Import</div><div class="tile"><span class="ic">📐</span>Master Pola</div>
+</div></div></div></div>
+
+<!-- 2 PK rawatan -->
+<div class="wrap"><div class="cap">2. Perintah Kerja — pilih rawatan<span>Angka "bisa dibuat" dihitung dari stok bebas (stok dikurangi kartu tercetak yang belum di-scan).</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Perintah Kerja</div><div class="s">Pilih rawatan yang mau diselesaikan</div></div>
+<div class="body">
+<div class="card"><div class="row"><span class="b">Tepbek III/1.A Bandung</span><span class="chip c-navy">BDG</span></div>
+<div class="row" style="margin-top:4px"><span class="k">Sisa 3.120 dari 4.044</span><span class="k">23% selesai</span></div><div class="bar"><i style="width:23%"></i></div>
+<div style="margin-top:7px;font-size:12px">Bisa dibuat dari stok: <b>940 set</b> <span class="chip c-ok">2 satuan bisa tuntas</span></div></div>
+<div class="card"><div class="row"><span class="b">Tepbek III/2.A Cimahi</span><span class="chip c-navy">CMH</span></div>
+<div class="row" style="margin-top:4px"><span class="k">Sisa 2.410 dari 2.782</span><span class="k">13% selesai</span></div><div class="bar"><i style="width:13%"></i></div>
+<div style="margin-top:7px;font-size:12px">Bisa dibuat dari stok: <b>610 set</b></div></div>
+<div class="card"><div class="row"><span class="b">Denbekang III/1.B Bogor</span><span class="chip c-navy">BGR</span></div>
+<div class="row" style="margin-top:4px"><span class="k">Sisa 453 dari 453</span><span class="k">0% selesai</span></div><div class="bar"><i style="width:0%"></i></div>
+<div style="margin-top:7px;font-size:12px">Bisa dibuat dari stok: <b>180 set</b> <span class="chip c-ok">1 satuan bisa tuntas</span></div></div>
+<div class="note">Stok bebas sekarang: 2.480 kemeja · 2.310 celana</div>
+</div></div></div>
+
+<!-- 3 PK satuan -->
+<div class="wrap"><div class="cap">3. Perintah Kerja — saran satuan<span>"Bisa tuntas" di atas; kalau tidak ada, daftar jadi preview biasa.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Bandung</div><div class="s">Urutan saran untuk menyelesaikan rawatan</div></div>
+<div class="body">
+<div class="sec">Saran — bisa tuntas</div>
+<div class="card" style="border-color:var(--ok)"><div class="row"><span class="b">Ditajenad</span><span class="chip c-ok">Bisa tuntas</span></div><div class="row" style="margin-top:3px"><span class="k">Sisa 120</span><span style="font-size:12px"><b>120</b> bisa dibuat</span></div><div class="bar"><i style="width:100%;background:var(--ok)"></i></div></div>
+<div class="card" style="border-color:var(--ok)"><div class="row"><span class="b">Pussenif</span><span class="chip c-ok">Bisa tuntas</span></div><div class="row" style="margin-top:3px"><span class="k">Sisa 310</span><span style="font-size:12px"><b>310</b> bisa dibuat</span></div><div class="bar"><i style="width:100%;background:var(--ok)"></i></div></div>
+<div class="sec">Lainnya — preview</div>
+<div class="card"><div class="row"><span class="b">Kodiklatad</span><span class="k">69%</span></div><div class="row" style="margin-top:3px"><span class="k">Sisa 608</span><span style="font-size:12px"><b>420</b> bisa dibuat</span></div><div class="bar"><i style="width:69%"></i></div></div>
+<div class="card"><div class="row"><span class="b">Seskoad</span><span class="k">32%</span></div><div class="row" style="margin-top:3px"><span class="k">Sisa 474</span><span style="font-size:12px"><b>150</b> bisa dibuat</span></div><div class="bar"><i style="width:32%"></i></div></div>
+<div class="card"><div class="row"><span class="b">Pusdikif Pussenif</span><span class="k">8%</span></div><div class="row" style="margin-top:3px"><span class="k">Sisa 490</span><span style="font-size:12px"><b>40</b> bisa dibuat</span></div><div class="bar"><i style="width:8%"></i></div></div>
+</div></div></div>
+
+<!-- 4 PK detail -->
+<div class="wrap"><div class="cap">4. Perintah Kerja — detail &amp; cetak<span>Centang bisa dibuang. Tab "Belum bisa" berisi kekurangan pola untuk diteruskan ke produksi.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Kodiklatad</div><div class="s">Sisa 608 · bisa dibuat 420</div></div>
+<div class="body">
+<div class="tabs"><div class="on">Bisa dibuat (420)</div><div>Belum bisa (188)</div></div>
+<div class="row"><span class="note">Urut kode personel</span><span class="note" style="color:var(--navy);font-weight:700">Pilih semua</span></div>
+<div class="card" style="padding:4px 10px">
+<div class="li"><div class="ck"></div><div style="flex:1"><b>KDL-001</b> · Serda<br>MUH RIZAL FAHMI</div><div class="pola">LD_96_P<br>31_P</div></div>
+<div class="li"><div class="ck"></div><div style="flex:1"><b>KDL-002</b> · Kopda<br>M Fajar Ramadhan</div><div class="pola">LD_104_P<br>33_P</div></div>
+<div class="li"><div class="ck off"></div><div style="flex:1;color:var(--mut)"><b>KDL-003</b> · Pelda<br>Sugianto, A. Md.</div><div class="pola" style="color:var(--mut)">LD_104_P<br>35_P</div></div>
+<div class="li"><div class="ck"></div><div style="flex:1"><b>KDL-004</b> · Peltu<br>Dedi Kurnia</div><div class="pola">LD_104_P<br>34_P</div></div>
+<div class="li"><div class="ck"></div><div style="flex:1"><b>KDL-005</b> · Lettu<br>Ratna Dewi K.</div><div class="pola">LD_104_WH<br>33_W</div></div>
+<div class="li"><div class="ck"></div><div style="flex:1"><b>KDL-006</b> · Praka<br>YOGA PRATAMA</div><div class="pola">LD_106_P<br>34_P</div></div>
+</div></div>
+<div class="bot"><div style="font-size:11.5px"><b>419</b> dipilih</div><div class="btn p">🖨 Cetak 419 kartu</div></div>
+</div></div>
+
+<!-- 5 SCAN SET -->
+<div class="wrap"><div class="cap">5. Scan — Set Jadi<span>Kamera terus menyala, scan beruntun. Hijau = tercatat, kuning = sudah pernah.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Scan</div><div class="s">Budi · sesi ini 37 set</div></div>
+<div class="body">
+<div class="seg"><div class="on">Set Jadi</div><div>Masuk Box</div></div>
+<div class="cam"><span>Arahkan ke QR di kartu</span></div>
+<div class="res r-ok"><b>✓ DTJ-118 · Andi Saputra</b>LD_96_P · 34_P — set tercatat, stok −1</div>
+<div class="card" style="padding:4px 10px">
+<div class="li"><div class="dot" style="background:var(--ok)"></div><div style="flex:1">DTJ-118 Andi Saputra</div><span class="note">10.14</span></div>
+<div class="li"><div class="dot" style="background:var(--warn)"></div><div style="flex:1">DTJ-004 Rudi Hartono <span class="note">· sudah tercatat 10.12 oleh Budi</span></div></div>
+<div class="li"><div class="dot" style="background:var(--ok)"></div><div style="flex:1">DTJ-097 Drs. Sutrisno</div><span class="note">10.13</span></div>
+</div></div></div></div>
+
+<!-- 6 SCAN BOX -->
+<div class="wrap"><div class="cap">6. Scan — Masuk Box<span>Pilih box dulu, lalu scan beruntun. Salah satuan langsung ditolak.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Scan</div><div class="s">Budi · sesi ini 12 set</div></div>
+<div class="body">
+<div class="seg"><div>Set Jadi</div><div class="on">Masuk Box</div></div>
+<div class="card"><div class="row"><span class="boxc">BDG-DTJ-01</span><span class="note" style="color:var(--navy);font-weight:700">Ganti box</span></div>
+<div class="row" style="margin-top:2px"><span class="k">Ditajenad · terbuka</span><span class="b">12 / 50</span></div><div class="bar"><i style="width:24%"></i></div></div>
+<div class="cam" style="height:160px"><span>Arahkan ke QR di kartu</span></div>
+<div class="res r-bad"><b>✗ KDL-021 · Kodiklatad</b>Bukan satuan box ini — tidak dimasukkan</div>
+<div class="card" style="padding:4px 10px">
+<div class="li"><div class="dot" style="background:var(--ok)"></div><div style="flex:1">DTJ-118 masuk · 12/50</div></div>
+<div class="li"><div class="dot" style="background:var(--bad)"></div><div style="flex:1">DTJ-210 <span class="note">· belum scan Set Jadi</span></div></div>
+</div></div></div></div>
+
+<!-- 7 BOX LIST -->
+<div class="wrap"><div class="cap">7. Box — daftar<span>Per satuan; box gabungan per rawatan di bawah.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Box</div><div class="s">Ditajenad · Bandung</div></div>
+<div class="body">
+<div class="inp">Satuan: Ditajenad ▾</div>
+<div class="card"><div class="row"><span class="boxc">BDG-DTJ-01</span><span class="chip c-warn">Terbuka</span></div><div class="row" style="margin-top:3px"><span class="k">Isi</span><span class="b">12 / 50</span></div><div class="bar"><i style="width:24%"></i></div></div>
+<div class="card"><div class="row"><span class="boxc">BDG-DTJ-02</span><span class="chip c-navy">Tertutup</span></div><div class="row" style="margin-top:3px"><span class="k">48 set · ditutup 02/10 14:35</span><span class="note" style="color:var(--navy);font-weight:700">⬇ PDF</span></div></div>
+<div class="card"><div class="row"><span class="boxc">BDG-DTJ-03</span><span class="chip c-ok">Terkirim</span></div><div class="row" style="margin-top:3px"><span class="k">50 set · dikirim 01/10</span><span class="note" style="color:var(--navy);font-weight:700">⬇ PDF</span></div></div>
+<div class="sec">Box gabungan Bandung</div>
+<div class="card"><div class="row"><span class="boxc">BDG-GAB-01</span><span class="chip c-warn">Terbuka</span></div><div class="row" style="margin-top:3px"><span class="k">3 satuan</span><span class="b">31 / 50</span></div></div>
+</div>
+<div class="bot"><div class="btn o" style="flex:1">+ Box gabungan</div><div class="btn p">+ Buka box baru</div></div>
+</div></div>
+
+<!-- 8 BOX DETAIL -->
+<div class="wrap"><div class="cap">8. Box — cek isi &amp; tutup<span>Setelah ditutup, PDF A4 tersedia untuk diunduh.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> BDG-DTJ-01</div><div class="s">Ditajenad · terbuka · 48 set</div></div>
+<div class="body">
+<div class="card"><div class="sec" style="margin-bottom:4px">Rekap pola</div>
+<div style="font-size:11px;line-height:1.6"><span class="pola">LD_104_P</span> 7 · <span class="pola">LD_108_P</span> 8 · <span class="pola">LD_110_P</span> 7 · <span class="pola">LD_106_P</span> 5 · +12 pola lain</div></div>
+<div class="card" style="padding:4px 10px">
+<div class="li"><div style="width:18px;color:var(--mut)">1</div><div style="flex:1"><b>DTJ-020</b> SARI WULANDARI</div><div class="pola">LD_106_WH</div></div>
+<div class="li"><div style="width:18px;color:var(--mut)">2</div><div style="flex:1"><b>DTJ-024</b> Yohanes Budi S.</div><div class="pola">LD_106_P</div></div>
+<div class="li"><div style="width:18px;color:var(--mut)">3</div><div style="flex:1"><b>DTJ-025</b> DENI SETIAWAN</div><div class="pola">LD_106_P</div></div>
+<div class="li"><div style="width:18px;color:var(--mut)">4</div><div style="flex:1"><b>DTJ-026</b> Lina Marlina P.</div><div class="pola">LD_112_WH</div></div>
+<div class="li"><div style="width:18px;color:var(--mut)">5</div><div style="flex:1"><b>DTJ-030</b> Sudirman</div><div class="pola">LD_110_P</div></div>
+<div class="li note" style="justify-content:center">… 43 lainnya</div>
+</div>
+<div class="note">Box yang sudah ditutup tidak bisa menerima scan masuk.</div>
+</div>
+<div class="bot"><div class="btn c">🔒 Tutup box &amp; buat PDF</div></div>
+</div></div>
+
+<!-- 9 STOK -->
+<div class="wrap"><div class="cap">9. Stok — setoran produksi<span>Satu setoran bisa banyak pola sekaligus. Tanpa nomor surat jalan.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Stok</div><div class="s">Setoran baru · 02/10/2026</div></div>
+<div class="body">
+<div class="tabs"><div class="on">Setoran</div><div>Keluarkan</div><div>Sisa stok</div></div>
+<div class="row"><div class="seg" style="flex:1"><div class="on">Kemeja</div><div>Celana</div></div></div>
+<div class="row"><div class="inp" style="flex:1">LD_102_P</div><div class="inp" style="width:70px;color:var(--ink);font-weight:700;text-align:right">80</div><span style="color:var(--bad)">✕</span></div>
+<div class="row"><div class="inp" style="flex:1">LD_104_P</div><div class="inp" style="width:70px;color:var(--ink);font-weight:700;text-align:right">60</div><span style="color:var(--bad)">✕</span></div>
+<div class="row"><div class="inp" style="flex:1">Cari pola…</div><div class="inp" style="width:70px;text-align:right">qty</div><span style="opacity:0">✕</span></div>
+<div class="note" style="color:var(--navy);font-weight:700">+ Tambah baris</div>
+<div class="card"><div class="row"><span class="k">Total setoran ini</span><span class="b">140 kemeja</span></div></div>
+<div class="note">Stok berkurang otomatis saat scan Set Jadi — tidak perlu dikurangi manual.</div>
+</div>
+<div class="bot"><div class="btn p">Simpan setoran</div></div>
+</div></div>
+
+<!-- 10 PEMBATALAN -->
+<div class="wrap"><div class="cap">10. Pembatalan — persetujuan admin<span>Staff mengajukan dari hasil scan; admin memutuskan di sini.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Pembatalan</div><div class="s">3 menunggu persetujuan</div></div>
+<div class="body">
+<div class="card"><div class="row"><span class="chip c-warn">Batal masuk box</span><span class="note">10.21</span></div>
+<div style="margin-top:5px;font-size:12px"><b>DTJ-118</b> Andi Saputra<br><span class="k">di BDG-DTJ-02 → seharusnya BDG-DTJ-01</span></div>
+<div class="note" style="margin-top:4px">"Salah ambil box" — Budi</div>
+<div class="row" style="margin-top:7px"><div class="btn r" style="flex:1;padding:6px">Tolak</div><div class="btn g" style="flex:1;padding:6px">Setujui</div></div></div>
+<div class="card"><div class="row"><span class="chip c-bad">Batal set jadi</span><span class="note">09.58</span></div>
+<div style="margin-top:5px;font-size:12px"><b>KDL-002</b> M Fajar Ramadhan<br><span class="k">kemeja LD_104_P + celana 33_P kembali ke stok</span></div>
+<div class="note" style="margin-top:4px">"Celana salah ukuran, ambil ulang" — Rina</div>
+<div class="row" style="margin-top:7px"><div class="btn r" style="flex:1;padding:6px">Tolak</div><div class="btn g" style="flex:1;padding:6px">Setujui</div></div></div>
+</div></div></div>
+
+<!-- 11 DASHBOARD -->
+<div class="wrap"><div class="cap">11. Dashboard<span>Progres per rawatan + kebutuhan size untuk prioritas produksi.</span></div>
+<div class="ph"><div class="sb"></div><div class="top"><div class="t"><i>←</i> Dashboard</div><div class="s">Per rawatan · ketuk untuk lihat per satuan</div></div>
+<div class="body">
+<div class="card"><div class="row"><span class="b">Bandung</span><span class="b">23%</span></div>
+<table class="mini"><tr><td>Belum dicetak</td><td class="n">2.180</td></tr><tr><td>Belum dapat set</td><td class="n">240</td></tr><tr><td>Belum masuk box</td><td class="n">160</td></tr></table></div>
+<div class="card"><div class="row"><span class="b">Cimahi</span><span class="b">13%</span></div>
+<table class="mini"><tr><td>Belum dicetak</td><td class="n">1.900</td></tr><tr><td>Belum dapat set</td><td class="n">35</td></tr><tr><td>Belum masuk box</td><td class="n">95</td></tr></table></div>
+<div class="card"><div class="sec" style="margin-bottom:4px">Kebutuhan size — Bandung</div>
+<table class="mini"><tr><td class="pola">LD_108_P</td><td>butuh 410 · stok 120</td><td class="n" style="color:var(--bad)">−290</td></tr>
+<tr><td class="pola">LD_104_P</td><td>butuh 380 · stok 300</td><td class="n" style="color:var(--bad)">−80</td></tr>
+<tr><td class="pola">36_P</td><td>butuh 290 · stok 310</td><td class="n" style="color:var(--ok)">cukup</td></tr></table></div>
+</div></div></div>
+
+</div></body></html>

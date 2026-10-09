@@ -20,10 +20,45 @@ CREATE OR ALTER PROCEDURE SIS_Employee_Manage
     -- Prompt 53: @IsActive default NULL (bukan 1) -- COALESCE di UPDATE menjaga status
     -- nonaktif tetap nonaktif kalau caller lama (Master Karyawan UPDATE) tidak mengirim field ini.
     @IsActive     BIT = NULL,
+    -- Prompt 58: @PhoneNo default NULL dengan alasan yang sama -- caller lama yang tidak
+    -- mengirim field ini TIDAK menghapus no. telp yang sudah ada (COALESCE di UPDATE).
+    @PhoneNo      VARCHAR(20) = NULL,
     @UserId       INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    -- Prompt 58: normalisasi no. telp sama seperti di station (SIS_StationEmployee_Manage):
+    -- buang semua non-digit, awalan 62 jadi 0. Di sini no. telp OPSIONAL (string kosong =
+    -- tidak mengubah apa-apa), tapi kalau diisi tetap wajib minimal 9 digit.
+    -- Tolak, jangan diam-diam dibuang: "--" atau huruf dulu lolos jadi kosong, lalu COALESCE
+    -- di UPDATE membuatnya "tidak diubah" padahal layar menampilkan sukses.
+    IF PATINDEX('%[^0-9 +().-]%', ISNULL(@PhoneNo, '')) > 0
+    BEGIN
+        RAISERROR('No. telp hanya boleh berisi angka.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @Digits VARCHAR(20) = ISNULL(@PhoneNo, '');
+    WHILE PATINDEX('%[^0-9]%', @Digits) > 0
+        SET @Digits = STUFF(@Digits, PATINDEX('%[^0-9]%', @Digits), 1, '');
+
+    IF LEFT(@Digits, 2) = '62'
+        SET @Digits = '0' + SUBSTRING(@Digits, 3, LEN(@Digits));
+
+    IF LTRIM(RTRIM(ISNULL(@PhoneNo, ''))) <> '' AND @Digits = ''
+    BEGIN
+        RAISERROR('No. telp harus berisi angka.', 16, 1);
+        RETURN;
+    END
+
+    IF LEN(@Digits) > 0 AND LEN(@Digits) < 9
+    BEGIN
+        RAISERROR('No. telp minimal 9 digit.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @PhoneNormalized VARCHAR(20) = NULLIF(@Digits, '');
 
     -- Prompt 35: employee_code boleh kosong (penjahit yang belum punya kode tapi sudah mulai
     -- kerja bisa didaftar dulu) -- string kosong/whitespace dinormalisasi jadi NULL supaya
@@ -38,8 +73,8 @@ BEGIN
             RETURN;
         END
 
-        INSERT INTO employees (division_id, resource_id, position_id, employee_code, employee_name, join_date, created_at, created_by)
-        VALUES (@DivisionId, @ResourceId, @PositionId, @EmployeeCode, @EmployeeName, @JoinDate, SYSDATETIME(), @UserId);
+        INSERT INTO employees (division_id, resource_id, position_id, employee_code, employee_name, phone_no, join_date, created_at, created_by)
+        VALUES (@DivisionId, @ResourceId, @PositionId, @EmployeeCode, @EmployeeName, @PhoneNormalized, @JoinDate, SYSDATETIME(), @UserId);
 
         SELECT SCOPE_IDENTITY() AS NewId;
     END
@@ -63,6 +98,7 @@ BEGIN
             employee_name = @EmployeeName,
             join_date = @JoinDate,
             is_active = COALESCE(@IsActive, is_active),
+            phone_no = COALESCE(@PhoneNormalized, phone_no),
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE employee_id = @Id AND deleted_at IS NULL;

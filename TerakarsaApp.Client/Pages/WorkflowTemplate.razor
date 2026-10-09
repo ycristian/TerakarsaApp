@@ -126,6 +126,7 @@ else
                                         <th>Butuh Bundle</th>
                                         <th>Auto Terima</th>
                                         <th>Kupon</th>
+                                        <th class="text-end">Harga (Rp)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -138,6 +139,7 @@ else
                                             <td>@(s.RequiresBundle ? "Ya" : "Tidak")</td>
                                             <td>@(s.AutoReceive ? "Ya" : "Tidak")</td>
                                             <td>@(s.PrintKupon ? "Ya" : "Tidak")</td>
+                                            <td class="text-end">@s.UnitPrice.ToString("#,##0.##")</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -187,8 +189,9 @@ else
                                         <th style="width: 22%;">Divisi</th>
                                         <th style="width: 10%;">Urutan</th>
                                         <th style="width: 12%;">Butuh Bundle</th>
-                                        <th style="width: 13%;">Auto Terima</th>
-                                        <th style="width: 10%;">Kupon</th>
+                                        <th style="width: 11%;">Auto Terima</th>
+                                        <th style="width: 8%;">Kupon</th>
+                                        <th style="width: 12%;">Harga (Rp)</th>
                                         <th style="width: 60px;"></th>
                                     </tr>
                                 </thead>
@@ -213,6 +216,12 @@ else
                                             <td class="text-center">
                                                 <input type="checkbox" class="form-check-input" @bind="row.PrintKupon" disabled="@(!row.RequiresBundle)"
                                                        title="@(row.RequiresBundle ? "Cetak kupon borongan otomatis saat hasil step ini dikonfirmasi diterima." : "Kupon hanya untuk step bundle")" />
+                                            </td>
+                                            @* Prompt 59: harga ARAHAN per pcs. Disalin ke artikel saat template diterapkan;
+                                               mengubahnya di sini tidak menyentuh artikel yang sudah ada. *@
+                                            <td>
+                                                <input type="number" min="0" step="0.01" class="form-control text-end" @bind="row.UnitPrice"
+                                                       title="Harga per pcs (upah) step ini. 0 = belum diisi." />
                                             </td>
                                             <td class="text-center">
                                                 <button type="button" class="btn btn-sm btn-danger" title="Hapus baris" @onclick="() => RemoveStepRow(row)" disabled="@(formModel.Steps.Count <= 1)"><i class="fe fe-trash-2"></i></button>
@@ -364,7 +373,8 @@ else
                 SortOrder = s.SortOrder,
                 RequiresBundle = s.RequiresBundle,
                 AutoReceive = s.AutoReceive,
-                PrintKupon = s.PrintKupon
+                PrintKupon = s.PrintKupon,
+                UnitPrice = s.UnitPrice
             }).ToList()
         };
         errorMessage = string.Empty;
@@ -429,7 +439,8 @@ else
             SortOrder = s.SortOrder,
             RequiresBundle = s.RequiresBundle,
             AutoReceive = s.AutoReceive,
-            PrintKupon = s.PrintKupon
+            PrintKupon = s.PrintKupon,
+            UnitPrice = s.UnitPrice
         }).ToList();
 
         (bool Success, string Error) result;
@@ -524,5 +535,6 @@ else
         public bool RequiresBundle { get; set; } = true;
         public bool AutoReceive { get; set; }
         public bool PrintKupon { get; set; }
+        public decimal UnitPrice { get; set; }
     }
 }

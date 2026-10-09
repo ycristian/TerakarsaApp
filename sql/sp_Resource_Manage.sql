@@ -25,6 +25,9 @@ CREATE OR ALTER PROCEDURE SIS_Resource_Manage
     @IsActive                BIT = 1,
     @IncludeInDashboard      BIT = 1,
     @CounterpartResourceId   INT = NULL,
+    -- Prompt 70: warna holder/lanyard fisik line ini (mis. '#1E5FA8'), dipakai badge warna di
+    -- layar gate. Dipakai apa adanya supaya warna bisa DIKOSONGKAN lagi dari UI (NULL = netral).
+    @ColorHex                VARCHAR(7) = NULL,
     @UserId                  INT = NULL
 AS
 BEGIN
@@ -62,8 +65,8 @@ BEGIN
 
     IF @Action = 'CREATE'
     BEGIN
-        INSERT INTO resources (division_id, resource_type_id, resource_name, is_active, include_in_dashboard, counterpart_resource_id, created_at, created_by)
-        VALUES (@DivisionId, @ResourceTypeId, @ResourceName, @IsActive, @IncludeInDashboard, @CounterpartResourceId, SYSDATETIME(), @UserId);
+        INSERT INTO resources (division_id, resource_type_id, resource_name, is_active, include_in_dashboard, counterpart_resource_id, color_hex, created_at, created_by)
+        VALUES (@DivisionId, @ResourceTypeId, @ResourceName, @IsActive, @IncludeInDashboard, @CounterpartResourceId, @ColorHex, SYSDATETIME(), @UserId);
 
         SELECT SCOPE_IDENTITY() AS NewId;
     END
@@ -77,6 +80,7 @@ BEGIN
             is_active = @IsActive,
             include_in_dashboard = @IncludeInDashboard,
             counterpart_resource_id = @CounterpartResourceId,
+            color_hex = @ColorHex,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE resource_id = @Id AND deleted_at IS NULL;

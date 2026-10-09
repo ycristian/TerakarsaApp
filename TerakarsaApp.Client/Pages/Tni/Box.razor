@@ -1,0 +1,467 @@
+@page "/tni/box"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniBoxApiService BoxApi
+@inject TniPersonelApiService PersonelApi
+@inject TniOrderState OrderState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* Prompt 67: daftar box (mockup layar 7).
+   Box DIMILIKI SATUAN; sisa yang sedikit boleh digabung ke BOX GABUNGAN lintas
+   satuan dalam satu rawatan. Status diturunkan dari packed_at/shipped_at.
+   Membuka kembali box tertutup TIDAK ADA di sini -- hanya lewat pembatalan (Prompt 68). *@
+
+<PageTitle>Box — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-package"></i> Box</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @* ---------- cari no box / kode box (alter_72) -- mengabaikan filter lain ---------- *@
+    <input class="tni-inp tni-search" style="font-size:15px;padding:12px"
+           placeholder="Cari no box (mis. 12) atau kode box"
+           @bind="cari" @bind:event="oninput" @bind:after="CariBerubahAsync" />
+
+    @* ---------- tombol filter -- format sama dengan halaman Personel ----------
+       Saat kolom cari terisi, filter diabaikan (pencarian berlaku seluruh order). *@
+    <div class="tni-row" style="margin-bottom:10px">
+        <button class="tni-btn @(AdaFilter ? "tni-btn-p" : "tni-btn-o")"
+                disabled="@(!string.IsNullOrWhiteSpace(cari))"
+                @onclick="@(() => showFilter = true)">
+            <i class="fe fe-filter"></i> Filter@(AdaFilter ? $" ({JumlahFilter})" : "")
+        </button>
+        <span class="tni-k">@boxList.Count.ToString("N0") box</span>
+    </div>
+
+    @if (isLoading)
+    {
+        <p class="tni-note">Memuat...</p>
+    }
+
+    @* ---------- box satuan ---------- *@
+    <div class="tni-sec">Box satuan (@boxSatuan.Count)</div>
+    @if (boxSatuan.Count == 0 && !isLoading)
+    {
+        <div class="tni-card"><span class="tni-note">Belum ada box satuan.</span></div>
+    }
+    @foreach (var b in boxSatuan)
+    {
+        @RenderBox(b)
+    }
+
+    @* ---------- box gabungan ---------- *@
+    <div class="tni-sec">Box gabungan (@boxGabungan.Count)</div>
+    @if (boxGabungan.Count == 0 && !isLoading)
+    {
+        <div class="tni-card">
+            <span class="tni-note">
+                Belum ada box gabungan. Box gabungan menerima personel dari satuan mana pun
+                dalam satu rawatan — untuk sisa yang terlalu sedikit.
+            </span>
+        </div>
+    }
+    @foreach (var b in boxGabungan)
+    {
+        @RenderBox(b)
+    }
+
+    @* ---------- bar aksi ---------- *@
+    <div class="tni-bot">
+        <button class="tni-btn tni-btn-o" @onclick="@(() => OpenBuat(true))">+ Box gabungan</button>
+        <button class="tni-btn tni-btn-p" @onclick="@(() => OpenBuat(false))">+ Buka box baru</button>
+    </div>
+</div>
+
+@* ---------------- bottom sheet FILTER (format sama dengan Personel) ---------------- *@
+@if (showFilter)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => showFilter = false)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">Filter</div>
+                <button class="tni-btn" @onclick="@(() => showFilter = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-k">Rawatan</div>
+            <select class="tni-inp" @bind="areaId" @bind:after="OnAreaChanged">
+                <option value="0">Semua rawatan</option>
+                @foreach (var a in areaList)
+                {
+                    <option value="@a.AreaId">@a.AreaName</option>
+                }
+            </select>
+
+            <div class="tni-k" style="margin-top:8px">Satuan</div>
+            <select class="tni-inp" @bind="satuanId">
+                <option value="0">Semua satuan</option>
+                @foreach (var sa in SatuanPilihan)
+                {
+                    <option value="@sa.SatuanId">@sa.SatuanCode — @sa.SatuanName</option>
+                }
+            </select>
+
+            <div class="tni-k" style="margin-top:8px">Status</div>
+            <select class="tni-inp" @bind="status">
+                <option value="">Semua status</option>
+                <option value="TERBUKA">Terbuka</option>
+                <option value="TERTUTUP">Tertutup</option>
+                <option value="TERKIRIM">Terkirim</option>
+            </select>
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="ResetFilterAsync">Reset</button>
+                <button class="tni-btn tni-btn-p" @onclick="TerapkanFilterAsync">Terapkan</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet buat box ---------------- *@
+@if (buatGabungan is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="TutupBuat">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">
+                    @(buatGabungan == true ? "Box gabungan baru" : "Box satuan baru")
+                </div>
+                <button class="tni-btn" @onclick="TutupBuat"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (kodeBaru is not null)
+            {
+                @* kode box yang didapat ditampilkan BESAR -- harus ditulis di kardus *@
+                <div style="text-align:center;padding:14px 0">
+                    <div class="tni-note">Tulis no box &amp; kode ini di kardus</div>
+                    <div style="font-size:15px;font-weight:800;color:var(--tni-navy);margin-top:8px">No. Box @noBaru</div>
+                    <div class="tni-pola-lg" style="font-size:30px;margin:4px 0 8px">@kodeBaru</div>
+                    <div class="tni-note">Box sudah siap menerima scan.</div>
+                </div>
+                <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                    <button class="tni-btn tni-btn-p" @onclick="TutupBuat">Selesai</button>
+                </div>
+            }
+            else
+            {
+                @if (buatGabungan == true)
+                {
+                    <div class="tni-k">Rawatan</div>
+                    <select class="tni-inp" @bind="buatAreaId">
+                        <option value="0">- pilih rawatan -</option>
+                        @foreach (var a in areaList)
+                        {
+                            <option value="@a.AreaId">@a.AreaName</option>
+                        }
+                    </select>
+                    <div class="tni-note" style="margin-top:6px">
+                        Box gabungan menerima personel dari satuan mana pun di rawatan ini.
+                    </div>
+                }
+                else
+                {
+                    <div class="tni-k">Satuan</div>
+                    <SearchableSelect TItem="TniWilayahRowDto"
+                                      Items="satuanList"
+                                      Value="buatSatuanId"
+                                      ValueChanged="@(v => buatSatuanId = v)"
+                                      IdSelector="@(x => x.SatuanId ?? 0)"
+                                      TextSelector="@(x => $"{x.SatuanCode} — {x.SatuanName}")"
+                                      Placeholder="Cari satuan..." />
+                }
+
+                <div class="tni-k" style="margin-top:8px">Kapasitas</div>
+                <input class="tni-inp" type="number" inputmode="numeric" @bind="buatKapasitas" />
+                <div class="tni-note" style="margin-top:4px">Biasanya 50 set per kardus.</div>
+
+                @if (!string.IsNullOrEmpty(sheetError))
+                {
+                    <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+                }
+
+                <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                    <button class="tni-btn tni-btn-o" @onclick="TutupBuat">Batal</button>
+                    <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="BuatAsync">
+                        @(isSaving ? "Membuka..." : "Buka box")
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+    private string sheetError = string.Empty;
+
+    // ---- filter (bottom sheet, format sama dengan Personel)
+    private bool showFilter;
+    private int areaId;
+    private int satuanId;
+    private string status = string.Empty;
+
+    private bool AdaFilter => areaId > 0 || satuanId > 0 || !string.IsNullOrEmpty(status);
+    private int JumlahFilter =>
+        (areaId > 0 ? 1 : 0) + (satuanId > 0 ? 1 : 0) + (string.IsNullOrEmpty(status) ? 0 : 1);
+
+    // Pilihan satuan mengikuti rawatan yang dipilih.
+    private List<TniWilayahRowDto> SatuanPilihan =>
+        satuanList.Where(x => areaId == 0 || x.AreaId == areaId).ToList();
+
+    private List<TniBoxListItemDto> boxList = new();
+    private List<TniWilayahRowDto> wilayah = new();
+
+    private bool? buatGabungan;
+    private int buatSatuanId;
+    private int buatAreaId;
+    private int buatKapasitas = 50;
+    private string? kodeBaru;
+    private int noBaru;
+
+    private string cari = string.Empty;
+    private CancellationTokenSource? cariCts;
+
+    private List<TniBoxListItemDto> boxSatuan => boxList.Where(x => !x.Gabungan).ToList();
+    private List<TniBoxListItemDto> boxGabungan => boxList.Where(x => x.Gabungan).ToList();
+
+    private List<TniWilayahRowDto> satuanList =>
+        wilayah.Where(x => x.SatuanId.HasValue).OrderBy(x => x.SatuanCode).ToList();
+
+    private List<TniWilayahRowDto> areaList =>
+        wilayah.GroupBy(x => x.AreaId).Select(g => g.First()).OrderBy(x => x.AreaCode).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess != true) return;
+
+        await OrderState.EnsureLoadedAsync();
+        wilayah = await PersonelApi.GetWilayahAsync();
+
+        // Ingat pilihan satuan terakhir -- staff biasanya bekerja per satuan.
+        try
+        {
+            var simpan = await JS.InvokeAsync<string>("localStorage.getItem", "tni.box.satuanId");
+            if (int.TryParse(simpan, out var sid)) satuanId = sid;
+        }
+        catch { /* localStorage tidak tersedia -- abaikan */ }
+
+        await LoadAsync();
+    }
+
+    // Ganti rawatan -> satuan yang terpilih mungkin tidak lagi masuk daftar.
+    private void OnAreaChanged()
+    {
+        if (satuanId > 0 && !SatuanPilihan.Any(x => x.SatuanId == satuanId)) satuanId = 0;
+    }
+
+    private async Task TerapkanFilterAsync()
+    {
+        showFilter = false;
+        await SimpanSatuanAsync();
+        await LoadAsync();
+    }
+
+    private async Task ResetFilterAsync()
+    {
+        areaId = 0;
+        satuanId = 0;
+        status = string.Empty;
+        showFilter = false;
+        await SimpanSatuanAsync();
+        await LoadAsync();
+    }
+
+    // Satuan terakhir diingat -- staff biasanya bekerja per satuan.
+    private async Task SimpanSatuanAsync()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "tni.box.satuanId", satuanId.ToString()); }
+        catch { }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            // Pencarian berlaku untuk SELURUH order -- filter satuan/status diabaikan,
+            // supaya box ke-N tetap ketemu walau filter masih terpasang.
+            boxList = string.IsNullOrWhiteSpace(cari)
+                ? await BoxApi.GetListAsync(
+                    areaId: areaId > 0 ? areaId : null,
+                    satuanId: satuanId > 0 ? satuanId : null,
+                    status: string.IsNullOrEmpty(status) ? null : status)
+                : await BoxApi.GetListAsync(cari: cari);
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+
+        isLoading = false;
+    }
+
+    // Ketik -> tunggu 300 ms tanpa ketikan baru, baru cari (tidak menembak API tiap huruf).
+    private async Task CariBerubahAsync()
+    {
+        cariCts?.Cancel();
+        var cts = cariCts = new CancellationTokenSource();
+
+        try { await Task.Delay(300, cts.Token); }
+        catch (TaskCanceledException) { return; }
+
+        await LoadAsync();
+    }
+
+    // ---------- buat box ----------
+    private void OpenBuat(bool gabungan)
+    {
+        sheetError = string.Empty;
+        kodeBaru = null;
+        buatGabungan = gabungan;
+        buatKapasitas = 50;
+        buatSatuanId = satuanId;
+        buatAreaId = gabungan && satuanId > 0
+            ? satuanList.FirstOrDefault(x => x.SatuanId == satuanId)?.AreaId ?? 0
+            : 0;
+    }
+
+    private async Task TutupBuat()
+    {
+        buatGabungan = null;
+        kodeBaru = null;
+        await LoadAsync();
+    }
+
+    private async Task BuatAsync()
+    {
+        sheetError = string.Empty;
+
+        if (buatGabungan == true && buatAreaId == 0) { sheetError = "Pilih rawatan dulu."; return; }
+        if (buatGabungan == false && buatSatuanId == 0) { sheetError = "Pilih satuan dulu."; return; }
+
+        isSaving = true;
+
+        var (ok, err, hasil) = await BoxApi.CreateAsync(new TniBoxCreateRequest
+        {
+            SatuanId = buatGabungan == true ? null : buatSatuanId,
+            AreaId = buatGabungan == true ? buatAreaId : null,
+            Kapasitas = buatKapasitas
+        });
+
+        isSaving = false;
+        if (!ok) { sheetError = err; return; }
+
+        kodeBaru = hasil?.BoxCode;
+        noBaru = hasil?.BoxNo ?? 0;
+    }
+
+    // ---------- unduh PDF ----------
+    private async Task UnduhPdfAsync(TniBoxListItemDto b)
+    {
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err, bytes, nama) = await BoxApi.GetPdfAsync(b.BoxId);
+        if (!ok) { errorMessage = err; return; }
+
+        try
+        {
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                nama, "application/pdf", Convert.ToBase64String(bytes!));
+            infoMessage = $"PDF {b.BoxCode} diunduh.";
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+    }
+
+    private static string ChipClass(string status) => status switch
+    {
+        "TERBUKA" => "tni-chip-warn",
+        "TERTUTUP" => "tni-chip-navy",
+        "TERKIRIM" => "tni-chip-ok",
+        _ => "tni-chip-mut"
+    };
+
+    private static string ChipLabel(string status) => status switch
+    {
+        "TERBUKA" => "Terbuka",
+        "TERTUTUP" => "Tertutup",
+        "TERKIRIM" => "Terkirim",
+        _ => status
+    };
+
+    // Detail box dibuka di TAB BARU (target="_blank" TANPA rel="noopener" -- syarat
+    // window.close() di TniCloseButton halaman detail, sama dengan daftar Personel).
+    private RenderFragment RenderBox(TniBoxListItemDto b) => @<a class="tni-card tni-tap" href="@($"/tni/box/{b.BoxId}")" target="_blank"
+         style="display:block;text-decoration:none;color:inherit">
+        <div class="tni-row">
+            <span>
+                <span class="tni-chip tni-chip-navy" style="font-size:12px;margin-right:6px">No. @b.BoxNo</span>
+                <span class="tni-pola-lg">@b.BoxCode</span>
+            </span>
+            <span class="tni-chip @ChipClass(b.Status)">@ChipLabel(b.Status)</span>
+        </div>
+        <div class="tni-note" style="margin-top:3px">
+            @b.SatuanName · @b.AreaCode
+            @if (b.Gabungan && b.JumlahSatuan > 0)
+            {
+                <text> · @b.JumlahSatuan satuan di dalamnya</text>
+            }
+        </div>
+        <div class="tni-row" style="margin-top:5px">
+            <span class="tni-k">Isi <b>@b.Isi</b> / @b.Kapasitas</span>
+            @if (b.BolehPdf)
+            {
+                <button class="tni-btn tni-btn-o" style="padding:4px 10px"
+                        @onclick:stopPropagation="true" @onclick:preventDefault="true"
+                        @onclick="@(() => UnduhPdfAsync(b))">
+                    &#8595; PDF
+                </button>
+            }
+        </div>
+        <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+            <div style="height:100%;width:@(b.Persen)%;background:@(b.Penuh ? "var(--tni-coral)" : "var(--tni-navy2)")"></div>
+        </div>
+        @if (b.Penuh && b.Terbuka)
+        {
+            <div style="font-size:11.5px;color:var(--tni-coral);margin-top:4px;font-weight:600">
+                Box penuh — tutup box lewat detail.
+            </div>
+        }
+    </a>;
+}

@@ -1,0 +1,324 @@
+@page "/tni/import"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniImportApiService ImportApi
+@inject TniOrderState OrderState
+
+@* Prompt 62: import personel dari export Google Form (.xlsx).
+   DUA LANGKAH: Unggah & cek (staging) lalu Simpan (commit). Baris bermasalah
+   ditampilkan dengan alasannya, tidak dibuang diam-diam. *@
+
+<PageTitle>Import Personel — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-upload"></i> Import Personel</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    @* ---------- 1. kartu unggah ---------- *@
+    <div class="tni-card">
+        <div class="tni-sec" style="margin-top:0">1. Pilih file</div>
+        <InputFile OnChange="HandleFile" accept=".xlsx" class="tni-inp" disabled="@isUploading" />
+        <div class="tni-note" style="margin-top:6px">
+            File <b>.xlsx</b> export Google Form, maks 10 MB. Sheet <b>DATA MENTAH</b>
+            dipakai kalau ada. File tidak disimpan di server.
+        </div>
+
+        @if (pickedName is not null)
+        {
+            <div class="tni-row" style="margin-top:8px">
+                <span class="tni-note">@pickedName</span>
+                <button class="tni-btn tni-btn-p" disabled="@isUploading" @onclick="UploadAsync">
+                    @(isUploading ? "Memproses..." : "Unggah & cek")
+                </button>
+            </div>
+        }
+
+        @if (isUploading)
+        {
+            <div class="tni-note" style="margin-top:6px">
+                Membaca ribuan baris — biasanya belasan detik, mohon tunggu.
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @* ---------- 2. hasil cek ---------- *@
+    @if (hasil?.Batch is not null)
+    {
+        var b = hasil.Batch;
+
+        <div class="tni-sec">2. Hasil cek — @b.NamaFile (@b.JumlahBaris baris)</div>
+
+        <div class="tni-stat4">
+            <div>
+                <span class="tni-k">Baru</span>
+                <b style="color:var(--tni-ok)">@b.JumlahBaru</b>
+            </div>
+            <div>
+                <span class="tni-k">Diperbarui</span>
+                <b style="color:var(--tni-navy)">@b.JumlahDiperbarui</b>
+            </div>
+            <div>
+                <span class="tni-k">Perlu review</span>
+                <b style="color:var(--tni-warn)">@b.JumlahReview</b>
+            </div>
+            <div>
+                <span class="tni-k">Ditolak</span>
+                <b style="color:var(--tni-bad)">@b.JumlahDitolak</b>
+            </div>
+        </div>
+
+        <div class="tni-card">
+            <span class="tni-note">
+                Baris <b>Perlu review</b> tetap tersimpan dengan tanda
+                <span class="tni-chip tni-chip-warn">perlu review</span> supaya bisa
+                dibetulkan di halaman Personel. Baris <b>Ditolak</b> tidak tersimpan.
+            </span>
+        </div>
+
+        @if (b.SudahDisimpan)
+        {
+            <div class="alert alert-info">
+                Batch ini sudah disimpan @b.CommittedAt?.ToString("dd/MM/yyyy HH:mm")
+                @(string.IsNullOrEmpty(b.CommittedByNama) ? "" : $" oleh {b.CommittedByNama}").
+            </div>
+        }
+
+        @if (hasil.Baris.Count > 0)
+        {
+            <div class="tni-seg">
+                <button class="@(filter == "TOLAK" ? "on" : "")" @onclick="@(() => filter = "TOLAK")">
+                    Ditolak (@b.JumlahDitolak)
+                </button>
+                <button class="@(filter == "REVIEW" ? "on" : "")" @onclick="@(() => filter = "REVIEW")">
+                    Perlu review (@b.JumlahReview)
+                </button>
+            </div>
+
+            var tampil = hasil.Baris.Where(x => x.Hasil == filter).ToList();
+
+            @if (tampil.Count == 0)
+            {
+                <div class="tni-card"><span class="tni-note">Tidak ada baris di kategori ini.</span></div>
+            }
+            else
+            {
+                @foreach (var r in tampil.Take(shown))
+                {
+                    <div class="tni-card">
+                        <div class="tni-row">
+                            <span class="tni-b">Baris @r.BarisKe — @(string.IsNullOrWhiteSpace(r.Nama) ? "(nama kosong)" : r.Nama)</span>
+                            <span class="tni-chip @(r.Hasil == "TOLAK" ? "tni-chip-bad" : "tni-chip-warn")">
+                                @(r.Hasil == "TOLAK" ? "ditolak" : "review")
+                            </span>
+                        </div>
+                        <div class="tni-note" style="margin-top:3px">
+                            NRP @(string.IsNullOrWhiteSpace(r.Nrp) ? "(kosong)" : r.Nrp)
+                            @if (!string.IsNullOrEmpty(r.Aksi))
+                            {
+                                <text> · @r.Aksi</text>
+                            }
+                        </div>
+                        <div style="margin-top:5px;font-size:12px;color:@(r.Hasil == "TOLAK" ? "var(--tni-bad)" : "var(--tni-warn)")">
+                            @r.Pesan
+                        </div>
+                    </div>
+                }
+
+                @if (tampil.Count > shown)
+                {
+                    <button class="tni-btn tni-btn-o" style="width:100%" @onclick="@(() => shown += 50)">
+                        Muat lagi (@(tampil.Count - shown) sisa)
+                    </button>
+                }
+            }
+        }
+
+        @if (!b.SudahDisimpan)
+        {
+            <div class="tni-bot">
+                @if (!confirmSave)
+                {
+                    <button class="tni-btn tni-btn-p" disabled="@(b.JumlahAkanDisimpan == 0 || isSaving)"
+                            @onclick="@(() => confirmSave = true)">
+                        Simpan @b.JumlahAkanDisimpan baris
+                    </button>
+                }
+                else
+                {
+                    <span class="tni-note" style="flex:1">
+                        Simpan @b.JumlahBaru baru + @b.JumlahDiperbarui diperbarui?
+                    </span>
+                    <button class="tni-btn tni-btn-o" @onclick="@(() => confirmSave = false)">Batal</button>
+                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CommitAsync">
+                        @(isSaving ? "Menyimpan..." : "Ya, simpan")
+                    </button>
+                }
+            </div>
+        }
+    }
+
+    @* ---------- 3. riwayat ---------- *@
+    <div class="tni-sec">Riwayat import</div>
+    @if (batches.Count == 0)
+    {
+        <div class="tni-card"><span class="tni-note">Belum ada import.</span></div>
+    }
+    else
+    {
+        @foreach (var b in batches)
+        {
+            <div class="tni-card tni-tap" @onclick="@(() => OpenBatch(b.BatchId))">
+                <div class="tni-row">
+                    <span class="tni-b">@b.NamaFile</span>
+                    <span class="tni-chip @(b.SudahDisimpan ? "tni-chip-ok" : "tni-chip-mut")">
+                        @(b.SudahDisimpan ? "tersimpan" : "belum disimpan")
+                    </span>
+                </div>
+                <div class="tni-note" style="margin-top:3px">
+                    @b.CreatedAt.ToString("dd/MM/yyyy HH:mm")
+                    @(string.IsNullOrEmpty(b.CreatedByNama) ? "" : $" · {b.CreatedByNama}")
+                </div>
+                <div class="tni-note" style="margin-top:3px">
+                    @b.JumlahBaris baris · baru @b.JumlahBaru · diperbarui @b.JumlahDiperbarui ·
+                    review @b.JumlahReview · ditolak @b.JumlahDitolak
+                </div>
+            </div>
+        }
+    }
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isUploading;
+    private bool isSaving;
+    private bool confirmSave;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+    private string filter = "TOLAK";
+    private int shown = 50;
+
+    private IBrowserFile? picked;
+    private string? pickedName;
+
+    private TniImportHasilDto? hasil;
+    private List<TniImportBatchDto> batches = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+
+        if (hasAccess == true)
+        {
+            await OrderState.EnsureLoadedAsync();
+            batches = await ImportApi.GetBatchesAsync();
+        }
+    }
+
+    private void HandleFile(InputFileChangeEventArgs e)
+    {
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+        picked = e.File;
+        pickedName = e.File?.Name;
+    }
+
+    private async Task UploadAsync()
+    {
+        if (picked is null) return;
+
+        isUploading = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+        hasil = null;
+        confirmSave = false;
+        shown = 50;
+
+        try
+        {
+            // 10 MB sesuai batas di controller.
+            await using var stream = picked.OpenReadStream(10 * 1024 * 1024);
+            var (ok, err, result) = await ImportApi.UploadAsync(stream, picked.Name, picked.Size);
+
+            if (!ok) errorMessage = err;
+            else
+            {
+                hasil = result;
+                filter = (hasil?.Batch?.JumlahDitolak ?? 0) > 0 ? "TOLAK" : "REVIEW";
+                batches = await ImportApi.GetBatchesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+
+        isUploading = false;
+    }
+
+    private async Task CommitAsync()
+    {
+        if (hasil?.Batch is null) return;
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err, result) = await ImportApi.CommitAsync(hasil.Batch.BatchId);
+
+        isSaving = false;
+        confirmSave = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"Tersimpan: {result?.JumlahBaru ?? 0} personel baru, " +
+                      $"{result?.JumlahDiperbarui ?? 0} diperbarui.";
+
+        // angka personel di header ikut berubah
+        await OrderState.RefreshAsync();
+        hasil = await ImportApi.GetBatchAsync(hasil.Batch.BatchId);
+        batches = await ImportApi.GetBatchesAsync();
+    }
+
+    private async Task OpenBatch(int batchId)
+    {
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+        confirmSave = false;
+        shown = 50;
+        hasil = await ImportApi.GetBatchAsync(batchId);
+        filter = (hasil?.Batch?.JumlahDitolak ?? 0) > 0 ? "TOLAK" : "REVIEW";
+    }
+}

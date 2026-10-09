@@ -9,6 +9,12 @@
 -- PrintKupon). v1 hanya valid utk step ber-bundle -- step manapun di JSON dengan
 -- PrintKupon = 1 DAN RequiresBundle = 0 ditolak (RAISERROR), baik CREATE maupun UPDATE.
 --
+-- Prompt 59 -- unit_price per step: JSON @Steps membawa UnitPrice (decimal), sama pola
+-- dengan PrintKupon di atas. Harga di sini hanyalah ARAHAN AWAL -- yang dipakai produksi
+-- adalah salinannya di article_workflows (disalin saat APPLY, lalu bebas diubah per artikel);
+-- mengubah harga template TIDAK merambat ke artikel yang sudah ada. Nilai negatif ditolak,
+-- kosong/absen dibaca 0.
+--
 -- Fix: CREATE & UPDATE sekarang menolak (RAISERROR) step dengan DivisionId kosong ATAU
 -- menunjuk divisi yang sudah di-soft-delete -- sebelumnya cuma ditegakkan lewat NOT NULL/FK
 -- divisions, yang tidak menangkap divisi yang deleted_at-nya terisi (baris masih ada di FK,
@@ -76,6 +82,16 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 59: harga step tidak boleh negatif (ini upah). Kosong/absen dibaca 0.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (UnitPrice DECIMAL(19,4) '$.UnitPrice')
+            WHERE ISNULL(UnitPrice, 0) < 0
+        )
+        BEGIN
+            RAISERROR('Harga step tidak boleh negatif.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             INSERT INTO workflow_templates (workflow_code, workflow_name, created_at, created_by)
@@ -83,8 +99,8 @@ BEGIN
 
             DECLARE @NewTemplateId INT = CAST(SCOPE_IDENTITY() AS INT);
 
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
-            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, unit_price, created_at, created_by)
+            SELECT @NewTemplateId, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), ISNULL(j.UnitPrice, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     StepName       VARCHAR(150) '$.StepName',
@@ -92,7 +108,8 @@ BEGIN
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
                     AutoReceive    BIT          '$.AutoReceive',
-                    PrintKupon     BIT          '$.PrintKupon'
+                    PrintKupon     BIT          '$.PrintKupon',
+                    UnitPrice      DECIMAL(19,4) '$.UnitPrice'
                 ) j;
 
             COMMIT TRAN;
@@ -148,6 +165,16 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 59: harga step tidak boleh negatif (ini upah). Kosong/absen dibaca 0.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (UnitPrice DECIMAL(19,4) '$.UnitPrice')
+            WHERE ISNULL(UnitPrice, 0) < 0
+        )
+        BEGIN
+            RAISERROR('Harga step tidak boleh negatif.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             UPDATE workflow_templates
@@ -165,6 +192,7 @@ BEGIN
                 wts.requires_bundle = j.RequiresBundle,
                 wts.auto_receive = ISNULL(j.AutoReceive, 0),
                 wts.print_kupon = ISNULL(j.PrintKupon, 0),
+                wts.unit_price = ISNULL(j.UnitPrice, 0),
                 wts.updated_at = SYSDATETIME(),
                 wts.updated_by = @UserId
             FROM workflow_template_steps wts
@@ -176,7 +204,8 @@ BEGIN
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
                     AutoReceive    BIT          '$.AutoReceive',
-                    PrintKupon     BIT          '$.PrintKupon'
+                    PrintKupon     BIT          '$.PrintKupon',
+                    UnitPrice      DECIMAL(19,4) '$.UnitPrice'
                 ) j ON j.Id = wts.step_id
             WHERE wts.workflow_template_id = @Id AND wts.deleted_at IS NULL;
 
@@ -196,8 +225,8 @@ BEGIN
               );
 
             -- Baris tanpa Id -> insert baru
-            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
-            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
+            INSERT INTO workflow_template_steps (workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, unit_price, created_at, created_by)
+            SELECT @Id, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), ISNULL(j.UnitPrice, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     Id             INT          '$.Id',
@@ -206,7 +235,8 @@ BEGIN
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
                     AutoReceive    BIT          '$.AutoReceive',
-                    PrintKupon     BIT          '$.PrintKupon'
+                    PrintKupon     BIT          '$.PrintKupon',
+                    UnitPrice      DECIMAL(19,4) '$.UnitPrice'
                 ) j
             WHERE j.Id IS NULL;
 

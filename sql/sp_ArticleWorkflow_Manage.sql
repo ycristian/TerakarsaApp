@@ -23,6 +23,14 @@
 -- menolak (RAISERROR) kalau PrintKupon = 1 pada step RequiresBundle = 0. Step Bundling
 -- implisit selalu print_kupon = 0 (default kolom, tidak pernah diisi eksplisit di sini).
 --
+-- Prompt 59 -- unit_price per step: APPLY MENYALIN harga dari workflow_template_steps seperti
+-- kolom lain (step Bundling implisit selalu 0 -- default kolom, tidak pernah diisi eksplisit
+-- di sini); SAVE menerima UnitPrice di JSON @Steps dan menolak nilai negatif. Harga adalah
+-- milik ARTIKEL sejak APPLY: mengubah harga template TIDAK merambat ke artikel yang sudah
+-- ada, dan sebaliknya. Perubahan harga TIDAK dibatasi status log/lock -- harga tidak pernah
+-- di-snapshot ke article_workflow_logs maupun workflow_lock_items, rekap selalu membaca
+-- nilai yang berlaku sekarang.
+--
 -- Fix: APPLY & SAVE sekarang menolak (RAISERROR) step dengan divisi kosong atau divisi yang
 -- sudah di-soft-delete (APPLY mengecek step template asal, SAVE mengecek DivisionId di JSON
 -- @Steps) -- sebelumnya cuma ditegakkan lewat NOT NULL/FK divisions, yang tidak menangkap
@@ -105,8 +113,8 @@ BEGIN
 
         BEGIN TRAN;
         BEGIN TRY
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
-            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, wts.auto_receive, wts.print_kupon, SYSDATETIME(), @UserId
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, unit_price, created_at, created_by)
+            SELECT @ArticleId, @WorkflowTemplateId, wts.step_name, wts.division_id, wts.sort_order, wts.requires_bundle, wts.auto_receive, wts.print_kupon, wts.unit_price, SYSDATETIME(), @UserId
             FROM workflow_template_steps wts
             WHERE wts.workflow_template_id = @WorkflowTemplateId AND wts.deleted_at IS NULL;
 
@@ -185,6 +193,17 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 59: harga step tidak boleh negatif (ini upah). Kosong/absen dibaca 0.
+        -- Sengaja TIDAK dibatasi oleh ada/tidaknya log atau lock -- lihat catatan di atas.
+        IF EXISTS (
+            SELECT 1 FROM OPENJSON(@Steps) WITH (UnitPrice DECIMAL(19,4) '$.UnitPrice')
+            WHERE ISNULL(UnitPrice, 0) < 0
+        )
+        BEGIN
+            RAISERROR('Harga step tidak boleh negatif.', 16, 1);
+            RETURN;
+        END
+
         BEGIN TRAN;
         BEGIN TRY
             -- Baris dengan Id -> update (workflow_template_id asal tidak diubah). JSON tidak
@@ -196,6 +215,7 @@ BEGIN
                 aw.requires_bundle = j.RequiresBundle,
                 aw.auto_receive = ISNULL(j.AutoReceive, 0),
                 aw.print_kupon = ISNULL(j.PrintKupon, 0),
+                aw.unit_price = ISNULL(j.UnitPrice, 0),
                 aw.updated_at = SYSDATETIME(),
                 aw.updated_by = @UserId
             FROM article_workflows aw
@@ -207,7 +227,8 @@ BEGIN
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
                     AutoReceive    BIT          '$.AutoReceive',
-                    PrintKupon     BIT          '$.PrintKupon'
+                    PrintKupon     BIT          '$.PrintKupon',
+                    UnitPrice      DECIMAL(19,4) '$.UnitPrice'
                 ) j ON j.Id = aw.article_workflow_id
             WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL;
 
@@ -234,8 +255,8 @@ BEGIN
               );
 
             -- Baris tanpa Id -> insert baru, workflow_template_id = NULL (step manual)
-            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, created_at, created_by)
-            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), SYSDATETIME(), @UserId
+            INSERT INTO article_workflows (article_id, workflow_template_id, step_name, division_id, sort_order, requires_bundle, auto_receive, print_kupon, unit_price, created_at, created_by)
+            SELECT @ArticleId, NULL, j.StepName, j.DivisionId, j.SortOrder, j.RequiresBundle, ISNULL(j.AutoReceive, 0), ISNULL(j.PrintKupon, 0), ISNULL(j.UnitPrice, 0), SYSDATETIME(), @UserId
             FROM OPENJSON(@Steps)
                 WITH (
                     Id             INT          '$.Id',
@@ -244,7 +265,8 @@ BEGIN
                     SortOrder      INT          '$.SortOrder',
                     RequiresBundle BIT          '$.RequiresBundle',
                     AutoReceive    BIT          '$.AutoReceive',
-                    PrintKupon     BIT          '$.PrintKupon'
+                    PrintKupon     BIT          '$.PrintKupon',
+                    UnitPrice      DECIMAL(19,4) '$.UnitPrice'
                 ) j
             WHERE j.Id IS NULL;
 

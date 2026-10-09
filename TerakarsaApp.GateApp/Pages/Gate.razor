@@ -1,0 +1,1110 @@
+@* Prompt 70 -- satu-satunya halaman aplikasi gate. Mesin state untuk ke-9 layar
+   (claude prompt/mockup_70_absensi_rfid.html bagian Gate 1-9).
+
+   ATURAN YANG DIPEGANG DI SINI:
+   - TIDAK ADA logika penentuan masuk/pulang. Komponen ini hanya mengantre tap dan menampilkan
+     result_code dari SIS_Gate_Tap. Satu-satunya keputusan lokal adalah cooldown 30 detik
+     (supaya tap dobel tidak membebani API) dan itu pun dicek ulang server.
+   - Jam yang dikirim adalah jam tap ASLI (DateTime.Now saat tap), bukan jam kirim.
+   - Reader USB RFID bekerja sebagai keyboard: input tersembunyi selalu di-fokus di layar yang
+     memang menunggu kartu, reader "mengetik" 10 digit + Enter.
+*@
+
+@implements IDisposable
+@inject GateApiClient Api
+@inject GateLocalDb Db
+@inject GateState State
+@inject GateSoundPlayer Sound
+@inject CardSyncService CardSync
+@inject TapQueueService TapQueue
+@inject Microsoft.Extensions.Options.IOptions<GateWorkerOptions> OptionsAccessor
+
+@* Input tersembunyi penampung "ketikan" reader. Ditaruh di luar layar (bukan display:none)
+   supaya tetap bisa menerima fokus.
+   JANGAN diikat ke value/@oninput: reader mengetik 10 digit dalam hitungan milidetik, dan
+   render ulang (ticker tiap detik, atau render akibat @oninput itu sendiri) menimpa isi
+   input dengan nilai lama di tengah ketikan -- digit hilang, UID terpotong (2026-10-03 kartu
+   1650450826 terbaca 0160450826, 0165045086, dst. dan dua UID terpotong sempat terdaftar).
+   Digit dikumpulkan dari keydown saja; preventDefault supaya input-nya sendiri tetap kosong. *@
+<input @ref="scanInput" type="text" autocomplete="off"
+       @onkeydown="OnScanKeyDown" @onkeydown:preventDefault="true"
+       style="position: fixed; top: -200px; left: -200px; width: 10px; height: 10px; opacity: 0" />
+
+<div style="width: 100vw; height: 100vh; overflow: hidden">
+    @switch (screen)
+    {
+        case GateScreen.Idle:
+            <GateIdleScreen GateName="@GateName" IsOnline="State.IsOnline" PendingCount="State.PendingTapCount"
+                            Counts="State.Counts" ClockDriftWarning="State.ClockDriftWarning"
+                            ClockDriftText="@ClockDriftText" Now="now" OnMenuClick="RequestMenu" />
+            break;
+
+        case GateScreen.Result:
+            <GateResultScreen GateName="@GateName" Result="lastResult" IsOfflineSave="lastResultWasOffline"
+                              PendingCount="State.PendingTapCount" TappedAt="lastTappedAt" Now="now"
+                              SecondsLeft="ResultSecondsLeft" OnDismiss="BackToIdle"
+                              CanEdit="CanEditFromResult" OnEdit="RequestEditFromResult"
+                              MaskedPhone="@MaskedPhoneForCard(lastResult.CardUid)" />
+            break;
+
+        case GateScreen.Confirm:
+            <GateConfirmScreen GateName="@GateName" Result="lastResult" TappedAt="lastTappedAt"
+                               IsBusy="isConfirming" ErrorMessage="@confirmError"
+                               OnLembur="() => ConfirmSession(GateConfirmActions.Lembur)"
+                               OnLupaKembali="() => ConfirmSession(GateConfirmActions.LupaKembali)"
+                               OnLater="BackToIdle" />
+            break;
+
+        case GateScreen.AwaitOperator:
+            <GateAwaitOperatorScreen GateName="@GateName" ErrorMessage="@operatorError"
+                                     SecondsLeft="AwaitOperatorSecondsLeft" OnCancel="BackToIdle"
+                                     EditTargetName="@pendingEditCard?.EmployeeName" />
+            break;
+
+        case GateScreen.Menu:
+            <GateMenuScreen Operator="operatorCard!" State="State" Counts="State.Counts" Pane="@menuPane"
+                            PendingRows="pendingRows" IsLoadingList="isLoadingPending"
+                            NoCardCount="NoCardCount" IdleSecondsLeft="MenuIdleSecondsLeft" Now="now"
+                            ClockDriftText="@ClockDriftText" IsSyncing="isSyncing"
+                            Volume="Sound.VolumePercent" HasWavOverrides="Sound.HasWavOverrides"
+                            OnClose="BackToIdle" OnExitApp="ExitApp"
+                            OnOpenRegisterCard="OpenRegisterCard" OnOpenEditEmployee="OpenEditEmployee"
+                            OnSelectPane="SelectMenuPane" OnForceSync="ForceSync"
+                            OnVolumeChanged="SetVolume" OnTestSound="TestSound"
+                            CancelTarget="cancelTarget" CancelReason="@cancelReason"
+                            CancelError="@cancelError" CancelSuccess="@cancelSuccess" IsCancelling="isCancelling"
+                            OnRequestCancel="RequestCancelSession"
+                            OnCancelReasonChanged="v => { cancelReason = v; lastMenuActivityAt = DateTime.Now; }"
+                            OnConfirmCancel="ConfirmCancelSession" OnDismissCancel="DismissCancelSession" />
+            break;
+
+        case GateScreen.RegisterCard:
+            <GateRegisterCardScreen Operator="operatorCard!" IsOnline="State.IsOnline"
+                                    VisibleRows="RegisterCandidates" Selected="registerSelected"
+                                    ScannedUid="@registerUid" CardType="@registerCardType"
+                                    DeactivateOld="registerDeactivateOld" Search="@registerSearch"
+                                    ShowAll="registerShowAll" IsSaving="isSaving"
+                                    ErrorMessage="@registerError" SuccessMessage="@registerSuccess"
+                                    OnBack="BackToMenu" OnCancel="ResetRegisterSelection" OnSave="SaveCard"
+                                    OnSelect="SelectRegisterEmployee"
+                                    OnCardTypeChanged="v => registerCardType = v"
+                                    OnDeactivateOldChanged="v => registerDeactivateOld = v"
+                                    OnSearchChanged="v => registerSearch = v"
+                                    OnShowAllChanged="v => registerShowAll = v"
+                                    CheckMode="checkMode" CheckUid="@checkUid" CheckCard="checkCard"
+                                    CheckMaskedPhone="@MaskedPhoneForCard(checkCard?.CardUid)"
+                                    OnToggleCheck="ToggleCheckMode" OnEditCardOwner="OpenEditForCard" />
+            break;
+
+        case GateScreen.EditEmployee:
+            <GateEditEmployeeScreen Operator="operatorCard!" IsOnline="State.IsOnline"
+                                    VisibleRows="EditCandidates" Selected="editSelected"
+                                    Search="@editSearch" Name="@editName" Phone="@editPhone"
+                                    IsSaving="isSaving" ErrorMessage="@editError" SuccessMessage="@editSuccess"
+                                    OnBack="LeaveEditEmployee" OnCancel="LeaveEditEmployee" OnSave="SaveEmployee"
+                                    OnClearSelection="() => editSelected = null"
+                                    OnSelect="SelectEditEmployee"
+                                    OnSearchChanged="v => editSearch = v"
+                                    OnNameChanged="v => editName = v"
+                                    OnPhoneChanged="v => editPhone = v"
+                                    OnSearchFocusChanged="v => editSearchFocused = v" />
+            break;
+    }
+</div>
+
+@code {
+    private enum GateScreen { Idle, Result, Confirm, AwaitOperator, Menu, RegisterCard, EditEmployee }
+
+    private GateWorkerOptions Options => OptionsAccessor.Value;
+    private string GateName => Options.GateCode.Replace('-', ' ').ToUpperInvariant();
+
+    private GateScreen screen = GateScreen.Idle;
+    private ElementReference scanInput;
+
+    private DateTime now = DateTime.Now;
+    private System.Timers.Timer? ticker;
+
+    // ---- tap ----
+    private string scanBuffer = string.Empty;
+    private GateTapResultDto lastResult = new();
+    private bool lastResultWasOffline;
+    private DateTime lastTappedAt = DateTime.Now;
+    private readonly Dictionary<string, GateTapResultDto> lastSessionByUid = new();
+    private DateTime screenEnteredAt = DateTime.Now;
+    private Guid pendingConfirmTapSource = Guid.Empty;
+    private string pendingConfirmCardUid = string.Empty;
+    private bool isConfirming;
+    private string? confirmError;
+
+    // ---- menu ----
+    private GateCardDto? operatorCard;
+    private string? operatorError;
+    private string menuPane = GatePendingModes.BelumAmbil;
+    private List<GatePendingRowDto> pendingRows = new();
+    private bool isLoadingPending;
+    private DateTime lastMenuActivityAt = DateTime.Now;
+    private bool isSyncing;
+
+    // ---- ubah data dari layar hasil tap ----
+    // Kartu karyawan yang baru tap; terisi selama menunggu kartu petugas.
+    private GateCardDto? pendingEditCard;
+    // true = form ubah data dibuka dari layar hasil -> selesai/kembali ke layar tunggu, bukan menu.
+    private bool editReturnToIdle;
+
+    // ---- batalkan absensi ----
+    private GatePendingRowDto? cancelTarget;
+    private string cancelReason = string.Empty;
+    private string? cancelError;
+    private string? cancelSuccess;
+    private bool isCancelling;
+
+    // ---- daftar kartu ----
+    private string registerSearch = string.Empty;
+    private bool registerShowAll;
+    private GateEmployeeDto? registerSelected;
+    private string registerUid = string.Empty;
+    private string registerCardType = "TETAP";
+    private bool registerDeactivateOld;
+    private string? registerError;
+    private string? registerSuccess;
+
+    // ---- cek kartu (di layar daftar kartu) ----
+    private bool checkMode;
+    private string checkUid = string.Empty;
+    private GateCardDto? checkCard;
+
+    // ---- ubah data karyawan ----
+    private string editSearch = string.Empty;
+    private GateEmployeeDto? editSelected;
+    private string editName = string.Empty;
+    private string editPhone = string.Empty;
+    private string? editError;
+    private string? editSuccess;
+    private bool editSearchFocused;
+
+    private bool isSaving;
+
+    // Layar yang memang menunggu kartu. Di layar "Ubah data karyawan" dan di menu, fokus TIDAK
+    // boleh dirampas input tersembunyi -- satpam sedang mengetik di field atau menekan tombol.
+    // "Ubah data karyawan" ikut menunggu kartu HANYA di langkah pilih karyawan dan selama kotak
+    // cari tidak sedang dipakai -- tempel kartu karyawan = formnya langsung terbuka.
+    private bool ScanEnabled => screen is GateScreen.Idle or GateScreen.Result
+        or GateScreen.AwaitOperator or GateScreen.RegisterCard
+        || (screen == GateScreen.EditEmployee && editSelected is null && !editSearchFocused);
+
+    private int ResultSecondsLeft => Math.Max(0, Options.ResultScreenSeconds - (int)(now - screenEnteredAt).TotalSeconds);
+    private int AwaitOperatorSecondsLeft => Math.Max(0, Options.MenuIdleTimeoutSeconds - (int)(now - screenEnteredAt).TotalSeconds);
+    private int MenuIdleSecondsLeft => Math.Max(0, Options.MenuIdleTimeoutSeconds - (int)(now - lastMenuActivityAt).TotalSeconds);
+
+    private string ClockDriftText
+    {
+        get
+        {
+            if (State.ClockDriftSeconds is null) return "belum diketahui";
+            var seconds = State.ClockDriftSeconds.Value;
+            if (Math.Abs(seconds) < 1) return "tepat";
+            var abs = Math.Abs(seconds);
+            var label = abs >= 60 ? $"{abs / 60:0} menit" : $"{abs:0} detik";
+            return seconds > 0 ? $"{label} lebih cepat" : $"{label} lebih lambat";
+        }
+    }
+
+    private int NoCardCount => State.Employees.Count(e => !e.HasActiveCard);
+
+    protected override void OnInitialized()
+    {
+        State.OnChanged += OnStateChanged;
+
+        // Satu timer 1 detik untuk semuanya: jam besar, hitung balik layar hasil, dan timeout
+        // menu. Tiga timer terpisah hanya menambah cara untuk salah.
+        ticker = new System.Timers.Timer(1000);
+        ticker.Elapsed += (_, _) => InvokeAsync(OnTick);
+        ticker.AutoReset = true;
+        ticker.Start();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task OnTick()
+    {
+        now = DateTime.Now;
+
+        if (screen == GateScreen.Result && ResultSecondsLeft <= 0)
+        {
+            BackToIdle();
+        }
+        else if (screen == GateScreen.AwaitOperator && AwaitOperatorSecondsLeft <= 0)
+        {
+            BackToIdle();
+        }
+        else if (screen is GateScreen.Menu or GateScreen.RegisterCard or GateScreen.EditEmployee
+                 && MenuIdleSecondsLeft <= 0)
+        {
+            // Menu tertutup sendiri supaya tablet tidak ditinggal terbuka di meja satpam.
+            BackToIdle();
+        }
+
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Fokus direbut ulang setelah SETIAP render: menekan tombol apa pun memindahkan fokus,
+        // dan kalau input tersembunyi kehilangan fokus, tap kartu akan hilang tanpa jejak.
+        if (ScanEnabled)
+        {
+            try { await scanInput.FocusAsync(); } catch (Exception) { /* elemen belum siap */ }
+        }
+    }
+
+    // ======================= Alur tap =======================
+
+    // Jeda antar digit di atas ini = ketikan baru. Reader mengetik jauh lebih cepat (beberapa
+    // ms per digit); sisa digit dari pembacaan yang terputus tidak boleh tersambung ke tap
+    // berikutnya.
+    private const int ScanKeyGapMs = 300;
+    private DateTime lastScanKeyAt = DateTime.MinValue;
+
+    private async Task OnScanKeyDown(KeyboardEventArgs e)
+    {
+        var keyAt = DateTime.Now;
+
+        if (e.Key is "Enter" or "NumpadEnter")
+        {
+            var raw = scanBuffer;
+            scanBuffer = string.Empty;
+            if (raw.Length == 0) return;   // Enter nyasar tanpa digit: abaikan diam-diam
+            await HandleScan(raw);
+            return;
+        }
+
+        if (e.Key.Length != 1 || !char.IsDigit(e.Key[0])) return;
+
+        if ((keyAt - lastScanKeyAt).TotalMilliseconds > ScanKeyGapMs)
+            scanBuffer = string.Empty;
+        lastScanKeyAt = keyAt;
+        scanBuffer += e.Key;
+    }
+
+    private async Task HandleScan(string raw)
+    {
+        var digits = new string((raw ?? string.Empty).Where(char.IsDigit).ToArray());
+
+        // Reader selalu mengirim TEPAT 10 digit (nol di depan ikut terketik). Kurang dari itu
+        // berarti ada digit yang hilang -- JANGAN ditambal nol: UID terpotong yang ditambal nol
+        // sempat terdaftar sebagai kartu (0000020559, 0020059659). Bacaan rusak TIDAK masuk
+        // antrian dan TIDAK mengisi form; di layar menu cukup pesan, tidak keluar dari layar.
+        if (digits.Length != 10)
+        {
+            const string badRead = "Pembacaan kartu tidak sempurna. Tempelkan ulang kartunya.";
+            if (screen is not (GateScreen.Idle or GateScreen.Result))
+                Sound.Play(GateSound.Reject);   // ShowRejected membunyikannya sendiri
+            switch (screen)
+            {
+                case GateScreen.RegisterCard when checkMode:
+                    checkUid = string.Empty;
+                    checkCard = null;
+                    registerError = badRead;
+                    StateHasChanged();
+                    return;
+                case GateScreen.RegisterCard:
+                    registerUid = string.Empty;
+                    registerSuccess = null;
+                    registerError = badRead;
+                    StateHasChanged();
+                    return;
+                case GateScreen.AwaitOperator:
+                    operatorError = badRead;
+                    StateHasChanged();
+                    return;
+                case GateScreen.EditEmployee:
+                    editSuccess = null;
+                    editError = badRead;
+                    StateHasChanged();
+                    return;
+                case GateScreen.Idle:
+                case GateScreen.Result:
+                    ShowRejected(null, raw ?? string.Empty, badRead);
+                    return;
+                default:
+                    return;
+            }
+        }
+
+        var uid = digits;
+
+        switch (screen)
+        {
+            case GateScreen.AwaitOperator:
+                UnlockMenu(uid);
+                return;
+
+            case GateScreen.EditEmployee:
+                SelectEditEmployeeByCard(uid);
+                return;
+
+            case GateScreen.RegisterCard when checkMode:
+                // Cek kartu: hanya cari pemiliknya di cache, tidak mengisi pendaftaran/absen.
+                checkUid = uid;
+                checkCard = State.FindCard(uid);
+                registerError = null;
+                Sound.Play(checkCard is null ? GateSound.Reject : GateSound.CheckIn);
+                lastMenuActivityAt = DateTime.Now;
+                StateHasChanged();
+                return;
+
+            case GateScreen.RegisterCard:
+                // Di layar ini kartu TIDAK ditap untuk absen -- UID-nya mengisi kotak pendaftaran.
+                registerUid = uid;
+                registerError = null;
+                registerSuccess = null;
+                lastMenuActivityAt = DateTime.Now;
+                StateHasChanged();
+                return;
+
+            case GateScreen.Idle:
+            case GateScreen.Result:
+                await ProcessTap(uid);
+                return;
+
+            default:
+                return;   // Confirm/Menu/EditEmployee: tap diabaikan
+        }
+    }
+
+    private async Task ProcessTap(string uid)
+    {
+        var tappedAt = DateTime.Now;
+
+        // Cooldown dicek LOKAL dulu dari antrian; server tetap mengecek 30 detik yang sama.
+        var lastTap = Db.GetLastTapAt(uid);
+        if (lastTap is not null && (tappedAt - lastTap.Value).TotalSeconds < Options.TapCooldownSeconds)
+        {
+            var cached = State.FindCard(uid);
+            lastSessionByUid.TryGetValue(uid, out var lastSession);
+            ShowResult(new GateTapResultDto
+            {
+                ResultCode = GateResultCodes.Duplicate,
+                CardUid = uid,
+                EmployeeName = cached?.EmployeeName,
+                EmployeeCode = cached?.EmployeeCode,
+                PositionName = cached?.PositionName,
+                ResourceName = cached?.ResourceName,
+                ColorHex = cached?.ColorHex,
+                // Jam sesi dari jawaban server terakhir untuk kartu ini (kosong kalau tap
+                // pertamanya masih di antrian offline -> layar tidak menampilkan kolom jam).
+                CheckInAt = lastSession?.CheckInAt,
+                CheckOutAt = lastSession?.CheckOutAt,
+                DurationMinutes = lastSession?.DurationMinutes,
+                Message = "Sudah tercatat."
+            }, tappedAt, isOfflineSave: false);
+            return;
+        }
+
+        // tap_uid dibuat SEBELUM pengiriman dan ditulis ke antrian lebih dulu: kalau aplikasi
+        // mati persis setelah ini, tap-nya tetap terkirim nanti, dan server menolaknya sebagai
+        // duplikat kalau ternyata sudah masuk.
+        var tapUid = Guid.NewGuid();
+        Db.EnqueueTap(tapUid, uid, tappedAt, null);
+        State.SetPendingCount(Db.GetPendingCount());
+
+        if (!State.IsOnline)
+        {
+            ShowOfflineSaved(uid, tappedAt);
+            return;
+        }
+
+        try
+        {
+            var results = await Api.PostTapsAsync(Options.GateCode,
+                new List<GateTapRequest>
+                {
+                    new() { TapUid = tapUid, CardUid = uid, TappedAt = tappedAt, IsOfflineReplay = false }
+                },
+                CancellationToken.None);
+
+            State.MarkOnline();
+            Db.MarkSent(tapUid);
+            State.SetPendingCount(Db.GetPendingCount());
+
+            var result = results.FirstOrDefault();
+            if (result is null) { ShowOfflineSaved(uid, tappedAt); return; }
+
+            if (result.ResultCode == GateResultCodes.NeedConfirm)
+            {
+                // Sesi > 14 jam: server TIDAK mengubah apa pun, hanya mengembalikan info sesi.
+                // Baris antriannya sudah ditandai sent -- pemanggilan ulang nanti memakai tap_uid
+                // BARU dengan @ConfirmAction, karena tap_uid lama sudah tercatat di gate_taps dan
+                // akan dijawab idempoten dengan hasil yang sama.
+                pendingConfirmTapSource = tapUid;
+                pendingConfirmCardUid = uid;
+                confirmError = null;
+                lastResult = result;
+                lastTappedAt = tappedAt;
+                screen = GateScreen.Confirm;
+                screenEnteredAt = DateTime.Now;
+                Sound.Play(GateSound.Reject);
+                StateHasChanged();
+                return;
+            }
+
+            ShowResult(result, tappedAt, isOfflineSave: false);
+        }
+        catch (Exception)
+        {
+            // Jaringan mati di tengah jalan: barisnya sudah di antrian, jadi cukup tampilkan
+            // layar offline. TapQueueService yang mengirimnya nanti.
+            State.MarkOffline("Tap belum terkirim, masuk antrian.");
+            ShowOfflineSaved(uid, tappedAt);
+        }
+    }
+
+    private async Task ConfirmSession(string action)
+    {
+        if (isConfirming) return;
+        isConfirming = true;
+        confirmError = null;
+
+        try
+        {
+            var tapUid = Guid.NewGuid();
+            var results = await Api.PostTapsAsync(Options.GateCode,
+                new List<GateTapRequest>
+                {
+                    new() { TapUid = tapUid, CardUid = pendingConfirmCardUid, TappedAt = lastTappedAt, ConfirmAction = action, IsOfflineReplay = false }
+                },
+                CancellationToken.None);
+
+            State.MarkOnline();
+            var result = results.FirstOrDefault();
+            if (result is null || result.ResultCode == "GAGAL")
+            {
+                confirmError = result?.Message ?? "Server tidak menjawab. Coba lagi.";
+                return;
+            }
+
+            ShowResult(result, lastTappedAt, isOfflineSave: false);
+        }
+        catch (Exception ex)
+        {
+            // Konfirmasi butuh server. Jangan diantrekan: pilihan satpam tidak boleh dieksekusi
+            // berjam-jam kemudian atas sesi yang mungkin sudah berubah.
+            confirmError = "Server tidak terjangkau: " + ex.Message;
+            State.MarkOffline(ex.Message);
+        }
+        finally
+        {
+            isConfirming = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowResult(GateTapResultDto result, DateTime tappedAt, bool isOfflineSave)
+    {
+        lastResult = result;
+        lastTappedAt = tappedAt;
+        lastResultWasOffline = isOfflineSave;
+
+        // Jam sesi terakhir per kartu, untuk layar "SUDAH TERCATAT" saat tap dobel ditolak
+        // cooldown LOKAL (tanpa bertanya ke server).
+        if (!isOfflineSave && result.CheckInAt is not null && !string.IsNullOrEmpty(result.CardUid))
+            lastSessionByUid[result.CardUid] = result;
+
+        // Hasil dari server = sesi mungkin berubah -> angka Hadir / Belum ambil / Perlu cek ikut
+        // diperbarui sekarang, tidak menunggu sync kartu berikutnya. Tidak ditunggu: layar hasil
+        // harus tampil seketika; angka masuk lewat State.OnChanged.
+        if (!isOfflineSave)
+            _ = CardSync.RefreshCountsAsync(CancellationToken.None);
+
+        screen = GateScreen.Result;
+        screenEnteredAt = DateTime.Now;
+
+        Sound.Play(result.ResultCode switch
+        {
+            GateResultCodes.CheckIn => GateSound.CheckIn,
+            GateResultCodes.CheckOut => GateSound.CheckOut,
+            GateResultCodes.Duplicate => GateSound.Duplicate,
+            _ => GateSound.Reject,
+        });
+
+        StateHasChanged();
+    }
+
+    // Offline: nama + resource dari cache, dan SENGAJA tanpa menyebut masuk/pulang -- penentuan
+    // in/out milik server.
+    private void ShowOfflineSaved(string uid, DateTime tappedAt)
+    {
+        var cached = State.FindCard(uid);
+        lastResult = new GateTapResultDto
+        {
+            ResultCode = GateResultCodes.CheckIn,   // hanya penentu warna; layar offline tidak memakainya
+            CardUid = uid,
+            EmployeeName = cached?.EmployeeName,
+            EmployeeCode = cached?.EmployeeCode,
+            PositionName = cached?.PositionName,
+            ResourceName = cached?.ResourceName,
+            ColorHex = cached?.ColorHex,
+        };
+        lastTappedAt = tappedAt;
+        lastResultWasOffline = true;
+        screen = GateScreen.Result;
+        screenEnteredAt = DateTime.Now;
+
+        // Bunyi check-in TIDAK dipakai di sini: hasilnya belum diketahui. Bunyi duplikat (pelan)
+        // dipakai sebagai "tersimpan, belum pasti" supaya satpam tidak salah menyimpulkan.
+        Sound.Play(GateSound.Duplicate);
+        StateHasChanged();
+    }
+
+    private void ShowRejected(GateCardDto? card, string rawUid, string message)
+    {
+        lastResult = new GateTapResultDto
+        {
+            ResultCode = GateFormat.BadReadCode,
+            CardUid = rawUid,
+            EmployeeName = card?.EmployeeName,
+            EmployeeCode = card?.EmployeeCode,
+            PositionName = card?.PositionName,
+            Message = message,
+        };
+        lastResultWasOffline = false;
+        lastTappedAt = DateTime.Now;
+        screen = GateScreen.Result;
+        screenEnteredAt = DateTime.Now;
+        Sound.Play(GateSound.Reject);
+        StateHasChanged();
+    }
+
+    private void BackToIdle()
+    {
+        screen = GateScreen.Idle;
+        screenEnteredAt = DateTime.Now;
+        operatorCard = null;
+        operatorError = null;
+        confirmError = null;
+        pendingEditCard = null;
+        editReturnToIdle = false;
+        cancelTarget = null;
+        cancelReason = string.Empty;
+        cancelError = null;
+        cancelSuccess = null;
+        ResetRegisterState();
+        ResetEditState();
+        StateHasChanged();
+    }
+
+    // ======================= Menu satpam =======================
+
+    private void RequestMenu()
+    {
+        screen = GateScreen.AwaitOperator;
+        screenEnteredAt = DateTime.Now;
+        operatorError = null;
+        StateHasChanged();
+    }
+
+    private void UnlockMenu(string uid)
+    {
+        var card = State.FindCard(uid);
+
+        // Dicek dari CACHE: is_gate_operator ikut SIS_Gate_CardSync, jadi menu tetap bisa dibuka
+        // saat offline. Yang dibatasi online adalah aksi di dalamnya.
+        if (card is null)
+        {
+            operatorError = "Kartu tidak dikenal di tablet ini. Sinkronisasi dulu atau pakai kartu lain.";
+            Sound.Play(GateSound.Reject);
+            StateHasChanged();
+            return;
+        }
+
+        if (!card.IsGateOperator)
+        {
+            operatorError = $"{card.EmployeeName} tidak berhak membuka menu.";
+            Sound.Play(GateSound.Reject);
+            StateHasChanged();
+            return;
+        }
+
+        operatorCard = card;
+        operatorError = null;
+
+        // Dibuka dari tombol "Ubah data" di layar hasil tap: langsung ke form karyawan itu,
+        // bukan ke menu. Selesai/Kembali dari form kembali ke layar tunggu.
+        if (pendingEditCard is not null)
+        {
+            var target = pendingEditCard;
+            pendingEditCard = null;
+            Sound.Play(GateSound.CheckIn);
+            OpenEditForCard(target);
+            editReturnToIdle = true;
+            return;
+        }
+
+        menuPane = GatePendingModes.BelumAmbil;
+        lastMenuActivityAt = DateTime.Now;
+        screen = GateScreen.Menu;
+        screenEnteredAt = DateTime.Now;
+        Sound.Play(GateSound.CheckIn);
+        _ = LoadPending(menuPane);
+        StateHasChanged();
+    }
+
+    private async Task SelectMenuPane(string pane)
+    {
+        menuPane = pane;
+        lastMenuActivityAt = DateTime.Now;
+        cancelSuccess = null;
+        if (pane != "STATUS") await LoadPending(pane);
+    }
+
+    // ======================= Batalkan absensi (salah ambil kartu) =======================
+
+    private void RequestCancelSession(GatePendingRowDto row)
+    {
+        cancelTarget = row;
+        cancelReason = string.Empty;
+        cancelError = null;
+        cancelSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    private void DismissCancelSession()
+    {
+        if (isCancelling) return;
+        cancelTarget = null;
+        cancelError = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    private async Task ConfirmCancelSession()
+    {
+        if (cancelTarget?.SessionId is null || string.IsNullOrEmpty(cancelReason) || isCancelling) return;
+
+        isCancelling = true;
+        cancelError = null;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            var (success, error) = await Api.CancelSessionAsync(new GateCancelSessionRequest
+            {
+                SessionId = cancelTarget.SessionId.Value,
+                Reason = cancelReason,
+                OperatorEmployeeId = operatorCard!.EmployeeId,
+            }, CancellationToken.None);
+
+            if (!success)
+            {
+                cancelError = error;
+                Sound.Play(GateSound.Reject);
+                return;
+            }
+
+            State.MarkOnline();
+            cancelSuccess = $"Absensi {cancelTarget.EmployeeName} (masuk {cancelTarget.CheckInAt:HH:mm}) dibatalkan.";
+            cancelTarget = null;
+            Sound.Play(GateSound.CheckOut);
+            _ = CardSync.RefreshCountsAsync(CancellationToken.None);
+            await LoadPending(menuPane);
+        }
+        catch (Exception ex)
+        {
+            cancelError = "Gagal menghubungi server: " + ex.Message;
+            State.MarkOffline(ex.Message);
+            Sound.Play(GateSound.Reject);
+        }
+        finally
+        {
+            isCancelling = false;
+            lastMenuActivityAt = DateTime.Now;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPending(string mode)
+    {
+        isLoadingPending = true;
+        pendingRows = new();
+        StateHasChanged();
+
+        try
+        {
+            pendingRows = await Api.GetPendingAsync(mode, CancellationToken.None);
+            State.MarkOnline();
+        }
+        catch (Exception ex)
+        {
+            // Daftar ini dibaca langsung dari server (bukan dari cache): isinya status sesi
+            // menit ini, yang tidak boleh ditebak dari data basi.
+            State.MarkOffline(ex.Message);
+            pendingRows = new();
+        }
+        finally
+        {
+            isLoadingPending = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ForceSync()
+    {
+        isSyncing = true;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+        try
+        {
+            await TapQueue.FlushOnceAsync(CancellationToken.None);
+            await CardSync.SyncOnceAsync(CancellationToken.None);
+        }
+        finally
+        {
+            isSyncing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetVolume(int percent)
+    {
+        Sound.VolumePercent = Math.Clamp(percent, 0, 100);
+        lastMenuActivityAt = DateTime.Now;
+        // Langsung diperdengarkan: pengatur volume tanpa umpan balik tidak ada gunanya di meja
+        // yang ramai.
+        Sound.Play(GateSound.CheckIn);
+    }
+
+    private void TestSound(GateSound sound)
+    {
+        lastMenuActivityAt = DateTime.Now;
+        Sound.Play(sound);
+    }
+
+    private void ExitApp()
+    {
+        // Satu-satunya jalan keluar aplikasi, dan hanya setelah tap kartu satpam.
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    private void BackToMenu()
+    {
+        screen = GateScreen.Menu;
+        screenEnteredAt = DateTime.Now;
+        lastMenuActivityAt = DateTime.Now;
+        ResetRegisterState();
+        ResetEditState();
+        StateHasChanged();
+    }
+
+    // ======================= Daftar kartu (Gate 8) =======================
+
+    private void OpenRegisterCard()
+    {
+        ResetRegisterState();
+        screen = GateScreen.RegisterCard;
+        screenEnteredAt = DateTime.Now;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+    }
+
+    // Default: hanya yang BELUM punya kartu aktif -- supaya rollout tinggal mengambil dari atas
+    // sampai daftarnya habis. Centang "tampilkan semua" untuk kasus ganti kartu.
+    private List<GateEmployeeDto> RegisterCandidates =>
+        State.Employees
+            .Where(e => registerShowAll || !e.HasActiveCard)
+            .Where(e => MatchesSearch(e, registerSearch))
+            .ToList();
+
+    private void SelectRegisterEmployee(GateEmployeeDto emp)
+    {
+        registerSelected = emp;
+        registerUid = string.Empty;
+        registerCardType = "TETAP";
+        registerDeactivateOld = false;
+        registerError = null;
+        registerSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    private void ResetRegisterSelection()
+    {
+        registerSelected = null;
+        registerUid = string.Empty;
+        registerError = null;
+        registerSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    private void ResetRegisterState()
+    {
+        registerSearch = string.Empty;
+        registerShowAll = false;
+        ResetRegisterSelection();
+        registerCardType = "TETAP";
+        registerDeactivateOld = false;
+        checkMode = false;
+        checkUid = string.Empty;
+        checkCard = null;
+    }
+
+    private void ToggleCheckMode()
+    {
+        checkMode = !checkMode;
+        checkUid = string.Empty;
+        checkCard = null;
+        registerError = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    private async Task SaveCard()
+    {
+        if (registerSelected is null || string.IsNullOrEmpty(registerUid) || isSaving) return;
+
+        isSaving = true;
+        registerError = null;
+        registerSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            var (success, error) = await Api.RegisterCardAsync(new GateRegisterCardRequest
+            {
+                EmployeeId = registerSelected.EmployeeId,
+                CardUid = registerUid,
+                CardType = registerCardType,
+                DeactivateOldCards = registerDeactivateOld,
+                OperatorEmployeeId = operatorCard!.EmployeeId,
+            }, CancellationToken.None);
+
+            if (!success)
+            {
+                registerError = error;
+                Sound.Play(GateSound.Reject);
+                return;
+            }
+
+            registerSuccess = $"Kartu {registerUid} terdaftar untuk {registerSelected.EmployeeName}.";
+            Sound.Play(GateSound.CheckIn);
+            State.MarkOnline();
+
+            // Sync ulang supaya namanya langsung hilang dari daftar "belum punya kartu" dan
+            // kartunya langsung bisa dipakai tap.
+            await CardSync.SyncOnceAsync(CancellationToken.None);
+            registerSelected = null;
+            registerUid = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            registerError = "Gagal menyimpan: " + ex.Message;
+            State.MarkOffline(ex.Message);
+            Sound.Play(GateSound.Reject);
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    // ======================= Ubah data karyawan (Gate 9) =======================
+
+    private void OpenEditEmployee()
+    {
+        ResetEditState();
+        screen = GateScreen.EditEmployee;
+        screenEnteredAt = DateTime.Now;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+    }
+
+    private List<GateEmployeeDto> EditCandidates =>
+        State.Employees.Where(e => MatchesSearch(e, editSearch)).Take(200).ToList();
+
+    private void SelectEditEmployee(GateEmployeeDto emp)
+    {
+        editSelected = emp;
+        editName = emp.EmployeeName;
+        editPhone = emp.Phone ?? string.Empty;
+        editError = null;
+        editSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+    }
+
+    // Satpam menempelkan kartu karyawan di langkah "Pilih karyawan": pemiliknya dicari di cache
+    // kartu dan formnya langsung terbuka -- tidak perlu mencari nama di daftar.
+    private void SelectEditEmployeeByCard(string uid)
+    {
+        lastMenuActivityAt = DateTime.Now;
+        editSuccess = null;
+
+        var card = State.FindCard(uid);
+        var emp = card is null ? null : State.Employees.FirstOrDefault(e => e.EmployeeId == card.EmployeeId);
+        if (emp is null)
+        {
+            editError = card is null
+                ? $"Kartu {uid} tidak dikenal di tablet ini (belum terdaftar / nonaktif / belum sinkron)."
+                : $"Data karyawan untuk kartu {uid} belum ada di tablet. Sinkronkan dulu.";
+            Sound.Play(GateSound.Reject);
+            StateHasChanged();
+            return;
+        }
+
+        SelectEditEmployee(emp);
+        Sound.Play(GateSound.CheckIn);
+        StateHasChanged();
+    }
+
+    // No. telepon tersamar pemilik kartu, dari cache karyawan tablet (layar hasil & cek kartu).
+    private string? MaskedPhoneForCard(string? cardUid)
+    {
+        var card = string.IsNullOrEmpty(cardUid) ? null : State.FindCard(cardUid);
+        if (card is null) return null;
+        var emp = State.Employees.FirstOrDefault(e => e.EmployeeId == card.EmployeeId);
+        return GateFormat.MaskPhone(emp?.Phone);
+    }
+
+    // Tombol "Ubah data" di layar hasil tap: hanya untuk tap yang dijawab server dan kartunya
+    // dikenal tablet (pemiliknya bisa dicari di cache).
+    private bool CanEditFromResult =>
+        !lastResultWasOffline
+        && lastResult.ResultCode is GateResultCodes.CheckIn or GateResultCodes.CheckOut or GateResultCodes.Duplicate
+        && !string.IsNullOrEmpty(lastResult.CardUid)
+        && State.FindCard(lastResult.CardUid) is not null;
+
+    // Ubah data karyawan yang baru tap: butuh kartu petugas dulu (layar yang sama dengan Menu),
+    // lalu UnlockMenu langsung membuka form orang itu.
+    private void RequestEditFromResult()
+    {
+        var card = string.IsNullOrEmpty(lastResult.CardUid) ? null : State.FindCard(lastResult.CardUid);
+        if (card is null) return;
+
+        pendingEditCard = card;
+        operatorError = null;
+        screen = GateScreen.AwaitOperator;
+        screenEnteredAt = DateTime.Now;
+        StateHasChanged();
+    }
+
+    // Dibuka dari tombol "Ubah data" di layar hasil tap -> langsung kembali ke layar tunggu (tidak
+    // mampir ke daftar). Dibuka dari menu -> bertingkat: form -> daftar "Ubah data karyawan"
+    // (supaya bisa langsung tempel kartu / pilih orang lain) -> menu.
+    private void LeaveEditEmployee()
+    {
+        if (editReturnToIdle)
+        {
+            BackToIdle();
+            return;
+        }
+
+        if (editSelected is not null)
+        {
+            editSelected = null;
+            editError = null;
+            editSuccess = null;
+            lastMenuActivityAt = DateTime.Now;
+            StateHasChanged();
+            return;
+        }
+
+        BackToMenu();
+    }
+
+    // Tombol "Ubah data karyawan" di hasil Cek kartu: langsung ke form pemilik kartu itu.
+    private void OpenEditForCard(GateCardDto card)
+    {
+        var emp = State.Employees.FirstOrDefault(e => e.EmployeeId == card.EmployeeId);
+        OpenEditEmployee();
+        if (emp is not null) SelectEditEmployee(emp);
+    }
+
+    private void ResetEditState()
+    {
+        editSearch = string.Empty;
+        editSearchFocused = false;
+        editSelected = null;
+        editName = string.Empty;
+        editPhone = string.Empty;
+        editError = null;
+        editSuccess = null;
+    }
+
+    private async Task SaveEmployee()
+    {
+        if (editSelected is null || isSaving) return;
+
+        // Tolak di sini dulu dengan pesan yang jelas (aturan sama dengan SP). Kosong tetap boleh
+        // = menghapus nomor yang salah ketik.
+        var phoneError = PhoneNoRules.Validate(editPhone);
+        if (phoneError is not null)
+        {
+            editError = phoneError;
+            editSuccess = null;
+            Sound.Play(GateSound.Reject);
+            lastMenuActivityAt = DateTime.Now;
+            return;
+        }
+
+        isSaving = true;
+        editError = null;
+        editSuccess = null;
+        lastMenuActivityAt = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            var (success, error) = await Api.UpdateEmployeeAsync(new GateUpdateEmployeeRequest
+            {
+                EmployeeId = editSelected.EmployeeId,
+                EmployeeName = editName,
+                Phone = editPhone,
+                OperatorEmployeeId = operatorCard!.EmployeeId,
+            }, CancellationToken.None);
+
+            if (!success)
+            {
+                editError = error;
+                Sound.Play(GateSound.Reject);
+                return;
+            }
+
+            editSuccess = $"Data {editName} tersimpan. Tempelkan kartu berikutnya atau pilih dari daftar.";
+            Sound.Play(GateSound.CheckIn);
+            State.MarkOnline();
+            // Kembali ke langkah pilih karyawan supaya kartu berikutnya bisa langsung ditempel.
+            editSelected = null;
+            editSearch = string.Empty;
+            await CardSync.SyncOnceAsync(CancellationToken.None);
+
+            // Dibuka dari layar hasil tap: selesai = langsung ke layar tunggu (bunyi sukses sudah
+            // jadi tanda tersimpan).
+            if (editReturnToIdle) BackToIdle();
+        }
+        catch (Exception ex)
+        {
+            editError = "Gagal menyimpan: " + ex.Message;
+            State.MarkOffline(ex.Message);
+            Sound.Play(GateSound.Reject);
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private static bool MatchesSearch(GateEmployeeDto emp, string search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return true;
+        var term = search.Trim();
+        return emp.EmployeeName.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (emp.EmployeeCode?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    public void Dispose()
+    {
+        State.OnChanged -= OnStateChanged;
+        ticker?.Stop();
+        ticker?.Dispose();
+    }
+}

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Prompt 70: aplikasi gate satpam. WPF + BlazorWebView (Blazor Hybrid): seluruh UI ditulis
+       dalam .razor, XAML HANYA window pembungkus. Desktop (bukan browser) supaya tablet tetap
+       mencatat tap saat listrik padam dan reader USB bisa dibaca sebagai keyboard tanpa izin
+       browser apa pun. Butuh WebView2 Runtime terpasang di tablet, lihat README.md. -->
+  <PropertyGroup>
+    <!-- WAJIB ber-versi Windows SDK, bukan net10.0-windows polos: BlazorWebView 10 merender
+         lewat WebView2CompositionControl (D3DImage) yang memuat Microsoft.Windows.SDK.NET.dll
+         (proyeksi WinRT). Assembly itu hanya ikut ter-copy kalau TFM menyebut versi SDK.
+         Tanpa ini build tetap lolos, tapi aplikasi mati diam-diam saat window.Show() dengan
+         FileNotFoundException 'Microsoft.Windows.SDK.NET, Version=10.0.17763.10'.
+         17763 = Windows 10 1809, versi yang diminta assembly WebView2.Wpf itu sendiri. -->
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TerakarsaApp.GateApp</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="10.0.110" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.2" />
+    <!-- Cache kartu/karyawan + antrian tap offline. Tanpa EF: tabelnya tiga, dan antrian harus
+         tetap bisa ditulis walau skema cache terlanjur korup. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TerakarsaApp.Shared\TerakarsaApp.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- appsettings.json sudah ikut sebagai Content bawaan SDK; di sini hanya dipastikan
+         ter-copy ke folder exe, karena App.xaml.cs membacanya dari AppContext.BaseDirectory. -->
+    <Content Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

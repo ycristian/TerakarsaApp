@@ -31,3 +31,10 @@ window.copyToClipboard = (text) => {
 
     return succeeded ? Promise.resolve() : Promise.reject(new Error("Copy gagal, browser tidak mendukung."));
 };
+
+// Prompt 58: tap sel di Rekap absen -> pindah ke sub-tab Input lalu gulirkan baris pegawai
+// yang ditap ke tengah layar. Elemen bisa belum ada (mis. tersaring pencarian) -- diam saja.
+window.scrollElementIntoView = (elementId) => {
+    const el = document.getElementById(elementId);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+};

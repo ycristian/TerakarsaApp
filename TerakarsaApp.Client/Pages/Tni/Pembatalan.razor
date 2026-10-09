@@ -1,0 +1,293 @@
+@page "/tni/pembatalan"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPembatalanApiService PembatalanApi
+@inject TniOrderState OrderState
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Prompt 68: persetujuan pembatalan scan (mockup layar 10).
+   HALAMAN INI BUTUH MODULE TNI_PDH_APPROVE -- bukan TNI_PDH. Staff biasa
+   mengajukan dari detail personel / /t/{token} / layar scan, bukan dari sini. *@
+
+<PageTitle>Pembatalan — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">
+        Anda tidak memiliki akses persetujuan pembatalan (module TNI_PDH_APPROVE).
+    </div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-corner-up-left"></i> Pembatalan</div>
+                <div class="tni-s">
+                    @(menungguCount == 0
+                        ? "Tidak ada yang menunggu persetujuan"
+                        : $"{menungguCount} menunggu persetujuan")
+                </div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    <div class="tni-seg">
+        <button class="@(tab == "MENUNGGU" ? "on" : "")" @onclick="@(() => GantiTab("MENUNGGU"))">
+            Menunggu@(menungguCount > 0 ? $" ({menungguCount})" : "")
+        </button>
+        <button class="@(tab == "RIWAYAT" ? "on" : "")" @onclick="@(() => GantiTab("RIWAYAT"))">
+            Riwayat
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="tni-note">Memuat...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="tni-card">
+            <span class="tni-note">
+                @(tab == "MENUNGGU"
+                    ? "Tidak ada pengajuan yang menunggu persetujuan."
+                    : "Belum ada pengajuan yang pernah diputus.")
+            </span>
+        </div>
+    }
+    else
+    {
+        @foreach (var p in items)
+        {
+            <div class="tni-card">
+                <div class="tni-row">
+                    <span class="tni-chip @(p.JenisBox ? "tni-chip-warn" : "tni-chip-bad")">
+                        @p.JenisLabel
+                    </span>
+                    <span class="tni-note">@p.DiajukanAt.ToString("HH.mm")</span>
+                </div>
+
+                <div style="margin-top:5px;font-size:12.5px">
+                    <b style="font-family:ui-monospace,Consolas,monospace">@p.KodeRef</b>
+                    @p.Pangkat @p.Nama
+                    <div class="tni-k">@p.EfekLabel</div>
+                </div>
+
+                <div class="tni-note" style="margin-top:4px">
+                    "@p.Alasan"
+                    @if (!string.IsNullOrEmpty(p.DiajukanOlehNama))
+                    {
+                        <text> — @p.DiajukanOlehNama</text>
+                    }
+                </div>
+
+                @if (p.Menunggu)
+                {
+                    @* Status personel bisa SUDAH BERUBAH sejak diajukan -- SP
+                       memeriksa ulang, tapi beri tahu di sini supaya pemutus tahu. *@
+                    @if (p.JenisBox && p.BoxAsalTertutup)
+                    {
+                        <div class="tni-note" style="margin-top:6px;color:var(--tni-warn)">
+                            Box @p.BoxCodeAsal akan terbuka lagi dan PDF harus dicetak ulang.
+                        </div>
+                    }
+
+                    @if (aksiId == p.PembatalanId)
+                    {
+                        <div class="tni-k" style="margin-top:8px">
+                            Catatan @(aksiTolak ? "(wajib)" : "(opsional)")
+                        </div>
+                        <input class="tni-inp" @bind="catatan" @bind:event="oninput"
+                               placeholder="@(aksiTolak ? "Alasan menolak" : "Catatan keputusan")"
+                               maxlength="500" />
+
+                        <div class="tni-row" style="margin-top:8px;gap:6px">
+                            <button class="tni-btn tni-btn-o" style="flex:1" disabled="@isSaving"
+                                    @onclick="TutupAksi">
+                                Kembali
+                            </button>
+                            <button class="tni-btn @(aksiTolak ? "tni-btn-c" : "tni-btn-g")" style="flex:1"
+                                    disabled="@(isSaving || (aksiTolak && string.IsNullOrWhiteSpace(catatan)))"
+                                    @onclick="@(() => PutusAsync(p))">
+                                @(isSaving ? "..." : aksiTolak ? "Ya, tolak" : "Ya, setujui")
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="tni-row" style="margin-top:7px;gap:6px">
+                            <button class="tni-btn tni-btn-r" style="flex:1"
+                                    @onclick="@(() => BukaAksi(p, tolak: true))">
+                                Tolak
+                            </button>
+                            <button class="tni-btn tni-btn-g" style="flex:1"
+                                    @onclick="@(() => BukaAksi(p, tolak: false))">
+                                Setujui
+                            </button>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="tni-row" style="margin-top:6px">
+                        <span class="tni-chip @(p.Disetujui ? "tni-chip-ok" : "tni-chip-mut")">
+                            @(p.Disetujui ? "Disetujui" : "Ditolak")
+                        </span>
+                        @if (p.DiputusAt.HasValue)
+                        {
+                            <span class="tni-note">
+                                @p.DiputusAt.Value.ToString("dd/MM/yy HH.mm")
+                                @if (!string.IsNullOrEmpty(p.DiputusOlehNama))
+                                {
+                                    <text> · @p.DiputusOlehNama</text>
+                                }
+                            </span>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(p.CatatanKeputusan))
+                    {
+                        <div class="tni-note" style="margin-top:4px">Catatan: @p.CatatanKeputusan</div>
+                    }
+                }
+
+                @* TAB BARU (tanpa rel="noopener" -- lihat Personel.razor). *@
+                <a class="tni-btn tni-btn-o" href="@($"/tni/personel/{p.PersonelId}")" target="_blank"
+                   style="display:block;width:100%;margin-top:7px;text-decoration:none">
+                    Buka detail personel
+                </a>
+            </div>
+        }
+    }
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private string tab = "MENUNGGU";
+    private List<TniPembatalanDto> items = new();
+    private int menungguCount;
+
+    private int? aksiId;
+    private bool aksiTolak;
+    private string catatan = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "TNI_PDH_APPROVE");
+        if (hasAccess != true) return;
+
+        await OrderState.EnsureLoadedAsync();
+        await LoadAsync();
+    }
+
+    private async Task GantiTab(string t)
+    {
+        tab = t;
+        TutupAksi();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        if (tab == "MENUNGGU")
+        {
+            items = await PembatalanApi.GetListAsync("MENUNGGU", pageSize: 100);
+            menungguCount = items.Count;
+        }
+        else
+        {
+            // Riwayat = yang sudah diputus; hitungan menunggu tetap dari daftar MENUNGGU
+            // supaya angka di tab & subjudul tidak ikut berubah.
+            var disetujui = await PembatalanApi.GetListAsync("DISETUJUI", pageSize: 100);
+            var ditolak = await PembatalanApi.GetListAsync("DITOLAK", pageSize: 100);
+
+            items = disetujui.Concat(ditolak)
+                .OrderByDescending(x => x.DiputusAt ?? x.DiajukanAt)
+                .ToList();
+
+            menungguCount = (await PembatalanApi.GetListAsync("MENUNGGU", pageSize: 100)).Count;
+        }
+
+        isLoading = false;
+    }
+
+    private void BukaAksi(TniPembatalanDto p, bool tolak)
+    {
+        aksiId = p.PembatalanId;
+        aksiTolak = tolak;
+        catatan = string.Empty;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+    }
+
+    private void TutupAksi()
+    {
+        aksiId = null;
+        catatan = string.Empty;
+    }
+
+    private async Task PutusAsync(TniPembatalanDto p)
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var hasil = aksiTolak
+            ? await PembatalanApi.TolakAsync(p.PembatalanId, catatan.Trim())
+            : await PembatalanApi.SetujuiAsync(p.PembatalanId,
+                string.IsNullOrWhiteSpace(catatan) ? null : catatan.Trim());
+
+        isSaving = false;
+
+        if (!hasil.Ok)
+        {
+            // Pengajuan tetap MENUNGGU -- SP menolak karena kondisinya sudah berubah.
+            errorMessage = hasil.Pesan;
+            await LoadAsync();
+            return;
+        }
+
+        infoMessage = aksiTolak
+            ? $"Pengajuan {p.KodeRef} ditolak."
+            : hasil.Data?.BoxDibukaUlang == true
+                ? $"{p.KodeRef} dikeluarkan dari box {hasil.Data?.BoxCode}. Box terbuka lagi — PDF harus dicetak ulang."
+                : p.JenisBox
+                    ? $"{p.KodeRef} dikeluarkan dari box {hasil.Data?.BoxCode ?? p.BoxCodeAsal}."
+                    : $"Set {p.KodeRef} dibatalkan; kemeja & celana kembali ke stok.";
+
+        TutupAksi();
+
+        // Badge di Beranda membaca SIS_Beranda_Summary -- muat ulang supaya
+        // angka menunggu di halaman ini langsung turun.
+        await LoadAsync();
+    }
+}

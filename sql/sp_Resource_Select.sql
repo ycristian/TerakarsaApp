@@ -65,6 +65,7 @@ BEGIN
                    r.include_in_dashboard AS IncludeInDashboard,
                    r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
                    cpd.division_name AS CounterpartDivisionName,
+                   r.color_hex AS ColorHex,
                    r.created_at AS CreatedAt, r.created_by AS CreatedBy,
                    r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
             FROM resources r
@@ -106,6 +107,7 @@ BEGIN
            r.include_in_dashboard AS IncludeInDashboard,
            r.counterpart_resource_id AS CounterpartResourceId, cp.resource_name AS CounterpartResourceName,
            cpd.division_name AS CounterpartDivisionName,
+           r.color_hex AS ColorHex,
            r.created_at AS CreatedAt, r.created_by AS CreatedBy,
            r.updated_at AS UpdatedAt, r.updated_by AS UpdatedBy
     FROM resources r

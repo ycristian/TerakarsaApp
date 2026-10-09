@@ -1,0 +1,265 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Stations
+@inject StationDeviceApiService StationApi
+
+@* Prompt 58: sub-tab "Rekap" tab Absen (/station). READ-ONLY -- satu-satunya aksi adalah tap
+   sel, yang memindahkan PIC ke sub-tab Input pada tanggal sel itu (hanya untuk tanggal yang
+   masih boleh diisi: hari ini s/d 4 hari ke belakang). Semua kode sel (H/T/I/S/A/C/?/-)
+   dihitung SIS_StationAttendance_Recap, di sini hanya diwarnai.
+
+   Satu rekap = satu PERIODE GAJIAN, Minggu s/d Sabtu. Hari Sabtu milik periode yang BERAKHIR
+   di hari itu (tidak dipotong jam 10:00 seperti periode log workflow). *@
+
+<div class="d-flex flex-column gap-2">
+
+    <div>
+        <label class="form-label small fw-semibold text-muted mb-1">Periode</label>
+        <select class="form-select form-select-sm" disabled="@(isLoading || periods.Count == 0)"
+                value="@(selectedPeriodId?.ToString() ?? "")"
+                @onchange="HandlePeriodChanged">
+            @if (periods.Count == 0)
+            {
+                <option value="">Periode gajian belum di-generate</option>
+            }
+            @foreach (var p in periods)
+            {
+                <option value="@p.PayrollPeriodId">
+                    @p.PeriodCode &middot; @p.StartDate.ToString("dd/MM") &ndash; @p.EndDate.ToString("dd/MM")@(p.IsCurrent ? " (berjalan)" : "")
+                </option>
+            }
+        </select>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="fw-bold">@result.Summary.StartDate.ToString("dd/MM") &ndash; @result.Summary.EndDate.ToString("dd/MM")</div>
+        @* Mode edit sengaja MATI secara default: grid ini dibaca sambil digulir di layar
+           sentuh, jadi sel tidak boleh langsung memindahkan layar saat tersenggol. *@
+        <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="absen-recap-edit"
+                   checked="@editMode" @onchange="e => editMode = e.Value is bool b && b" />
+            <label class="form-check-label small text-muted" for="absen-recap-edit">Tap sel untuk edit</label>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <p class="text-muted mb-0">Memuat...</p>
+    }
+    else if (result.Employees.Count == 0)
+    {
+        <p class="text-muted mb-0">Belum ada pegawai di line ini.</p>
+    }
+    else
+    {
+        @* Kotak gulir sendiri (bukan .table-responsive): dengan tinggi dibatasi, baris header
+           bisa ikut di-freeze ke atas saat daftar pegawai digulir -- kalau tingginya dibiarkan
+           mengikuti isi, yang menggulir adalah halaman dan sticky-nya tidak pernah aktif. *@
+        <div style="max-height: 60vh; overflow: auto;">
+            <table class="table table-sm align-middle mb-0" style="font-size: 0.75rem;">
+                <thead>
+                    <tr class="text-muted">
+                        @* Sudut kiri-atas: freeze dua arah sekaligus, jadi z-index-nya paling
+                           tinggi supaya tidak tertimpa header tanggal maupun kolom nama. *@
+                        <th style="position: sticky; top: 0; left: 0; z-index: 3; background: #F7F8FA;">Nama</th>
+                        @foreach (var d in result.Dates)
+                        {
+                            <th class="text-center @(d.IsToday ? "text-primary" : "")"
+                                style="width: 2.4rem; position: sticky; top: 0; z-index: 2; background: #F7F8FA;">
+                                <span class="d-block">@DayLabel(d.AttendanceDate)</span>
+                                <span class="d-block">@d.AttendanceDate.ToString("dd")</span>
+                            </th>
+                        }
+                        <th class="text-center" style="width: 3rem; position: sticky; top: 0; z-index: 2; background: #F7F8FA;">Hadir</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var emp in result.Employees)
+                    {
+                        <tr>
+                            @* Kolom nama di-freeze -- grid 7 hari lebih lebar dari layar
+                               stasiun, jadi nama harus tetap terlihat saat digeser. *@
+                            <td class="fw-semibold" style="position: sticky; left: 0; z-index: 1; background: #fff;">
+                                @emp.EmployeeName
+                                @if (!emp.IsActive)
+                                {
+                                    <span class="badge bg-secondary ms-1" style="font-size: 0.55rem;">Nonaktif</span>
+                                }
+                            </td>
+                            @foreach (var d in result.Dates)
+                            {
+                                var code = CodeFor(emp.EmployeeId, d.AttendanceDate);
+                                <td class="p-1">
+                                    @* Sel bisa di-tap hanya saat mode edit dinyalakan DAN tanggalnya
+                                       masih di jendela input (hari ini s/d 4 hari ke belakang --
+                                       Input memang menolak tanggal di luar itu). *@
+                                    @if (editMode && IsEditable(d.AttendanceDate))
+                                    {
+                                        <button type="button" class="btn btn-sm w-100 p-0 fw-bold border-0"
+                                                style="@CellStyle(code)" title="@CodeLabel(code)"
+                                                @onclick="() => OpenInput(d.AttendanceDate, emp.EmployeeId)">
+                                            @CellText(code)
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <span class="d-flex align-items-center justify-content-center fw-bold"
+                                              style="@CellStyle(code) height: 28px; border-radius: 6px;"
+                                              title="@CodeLabel(code)">
+                                            @CellText(code)
+                                        </span>
+                                    }
+                                </td>
+                            }
+                            @* Merah kalau hadirnya kurang dari separuh hari kerja yang SUDAH
+                               LEWAT -- penanda cepat buat PIC, bukan aturan bisnis. Pembanding
+                               memakai hari berjalan supaya periode yang baru mulai tidak
+                               langsung merah semua. *@
+                            <td class="text-center fw-bold"
+                                style="@(ElapsedWorkingDays > 0 && emp.HadirCount * 2 < ElapsedWorkingDays ? "color: #B42318;" : "")">
+                                @emp.HadirCount/@emp.WorkingDayCount
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 small text-muted">
+            @foreach (var legend in Legends)
+            {
+                <span>
+                    <span class="d-inline-flex align-items-center justify-content-center fw-bold"
+                          style="@CellStyle(legend.Code) width: 18px; height: 18px; border-radius: 4px; font-size: 0.65rem;">@CellText(legend.Code)</span>
+                    @legend.Label
+                </span>
+            }
+        </div>
+
+        <div class="row g-1 text-center p-2" style="background: #F7F8FA; border-radius: 8px;">
+            <div class="col">
+                <div class="fw-bold">@result.Summary.AttendancePercent%</div>
+                <div class="text-muted" style="font-size: 0.7rem;">Kehadiran</div>
+            </div>
+            <div class="col">
+                <div class="fw-bold" style="color: #8A5A00;">@result.Summary.TelatCount</div>
+                <div class="text-muted" style="font-size: 0.7rem;">Telat</div>
+            </div>
+            <div class="col">
+                <div class="fw-bold" style="color: #B42318;">@result.Summary.AlpaCount</div>
+                <div class="text-muted" style="font-size: 0.7rem;">Alpa</div>
+            </div>
+            <div class="col">
+                <div class="fw-bold">@result.Summary.BelumCount</div>
+                <div class="text-muted" style="font-size: 0.7rem;">Belum diisi</div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    // (tanggal sel, employee_id) -- parent yang memindahkan sub-tab ke Input.
+    [Parameter] public EventCallback<(DateTime Date, int EmployeeId)> OnOpenInput { get; set; }
+
+    private StationAttendanceRecapResult result = new();
+    private List<StationAttendancePeriodDto> periods = new();
+    // NULL = periode absen berjalan (server yang menentukan pada muat pertama).
+    private int? selectedPeriodId;
+    private bool isLoading = false;
+    // Default MATI -- lihat komentar di checkbox "Tap sel untuk edit".
+    private bool editMode = false;
+    private int loadedForResourceId;
+
+    // Hari kerja dalam periode yang sudah dilewati (termasuk hari ini) -- dasar penanda merah
+    // kolom "Hadir x/y".
+    private int ElapsedWorkingDays =>
+        result.Dates.Count(d => d.IsWorkingDay && d.AttendanceDate.Date <= DateTime.Today);
+    // Sel dicari lewat dictionary -- grid 5 kolom x N pegawai dibaca ulang setiap render.
+    private Dictionary<(int, DateTime), string> cellLookup = new();
+
+    private static readonly (string Code, string Label)[] Legends = new[]
+    {
+        ("H", "Hadir"), ("T", "Hadir telat"), ("I", "Izin"), ("S", "Sakit"),
+        ("A", "Alpa"), ("C", "Cuti"), ("?", "Belum diisi"), (".", "Belum waktunya"), ("-", "Libur")
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ResourceId <= 0 || loadedForResourceId == ResourceId) return;
+        await LoadAsync();
+    }
+
+    public async Task LoadAsync()
+    {
+        if (ResourceId <= 0) return;
+
+        isLoading = true;
+        loadedForResourceId = ResourceId;
+
+        if (periods.Count == 0)
+            periods = await StationApi.GetAttendancePeriodsAsync();
+
+        result = await StationApi.GetAttendanceRecapAsync(ResourceId, selectedPeriodId) ?? new();
+        cellLookup = result.Cells
+            .GroupBy(c => (c.EmployeeId, c.AttendanceDate.Date))
+            .ToDictionary(g => g.Key, g => g.First().Code);
+
+        // Muat pertama: server memilih periode berjalan -- ikutkan ke dropdown supaya
+        // pilihannya terlihat terpilih.
+        selectedPeriodId ??= result.Summary.PayrollPeriodId;
+
+        isLoading = false;
+    }
+
+    private async Task HandlePeriodChanged(ChangeEventArgs e)
+    {
+        selectedPeriodId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await LoadAsync();
+    }
+
+    // Jendela input absen: hari ini s/d 4 hari ke belakang (ditegakkan SIS_StationAttendance_Manage).
+    private static bool IsEditable(DateTime date) =>
+        date.Date <= DateTime.Today && date.Date >= DateTime.Today.AddDays(-4);
+
+    private string CodeFor(int employeeId, DateTime date) =>
+        cellLookup.TryGetValue((employeeId, date.Date), out var code) ? code : "-";
+
+    private Task OpenInput(DateTime date, int employeeId) => OnOpenInput.InvokeAsync((date, employeeId));
+
+    // En dash & titik tengah hanya di tampilan -- kolom Code dari SP memakai '-' dan '.'
+    // biasa (char(1) non-unicode).
+    private static string CellText(string code) => code switch
+    {
+        "-" => "–",
+        "." => "·",
+        _ => code
+    };
+
+    private static string CellStyle(string code) => code switch
+    {
+        "H" => "background: #E8F6EE; color: #157347;",
+        "T" => "background: #FFF8E6; color: #8A5A00;",
+        "I" => "background: #EAF1FC; color: #1E56B0;",
+        "S" => "background: #FFF3E3; color: #A35400;",
+        "A" => "background: #FDECEC; color: #B42318;",
+        "C" => "background: #F3F0FF; color: #5B4BD6;",
+        // Hanya tunggakan ('?') yang diberi garis peringatan; hari yang belum tiba ('.')
+        // dan libur ('-') tampil netral.
+        "?" => "background: #F1F2F6; color: #9AA0AE; outline: 2px dashed #E0A100;",
+        _ => "background: #F1F2F6; color: #9AA0AE;"
+    };
+
+    private static string CodeLabel(string code) =>
+        Legends.FirstOrDefault(l => l.Code == code).Label ?? "Libur";
+
+    private static string DayLabel(DateTime date) => date.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "Sen",
+        DayOfWeek.Tuesday => "Sel",
+        DayOfWeek.Wednesday => "Rab",
+        DayOfWeek.Thursday => "Kam",
+        DayOfWeek.Friday => "Jum",
+        DayOfWeek.Saturday => "Sab",
+        _ => "Min"
+    };
+}

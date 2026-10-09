@@ -1,0 +1,141 @@
+@using TerakarsaApp.Shared.Stations
+
+@* Prompt 58: isi tab "Absen" di /station -- segmented toggle 3 sub-tab + penjaga perubahan
+   yang belum disimpan. Dipisah dari StationDevice.razor (sudah 4000+ baris) supaya absensi
+   berdiri sendiri; tiap sub-tab memuat datanya sendiri lewat StationDeviceApiService. *@
+
+<div class="d-flex flex-column gap-3">
+
+    <div class="btn-group w-100" role="group">
+        <button type="button" class="btn btn-sm @(subTab == "input" ? "btn-primary" : "btn-outline-secondary")"
+                @onclick='() => RequestSubTab("input")'>Input</button>
+        <button type="button" class="btn btn-sm @(subTab == "rekap" ? "btn-primary" : "btn-outline-secondary")"
+                @onclick='() => RequestSubTab("rekap")'>Rekap periode</button>
+        <button type="button" class="btn btn-sm @(subTab == "pegawai" ? "btn-primary" : "btn-outline-secondary")"
+                @onclick='() => RequestSubTab("pegawai")'>Pegawai</button>
+    </div>
+
+    @* Ketiga sub-tab tetap hidup (hanya disembunyikan) supaya perubahan Input yang belum
+       disimpan tidak hilang begitu PIC melihat Rekap lalu balik lagi. *@
+    <div class="@(subTab == "input" ? "" : "d-none")">
+        <StationAttendanceInput @ref="inputRef" ResourceId="ResourceId"
+                                OnDirtyCountChanged="HandleDirtyCountChanged" OnSaved="HandleSaved" />
+    </div>
+    <div class="@(subTab == "rekap" ? "" : "d-none")">
+        <StationAttendanceRecap @ref="recapRef" ResourceId="ResourceId" OnOpenInput="HandleOpenInputFromRecap" />
+    </div>
+    <div class="@(subTab == "pegawai" ? "" : "d-none")">
+        <StationAttendanceEmployees @ref="employeesRef" ResourceId="ResourceId"
+                                    DivisionName="@DivisionName" ResourceName="@ResourceName"
+                                    OnEmployeeChanged="HandleEmployeeChanged" />
+    </div>
+</div>
+
+<ConfirmDeleteModal Show="showLeaveConfirm" Title="Perubahan Belum Disimpan"
+                     ConfirmText="Ya, Buang" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
+                     OnConfirm="ConfirmLeave" OnCancel="CancelLeave">
+    <Message>Ada @dirtyCount perubahan absen yang belum disimpan. Pindah sub-tab akan membuang perubahan itu.</Message>
+</ConfirmDeleteModal>
+
+@code {
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    [Parameter] public string DivisionName { get; set; } = string.Empty;
+    [Parameter] public string ResourceName { get; set; } = string.Empty;
+    // Dibaca StationDevice: badge angka di judul tab + dialog konfirmasi saat pindah tab.
+    [Parameter] public EventCallback<int> OnDirtyCountChanged { get; set; }
+    // Absen tersimpan / pegawai berubah -> badge "belum diisi" & dropdown penjahit disegarkan.
+    [Parameter] public EventCallback OnDataChanged { get; set; }
+
+    private string subTab = "input";
+    private int dirtyCount = 0;
+    private bool showLeaveConfirm = false;
+    private string? pendingSubTab;
+
+    private StationAttendanceInput? inputRef;
+    private StationAttendanceRecap? recapRef;
+    private StationAttendanceEmployees? employeesRef;
+
+    // Dipanggil StationDevice sebelum pindah tab (dialognya di sana, bukan di sini).
+    public int DirtyCount => dirtyCount;
+
+    private async Task RequestSubTab(string target)
+    {
+        if (subTab == target) return;
+
+        if (subTab == "input" && dirtyCount > 0)
+        {
+            pendingSubTab = target;
+            showLeaveConfirm = true;
+            return;
+        }
+
+        await SwitchSubTab(target);
+    }
+
+    private async Task SwitchSubTab(string target)
+    {
+        subTab = target;
+
+        // Sub-tab yang dipakai lagi dimuat ulang -- datanya bisa sudah berubah (mis. absen
+        // baru disimpan, pegawai baru ditambah).
+        if (target == "rekap" && recapRef is not null)
+            await recapRef.LoadAsync();
+        else if (target == "pegawai" && employeesRef is not null)
+            await employeesRef.LoadAsync();
+    }
+
+    private async Task ConfirmLeave()
+    {
+        showLeaveConfirm = false;
+        var target = pendingSubTab;
+        pendingSubTab = null;
+        if (target is null) return;
+
+        // Buang perubahan: Input dimuat ulang dari DB (tanggal yang sedang dibuka tetap sama).
+        if (inputRef is not null) await inputRef.ReloadAsync();
+        await HandleDirtyCountChanged(0);
+        await SwitchSubTab(target);
+    }
+
+    private void CancelLeave()
+    {
+        showLeaveConfirm = false;
+        pendingSubTab = null;
+    }
+
+    private async Task HandleDirtyCountChanged(int count)
+    {
+        dirtyCount = count;
+        await OnDirtyCountChanged.InvokeAsync(count);
+    }
+
+    private async Task HandleSaved()
+    {
+        dirtyCount = 0;
+        await OnDirtyCountChanged.InvokeAsync(0);
+        await OnDataChanged.InvokeAsync();
+    }
+
+    // Tap sel di Rekap -> Input pada tanggal sel itu, baris pegawainya digulirkan ke tengah.
+    // Perubahan Input yang belum disimpan dikonfirmasi dulu (sama seperti pindah sub-tab).
+    private async Task HandleOpenInputFromRecap((DateTime Date, int EmployeeId) cell)
+    {
+        if (dirtyCount > 0)
+        {
+            pendingSubTab = "input";
+            showLeaveConfirm = true;
+            return;
+        }
+
+        subTab = "input";
+        if (inputRef is not null) await inputRef.OpenAsync(cell.Date, cell.EmployeeId);
+    }
+
+    private async Task HandleEmployeeChanged()
+    {
+        // Daftar pegawai berubah -> Input & Rekap ikut berubah isinya.
+        if (inputRef is not null) await inputRef.ReloadAsync();
+        if (recapRef is not null) await recapRef.LoadAsync();
+        await OnDataChanged.InvokeAsync();
+    }
+}

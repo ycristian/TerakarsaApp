@@ -1,0 +1,521 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Stations
+@using TerakarsaApp.Shared.Positions
+@inject StationDeviceApiService StationApi
+
+@* Prompt 58: sub-tab "Pegawai" tab Absen (/station). PIC line mengelola anggotanya sendiri:
+   tambah, nonaktifkan, aktifkan lagi. Divisi & line TIDAK pernah dikirim dari sini -- server
+   mengambilnya dari token perangkat + operator sesi (SIS_StationEmployee_Manage).
+   Tidak ada hapus: pegawai hanya dinonaktifkan, data absen & log lamanya tetap tersimpan. *@
+
+<div class="d-flex flex-column gap-2">
+
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-sm @(showActive ? "btn-success" : "btn-outline-secondary")"
+                    @onclick="() => SwitchList(true)">
+                Aktif @activeCount
+            </button>
+            <button type="button" class="btn btn-sm @(showActive ? "btn-outline-secondary" : "btn-success")"
+                    @onclick="() => SwitchList(false)">
+                Nonaktif @inactiveCount
+            </button>
+        </div>
+        <span class="flex-grow-1"></span>
+        <button type="button" class="btn btn-primary btn-sm" @onclick="OpenForm">+ Pegawai</button>
+    </div>
+
+    <input class="form-control" placeholder="Cari nama / no telp..." @bind="searchText" @bind:event="oninput"
+           @bind:after="LoadAsync" />
+
+    @if (!string.IsNullOrEmpty(listError))
+    {
+        <div class="alert alert-danger mb-0">@listError</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="text-muted mb-0">Memuat...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <p class="text-muted mb-0">@(showActive ? "Belum ada pegawai aktif di line ini." : "Tidak ada pegawai nonaktif.")</p>
+    }
+    else
+    {
+        <div style="border: 1px solid #DEE2E6; border-radius: 10px; overflow: hidden;">
+            @* Dikelompokkan per jabatan: judul grup + jumlah orangnya. Jabatan tetap
+               ditampilkan di tiap baris. Urutan di dalam grup ikut urutan dari server. *@
+            @foreach (var group in GroupedItems)
+            {
+                <div class="px-2 py-1 d-flex align-items-center gap-2 small fw-semibold"
+                     style="background: #F1F2F6; border-bottom: 1px solid #DEE2E6;">
+                    <span class="flex-grow-1">@group.PositionName</span>
+                    <span class="text-muted">@group.Items.Count</span>
+                </div>
+                @foreach (var emp in group.Items)
+                {
+                <div class="p-2" style="border-bottom: 1px solid #DEE2E6; @(inactiveFormId == emp.Id ? "background: #FFF8F8;" : "")">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="flex-grow-1">
+                            <div class="fw-bold">@emp.EmployeeName</div>
+                            <div class="small text-muted">
+                                @emp.PositionName
+                                @if (!string.IsNullOrWhiteSpace(emp.PhoneNo))
+                                {
+                                    <span> &middot; @emp.PhoneNo</span>
+                                }
+                                @if (!showActive && emp.InactiveDate is { } inactiveDate)
+                                {
+                                    <span> &middot; @inactiveDate.ToString("dd/MM/yyyy") &middot; @ReasonLabel(emp.InactiveReason)</span>
+                                }
+                            </div>
+                        </div>
+                        @if (showActive)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@isSaving"
+                                    title="Edit" aria-label="@($"Edit {emp.EmployeeName}")"
+                                    @onclick="() => OpenEditForm(emp)">
+                                <i class="fe fe-edit"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" disabled="@isSaving"
+                                    aria-label="@($"Nonaktifkan {emp.EmployeeName}")"
+                                    @onclick="() => OpenInactiveForm(emp)">
+                                Nonaktifkan
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-success text-nowrap" disabled="@isSaving"
+                                    @onclick="() => Reactivate(emp.Id)">
+                                Aktifkan lagi
+                            </button>
+                        }
+                    </div>
+
+                    @if (inactiveFormId == emp.Id)
+                    {
+                        <div class="row g-2 mt-2">
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold text-muted mb-1">Terakhir kerja</label>
+                                <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                       value="@inactiveDateInput" @onchange="e => inactiveDateInput = e.Value?.ToString() ?? string.Empty" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold text-muted mb-1">Alasan</label>
+                                <select class="form-select" @bind="inactiveReason">
+                                    @foreach (var reason in Reasons)
+                                    {
+                                        <option value="@reason.Code">@reason.Label</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(inactiveError))
+                        {
+                            <div class="alert alert-danger py-2 mt-2 mb-0">@inactiveError</div>
+                        }
+                        <div class="d-flex gap-2 justify-content-end mt-2">
+                            <button type="button" class="btn btn-sm btn-light" disabled="@isSaving" @onclick="CloseInactiveForm">Batal</button>
+                            <button type="button" class="btn btn-sm btn-danger" disabled="@isSaving" @onclick="() => ConfirmInactive(emp)">
+                                @(isSaving ? "Memproses..." : "Nonaktifkan")
+                            </button>
+                        </div>
+                    }
+                </div>
+                }
+            }
+        </div>
+    }
+
+    <div class="small text-muted">
+        Pegawai nonaktif tidak muncul di Input &amp; Rekap. Data lamanya tetap tersimpan.
+    </div>
+</div>
+
+@* Tambah & edit pegawai memakai modal yang SAMA -- bedanya cuma editingId (null = tambah).
+   Pola modal mengikuti modal lain di station: .modal.d-block + backdrop sendiri. *@
+@if (showForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingId is null ? "Pegawai Baru" : "Edit Pegawai")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" disabled="@isSaving" @onclick="CloseForm"></button>
+                </div>
+                <div class="modal-body d-flex flex-column gap-2">
+                    <div>
+                        <label class="form-label small fw-semibold text-muted mb-1">Nama *</label>
+                        <input class="form-control" maxlength="150" @bind="formName" @bind:event="oninput" />
+                    </div>
+                    @* No. telp boleh dikosongkan (banyak pegawai lama belum punya nomor
+                       tercatat), tapi kalau diisi SP menolak nomor di bawah 9 digit dan nomor
+                       yang sudah dipakai orang lain. *@
+                    <div>
+                        <label class="form-label small fw-semibold text-muted mb-1">No. telp (opsional)</label>
+                        <input class="form-control" inputmode="tel" maxlength="30" @bind="formPhone" @bind:event="oninput" />
+                        <div class="form-text" style="font-size: 0.7rem;">Boleh dikosongkan. Kalau diisi, minimal 9 digit.</div>
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold text-muted mb-1">Jabatan *</label>
+                        <select class="form-select" @bind="formPositionId">
+                            <option value="0">-- Pilih Jabatan --</option>
+                            @foreach (var p in positions)
+                            {
+                                <option value="@p.Id">@p.PositionName</option>
+                            }
+                        </select>
+                    </div>
+                    @* Tanggal mulai kerja. Boleh mundur (pegawai lama yang baru didaftar),
+                       tidak boleh di masa depan -- ditegakkan ulang di SP. *@
+                    <div>
+                        <label class="form-label small fw-semibold text-muted mb-1">Masuk tanggal *</label>
+                        <input type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                               value="@formJoinDate" @onchange="e => formJoinDate = e.Value?.ToString() ?? string.Empty" />
+                    </div>
+
+                    <div class="row g-2 small">
+                        <div class="col-6">
+                            <div class="p-2" style="background: #F1F2F6; border-radius: 8px;">
+                                <div class="text-muted">Divisi</div>
+                                <b>@DivisionName</b>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2" style="background: #F1F2F6; border-radius: 8px;">
+                                <div class="text-muted">Line</div>
+                                <b>@ResourceName</b>
+                            </div>
+                        </div>
+                    </div>
+                    @if (editingId is null)
+                    {
+                        <div class="text-muted" style="font-size: 0.7rem;">
+                            Divisi &amp; line otomatis dari station. Langsung aktif dan bisa diabsen.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-muted" style="font-size: 0.7rem;">
+                            Kode karyawan @(string.IsNullOrWhiteSpace(editingCode) ? "-" : editingCode) &middot;
+                            divisi &amp; line hanya bisa diubah lewat Master Karyawan.
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger py-2 mb-0">
+                            @formError
+                            @if (reactivateCandidateId is int candidateId)
+                            {
+                                @* PHONE_INACTIVE| dari SP: nomornya milik pegawai nonaktif, jadi
+                                   yang ditawarkan adalah mengaktifkan orang yang sama, bukan
+                                   membuat baru. *@
+                                <div class="mt-1">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@isSaving"
+                                            @onclick="() => Reactivate(candidateId)">
+                                        Aktifkan lagi?
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" disabled="@isSaving" @onclick="CloseForm">Batal</button>
+                    <button type="button" class="btn btn-primary" disabled="@isSaving" @onclick="SaveForm">
+                        @(isSaving ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    [Parameter] public string DivisionName { get; set; } = string.Empty;
+    [Parameter] public string ResourceName { get; set; } = string.Empty;
+    // Dipakai parent untuk menyegarkan badge absen + opsi dropdown penjahit di tab lain.
+    [Parameter] public EventCallback OnEmployeeChanged { get; set; }
+
+    private static readonly (string Code, string Label)[] Reasons = new[]
+    {
+        ("RESIGN", "Resign"), ("HABIS_KONTRAK", "Habis kontrak"),
+        ("DIBERHENTIKAN", "Diberhentikan"), ("PINDAH_DIVISI", "Pindah divisi")
+    };
+
+    private List<StationEmployeeDto> items = new();
+    private List<PositionDto> positions = new();
+    private int activeCount;
+    private int inactiveCount;
+    private bool showActive = true;
+    private string searchText = string.Empty;
+    private bool isLoading = false;
+    private bool isSaving = false;
+    private string listError = string.Empty;
+    private int loadedForResourceId;
+
+    private bool showForm = false;
+    // NULL = modal sedang dipakai untuk TAMBAH pegawai; terisi = edit pegawai itu.
+    private int? editingId;
+    private string? editingCode;
+    private string formName = string.Empty;
+    private string formPhone = string.Empty;
+    private int formPositionId = 0;
+    // "yyyy-MM-dd" dari <input type="date">; kosong = biar SP yang memakai hari ini.
+    private string formJoinDate = string.Empty;
+    private string formError = string.Empty;
+    private int? reactivateCandidateId;
+
+    private int? inactiveFormId;
+    private string inactiveDateInput = string.Empty;
+    private string inactiveReason = "RESIGN";
+    private string inactiveError = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ResourceId <= 0 || loadedForResourceId == ResourceId) return;
+        loadedForResourceId = ResourceId;
+        await LoadAsync();
+    }
+
+    public async Task LoadAsync()
+    {
+        if (ResourceId <= 0) return;
+
+        isLoading = true;
+        listError = string.Empty;
+
+        var result = await StationApi.GetStationEmployeesAsync(ResourceId, showActive, searchText);
+        if (result is null)
+        {
+            items = new();
+            listError = "Gagal memuat daftar pegawai.";
+        }
+        else
+        {
+            items = result.Items;
+            activeCount = result.ActiveCount;
+            inactiveCount = result.InactiveCount;
+        }
+
+        isLoading = false;
+    }
+
+    private async Task SwitchList(bool active)
+    {
+        if (showActive == active) return;
+
+        showActive = active;
+        CloseInactiveForm();
+        await LoadAsync();
+    }
+
+    private async Task OpenForm()
+    {
+        editingId = null;
+        editingCode = null;
+        formName = string.Empty;
+        formPhone = string.Empty;
+        formPositionId = 0;
+        formJoinDate = DateTime.Today.ToString("yyyy-MM-dd");
+        formError = string.Empty;
+        reactivateCandidateId = null;
+        showForm = true;
+
+        if (positions.Count == 0)
+            positions = await StationApi.GetStationPositionsAsync();
+    }
+
+    // Modal yang sama dengan tambah -- hanya terisi dan menyimpan lewat endpoint UPDATE.
+    private async Task OpenEditForm(StationEmployeeDto emp)
+    {
+        editingId = emp.Id;
+        editingCode = emp.EmployeeCode;
+        formName = emp.EmployeeName;
+        formPhone = emp.PhoneNo ?? string.Empty;
+        formPositionId = emp.PositionId;
+        formJoinDate = emp.JoinDate?.ToString("yyyy-MM-dd") ?? string.Empty;
+        formError = string.Empty;
+        reactivateCandidateId = null;
+        showForm = true;
+
+        if (positions.Count == 0)
+            positions = await StationApi.GetStationPositionsAsync();
+
+        // Jabatan lama pegawai bisa saja TIDAK ada di daftar jabatan divisi ini (pemetaan
+        // diubah admin setelah pegawainya didaftar). Tetap disertakan supaya pilihannya tidak
+        // diam-diam kosong lalu tersimpan jadi jabatan lain.
+        if (emp.PositionId > 0 && !positions.Any(p => p.Id == emp.PositionId))
+            positions.Insert(0, new PositionDto { Id = emp.PositionId, PositionName = emp.PositionName });
+    }
+
+    private void CloseForm()
+    {
+        showForm = false;
+        editingId = null;
+        editingCode = null;
+        formError = string.Empty;
+        reactivateCandidateId = null;
+    }
+
+    private async Task SaveForm()
+    {
+        formError = string.Empty;
+        reactivateCandidateId = null;
+
+        if (string.IsNullOrWhiteSpace(formName))
+        {
+            formError = "Nama wajib diisi.";
+            return;
+        }
+        if (formPositionId <= 0)
+        {
+            formError = "Jabatan wajib dipilih.";
+            return;
+        }
+
+        isSaving = true;
+
+        var (success, error) = editingId is int id
+            ? await StationApi.UpdateStationEmployeeAsync(id, new StationEmployeeUpdateRequest
+            {
+                ResourceId = ResourceId,
+                EmployeeName = formName.Trim(),
+                PhoneNo = formPhone,
+                PositionId = formPositionId,
+                JoinDate = ParsedJoinDate
+            })
+            : await StationApi.CreateStationEmployeeAsync(new StationEmployeeCreateRequest
+            {
+                ResourceId = ResourceId,
+                EmployeeName = formName.Trim(),
+                PhoneNo = formPhone,
+                PositionId = formPositionId,
+                JoinDate = ParsedJoinDate
+            });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            // Tawaran "Aktifkan lagi?" hanya relevan saat MEMBUAT pegawai baru -- saat edit,
+            // nomor yang bentrok itu milik orang lain (SP mengirim pesan biasa, tanpa prefix).
+            formError = TranslatePhoneError(error);
+            return;
+        }
+
+        CloseForm();
+        await LoadAsync();
+        await OnEmployeeChanged.InvokeAsync();
+    }
+
+    // PHONE_ACTIVE|<nama>|<line> dan PHONE_INACTIVE|<id>|<nama>|<line> -- prefix tetap dari SP
+    // (pola sama dengan QTY_EXCEED|/LOCKED| di log workflow).
+    private string TranslatePhoneError(string error)
+    {
+        var activeIdx = error.IndexOf("PHONE_ACTIVE|", StringComparison.Ordinal);
+        if (activeIdx >= 0)
+        {
+            var parts = error[(activeIdx + "PHONE_ACTIVE|".Length)..].Split('|');
+            var name = parts.ElementAtOrDefault(0)?.Trim() ?? "-";
+            var where = parts.ElementAtOrDefault(1)?.Trim() ?? "-";
+            return $"No. telp sudah dipakai {name} ({where}).";
+        }
+
+        var inactiveIdx = error.IndexOf("PHONE_INACTIVE|", StringComparison.Ordinal);
+        if (inactiveIdx >= 0)
+        {
+            var parts = error[(inactiveIdx + "PHONE_INACTIVE|".Length)..].Split('|');
+            if (int.TryParse(parts.ElementAtOrDefault(0), out var id))
+                reactivateCandidateId = id;
+
+            var name = parts.ElementAtOrDefault(1)?.Trim() ?? "-";
+            var where = parts.ElementAtOrDefault(2)?.Trim() ?? "-";
+            return $"No. telp ini sudah dipakai {name} (Nonaktif, {where}).";
+        }
+
+        return error;
+    }
+
+    private async Task Reactivate(int employeeId)
+    {
+        isSaving = true;
+        var (success, error) = await StationApi.ReactivateStationEmployeeAsync(employeeId, ResourceId);
+        isSaving = false;
+
+        if (!success)
+        {
+            if (showForm) formError = error; else listError = error;
+            return;
+        }
+
+        CloseForm();
+        // Setelah diaktifkan orangnya pindah ke daftar Aktif -- langsung tampilkan di sana.
+        showActive = true;
+        await LoadAsync();
+        await OnEmployeeChanged.InvokeAsync();
+    }
+
+    private void OpenInactiveForm(StationEmployeeDto emp)
+    {
+        inactiveFormId = emp.Id;
+        inactiveDateInput = DateTime.Today.ToString("yyyy-MM-dd");
+        inactiveReason = "RESIGN";
+        inactiveError = string.Empty;
+    }
+
+    private void CloseInactiveForm()
+    {
+        inactiveFormId = null;
+        inactiveError = string.Empty;
+    }
+
+    private async Task ConfirmInactive(StationEmployeeDto emp)
+    {
+        inactiveError = string.Empty;
+
+        if (!DateTime.TryParse(inactiveDateInput, out var inactiveDate))
+        {
+            inactiveError = "Tanggal terakhir kerja wajib diisi.";
+            return;
+        }
+
+        isSaving = true;
+        var (success, error) = await StationApi.SetStationEmployeeInactiveAsync(emp.Id, new StationEmployeeInactiveRequest
+        {
+            ResourceId = ResourceId,
+            InactiveDate = inactiveDate.Date,
+            InactiveReason = inactiveReason
+        });
+        isSaving = false;
+
+        if (!success)
+        {
+            inactiveError = error;
+            return;
+        }
+
+        CloseInactiveForm();
+        await LoadAsync();
+        await OnEmployeeChanged.InvokeAsync();
+    }
+
+    // Pengelompokan jabatan murni tampilan -- server tetap mengirim daftar datar.
+    // Jabatan kosong digabung ke "Tanpa jabatan" dan selalu ditaruh paling bawah.
+    private IEnumerable<(string PositionName, List<StationEmployeeDto> Items)> GroupedItems =>
+        items
+            .GroupBy(e => string.IsNullOrWhiteSpace(e.PositionName) ? "Tanpa jabatan" : e.PositionName.Trim())
+            .OrderBy(g => g.Key == "Tanpa jabatan" ? 1 : 0)
+            .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => (PositionName: g.Key, Items: g.ToList()));
+
+    // Kosong = tidak dikirim, SP memakai hari ini.
+    private DateTime? ParsedJoinDate =>
+        DateTime.TryParse(formJoinDate, out var parsed) ? parsed.Date : null;
+
+    private static string ReasonLabel(string? code) =>
+        Reasons.FirstOrDefault(r => r.Code == code).Label ?? (code ?? "-");
+}

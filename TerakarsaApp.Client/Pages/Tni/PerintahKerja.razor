@@ -1,0 +1,518 @@
+@page "/tni/perintah-kerja"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPerintahKerjaApiService PkApi
+@inject TniOrderState OrderState
+
+@* Prompt 65: Perintah Kerja (mockup layar 2-4). Tiga langkah dalam satu halaman:
+   pilih rawatan -> daftar satuan (saran) -> detail satuan (cetak / lepas).
+
+   Angka "bisa dibuat" adalah SARAN dari stok bebas, BUKAN validasi: supervisor
+   bebas memilih, dan cetak tidak pernah mengunci stok. *@
+
+<PageTitle>Perintah Kerja — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-clipboard"></i> Perintah Kerja</div>
+                <div class="tni-s">@Breadcrumb</div>
+            </div>
+            @if (langkah == 1)
+            {
+                <TniBackButton />
+            }
+            else
+            {
+                <button class="tni-btn" style="background:rgba(255,255,255,.15);color:#fff" @onclick="Kembali">
+                    <i class="fe fe-arrow-left"></i> Kembali
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="tni-note">Memuat...</p>
+    }
+
+    @* ==================== LANGKAH 1: pilih rawatan ==================== *@
+    @if (langkah == 1 && !isLoading)
+    {
+        <div class="tni-note" style="margin-bottom:8px">
+            Stok bebas total: <b>@rawatanData.StokBebasKemeja</b> kemeja ·
+            <b>@rawatanData.StokBebasCelana</b> celana.
+        </div>
+
+        @foreach (var r in rawatanData.Rawatan)
+        {
+            <div class="tni-card tni-tap" @onclick="@(() => PilihRawatanAsync(r))">
+                <div class="tni-row">
+                    <span class="tni-b">@r.AreaName</span>
+                    <span class="tni-chip tni-chip-navy">@r.AreaCode</span>
+                </div>
+                <div class="tni-note" style="margin-top:3px">
+                    Sisa <b>@r.Sisa.ToString("N0")</b> dari total @r.TotalPersonel.ToString("N0")
+                </div>
+                <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+                    <div style="height:100%;width:@(r.PersenSelesai)%;background:var(--tni-navy2)"></div>
+                </div>
+                <div class="tni-row" style="margin-top:5px">
+                    <span class="tni-note">@r.PersenSelesai% selesai (masuk box)</span>
+                    <span class="tni-k">Bisa dibuat dari stok: <b>@r.BisaDibuat set</b></span>
+                </div>
+                @if (r.SatuanBisaTuntas > 0)
+                {
+                    <div style="margin-top:5px">
+                        <span class="tni-chip tni-chip-ok">@r.SatuanBisaTuntas satuan bisa tuntas</span>
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    @* ==================== LANGKAH 2: daftar satuan ==================== *@
+    @if (langkah == 2 && !isLoading)
+    {
+        var tuntas = satuanList.Where(x => x.BisaTuntas).ToList();
+        var lainnya = satuanList.Where(x => !x.BisaTuntas).ToList();
+
+        @if (tuntas.Count > 0)
+        {
+            <div class="tni-sec">Saran — bisa tuntas</div>
+            @foreach (var s in tuntas)
+            {
+                <div class="tni-card tni-tap" style="border:1.5px solid var(--tni-ok)"
+                     @onclick="@(() => PilihSatuanAsync(s))">
+                    <div class="tni-row">
+                        <span class="tni-b">@s.SatuanName</span>
+                        <span class="tni-chip tni-chip-ok">Bisa tuntas</span>
+                    </div>
+                    <div class="tni-note" style="margin-top:3px">
+                        @s.SatuanCode · sisa <b>@s.Sisa</b> — stok cukup untuk semuanya
+                    </div>
+                </div>
+            }
+        }
+
+        <div class="tni-sec">Lainnya — preview</div>
+        @if (lainnya.Count == 0)
+        {
+            <div class="tni-card"><span class="tni-note">Tidak ada satuan lain.</span></div>
+        }
+        @foreach (var s in lainnya)
+        {
+            <div class="tni-card tni-tap" @onclick="@(() => PilihSatuanAsync(s))">
+                <div class="tni-row">
+                    <span class="tni-b">@s.SatuanName</span>
+                    @if (s.Sisa == 0)
+                    {
+                        <span class="tni-chip tni-chip-mut">Semua sudah dicetak</span>
+                    }
+                    else
+                    {
+                        <span class="tni-k">@s.BisaDibuat / @s.Sisa</span>
+                    }
+                </div>
+                <div class="tni-note" style="margin-top:3px">
+                    @s.SatuanCode · @s.PersenSelesai% selesai
+                </div>
+                <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+                    <div style="height:100%;width:@(s.PersenSelesai)%;background:var(--tni-navy2)"></div>
+                </div>
+            </div>
+        }
+
+        <div class="tni-note" style="margin-top:10px">
+            Angka tiap satuan dihitung sendiri-sendiri dari stok bebas yang sama —
+            kalau dua satuan dikerjakan bersamaan, totalnya bisa tidak cukup.
+        </div>
+    }
+
+    @* ==================== LANGKAH 3: detail satuan ==================== *@
+    @if (langkah == 3 && !isLoading && detail is not null)
+    {
+        <div class="tni-seg">
+            <button class="@(tab == "BISA" ? "on" : "")" @onclick="@(() => tab = "BISA")">
+                Bisa dibuat (@detail.BisaDibuat.Count)
+            </button>
+            <button class="@(tab == "BELUM" ? "on" : "")" @onclick="@(() => tab = "BELUM")">
+                Belum bisa (@detail.BelumBisa.Count)
+            </button>
+            <button class="@(tab == "DIJATAH" ? "on" : "")" @onclick="GoDijatahAsync">
+                Sudah dicetak (@dijatah.Count)
+            </button>
+        </div>
+
+        @* ---------- tab BISA DIBUAT ---------- *@
+        @if (tab == "BISA")
+        {
+            @if (detail.BisaDibuat.Count == 0)
+            {
+                <div class="tni-card">
+                    <span class="tni-note">
+                        Tidak ada yang bisa dibuat dari stok bebas saat ini.
+                        Lihat tab <b>Belum bisa</b> untuk kekurangannya.
+                    </span>
+                </div>
+            }
+            else
+            {
+                <div class="tni-row" style="margin-bottom:8px">
+                    <button class="tni-btn tni-btn-o" @onclick="PilihSemua">
+                        @(dipilih.Count == detail.BisaDibuat.Count ? "Kosongkan pilihan" : "Pilih semua")
+                    </button>
+                    <span class="tni-k">@dipilih.Count dipilih</span>
+                </div>
+
+                @foreach (var p in detail.BisaDibuat)
+                {
+                    var id = p.PersonelId;
+                    <div class="tni-card tni-tap" @onclick="@(() => Toggle(id))">
+                        <div class="tni-row">
+                            <span>
+                                <input type="checkbox" checked="@dipilih.Contains(id)"
+                                       @onclick:stopPropagation="true" @onchange="@(() => Toggle(id))" />
+                                <span class="tni-pola-lg" style="font-size:15px;margin-left:6px">@p.KodeRef</span>
+                            </span>
+                            <span class="tni-pola" style="font-size:11.5px">
+                                @p.PolaKemejaKode · @p.PolaCelanaKode
+                            </span>
+                        </div>
+                        <div class="tni-note" style="margin-top:2px">@p.Pangkat @p.Nama</div>
+                    </div>
+                }
+            }
+        }
+
+        @* ---------- tab BELUM BISA ---------- *@
+        @if (tab == "BELUM")
+        {
+            @if (detail.Kekurangan.Count > 0)
+            {
+                <div class="tni-card" style="border-color:var(--tni-bad)">
+                    <div class="tni-k" style="font-weight:700;margin-bottom:4px">Kekurangan stok</div>
+                    @foreach (var k in detail.Kekurangan)
+                    {
+                        <div class="tni-row" style="font-size:12.5px">
+                            <span>kurang <b>@k.Kurang</b> @(k.JenisItem == "KEMEJA" ? "kemeja" : "celana")</span>
+                            <span class="tni-pola">@k.Kode</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (detail.BelumBisa.Count == 0)
+            {
+                <div class="tni-card"><span class="tni-note">Semua sisa bisa dibuat dari stok.</span></div>
+            }
+            @foreach (var b in detail.BelumBisa)
+            {
+                <div class="tni-card">
+                    <div class="tni-row">
+                        <span class="tni-pola-lg" style="font-size:15px">@b.Personel.KodeRef</span>
+                        <span class="tni-pola" style="font-size:11.5px">
+                            @b.Personel.PolaKemejaKode · @b.Personel.PolaCelanaKode
+                        </span>
+                    </div>
+                    <div class="tni-note" style="margin-top:2px">@b.Personel.Pangkat @b.Personel.Nama</div>
+                    <div style="font-size:12px;color:var(--tni-bad);margin-top:3px">@b.Alasan</div>
+                </div>
+            }
+        }
+
+        @* ---------- tab SUDAH DICETAK ---------- *@
+        @if (tab == "DIJATAH")
+        {
+            @if (dijatah.Count == 0)
+            {
+                <div class="tni-card">
+                    <span class="tni-note">Tidak ada kartu tercetak yang belum di-scan Set Jadi.</span>
+                </div>
+            }
+            else
+            {
+                <div class="tni-note" style="margin-bottom:8px">
+                    Kartu ini sudah dicetak tapi belum di-scan Set Jadi, jadi stoknya
+                    dianggap <b>sudah dijatah</b>.
+                </div>
+                <div class="tni-row" style="margin-bottom:8px">
+                    <button class="tni-btn tni-btn-o" @onclick="PilihSemuaDijatah">
+                        @(dipilihLepas.Count == dijatah.Count ? "Kosongkan pilihan" : "Pilih semua")
+                    </button>
+                    <span class="tni-k">@dipilihLepas.Count dipilih</span>
+                </div>
+
+                @foreach (var d in dijatah)
+                {
+                    var id = d.PersonelId;
+                    <div class="tni-card tni-tap" @onclick="@(() => ToggleLepas(id))">
+                        <div class="tni-row">
+                            <span>
+                                <input type="checkbox" checked="@dipilihLepas.Contains(id)"
+                                       @onclick:stopPropagation="true" @onchange="@(() => ToggleLepas(id))" />
+                                <span class="tni-pola-lg" style="font-size:15px;margin-left:6px">@d.KodeRef</span>
+                            </span>
+                            <span class="tni-pola" style="font-size:11.5px">
+                                @d.PolaKemejaKode · @d.PolaCelanaKode
+                            </span>
+                        </div>
+                        <div class="tni-note" style="margin-top:2px">@d.Pangkat @d.Nama</div>
+                        <div class="tni-note">
+                            dicetak @d.PrintedAt?.ToString("dd/MM HH:mm")
+                            @(string.IsNullOrEmpty(d.PrintedByNama) ? "" : $" · {d.PrintedByNama}")
+                            @(d.PrintCount > 1 ? $" · {d.PrintCount}x" : "")
+                        </div>
+                    </div>
+                }
+            }
+        }
+
+        @* ---------- bar aksi ---------- *@
+        <div class="tni-bot">
+            @if (tab == "BISA" && dipilih.Count > 0)
+            {
+                @if (!konfirmCetak)
+                {
+                    <span class="tni-note" style="flex:1"><b>@dipilih.Count</b> dipilih</span>
+                    <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="@(() => konfirmCetak = true)">
+                        Cetak @dipilih.Count kartu
+                    </button>
+                }
+                else
+                {
+                    <span class="tni-note" style="flex:1">Cetak @dipilih.Count kartu sekarang?</span>
+                    <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmCetak = false)">Batal</button>
+                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CetakAsync">
+                        @(isSaving ? "Mengirim..." : "Ya, cetak")
+                    </button>
+                }
+            }
+            else if (tab == "DIJATAH" && dipilihLepas.Count > 0)
+            {
+                @if (!konfirmLepas)
+                {
+                    <span class="tni-note" style="flex:1"><b>@dipilihLepas.Count</b> dipilih</span>
+                    <button class="tni-btn tni-btn-r" disabled="@isSaving" @onclick="@(() => konfirmLepas = true)">
+                        Lepas kartu
+                    </button>
+                }
+                else
+                {
+                    <span class="tni-note" style="flex:1">
+                        Kartu fisik ini tidak akan dikerjakan sekarang? Stok bebas akan dikembalikan.
+                    </span>
+                    <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmLepas = false)">Batal</button>
+                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="LepasAsync">
+                        @(isSaving ? "Memproses..." : "Ya, lepas")
+                    </button>
+                }
+            }
+            else
+            {
+                <span class="tni-note" style="flex:1">
+                    @(tab == "BISA" ? "Centang personel untuk dicetak." :
+                      tab == "DIJATAH" ? "Centang kartu yang batal dikerjakan." :
+                      "Tidak ada aksi di tab ini.")
+                </span>
+            }
+        </div>
+    }
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private bool konfirmCetak;
+    private bool konfirmLepas;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private int langkah = 1;
+    private string tab = "BISA";
+
+    private TniPerintahKerjaApiService.RawatanResponse rawatanData = new();
+    private TniRawatanDto? rawatanTerpilih;
+    private List<TniSatuanSaranDto> satuanList = new();
+    private TniSatuanSaranDto? satuanTerpilih;
+    private TniSatuanDetailDto? detail;
+    private List<TniDijatahDto> dijatah = new();
+
+    private HashSet<int> dipilih = new();
+    private HashSet<int> dipilihLepas = new();
+
+    private string Breadcrumb => langkah switch
+    {
+        1 => OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...",
+        2 => rawatanTerpilih?.AreaName ?? string.Empty,
+        _ => $"{satuanTerpilih?.SatuanName} · {rawatanTerpilih?.AreaCode}"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess != true) return;
+
+        await OrderState.EnsureLoadedAsync();
+        await LoadRawatanAsync();
+    }
+
+    private async Task LoadRawatanAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+        try { rawatanData = await PkApi.GetRawatanAsync(); }
+        catch (Exception ex) { errorMessage = ex.Message; }
+        isLoading = false;
+    }
+
+    private async Task PilihRawatanAsync(TniRawatanDto r)
+    {
+        rawatanTerpilih = r;
+        langkah = 2;
+        infoMessage = string.Empty;
+        isLoading = true;
+        try { satuanList = await PkApi.GetSatuanAsync(r.AreaId); }
+        catch (Exception ex) { errorMessage = ex.Message; }
+        isLoading = false;
+    }
+
+    private async Task PilihSatuanAsync(TniSatuanSaranDto s)
+    {
+        satuanTerpilih = s;
+        langkah = 3;
+        tab = "BISA";
+        dipilih.Clear();
+        dipilihLepas.Clear();
+        konfirmCetak = false;
+        konfirmLepas = false;
+        infoMessage = string.Empty;
+        await LoadDetailAsync();
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        if (satuanTerpilih is null) return;
+
+        isLoading = true;
+        try
+        {
+            detail = await PkApi.GetSatuanDetailAsync(satuanTerpilih.SatuanId);
+            dijatah = await PkApi.GetDijatahAsync(satuanTerpilih.SatuanId);
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+        isLoading = false;
+    }
+
+    private async Task GoDijatahAsync()
+    {
+        tab = "DIJATAH";
+        if (satuanTerpilih is not null) dijatah = await PkApi.GetDijatahAsync(satuanTerpilih.SatuanId);
+    }
+
+    private async Task Kembali()
+    {
+        konfirmCetak = false;
+        konfirmLepas = false;
+        infoMessage = string.Empty;
+
+        if (langkah == 3) { langkah = 2; if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId); }
+        else if (langkah == 2) { langkah = 1; await LoadRawatanAsync(); }
+    }
+
+    private void Toggle(int id)
+    {
+        if (!dipilih.Add(id)) dipilih.Remove(id);
+        konfirmCetak = false;
+    }
+
+    private void ToggleLepas(int id)
+    {
+        if (!dipilihLepas.Add(id)) dipilihLepas.Remove(id);
+        konfirmLepas = false;
+    }
+
+    private void PilihSemua()
+    {
+        if (detail is null) return;
+        if (dipilih.Count == detail.BisaDibuat.Count) dipilih.Clear();
+        else dipilih = detail.BisaDibuat.Select(x => x.PersonelId).ToHashSet();
+        konfirmCetak = false;
+    }
+
+    private void PilihSemuaDijatah()
+    {
+        if (dipilihLepas.Count == dijatah.Count) dipilihLepas.Clear();
+        else dipilihLepas = dijatah.Select(x => x.PersonelId).ToHashSet();
+        konfirmLepas = false;
+    }
+
+    private async Task CetakAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err, hasil) = await PkApi.CetakAsync(dipilih.ToList());
+
+        isSaving = false;
+        konfirmCetak = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"{hasil?.JumlahJob ?? 0} kartu masuk antrian cetak.";
+        dipilih.Clear();
+
+        // stok bebas & angka satuan lain ikut berubah -> muat ulang
+        await LoadDetailAsync();
+        if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId);
+    }
+
+    private async Task LepasAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err, hasil) = await PkApi.LepasAsync(dipilihLepas.ToList());
+
+        isSaving = false;
+        konfirmLepas = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"{hasil?.JumlahDilepas ?? 0} kartu dilepas — stok bebas dikembalikan."
+            + (string.IsNullOrEmpty(hasil?.DilewatiKodeRef)
+                ? string.Empty
+                : $" Dilewati karena sudah set jadi: {hasil.DilewatiKodeRef}.");
+
+        dipilihLepas.Clear();
+        await LoadDetailAsync();
+        if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId);
+    }
+}

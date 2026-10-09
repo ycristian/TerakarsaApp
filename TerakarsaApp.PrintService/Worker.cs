@@ -53,6 +53,13 @@ public class Worker : BackgroundService
     // (tidak ada untungnya dipindah ke DB).
     private static readonly string[] LabelJobTypes = { "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE" };
 
+    // Prompt 65: job_type yang dirakit di C# sebagai ESC/POS (printer thermal 80mm),
+    // BUKAN lewat token SP seperti job_type kupon -- jadi tidak didaftarkan di
+    // print_kupon_job_types, dan ditangkap berdasarkan job_type sebelum switch
+    // RenderMode di ProcessJobAsync. Printernya tetap diambil dari hasil klaim
+    // (print_job_routes -> print_devices), jadi bisa dipindah dari DB.
+    private static readonly string[] EscPosJobTypes = { "TNI_KARTU" };
+
     // Ad hoc (2026-09-01): job_type "kupon" (thermal, render_mode TOKEN) TIDAK LAGI hardcode di
     // sini -- render TOKEN generik (EscPosRenderer cuma nerjemahin token, tidak peduli
     // job_type-nya apa), jadi job_type struk baru cukup SP render + baris di
@@ -63,28 +70,50 @@ public class Worker : BackgroundService
     {
         var enabledJobTypes = new List<string>();
         if (_options.PrinterLabelOn) enabledJobTypes.AddRange(LabelJobTypes);
-        if (_options.PrinterThermalOn) enabledJobTypes.AddRange(await _apiClient.GetKuponJobTypesAsync(ct));
+        if (_options.PrinterThermalOn)
+        {
+            enabledJobTypes.AddRange(await _apiClient.GetKuponJobTypesAsync(ct));
+            enabledJobTypes.AddRange(EscPosJobTypes);
+        }
 
         // Semua printer off -- jangan panggil API sama sekali, tidak ada yang boleh diklaim.
         if (enabledJobTypes.Count == 0) return;
 
-        var jobs = await _apiClient.ClaimAsync(Math.Max(1, _options.BatchSize), enabledJobTypes, _options.DryRun, ct);
-        if (jobs.Count == 0) return;
+        var batchSize = Math.Max(1, _options.BatchSize);
 
-        Log(LogLevel.Information, $"Klaim {jobs.Count} job cetak.");
+        // Prompt 65 -- PERCEPATAN: kalau satu klaim mengembalikan job sebanyak
+        // BatchSize, antrian kemungkinan masih panjang (mis. cetak ratusan kartu
+        // satuan sekaligus), jadi langsung klaim lagi tanpa menunggu PollSeconds.
+        // Perilaku untuk antrian kosong/sebagian TIDAK berubah.
+        // Dibatasi supaya satu siklus poll tidak berputar selamanya dan service
+        // tetap bisa berhenti saat diminta.
+        const int maxBatchesPerCycle = 50;
 
-        foreach (var job in jobs)
+        for (var batch = 0; batch < maxBatchesPerCycle; batch++)
         {
-            // Kegagalan satu job tidak boleh menghentikan job lain di batch ini.
-            try
+            if (ct.IsCancellationRequested) return;
+
+            var jobs = await _apiClient.ClaimAsync(batchSize, enabledJobTypes, _options.DryRun, ct);
+            if (jobs.Count == 0) return;
+
+            Log(LogLevel.Information, $"Klaim {jobs.Count} job cetak.");
+
+            foreach (var job in jobs)
             {
-                await ProcessJobAsync(job, ct);
+                // Kegagalan satu job tidak boleh menghentikan job lain di batch ini.
+                try
+                {
+                    await ProcessJobAsync(job, ct);
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Error, $"Job #{job.PrintJobId}: error tak terduga - {ex.Message}");
+                    await ReportSafeAsync(job.PrintJobId, false, ex.Message, ct);
+                }
             }
-            catch (Exception ex)
-            {
-                Log(LogLevel.Error, $"Job #{job.PrintJobId}: error tak terduga - {ex.Message}");
-                await ReportSafeAsync(job.PrintJobId, false, ex.Message, ct);
-            }
+
+            // Batch belum penuh -> antrian habis, kembali ke jeda polling normal.
+            if (jobs.Count < batchSize) return;
         }
     }
 
@@ -95,6 +124,15 @@ public class Worker : BackgroundService
     // TIDAK berubah); 'TOKEN' = render lewat SP (SIS_Print_Dispatch) + EscPosRenderer.
     private async Task ProcessJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
+        // Prompt 65: TNI_KARTU dirakit di C# (TniKartuEscPosBuilder), jadi ditangkap
+        // di sini SEBELUM switch RenderMode -- printernya memang device THERMAL yang
+        // render_mode-nya 'TOKEN' (dipakai kupon), tapi kartu ini tidak lewat jalur token.
+        if (EscPosJobTypes.Contains(job.JobType))
+        {
+            await ProcessTniKartuJobAsync(job, ct);
+            return;
+        }
+
         if (job.RenderMode == "RAW_TSPL")
         {
             await ProcessTsplJobAsync(job, ct);
@@ -223,6 +261,54 @@ public class Worker : BackgroundService
                     RawPrinterHelper.SendBytesToPrinter(job.PrinterName, rendered.Bytes);
                 }
                 Log(LogLevel.Information, $"Job #{job.PrintJobId}: dicetak {copies}x ke printer '{job.PrinterName}'.");
+            }
+
+            await ReportSafeAsync(job.PrintJobId, true, null, ct);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, $"Job #{job.PrintJobId}: gagal cetak - {ex.Message}");
+            await ReportSafeAsync(job.PrintJobId, false, ex.Message, ct);
+        }
+    }
+
+    // Prompt 65: kartu personel PDH TNI AD -- ESC/POS dirakit dari payload di C#.
+    // DryRun menulis .escpos.bin (byte mentah) DAN .txt (pratinjau teks baris demi
+    // baris) supaya layout bisa diperiksa tanpa printer fisik.
+    private async Task ProcessTniKartuJobAsync(PrintJobClaimedDto job, CancellationToken ct)
+    {
+        TerakarsaApp.Shared.PrintJobs.TniKartuPayload payload;
+        byte[] escpos;
+        try
+        {
+            payload = TniKartuEscPosBuilder.ParsePayload(job.Payload);
+            escpos = TniKartuEscPosBuilder.Build(payload);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, $"Job #{job.PrintJobId}: payload rusak - {ex.Message}");
+            await ReportSafeAsync(job.PrintJobId, false, $"Payload rusak: {ex.Message}", ct);
+            return;
+        }
+
+        try
+        {
+            if (_options.DryRun)
+            {
+                var dryRunDir = Path.Combine(AppContext.BaseDirectory, "dryrun");
+                Directory.CreateDirectory(dryRunDir);
+                var binPath = Path.Combine(dryRunDir, $"{job.PrintJobId}.escpos.bin");
+                var txtPath = Path.Combine(dryRunDir, $"{job.PrintJobId}.txt");
+                await File.WriteAllBytesAsync(binPath, escpos, ct);
+                await File.WriteAllTextAsync(txtPath, TniKartuEscPosBuilder.BuildPlainText(payload), ct);
+                Log(LogLevel.Information,
+                    $"Job #{job.PrintJobId} (DryRun) kartu {payload.KodeRef}: ditulis ke {binPath} dan {txtPath}");
+            }
+            else
+            {
+                RawPrinterHelper.SendBytesToPrinter(job.PrinterName, escpos);
+                Log(LogLevel.Information,
+                    $"Job #{job.PrintJobId} kartu {payload.KodeRef}: dicetak ke printer '{job.PrinterName}'.");
             }
 
             await ReportSafeAsync(job.PrintJobId, true, null, ct);

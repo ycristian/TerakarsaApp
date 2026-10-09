@@ -15,6 +15,9 @@ public class ResourceDto
     public string? CounterpartResourceName { get; set; }
     // Prompt 40: nama divisi counterpart -- dipakai list Master Resource "{Nama} ({Divisi})".
     public string? CounterpartDivisionName { get; set; }
+    // Prompt 70: warna holder/lanyard fisik line ini (mis. "#1E5FA8"), dipakai badge warna di
+    // layar gate. NULL = layar gate memakai warna netral.
+    public string? ColorHex { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -29,6 +32,8 @@ public class ResourceCreateRequest
     public bool IsActive { get; set; } = true;
     public bool IncludeInDashboard { get; set; } = true;
     public int? CounterpartResourceId { get; set; }
+    // Prompt 70: NULL/kosong = warna netral di layar gate.
+    public string? ColorHex { get; set; }
 }
 
 public class ResourceUpdateRequest
@@ -40,6 +45,8 @@ public class ResourceUpdateRequest
     public bool IsActive { get; set; }
     public bool IncludeInDashboard { get; set; } = true;
     public int? CounterpartResourceId { get; set; }
+    // Prompt 70: NULL/kosong = warna netral di layar gate.
+    public string? ColorHex { get; set; }
 }
 
 public class ResourcePagedRequest

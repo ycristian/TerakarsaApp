@@ -1,0 +1,724 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Payroll
+@using TerakarsaApp.Shared.Stations
+@using System.Globalization
+@inject StationDeviceApiService StationApi
+@inject IJSRuntime JS
+
+@* Prompt 59: tab "Report" di /station (label lama "Rekap Produksi" -- nama komponen,
+   DTO, service dan SP sengaja TIDAK ikut di-rename) -- matriks output satu line untuk satu
+   periode gajian. Dua mode:
+     Output -- baris yang DIBUAT line ini dan sudah di-LOCK ke periode terpilih. Periode
+       sebuah baris datang dari lock-nya, bukan dari tanggalnya, jadi tanggal bisa jatuh
+       di luar rentang periode -> kolom tambahan bertanda "luar periode".
+     Terima -- penerimaan line ini dalam rentang waktu periode, tanpa syarat lock.
+   Angka sel = qty_ok + qty_reject_fabric (lihat sql/sp_Station_RekapProduksi.sql).
+
+   Output non-PO (sampel/order tanpa PO) hanya ada di mode Output: baris terakhir matriks,
+   diklik untuk membuka daftar catatannya. Tidak ikut lock -- edit/hapus bebas. *@
+
+<div class="d-flex flex-column gap-3">
+
+    @* ===== Toolbar ===== *@
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="btn-group" role="group" aria-label="Periode">
+            <button type="button" class="btn btn-outline-secondary" title="Periode sebelumnya"
+                    disabled="@(isLoading || selectedPeriod is null)" @onclick="PreviousPeriod">
+                <i class="fe fe-chevron-left"></i>
+            </button>
+            <button type="button" class="btn btn-outline-secondary text-start" disabled>
+                @if (selectedPeriod is null)
+                {
+                    <span class="fw-bold">Periode belum di-generate</span>
+                }
+                else
+                {
+                    <span class="d-block fw-bold">@selectedPeriod.PeriodCode</span>
+                    <span class="d-block text-muted" style="font-size: 0.7rem;">
+                        @FormatRange(selectedPeriod.PeriodStart, selectedPeriod.PeriodEnd)
+                    </span>
+                }
+            </button>
+            <button type="button" class="btn btn-outline-secondary" title="Periode berikutnya"
+                    disabled="@(isLoading || !CanGoNext)" @onclick="NextPeriod">
+                <i class="fe fe-chevron-right"></i>
+            </button>
+        </div>
+
+        <div class="btn-group" role="group" aria-label="Mode">
+            <button type="button" class="btn @(IsOutput ? "btn-primary" : "btn-outline-primary")"
+                    disabled="@isLoading" @onclick='() => SetMode("OUTPUT")'>Output</button>
+            <button type="button" class="btn @(IsOutput ? "btn-outline-primary" : "btn-primary")"
+                    disabled="@isLoading" @onclick='() => SetMode("TERIMA")'>Terima</button>
+        </div>
+
+        @* Harga disembunyikan di mode Terima: nilai upah dihitung dari output, bukan dari
+           penerimaan. Export Excel tetap selalu memuat Harga & Nilai di kedua mode. *@
+        @if (IsOutput)
+        {
+            @* Dua utility Bootstrap TIDAK boleh dipakai di app ini -- tema (assets/css/style.css)
+               mendefinisikan ulang keduanya:
+                 .rounded -> border-radius: 50% !important  (kotak jadi ELIPS)
+                 .border  -> border + padding: 0.75rem + vertical-align: top (gaya SEL TABEL)
+               Padding siluman dari .border itu yang bikin celah 12px di kiri kolom sticky.
+               Jadi border & radius SELALU inline. ("rounded-pill" aman: di-override jadi 50px.) *@
+            <div class="form-check form-check-inline m-0 px-3 py-2" style="border: 1px solid #e9edf4; border-radius: 6px;">
+                <input class="form-check-input" type="checkbox" id="rekap-price"
+                       checked="@showPrice" @onchange="e => showPrice = e.Value is bool b && b" />
+                <label class="form-check-label fw-semibold" for="rekap-price">Price</label>
+            </div>
+        }
+
+        <div class="flex-grow-1"></div>
+
+        @if (IsOutput)
+        {
+            <button type="button" class="btn btn-outline-primary" disabled="@(selectedPeriod is null)"
+                    @onclick="OpenNewNonPo">
+                + Output Non-PO
+            </button>
+        }
+        <button type="button" class="btn btn-success" disabled="@(isExporting || selectedPeriod is null)"
+                @onclick="ExportExcel">
+            @(isExporting ? "Menyiapkan..." : "Export Excel")
+        </button>
+    </div>
+
+    @* ===== Teks info + chip belum lock ===== *@
+    <div class="d-flex flex-wrap align-items-center gap-2 small text-muted">
+        @if (selectedPeriod is not null)
+        {
+            @if (IsOutput)
+            {
+                <span>
+                    Output yang sudah <strong>lock</strong> ke @selectedPeriod.PeriodCode.
+                    Kolom = tanggal output. Angka = OK + reject bahan.
+                </span>
+                @if (result.UnlockedCount > 0)
+                {
+                    <span class="badge rounded-pill" style="background: #FDECEC; color: #A61B1B;">
+                        @result.UnlockedCount baris belum lock, tidak dihitung
+                    </span>
+                }
+            }
+            else
+            {
+                <span>
+                    Semua penerimaan @FormatRange(selectedPeriod.PeriodStart, selectedPeriod.PeriodEnd),
+                    tanpa syarat lock. Kolom = tanggal terima. Angka = OK + reject bahan.
+                </span>
+            }
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(loadError))
+    {
+        <div class="alert alert-danger mb-0">@loadError</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="text-muted mb-0">Memuat...</p>
+    }
+    else if (selectedPeriod is null)
+    {
+        <p class="text-muted mb-0">Periode gajian belum di-generate. Hubungi admin.</p>
+    }
+    else
+    {
+        @* Kotak gulir sendiri: kolom tanggal selalu lebih lebar dari layar stasiun, jadi
+           kolom Artikel di-freeze ke kiri (pola sama dengan grid Rekap di tab Absen). *@
+        <div style="overflow: auto; border: 1px solid #e9edf4; border-radius: 6px;">
+            <table class="table table-sm align-middle mb-0" style="font-size: 0.8rem;">
+                <thead>
+                    <tr class="text-muted">
+                        <th style="position: sticky; top: 0; left: 0; z-index: 3; background: #F6F8FB; min-width: 190px;">Artikel</th>
+                        @foreach (var d in dateColumns)
+                        {
+                            var outside = IsOutsidePeriod(d);
+                            <th class="text-end" style="position: sticky; top: 0; z-index: 2; min-width: 68px; background: @(outside ? "#FFF1D6" : "#F6F8FB"); @(outside ? "color: #7A4B00;" : "")">
+                                <span class="d-block" style="font-size: 0.65rem;">@DayLabel(d)</span>
+                                <span class="d-block fw-bold">@d.Day/@d.Month</span>
+                                <span class="d-block fw-normal" style="font-size: 0.65rem;">@ColumnNote(d)</span>
+                            </th>
+                        }
+                        <th class="text-end" style="position: sticky; top: 0; z-index: 2; background: #FDF0C4; color: #5C4500; min-width: 78px;">Total Qty</th>
+                        @if (ShowPriceColumns)
+                        {
+                            <th class="text-end" style="position: sticky; top: 0; z-index: 2; background: #DCEFE4; color: #14532D; min-width: 78px;">Harga</th>
+                            <th class="text-end" style="position: sticky; top: 0; z-index: 2; background: #DCEFE4; color: #14532D; min-width: 100px;">Nilai (Rp)</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (matrixRows.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="@TotalColumnCount" class="text-muted text-center py-3">
+                                Belum ada data untuk periode ini.
+                            </td>
+                        </tr>
+                    }
+                    @foreach (var row in matrixRows)
+                    {
+                        <tr>
+                            <td style="position: sticky; left: 0; z-index: 1; background: #fff;">
+                                <span class="d-block fw-bold">@row.ArticleName</span>
+                                <span class="d-block text-muted" style="font-size: 0.7rem;">
+                                    @row.StepName @(string.IsNullOrWhiteSpace(row.NoPo) ? "" : "· " + row.NoPo)
+                                </span>
+                            </td>
+                            @foreach (var d in dateColumns)
+                            {
+                                var q = row.PerDate.TryGetValue(d, out var v) ? v : 0;
+                                <td class="text-end @(q == 0 ? "text-muted" : "")" style="@(IsOutsidePeriod(d) ? "background: #FFFAF0;" : "")">
+                                    @(q == 0 ? "–" : Num(q))
+                                </td>
+                            }
+                            <td class="text-end fw-bold" style="background: #FFF8E1;">@Num(row.Total)</td>
+                            @if (ShowPriceColumns)
+                            {
+                                <td class="text-end" style="background: #F3FAF6;">@Num(row.UnitPrice)</td>
+                                <td class="text-end fw-bold" style="background: #E8F5EE; color: #14532D;">@Num(row.Total * row.UnitPrice)</td>
+                            }
+                        </tr>
+                    }
+
+                    @* Total PO = dasar upah dari pekerjaan ber-PO; non-PO sengaja TIDAK ikut
+                       di sini supaya dua sumber upah tetap bisa dibedakan. *@
+                    <tr style="background: #F2F6FC; border-top: 2px solid #C9D6EA;">
+                        <td class="fw-bold" style="position: sticky; left: 0; z-index: 1; background: #F2F6FC;">
+                            Total PO
+                            <span class="d-block text-muted fw-normal" style="font-size: 0.7rem;">dasar upah</span>
+                        </td>
+                        @foreach (var d in dateColumns)
+                        {
+                            <td class="text-end fw-bold @(ColumnTotal(d) == 0 ? "text-muted" : "")">
+                                @(ColumnTotal(d) == 0 ? "–" : Num(ColumnTotal(d)))
+                            </td>
+                        }
+                        <td class="text-end fw-bold">@Num(GrandTotalQty)</td>
+                        @if (ShowPriceColumns)
+                        {
+                            <td></td>
+                            <td class="text-end fw-bold" style="color: #14532D;">@Num(GrandTotalNilai)</td>
+                        }
+                    </tr>
+
+                    @if (IsOutput)
+                    {
+                        <tr>
+                            <td colspan="@TotalColumnCount" class="text-muted fw-semibold"
+                                style="background: #F6F8FB; font-size: 0.7rem;">
+                                DI LUAR PO &middot; masuk upah, harga diisi PIC
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="position: sticky; left: 0; z-index: 1; background: #fff;">
+                                <button type="button" class="btn btn-link p-0 fw-bold text-decoration-none"
+                                        @onclick="OpenNonPoDetail">
+                                    Di luar PO &rsaquo;
+                                </button>
+                            </td>
+                            @foreach (var d in dateColumns)
+                            {
+                                var q = NonPoQty(d);
+                                <td class="text-end @(q == 0 ? "text-muted" : "")" style="@(IsOutsidePeriod(d) ? "background: #FFFAF0;" : "")">
+                                    @(q == 0 ? "–" : Num(q))
+                                </td>
+                            }
+                            <td class="text-end fw-bold" style="background: #FFF8E1;">@Num(NonPoTotalQty)</td>
+                            @if (ShowPriceColumns)
+                            {
+                                <td class="text-end text-muted" style="background: #F3FAF6;">–</td>
+                                <td class="text-end fw-bold" style="background: #E8F5EE; color: #14532D;">@Num(NonPoTotalNilai)</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ===== Modal detail "Di luar PO" ===== *@
+@if (showNonPoDetail)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0">Di luar PO &middot; @selectedPeriod?.PeriodCode</h5>
+                        <small class="text-muted">
+                            @nonPoItems.Count catatan &middot; @Num(nonPoItems.Sum(x => x.Qty)) pcs &middot; Rp @Num(nonPoItems.Sum(x => x.Nilai))
+                        </small>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Tutup" @onclick="() => showNonPoDetail = false"></button>
+                </div>
+                <div class="modal-body p-0">
+                    @if (nonPoItems.Count == 0)
+                    {
+                        <p class="text-muted m-3">Belum ada catatan non-PO di periode ini.</p>
+                    }
+                    @foreach (var item in nonPoItems)
+                    {
+                        <div class="d-flex align-items-center gap-2 border-bottom px-3 py-2">
+                            <div style="width: 54px;">
+                                <span class="d-block text-muted" style="font-size: 0.7rem;">@DayLabel(item.OutputAt)</span>
+                                <span class="d-block fw-bold">@item.OutputAt.Day/@item.OutputAt.Month</span>
+                            </div>
+                            <div class="flex-grow-1" style="min-width: 0;">
+                                <span class="d-block">@item.Remark</span>
+                                <span class="d-block text-muted" style="font-size: 0.7rem;">
+                                    @Num(item.Qty) pcs &times; Rp @Num(item.UnitPrice) &middot; diinput @item.CreatedAt.ToString("d/M HH:mm")
+                                </span>
+                            </div>
+                            <div class="fw-bold text-end" style="width: 86px;">Rp @Num(item.Nilai)</div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit"
+                                    @onclick="() => OpenEditNonPo(item)"><i class="fe fe-edit-2"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" title="Hapus"
+                                    @onclick="() => AskDeleteNonPo(item)"><i class="fe fe-trash-2"></i></button>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer justify-content-start">
+                    <small class="text-muted">Edit dan hapus bebas, tanpa lock. Ubah tanggal, periode ikut berubah.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal input / edit non-PO ===== *@
+@if (showNonPoForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0">Output Non-PO</h5>
+                        <small class="text-muted">Masuk upah line ini</small>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Tutup" @onclick="CloseNonPoForm"></button>
+                </div>
+                <div class="modal-body d-flex flex-column gap-3">
+                    <div>
+                        <label class="form-label fw-semibold mb-1">Tanggal &amp; jam</label>
+                        <input type="datetime-local" class="form-control" @bind="formOutputAt" @bind:after="OnFormDateChanged" />
+                        <div class="mt-1 px-2 py-1" style="background: #E8F5EE; color: #1E5A3A; font-size: 0.75rem; border-radius: 6px;">
+                            @if (formPeriod is null)
+                            {
+                                <span>Periode untuk tanggal itu belum di-generate.</span>
+                            }
+                            else
+                            {
+                                <span>Masuk periode <strong>@formPeriod.PeriodCode</strong> (@FormatRange(formPeriod.PeriodStart, formPeriod.PeriodEnd))</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold mb-1">Qty (pcs)</label>
+                            <input type="number" min="1" class="form-control" @bind="formQty" @bind:event="oninput" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold mb-1">Harga / pcs (Rp)</label>
+                            <input type="number" min="0" step="0.01" class="form-control" @bind="formUnitPrice" @bind:event="oninput" />
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between px-3 py-2" style="background: #FFF8E1; border-radius: 6px;">
+                        <span style="color: #5C4500;">Nilai upah</span>
+                        <strong>Rp @Num((formQty ?? 0) * (formUnitPrice ?? 0))</strong>
+                    </div>
+                    <div>
+                        <label class="form-label fw-semibold mb-1">Keterangan</label>
+                        <textarea class="form-control" rows="3" maxlength="500" @bind="formRemark"></textarea>
+                    </div>
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger mb-0">@formError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseNonPoForm">Batal</button>
+                    <button type="button" class="btn btn-primary" disabled="@isSavingNonPo" @onclick="SaveNonPo">
+                        @(isSavingNonPo ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="nonPoPendingDelete is not null" IsBusy="isDeletingNonPo"
+                    OnConfirm="ConfirmDeleteNonPo" OnCancel="() => nonPoPendingDelete = null">
+    <Message>Hapus catatan non-PO "@nonPoPendingDelete?.Remark"?</Message>
+</ConfirmDeleteModal>
+
+@code {
+    // Operator sesi stasiun. Tab ini tidak pernah dirender tanpa operator (parent menonaktifkan
+    // tab-nya), tapi server tetap menolak sendiri lewat EffectiveResourceId.
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+
+    private const string ModeOutput = "OUTPUT";
+
+    private string mode = ModeOutput;
+    private bool showPrice;
+    private bool isLoading;
+    private bool isExporting;
+    private string loadError = string.Empty;
+    private int loadedForResourceId;
+
+    // Daftar periode yang SUDAH diketahui client, bertambah saat menelusuri ke belakang.
+    // SIS_PayrollPeriod_Options hanya mengembalikan jendela sempit di sekitar @DefaultAt,
+    // jadi tombol ‹ memanggilnya lagi dengan acuan baru dan hasilnya digabung di sini.
+    private List<PayrollPeriodOptionDto> allPeriods = new();
+    private PayrollPeriodOptionDto? selectedPeriod;
+
+    private RekapProduksiResultDto result = new();
+    private List<DateTime> dateColumns = new();
+    private List<MatrixRow> matrixRows = new();
+    private Dictionary<DateTime, RekapProduksiNonPoDayDto> nonPoByDate = new();
+
+    private bool showNonPoDetail;
+    private List<NonPoOutputDto> nonPoItems = new();
+
+    private bool showNonPoForm;
+    private bool isSavingNonPo;
+    private int? editingNonPoId;
+    private DateTime formOutputAt = DateTime.Now;
+    // Nullable: dengan @bind:event="oninput", int/decimal biasa akan MENOLAK string kosong
+    // dan memantulkan angka lama kembali ke layar begitu PIC menghapus isinya untuk mengetik
+    // ulang. Nullable menerima kosong sebagai null, jadi field tetap bisa dikosongkan sambil
+    // kotak "Nilai upah" tetap hidup mengikuti ketikan.
+    private int? formQty;
+    private decimal? formUnitPrice;
+    private string formRemark = string.Empty;
+    private PayrollPeriodOptionDto? formPeriod;
+    private string formError = string.Empty;
+
+    private NonPoOutputDto? nonPoPendingDelete;
+    private bool isDeletingNonPo;
+
+    private bool IsOutput => mode == ModeOutput;
+    // Kolom Harga/Nilai di LAYAR mengikuti checkbox dan hanya ada di mode Output.
+    // Di Excel keduanya selalu ikut -- lihat StationRekapProduksiService.ExportAsync.
+    private bool ShowPriceColumns => IsOutput && showPrice;
+    private int TotalColumnCount => 1 + dateColumns.Count + 1 + (ShowPriceColumns ? 2 : 0);
+    private bool CanGoNext => selectedPeriod is not null && allPeriods.Any(p => p.PeriodStart >= selectedPeriod.PeriodEnd);
+
+    private int GrandTotalQty => matrixRows.Sum(r => r.Total);
+    private decimal GrandTotalNilai => matrixRows.Sum(r => r.Total * r.UnitPrice);
+    private int NonPoTotalQty => nonPoByDate.Values.Sum(x => x.Qty);
+    private decimal NonPoTotalNilai => nonPoByDate.Values.Sum(x => x.Nilai);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ResourceId <= 0 || loadedForResourceId == ResourceId) return;
+        loadedForResourceId = ResourceId;
+
+        if (allPeriods.Count == 0)
+        {
+            // Tanpa defaultAt = periode berjalan jadi IsDefault.
+            MergePeriods(await StationApi.GetPayrollPeriodsAsync(null));
+            selectedPeriod = allPeriods.FirstOrDefault(p => p.IsDefault) ?? allPeriods.LastOrDefault();
+        }
+
+        await LoadAsync();
+    }
+
+    public async Task LoadAsync()
+    {
+        if (ResourceId <= 0 || selectedPeriod is null) return;
+
+        isLoading = true;
+        loadError = string.Empty;
+        StateHasChanged();
+
+        result = await StationApi.GetRekapProduksiAsync(ResourceId, selectedPeriod.PayrollPeriodId, mode) ?? new();
+        if (result.Period is null)
+            loadError = "Gagal memuat rekap produksi.";
+
+        BuildMatrix();
+
+        isLoading = false;
+    }
+
+    // Pivot baris format panjang jadi matriks (step artikel x tanggal). Kolom tanggal =
+    // seluruh rentang periode DITAMBAH tanggal di luar rentang yang muncul di data (hanya
+    // mungkin di mode Output), diurutkan menurut tanggal.
+    private void BuildMatrix()
+    {
+        var start = PeriodStartDate;
+        var end = PeriodEndDate;
+
+        var dates = new SortedSet<DateTime>();
+        for (var d = start; d <= end; d = d.AddDays(1)) dates.Add(d);
+        foreach (var r in result.Rows) dates.Add(r.Tanggal.Date);
+        foreach (var n in result.NonPoDays) dates.Add(n.Tanggal.Date);
+        dateColumns = dates.ToList();
+
+        matrixRows = result.Rows
+            .GroupBy(r => r.ArticleWorkflowId)
+            .Select(g => new MatrixRow
+            {
+                ArticleName = g.First().ArticleName,
+                StepName = g.First().StepName,
+                NoPo = g.First().NoPo,
+                UnitPrice = g.First().UnitPrice,
+                Total = g.Sum(x => x.Qty),
+                PerDate = g.GroupBy(x => x.Tanggal.Date).ToDictionary(x => x.Key, x => x.Sum(v => v.Qty)),
+            })
+            .OrderBy(r => r.ArticleName)
+            .ThenBy(r => r.StepName)
+            .ToList();
+
+        nonPoByDate = result.NonPoDays
+            .GroupBy(x => x.Tanggal.Date)
+            .ToDictionary(g => g.Key, g => new RekapProduksiNonPoDayDto
+            {
+                Tanggal = g.Key,
+                Qty = g.Sum(x => x.Qty),
+                Nilai = g.Sum(x => x.Nilai),
+            });
+    }
+
+    private DateTime PeriodStartDate => (selectedPeriod?.PeriodStart ?? DateTime.Today).Date;
+    private DateTime PeriodEndDate => (selectedPeriod?.PeriodEnd ?? DateTime.Today).Date;
+
+    private bool IsOutsidePeriod(DateTime date) => date < PeriodStartDate || date > PeriodEndDate;
+
+    private int ColumnTotal(DateTime date) =>
+        matrixRows.Sum(r => r.PerDate.TryGetValue(date, out var q) ? q : 0);
+
+    private int NonPoQty(DateTime date) => nonPoByDate.TryGetValue(date, out var v) ? v.Qty : 0;
+
+    private async Task SetMode(string newMode)
+    {
+        if (mode == newMode) return;
+        mode = newMode;
+        await LoadAsync();
+    }
+
+    private async Task PreviousPeriod()
+    {
+        if (selectedPeriod is null) return;
+
+        // Satu detik sebelum awal periode terpilih = pasti di dalam periode sebelumnya.
+        var target = selectedPeriod.PeriodStart.AddSeconds(-1);
+        if (!allPeriods.Any(p => p.PeriodStart <= target && target < p.PeriodEnd))
+            MergePeriods(await StationApi.GetPayrollPeriodsAsync(target));
+
+        var previous = allPeriods.FirstOrDefault(p => p.PeriodStart <= target && target < p.PeriodEnd);
+        if (previous is null) return;
+
+        selectedPeriod = previous;
+        await LoadAsync();
+    }
+
+    // Maju hanya di antara periode yang SUDAH diketahui -- batas atas pilihan (satu periode
+    // setelah periode berjalan) ditentukan SIS_PayrollPeriod_Options, bukan di sini.
+    private async Task NextPeriod()
+    {
+        if (selectedPeriod is null) return;
+
+        var next = allPeriods.Where(p => p.PeriodStart >= selectedPeriod.PeriodEnd)
+            .OrderBy(p => p.PeriodStart).FirstOrDefault();
+        if (next is null) return;
+
+        selectedPeriod = next;
+        await LoadAsync();
+    }
+
+    private void MergePeriods(List<PayrollPeriodOptionDto> incoming)
+    {
+        foreach (var p in incoming)
+        {
+            if (allPeriods.All(x => x.PayrollPeriodId != p.PayrollPeriodId))
+                allPeriods.Add(p);
+        }
+        allPeriods = allPeriods.OrderBy(p => p.PeriodStart).ToList();
+    }
+
+    private async Task ExportExcel()
+    {
+        if (selectedPeriod is null) return;
+
+        isExporting = true;
+        var file = await StationApi.ExportRekapProduksiAsync(ResourceId, selectedPeriod.PayrollPeriodId, mode);
+        isExporting = false;
+
+        if (file is null)
+        {
+            loadError = "Gagal menyiapkan file Excel.";
+            return;
+        }
+
+        await JS.InvokeVoidAsync("downloadFileFromBytes", file.Value.FileName,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Convert.ToBase64String(file.Value.Bytes));
+    }
+
+    // ===== Non-PO =====
+
+    private async Task OpenNonPoDetail()
+    {
+        if (selectedPeriod is null) return;
+        nonPoItems = await StationApi.GetNonPoOutputsAsync(ResourceId, selectedPeriod.PayrollPeriodId);
+        showNonPoDetail = true;
+    }
+
+    private async Task OpenNewNonPo()
+    {
+        editingNonPoId = null;
+        formOutputAt = DateTime.Now;
+        formQty = null;
+        formUnitPrice = null;
+        formRemark = string.Empty;
+        formError = string.Empty;
+        showNonPoForm = true;
+        await ResolveFormPeriod();
+    }
+
+    private async Task OpenEditNonPo(NonPoOutputDto item)
+    {
+        editingNonPoId = item.NonPoOutputId;
+        formOutputAt = item.OutputAt;
+        formQty = item.Qty;
+        formUnitPrice = item.UnitPrice;
+        formRemark = item.Remark;
+        formError = string.Empty;
+        showNonPoForm = true;
+        await ResolveFormPeriod();
+    }
+
+    private void CloseNonPoForm()
+    {
+        showNonPoForm = false;
+        editingNonPoId = null;
+    }
+
+    private Task OnFormDateChanged() => ResolveFormPeriod();
+
+    // Label "Masuk periode ..." -- dicari dulu di periode yang sudah diketahui, baru menanyakan
+    // server kalau tanggalnya di luar jendela itu. SP tetap yang memutuskan periode sebenarnya
+    // saat simpan; label ini hanya pratinjau.
+    private async Task ResolveFormPeriod()
+    {
+        formPeriod = allPeriods.FirstOrDefault(p => p.PeriodStart <= formOutputAt && formOutputAt < p.PeriodEnd);
+        if (formPeriod is not null) return;
+
+        MergePeriods(await StationApi.GetPayrollPeriodsAsync(formOutputAt));
+        formPeriod = allPeriods.FirstOrDefault(p => p.PeriodStart <= formOutputAt && formOutputAt < p.PeriodEnd);
+    }
+
+    private async Task SaveNonPo()
+    {
+        formError = string.Empty;
+        isSavingNonPo = true;
+
+        var request = new NonPoOutputSaveRequest
+        {
+            ResourceId = ResourceId,
+            OutputAt = formOutputAt,
+            Qty = formQty ?? 0,
+            UnitPrice = formUnitPrice ?? 0,
+            Remark = formRemark ?? string.Empty,
+        };
+
+        var (success, error) = editingNonPoId is null
+            ? await StationApi.CreateNonPoOutputAsync(request)
+            : await StationApi.UpdateNonPoOutputAsync(editingNonPoId.Value, request);
+
+        isSavingNonPo = false;
+
+        if (!success)
+        {
+            formError = error;
+            return;
+        }
+
+        showNonPoForm = false;
+        editingNonPoId = null;
+        await RefreshAfterNonPoChange();
+    }
+
+    private void AskDeleteNonPo(NonPoOutputDto item) => nonPoPendingDelete = item;
+
+    private async Task ConfirmDeleteNonPo()
+    {
+        if (nonPoPendingDelete is null) return;
+
+        isDeletingNonPo = true;
+        var (success, error) = await StationApi.DeleteNonPoOutputAsync(nonPoPendingDelete.NonPoOutputId, ResourceId);
+        isDeletingNonPo = false;
+        nonPoPendingDelete = null;
+
+        if (!success)
+        {
+            loadError = error;
+            return;
+        }
+
+        await RefreshAfterNonPoChange();
+    }
+
+    // Matriks selalu disegarkan; daftar di modal detail hanya kalau modalnya memang terbuka.
+    // Catatan bisa PINDAH periode setelah tanggalnya diubah, jadi daftar yang tampil pun
+    // bisa menyusut -- itu memang perilaku yang diharapkan.
+    private async Task RefreshAfterNonPoChange()
+    {
+        await LoadAsync();
+        if (showNonPoDetail && selectedPeriod is not null)
+            nonPoItems = await StationApi.GetNonPoOutputsAsync(ResourceId, selectedPeriod.PayrollPeriodId);
+    }
+
+    // ===== Tampilan =====
+
+    // Catatan kecil di bawah tanggal: jam cut-off di kedua ujung periode, atau penanda
+    // kolom tambahan yang tanggalnya jatuh di luar periode (hanya mungkin di mode Output).
+    private string ColumnNote(DateTime date)
+    {
+        if (IsOutsidePeriod(date)) return "luar periode";
+        if (date == PeriodStartDate) return "mulai 10:00";
+        if (date == PeriodEndDate) return "s/d 10:00";
+        return string.Empty;
+    }
+
+    private static readonly CultureInfo Id = CultureInfo.GetCultureInfo("id-ID");
+
+    private static string Num(int value) => value.ToString("#,##0", Id);
+    private static string Num(decimal value) => value.ToString("#,##0.##", Id);
+
+    private static string DayLabel(DateTime date) => date.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "Sen",
+        DayOfWeek.Tuesday => "Sel",
+        DayOfWeek.Wednesday => "Rab",
+        DayOfWeek.Thursday => "Kam",
+        DayOfWeek.Friday => "Jum",
+        DayOfWeek.Saturday => "Sab",
+        _ => "Min"
+    };
+
+    private static readonly string[] MonthNames =
+        { "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des" };
+
+    private static string FormatIndo(DateTime value) =>
+        $"{DayLabel(value)} {value.Day} {MonthNames[value.Month - 1]} {value:HH:mm}";
+
+    private static string FormatRange(DateTime start, DateTime end) =>
+        $"{FormatIndo(start)} – {FormatIndo(end)}";
+
+    private class MatrixRow
+    {
+        public string ArticleName { get; set; } = string.Empty;
+        public string StepName { get; set; } = string.Empty;
+        public string? NoPo { get; set; }
+        public decimal UnitPrice { get; set; }
+        public int Total { get; set; }
+        public Dictionary<DateTime, int> PerDate { get; set; } = new();
+    }
+}

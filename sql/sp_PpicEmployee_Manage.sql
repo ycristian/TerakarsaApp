@@ -28,12 +28,32 @@ CREATE OR ALTER PROCEDURE SIS_PpicEmployee_Manage
     @ResourceId   INT = NULL,
     @JoinDate     DATE = NULL,
     @IsActive     BIT = NULL,
+    -- Prompt 58: default NULL -- caller lama yang tidak mengirim field ini TIDAK menghapus
+    -- no. telp yang sudah ada (COALESCE di UPDATE).
+    @PhoneNo      VARCHAR(20) = NULL,
     @UserId       INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SET @EmployeeCode = NULLIF(LTRIM(RTRIM(@EmployeeCode)), '');
+
+    -- Prompt 58: normalisasi no. telp sama seperti di station (SIS_StationEmployee_Manage):
+    -- buang semua non-digit, awalan 62 jadi 0. Opsional di sini, tapi kalau diisi minimal 9 digit.
+    DECLARE @Digits VARCHAR(20) = ISNULL(@PhoneNo, '');
+    WHILE PATINDEX('%[^0-9]%', @Digits) > 0
+        SET @Digits = STUFF(@Digits, PATINDEX('%[^0-9]%', @Digits), 1, '');
+
+    IF LEFT(@Digits, 2) = '62'
+        SET @Digits = '0' + SUBSTRING(@Digits, 3, LEN(@Digits));
+
+    IF LEN(@Digits) > 0 AND LEN(@Digits) < 9
+    BEGIN
+        RAISERROR('No. telp minimal 9 digit.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @PhoneNormalized VARCHAR(20) = NULLIF(@Digits, '');
 
     -- CREATE/UPDATE: divisi TUJUAN wajib dikelola PPIC.
     IF @Action IN ('CREATE', 'UPDATE')
@@ -68,8 +88,8 @@ BEGIN
             RETURN;
         END
 
-        INSERT INTO employees (division_id, resource_id, position_id, employee_code, employee_name, join_date, created_at, created_by)
-        VALUES (@DivisionId, @ResourceId, @PositionId, @EmployeeCode, @EmployeeName, @JoinDate, SYSDATETIME(), @UserId);
+        INSERT INTO employees (division_id, resource_id, position_id, employee_code, employee_name, phone_no, join_date, created_at, created_by)
+        VALUES (@DivisionId, @ResourceId, @PositionId, @EmployeeCode, @EmployeeName, @PhoneNormalized, @JoinDate, SYSDATETIME(), @UserId);
 
         SELECT SCOPE_IDENTITY() AS NewId;
     END
@@ -92,6 +112,7 @@ BEGIN
             employee_code = @EmployeeCode,
             employee_name = @EmployeeName,
             join_date = @JoinDate,
+            phone_no = COALESCE(@PhoneNormalized, phone_no),
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         WHERE employee_id = @Id AND deleted_at IS NULL;

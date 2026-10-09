@@ -91,13 +91,15 @@ public class ResourceService
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
         var includeInDashboardParam = new SqlParameter("@IncludeInDashboard", request.IncludeInDashboard);
         var counterpartResourceIdParam = new SqlParameter("@CounterpartResourceId", (object?)request.CounterpartResourceId ?? DBNull.Value);
+        // Prompt 70: dipakai apa adanya (bukan ISNULL ke nilai lama) supaya warna bisa dikosongkan lagi dari UI.
+        var colorHexParam = new SqlParameter("@ColorHex", (object?)NullIfBlank(request.ColorHex) ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Resource_Manage @Action = @Action, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @UserId = @UserId",
-                actionParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, userIdParam);
+                "EXEC SIS_Resource_Manage @Action = @Action, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @ColorHex = @ColorHex, @UserId = @UserId",
+                actionParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, colorHexParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -116,13 +118,15 @@ public class ResourceService
         var isActiveParam = new SqlParameter("@IsActive", request.IsActive);
         var includeInDashboardParam = new SqlParameter("@IncludeInDashboard", request.IncludeInDashboard);
         var counterpartResourceIdParam = new SqlParameter("@CounterpartResourceId", (object?)request.CounterpartResourceId ?? DBNull.Value);
+        // Prompt 70: dipakai apa adanya (bukan ISNULL ke nilai lama) supaya warna bisa dikosongkan lagi dari UI.
+        var colorHexParam = new SqlParameter("@ColorHex", (object?)NullIfBlank(request.ColorHex) ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Resource_Manage @Action = @Action, @Id = @Id, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @UserId = @UserId",
-                actionParam, idParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, userIdParam);
+                "EXEC SIS_Resource_Manage @Action = @Action, @Id = @Id, @DivisionId = @DivisionId, @ResourceTypeId = @ResourceTypeId, @ResourceName = @ResourceName, @IsActive = @IsActive, @IncludeInDashboard = @IncludeInDashboard, @CounterpartResourceId = @CounterpartResourceId, @ColorHex = @ColorHex, @UserId = @UserId",
+                actionParam, idParam, divisionIdParam, resourceTypeIdParam, nameParam, isActiveParam, includeInDashboardParam, counterpartResourceIdParam, colorHexParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -141,4 +145,9 @@ public class ResourceService
             "EXEC SIS_Resource_Manage @Action = @Action, @Id = @Id, @UserId = @UserId",
             actionParam, idParam, userIdParam);
     }
+
+    // Prompt 70: color picker Blazor mengirim string kosong saat warna dikosongkan -- itu harus
+    // tersimpan sebagai NULL (warna netral), bukan '' yang gagal dibaca sebagai hex di gate.
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

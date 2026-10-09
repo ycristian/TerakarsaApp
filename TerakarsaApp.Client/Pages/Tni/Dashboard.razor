@@ -1,0 +1,463 @@
+@page "/tni/dashboard"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniDashboardApiService DashboardApi
+@inject TniPersonelApiService PersonelApi
+@inject TniOrderState OrderState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Prompt 69: dashboard progres & kebutuhan size (mockup layar 11).
+   Read-only. Angka status dari tni.v_personel, angka stok dari tni.v_stok_pola --
+   halaman ini TIDAK menghitung status atau saldo sendiri.
+   Muat ulang otomatis tiap 60 detik selama halaman terbuka. *@
+
+<PageTitle>Dashboard — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-bar-chart-2"></i> Dashboard</div>
+                <div class="tni-s">
+                    @(tab == "PROGRES"
+                        ? "Per rawatan · ketuk untuk lihat per satuan"
+                        : "Prioritas produksi per pola")
+                </div>
+            </div>
+            <div class="tni-row" style="gap:6px">
+                <button class="tni-btn tni-btn-o" title="Muat ulang"
+                        disabled="@isLoading" @onclick="RefreshAsync">
+                    <i class="fe fe-refresh-cw"></i>
+                </button>
+                <TniBackButton />
+            </div>
+        </div>
+    </div>
+
+    <div class="tni-seg">
+        <button class="@(tab == "PROGRES" ? "on" : "")" @onclick="@(() => GantiTab("PROGRES"))">
+            Progres
+        </button>
+        <button class="@(tab == "SIZE" ? "on" : "")" @onclick="@(() => GantiTab("SIZE"))">
+            Kebutuhan size
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @* ======================= PROGRES ======================= *@
+    @if (tab == "PROGRES")
+    {
+        @if (isLoading && progres.Area.Count == 0)
+        {
+            <p class="tni-note">Memuat...</p>
+        }
+        else if (progres.Area.Count == 0)
+        {
+            <div class="tni-card"><span class="tni-note">Belum ada data personel.</span></div>
+        }
+        else
+        {
+            @* ringkasan seluruh order *@
+            <div class="tni-card">
+                <div class="tni-row">
+                    <span class="tni-k">SELURUH ORDER</span>
+                    <span class="tni-pct">@Pct(progres.PersenBox)</span>
+                </div>
+                @Batang(progres.Area)
+                @Legenda()
+                <table class="tni-mini" style="margin-top:6px">
+                    <tr><td>Total personel</td><td class="tni-n">@N(progres.Total)</td></tr>
+                    <tr><td>Belum dapat set</td><td class="tni-n">@N(progres.BelumDapatSet)</td></tr>
+                    <tr><td>Belum masuk box</td><td class="tni-n">@N(progres.BelumMasukBox)</td></tr>
+                    <tr><td>Terkirim</td><td class="tni-n">@N(progres.Terkirim)</td></tr>
+                </table>
+            </div>
+
+            <div class="tni-sec">Per rawatan</div>
+            @foreach (var a in progres.Area)
+            {
+                <div class="tni-card tni-tap" @onclick="@(() => ToggleArea(a.AreaId))">
+                    <div class="tni-row">
+                        <span>
+                            <b style="font-size:14px">@a.AreaName</b>
+                            <div class="tni-note">@a.AreaCode · @a.Kota · @N(a.Total) personel</div>
+                        </span>
+                        <span style="text-align:right">
+                            <span class="tni-pct">@Pct(a.PersenBox)</span>
+                            <div class="tni-note">masuk box</div>
+                        </span>
+                    </div>
+
+                    @Batang(new[] { (TniProgresRowDto)a })
+                    @Legenda()
+
+                    <table class="tni-mini" style="margin-top:6px">
+                        <tr><td>Belum dicetak</td><td class="tni-n">@N(a.BelumCetak)</td></tr>
+                        <tr><td>Belum dapat set</td><td class="tni-n">@N(a.BelumDapatSet)</td></tr>
+                        <tr><td>Belum masuk box</td><td class="tni-n">@N(a.BelumMasukBox)</td></tr>
+                        <tr><td>Terkirim</td><td class="tni-n">@N(a.Terkirim)</td></tr>
+                    </table>
+
+                    <div class="tni-note" style="margin-top:5px">
+                        Box: @a.BoxTerbuka terbuka · @a.BoxTertutup tertutup · @a.BoxTerkirim terkirim
+                        @if (a.TotalBox == 0)
+                        {
+                            <text> (belum ada box)</text>
+                        }
+                    </div>
+
+                    <div class="tni-note" style="margin-top:4px;color:var(--tni-navy)">
+                        @(areaBuka == a.AreaId ? "▲ Sembunyikan satuan" : "▼ Lihat per satuan")
+                    </div>
+                </div>
+
+                @if (areaBuka == a.AreaId)
+                {
+                    @* urut persen terendah dulu -- yang paling tertinggal di atas *@
+                    @foreach (var s in progres.SatuanOf(a.AreaId))
+                    {
+                        @* 2026-10-07: buka daftar personel satuan di TAB BARU (anchor
+                           target=_blank tanpa rel=noopener, pola sama dengan link personel/box)
+                           supaya dashboard + kartu rawatan yang terbuka tidak hilang. *@
+                        <a class="tni-card tni-tap" style="margin-left:10px;display:block;color:inherit;text-decoration:none"
+                           href="/tni/personel?satuanId=@s.SatuanId" target="_blank"
+                           @onclick:stopPropagation="true">
+                            <div class="tni-row">
+                                <span>
+                                    <b>@s.SatuanCode</b>
+                                    <span class="tni-note" style="margin-left:4px">@s.SatuanName</span>
+                                </span>
+                                <span><b>@Pct(s.PersenBox)</b></span>
+                            </div>
+
+                            @Batang(new[] { (TniProgresRowDto)s })
+
+                            <div class="tni-note">
+                                @N(s.Total) personel · belum dapat set @N(s.BelumDapatSet) ·
+                                belum masuk box @N(s.BelumMasukBox) · terkirim @N(s.Terkirim)
+                            </div>
+                        </a>
+                    }
+                }
+            }
+        }
+    }
+
+    @* ==================== KEBUTUHAN SIZE ==================== *@
+    else
+    {
+        <div class="tni-card">
+            <div class="tni-k">Rawatan</div>
+            <select class="tni-inp" @bind="areaFilter" @bind:after="GantiAreaAsync">
+                <option value="0">Semua rawatan</option>
+                @foreach (var a in areaList)
+                {
+                    <option value="@a.AreaId">@a.AreaCode — @a.AreaName</option>
+                }
+            </select>
+
+            @* 2026-10-07: filter satuan -- daftarnya mengikuti rawatan terpilih *@
+            <div class="tni-k" style="margin-top:8px">Satuan</div>
+            <SearchableSelect TItem="TniWilayahRowDto"
+                              Items="satuanList"
+                              Value="satuanFilter"
+                              ValueChanged="GantiSatuanAsync"
+                              IdSelector="@(x => x.SatuanId ?? 0)"
+                              TextSelector="@(x => areaFilter == 0 ? $"{x.AreaCode} · {x.SatuanCode} — {x.SatuanName}" : $"{x.SatuanCode} — {x.SatuanName}")"
+                              AllowNone="true"
+                              NoneLabel="Semua satuan"
+                              Placeholder="Cari satuan..." />
+
+            <div class="tni-seg" style="margin-top:8px">
+                <button class="@(jenis == "KEMEJA" ? "on" : "")" @onclick="@(() => GantiJenis("KEMEJA"))">
+                    Kemeja
+                </button>
+                <button class="@(jenis == "CELANA" ? "on" : "")" @onclick="@(() => GantiJenis("CELANA"))">
+                    Celana
+                </button>
+            </div>
+        </div>
+
+        @* Keterangan WAJIB: stok tidak dibagi per rawatan. *@
+        <div class="tni-card" style="border-color:var(--tni-gold)">
+            <div class="tni-row">
+                <span class="tni-k">TOTAL KEKURANGAN</span>
+                <span class="tni-pct" style="color:@(TotalKurang > 0 ? "var(--tni-bad)" : "var(--tni-ok)")">
+                    @N(TotalKurang)
+                </span>
+            </div>
+            <div class="tni-note" style="margin-top:4px">
+                @(TotalKurang > 0
+                    ? $"{jenis.ToLowerInvariant()} yang masih harus diproduksi untuk pilihan ini."
+                    : "Stok mencukupi untuk seluruh pola pada pilihan ini.")
+            </div>
+            <div class="tni-note" style="margin-top:6px;color:var(--tni-warn)">
+                Butuh dihitung untuk rawatan / satuan terpilih, tapi <b>saldo &amp; stok bebas adalah stok
+                global</b> — stok tidak dibagi per rawatan atau satuan.
+            </div>
+        </div>
+
+        @if (isLoading && size.Count == 0)
+        {
+            <p class="tni-note">Memuat...</p>
+        }
+        else if (size.Count == 0)
+        {
+            <div class="tni-card">
+                <span class="tni-note">Tidak ada pola yang dibutuhkan maupun berstok untuk pilihan ini.</span>
+            </div>
+        }
+        else
+        {
+            <div class="tni-sec">@size.Count pola · per grup gender</div>
+            @* 2026-10-07: tabel kecil seperti Sisa stok; urut grup gender (P, PG, W, WH)
+               lalu angka pola dari SP, header tiap ganti grup. Kurang = Butuh - Saldo. *@
+            <div class="tni-tblwrap">
+                <table class="tni-tbl tni-tbl-sm">
+                    <thead>
+                        <tr><th>Pola</th><th>Butuh</th><th>Saldo</th><th>Bebas</th><th>Kurang</th></tr>
+                    </thead>
+                    <tbody>
+                        @for (var i = 0; i < size.Count; i++)
+                        {
+                            var x = size[i];
+                            @if (i == 0 || size[i - 1].GrupGender != x.GrupGender)
+                            {
+                                <tr class="tni-tbl-grp">
+                                    <td colspan="5">
+                                        _@x.GrupGender · @TniUrutStok.Label(x.GrupGender)
+                                        <span style="font-weight:400">· kurang @N(size.Where(y => y.GrupGender == x.GrupGender).Sum(y => y.Kurang))</span>
+                                    </td>
+                                </tr>
+                            }
+                            <tr>
+                                <td><span class="tni-code">@x.Kode</span></td>
+                                <td>@N(x.Butuh)</td>
+                                <td style="@(x.Saldo < 0 ? "color:var(--tni-bad);font-weight:700" : "")">@N(x.Saldo)</td>
+                                <td>@N(x.StokBebas)</td>
+                                <td style="font-weight:700;color:@(x.Cukup ? "var(--tni-ok)" : "var(--tni-bad)")">
+                                    @(x.Cukup ? "cukup" : N(x.Kurang))
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <div class="tni-bot">
+            <button class="tni-btn tni-btn-p" disabled="@isDownloading" @onclick="UnduhExcelAsync">
+                <i class="fe fe-download"></i>
+                @(isDownloading ? "Menyiapkan..." : "Unduh Excel")
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(infoMessage))
+        {
+            <div class="alert alert-success" style="margin-top:8px">@infoMessage</div>
+        }
+    }
+
+    <div class="tni-note" style="text-align:center;margin-top:10px">
+        Diperbarui @terakhirMuat.ToString("HH:mm:ss") · otomatis tiap 60 detik
+    </div>
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isDownloading;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private string tab = "PROGRES";
+    private string jenis = "KEMEJA";
+    private int areaFilter;                 // 0 = semua rawatan
+    private int? areaBuka;                  // kartu rawatan yang sedang dibuka
+
+    private TniDashboardProgresDto progres = new();
+    private List<TniKebutuhanSizeDto> size = new();
+    private List<TniWilayahRowDto> wilayah = new();
+
+    private DateTime terakhirMuat = DateTime.Now;
+
+    // Muat ulang otomatis tiap 60 detik; dibuang di Dispose supaya tidak
+    // jalan terus setelah halaman ditutup.
+    private Timer? timer;
+
+    private List<TniWilayahRowDto> areaList =>
+        wilayah.GroupBy(x => x.AreaId).Select(g => g.First()).OrderBy(x => x.AreaCode).ToList();
+
+    private int TotalKurang => size.Sum(x => x.Kurang);
+
+    private int? AreaIdFilter => areaFilter == 0 ? null : areaFilter;
+
+    // 2026-10-07: filter satuan; 0 = semua satuan (dalam rawatan terpilih)
+    private int satuanFilter;
+    private int? SatuanIdFilter => satuanFilter == 0 ? null : satuanFilter;
+
+    private List<TniWilayahRowDto> satuanList =>
+        wilayah.Where(x => x.SatuanId.HasValue && (areaFilter == 0 || x.AreaId == areaFilter))
+               .OrderBy(x => x.AreaCode).ThenBy(x => x.SatuanCode)
+               .ToList();
+
+    // ganti rawatan -> satuan lama belum tentu ada di rawatan baru, jadi direset
+    private async Task GantiAreaAsync()
+    {
+        satuanFilter = 0;
+        await LoadSizeAsync();
+    }
+
+    private async Task GantiSatuanAsync(int id)
+    {
+        satuanFilter = id;
+        await LoadSizeAsync();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess != true) return;
+
+        await OrderState.EnsureLoadedAsync();
+        wilayah = await PersonelApi.GetWilayahAsync();
+
+        await RefreshAsync();
+
+        timer = new Timer(async _ => await InvokeAsync(RefreshAsync),
+                          null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+    }
+
+    private async Task GantiTab(string t)
+    {
+        tab = t;
+        infoMessage = string.Empty;
+        await RefreshAsync();
+    }
+
+    private async Task GantiJenis(string j)
+    {
+        jenis = j;
+        await LoadSizeAsync();
+    }
+
+    private void ToggleArea(int areaId) => areaBuka = areaBuka == areaId ? null : areaId;
+
+    // Hanya memuat data tab yang sedang terlihat -- halaman ini dipakai di HP.
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        if (tab == "PROGRES") progres = await DashboardApi.GetProgresAsync();
+        else size = await DashboardApi.GetKebutuhanSizeAsync(AreaIdFilter, jenis, SatuanIdFilter);
+
+        terakhirMuat = DateTime.Now;
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadSizeAsync()
+    {
+        isLoading = true;
+        size = await DashboardApi.GetKebutuhanSizeAsync(AreaIdFilter, jenis, SatuanIdFilter);
+        terakhirMuat = DateTime.Now;
+        isLoading = false;
+    }
+
+    private async Task UnduhExcelAsync()
+    {
+        isDownloading = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err, bytes, nama) = await DashboardApi.GetExcelAsync(AreaIdFilter, SatuanIdFilter);
+
+        isDownloading = false;
+        if (!ok) { errorMessage = err; return; }
+
+        try
+        {
+            await JS.InvokeVoidAsync("downloadFileFromBytes", nama,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                Convert.ToBase64String(bytes!));
+            infoMessage = $"{nama} diunduh (sheet Kemeja & Celana).";
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+    }
+
+    // ---------- render helper ----------
+
+    // Batang bertumpuk; untuk ringkasan order, beberapa baris dijumlahkan dulu.
+    private RenderFragment Batang(IEnumerable<TniProgresRowDto> baris) => builder =>
+    {
+        var rows = baris.ToList();
+        var total = rows.Sum(x => x.Total);
+        if (total == 0) return;
+
+        var segmen = new (string Kelas, int Jumlah)[]
+        {
+            ("tni-prog-kirim", rows.Sum(x => x.Terkirim)),
+            ("tni-prog-box",   rows.Sum(x => x.MasukBox)),
+            ("tni-prog-set",   rows.Sum(x => x.SetJadi)),
+            ("tni-prog-cetak", rows.Sum(x => x.Dicetak)),
+            ("tni-prog-belum", rows.Sum(x => x.BelumCetak))
+        };
+
+        var seq = 0;
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "tni-prog");
+
+        foreach (var (kelas, jumlah) in segmen)
+        {
+            if (jumlah <= 0) continue;
+
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", kelas);
+            builder.AddAttribute(seq++, "style",
+                $"width:{(jumlah * 100m / total).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}%");
+            builder.AddAttribute(seq++, "title", $"{jumlah}");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private static RenderFragment Legenda() =>
+        @<div class="tni-leg">
+            <span><i style="background:var(--tni-ok)"></i>Terkirim</span>
+            <span><i style="background:var(--tni-navy)"></i>Masuk box</span>
+            <span><i style="background:var(--tni-navy2)"></i>Dapat set</span>
+            <span><i style="background:var(--tni-gold)"></i>Dicetak</span>
+            <span><i style="background:#D7DDE4"></i>Belum cetak</span>
+        </div>;
+
+    private static string N(int n) => n.ToString("N0", new System.Globalization.CultureInfo("id-ID"));
+
+    private static string Pct(decimal p) =>
+        p.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    public void Dispose() => timer?.Dispose();
+}

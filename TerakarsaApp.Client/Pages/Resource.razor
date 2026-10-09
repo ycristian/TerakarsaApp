@@ -74,6 +74,7 @@ else
                             <th>Status</th>
                             <th>Dashboard</th>
                             <th>Counterpart</th>
+                            <th>Warna</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -100,6 +101,17 @@ else
                                     }
                                 </td>
                                 <td>@(r.CounterpartResourceName is not null ? $"{r.CounterpartResourceName} ({r.CounterpartDivisionName})" : "-")</td>
+                                @* Prompt 70: warna holder fisik, sama dengan badge di layar gate. *@
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(r.ColorHex))
+                                    {
+                                        <span class="badge" style="background-color: @r.ColorHex; color: #fff;">@r.ColorHex</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(r)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(r)"><i class="fe fe-trash-2"></i></button>
@@ -162,6 +174,28 @@ else
                             <label class="form-label">Nama Resource</label>
                             <InputText class="form-control" @bind-Value="formModel.ResourceName" />
                             <ValidationMessage For="@(() => formModel.ResourceName)" class="text-danger" />
+                        </div>
+                        @* Prompt 70: warna holder/lanyard FISIK line ini. Dipakai badge warna di
+                           layar gate supaya satpam bisa mencocokkan kartu dengan holder yang
+                           dipakai karyawan. Mutasi line = tukar holder, jadi warnanya di resource
+                           bukan di kartu. Kosong = layar gate memakai warna netral. *@
+                        <div class="mb-3">
+                            <label class="form-label">Warna holder (layar gate)</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="color" class="form-control form-control-color"
+                                       value="@(string.IsNullOrWhiteSpace(formModel.ColorHex) ? "#6C757D" : formModel.ColorHex)"
+                                       @onchange="e => formModel.ColorHex = e.Value?.ToString() ?? string.Empty" />
+                                <input class="form-control" style="max-width: 130px; font-family: ui-monospace, Consolas, monospace;"
+                                       placeholder="#1E5FA8" @bind="formModel.ColorHex" />
+                                <span class="badge" style="background-color: @(string.IsNullOrWhiteSpace(formModel.ColorHex) ? "#6C757D" : formModel.ColorHex); color: #fff;">
+                                    @(string.IsNullOrWhiteSpace(formModel.ResourceName) ? "Contoh" : formModel.ResourceName)
+                                </span>
+                                @if (!string.IsNullOrWhiteSpace(formModel.ColorHex))
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => formModel.ColorHex = string.Empty">Kosongkan</button>
+                                }
+                            </div>
+                            <div class="form-text">Kosong = layar gate memakai warna netral.</div>
                         </div>
                         <div class="mb-3 form-check">
                             <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
@@ -301,7 +335,8 @@ else
             ResourceName = resource.ResourceName,
             IsActive = resource.IsActive,
             IncludeInDashboard = resource.IncludeInDashboard,
-            CounterpartResourceId = resource.CounterpartResourceId ?? 0
+            CounterpartResourceId = resource.CounterpartResourceId ?? 0,
+            ColorHex = resource.ColorHex ?? string.Empty
         };
         errorMessage = string.Empty;
         counterpartOptions = await ResourceApi.GetActiveExceptDivisionAsync(resource.DivisionId);
@@ -341,7 +376,8 @@ else
                 ResourceName = formModel.ResourceName,
                 IsActive = formModel.IsActive,
                 IncludeInDashboard = formModel.IncludeInDashboard,
-                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null
+                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null,
+                ColorHex = string.IsNullOrWhiteSpace(formModel.ColorHex) ? null : formModel.ColorHex.Trim()
             });
         }
         else
@@ -353,7 +389,8 @@ else
                 ResourceName = formModel.ResourceName,
                 IsActive = formModel.IsActive,
                 IncludeInDashboard = formModel.IncludeInDashboard,
-                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null
+                CounterpartResourceId = formModel.CounterpartResourceId > 0 ? formModel.CounterpartResourceId : null,
+                ColorHex = string.IsNullOrWhiteSpace(formModel.ColorHex) ? null : formModel.ColorHex.Trim()
             });
         }
 
@@ -414,5 +451,8 @@ else
         public bool IsActive { get; set; } = true;
         public bool IncludeInDashboard { get; set; } = true;
         public int CounterpartResourceId { get; set; }
+
+        // Prompt 70: warna holder/lanyard fisik line ini (mis. "#1E5FA8"). Kosong = netral.
+        public string ColorHex { get; set; } = string.Empty;
     }
 }

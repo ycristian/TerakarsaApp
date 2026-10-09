@@ -1,0 +1,152 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPembatalanApiService PembatalanApi
+
+@* Prompt 68: tombol + form "Ajukan batal", dipakai tiga tempat sekaligus --
+   detail personel, halaman /t/{token}, dan sheet aksi di layar scan.
+
+   JENIS DITENTUKAN OTOMATIS dari status:
+     MASUK_BOX -> BOX ("Batal masuk box {kode box}")
+     SET_JADI  -> SET ("Batal set jadi")
+     status lain (termasuk TERKIRIM) -> tombol TIDAK muncul.
+
+   Bila sudah ada pengajuan MENUNGGU, chip "Menunggu persetujuan" tampil
+   sebagai PENGGANTI tombol.
+
+   2026-10-07: jenis BOX TIDAK PERLU PERSETUJUAN -- "Keluarkan dari box" langsung
+   dieksekusi SP (baris pembatalan dibuat berstatus DISETUJUI sebagai jejak).
+   Jenis SET tetap lewat persetujuan. *@
+
+@if (menunggu is not null)
+{
+    <div class="tni-card" style="margin:0">
+        <div class="tni-row">
+            <span class="tni-chip tni-chip-warn">Menunggu persetujuan</span>
+            <span class="tni-note">@menunggu.DiajukanAt.ToString("dd/MM HH:mm")</span>
+        </div>
+        <div class="tni-note" style="margin-top:4px">
+            @menunggu.JenisLabel — "@menunggu.Alasan"
+            @if (!string.IsNullOrEmpty(menunggu.DiajukanOlehNama))
+            {
+                <text> · @menunggu.DiajukanOlehNama</text>
+            }
+        </div>
+    </div>
+}
+else if (Jenis is not null)
+{
+    @if (!buka)
+    {
+        <button class="tni-btn tni-btn-r" style="width:100%" @onclick="@(() => buka = true)">
+            <i class="fe fe-corner-up-left"></i> @Label
+        </button>
+    }
+    else
+    {
+        <div class="tni-card" style="margin:0">
+            <div class="tni-sec" style="margin-top:0">@Label</div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger" style="margin-bottom:6px">@errorMessage</div>
+            }
+
+            <div class="tni-k">Alasan (wajib)</div>
+            <input class="tni-inp" @bind="alasan" @bind:event="oninput"
+                   placeholder="@(Jenis == "BOX" ? "Salah ambil box" : "Celana salah ukuran")"
+                   maxlength="500" />
+
+            <div class="tni-note" style="margin-top:6px">
+                @(Jenis == "BOX"
+                    ? "Personel LANGSUNG keluar dari box (tanpa persetujuan) dan bisa di-scan ke box yang benar. Box yang sudah ditutup akan terbuka lagi."
+                    : "Bila disetujui, kemeja & celana kembali ke stok dan kartu bisa di-scan set jadi lagi.")
+            </div>
+
+            <div class="tni-row" style="margin-top:8px;gap:6px">
+                <button class="tni-btn tni-btn-o" style="flex:1" disabled="@isSaving"
+                        @onclick="Tutup">
+                    Batal
+                </button>
+                <button class="tni-btn tni-btn-c" style="flex:1"
+                        disabled="@(isSaving || string.IsNullOrWhiteSpace(alasan))"
+                        @onclick="KirimAsync">
+                    @(isSaving ? "Menyimpan..." : Jenis == "BOX" ? "Keluarkan" : "Ajukan")
+                </button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public int PersonelId { get; set; }
+    [Parameter, EditorRequired] public string StatusProgres { get; set; } = string.Empty;
+    [Parameter] public string? BoxCode { get; set; }
+
+    // Teks tombol pembatalan SET (mis. "Batalkan Set Lengkap" di pop up scan).
+    // Kosong = "Batal set jadi". Pembatalan BOX selalu memakai label bawaan.
+    [Parameter] public string? LabelSet { get; set; }
+
+    // Dipanggil setelah pengajuan berhasil -- pemanggil memuat ulang datanya.
+    [Parameter] public EventCallback OnDiajukan { get; set; }
+
+    private bool buka;
+    private bool isSaving;
+    private string alasan = string.Empty;
+    private string errorMessage = string.Empty;
+
+    private List<TniPembatalanDto> riwayat = new();
+    private TniPembatalanDto? menunggu;
+
+    // Jenis diturunkan dari status; null = tombol tidak relevan.
+    private string? Jenis => StatusProgres switch
+    {
+        "MASUK_BOX" => "BOX",
+        "SET_JADI" => "SET",
+        _ => null
+    };
+
+    private string Label => Jenis == "BOX"
+        ? $"Keluarkan dari box {BoxCode}".TrimEnd()
+        : LabelSet ?? "Batal set jadi";
+
+    protected override async Task OnParametersSetAsync() => await MuatAsync();
+
+    private async Task MuatAsync()
+    {
+        riwayat = await PembatalanApi.GetByPersonelAsync(PersonelId);
+
+        // Hanya pengajuan menunggu YANG SEJENIS yang menggantikan tombol --
+        // mis. batal SET yang menunggu tidak menyembunyikan tombol batal BOX.
+        menunggu = riwayat.FirstOrDefault(x => x.Menunggu && (Jenis is null || x.Jenis == Jenis))
+                   ?? riwayat.FirstOrDefault(x => x.Menunggu);
+    }
+
+    private void Tutup()
+    {
+        buka = false;
+        alasan = string.Empty;
+        errorMessage = string.Empty;
+    }
+
+    private async Task KirimAsync()
+    {
+        if (Jenis is null || string.IsNullOrWhiteSpace(alasan)) return;
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var hasil = await PembatalanApi.AjukanAsync(PersonelId, Jenis, alasan.Trim());
+
+        isSaving = false;
+
+        if (!hasil.Ok)
+        {
+            errorMessage = hasil.Pesan;
+            return;
+        }
+
+        Tutup();
+        await MuatAsync();
+        await OnDiajukan.InvokeAsync();
+    }
+}

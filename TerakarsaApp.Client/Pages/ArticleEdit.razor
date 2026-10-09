@@ -292,8 +292,9 @@ else
                                         <th style="width: 22%;">Divisi</th>
                                         <th style="width: 12%;">Urutan</th>
                                         <th style="width: 13%;">Butuh Bundle</th>
-                                        <th style="width: 13%;">Auto Terima</th>
-                                        <th style="width: 10%;">Kupon</th>
+                                        <th style="width: 11%;">Auto Terima</th>
+                                        <th style="width: 8%;">Kupon</th>
+                                        <th style="width: 12%;">Harga (Rp)</th>
                                         <th style="width: 60px;"></th>
                                     </tr>
                                 </thead>
@@ -330,6 +331,9 @@ else
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" disabled title="Kupon (tidak berlaku utk step Bundling)" />
                                                 </td>
+                                                @* Prompt 59: step Bundling implisit TIDAK punya harga (selalu 0 di DB) --
+                                                   sengaja tanpa input, bukan input yang di-disable. *@
+                                                <td class="text-center text-muted">&ndash;</td>
                                                 <td></td>
                                             </tr>
                                         }
@@ -354,6 +358,13 @@ else
                                                 <td class="text-center">
                                                     <input type="checkbox" class="form-check-input" @bind="row.PrintKupon" disabled="@(!row.RequiresBundle)"
                                                            title="@(row.RequiresBundle ? "Cetak kupon borongan otomatis saat hasil step ini dikonfirmasi diterima." : "Kupon hanya untuk step bundle")" />
+                                                </td>
+                                                @* Prompt 59: harga per pcs yang BERLAKU untuk artikel ini -- dasar kolom
+                                                   Nilai di tab Report stasiun. Bebas diubah kapan pun (tidak
+                                                   terikat status log/lock); rekap selalu membaca nilai terbaru. *@
+                                                <td>
+                                                    <input type="number" min="0" step="0.01" class="form-control text-end" @bind="row.UnitPrice"
+                                                           title="Harga per pcs (upah) step ini. 0 = belum diisi." />
                                                 </td>
                                                 <td class="text-center">
                                                     <div class="d-flex gap-1 justify-content-center">
@@ -1116,7 +1127,8 @@ else
                 SortOrder = s.SortOrder,
                 RequiresBundle = s.RequiresBundle,
                 AutoReceive = s.AutoReceive,
-                PrintKupon = s.PrintKupon
+                PrintKupon = s.PrintKupon,
+                UnitPrice = s.UnitPrice
             }).ToList();
             bundlingSteps = workflow.Steps.Where(s => s.IsBundling).ToList();
         }
@@ -1217,7 +1229,8 @@ else
                 SortOrder = r.SortOrder,
                 RequiresBundle = r.RequiresBundle,
                 AutoReceive = r.AutoReceive,
-                PrintKupon = r.PrintKupon
+                PrintKupon = r.PrintKupon,
+                UnitPrice = r.UnitPrice
             }).ToList()
         });
 
@@ -1390,6 +1403,7 @@ else
         public bool RequiresBundle { get; set; } = true;
         public bool AutoReceive { get; set; }
         public bool PrintKupon { get; set; }
+        public decimal UnitPrice { get; set; }
     }
 
     private class WorkflowDisplayItem

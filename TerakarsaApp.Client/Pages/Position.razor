@@ -4,9 +4,11 @@
 @using System.ComponentModel.DataAnnotations
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Positions
+@using TerakarsaApp.Shared.Divisions
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Authorization
 @inject PositionApiService PositionApi
+@inject DivisionApiService DivisionApi
 @inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>Data Jabatan</PageTitle>
@@ -65,6 +67,8 @@ else
                     <thead>
                         <tr>
                             <SortableHeader Label="Nama Jabatan" Column="PositionName" CurrentColumn="sortColumn" CurrentDirection="sortDirection" OnSort="ToggleSort" />
+                            <th>Divisi</th>
+                            <th>Menu Gate</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -73,6 +77,10 @@ else
                         {
                             <tr>
                                 <td>@p.PositionName</td>
+                                @* Kosong = jabatan ini belum dibatasi, jadi muncul di semua divisi. *@
+                                <td>@(string.IsNullOrWhiteSpace(p.DivisionNames) ? "Semua divisi" : p.DivisionNames)</td>
+                                @* Prompt 70: siapa yang boleh membuka menu satpam di aplikasi gate. *@
+                                <td>@(p.IsGateOperator ? "Boleh" : "—")</td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(p)"><i class="fe fe-edit"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(p)"><i class="fe fe-trash-2"></i></button>
@@ -107,6 +115,35 @@ else
                             <InputText class="form-control" @bind-Value="formModel.PositionName" />
                             <ValidationMessage For="@(() => formModel.PositionName)" class="text-danger" />
                         </div>
+                        @* Prompt 58 (lanjutan): jabatan dibatasi ke divisi tertentu -- dipakai
+                           membatasi dropdown "Jabatan" saat mendaftar pegawai dari stasiun.
+                           Tidak ada yang dicentang = berlaku di SEMUA divisi (fallback di SP). *@
+                        <div class="mb-3">
+                            <label class="form-label">Divisi</label>
+                            <div class="border rounded-0 p-2" style="max-height: 220px; overflow-y: auto;">
+                                @foreach (var d in divisionOptions)
+                                {
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="@($"pos-div-{d.Id}")"
+                                               checked="@formModel.DivisionIds.Contains(d.Id)"
+                                               @onchange="e => ToggleDivision(d.Id, e.Value is bool b && b)" />
+                                        <label class="form-check-label" for="@($"pos-div-{d.Id}")">@d.DivisionName</label>
+                                    </div>
+                                }
+                            </div>
+                            <div class="form-text">Tidak ada yang dicentang = jabatan ini berlaku di semua divisi.</div>
+                        </div>
+                        @* Prompt 70: akses menu satpam di aplikasi gate melekat pada JABATAN --
+                           aplikasi gate tanpa login, dan employees tidak punya relasi ke users. *@
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="pos-gate-operator"
+                                       checked="@formModel.IsGateOperator"
+                                       @onchange="e => formModel.IsGateOperator = e.Value is bool b && b" />
+                                <label class="form-check-label" for="pos-gate-operator">Boleh buka menu gate</label>
+                            </div>
+                            <div class="form-text">Kartu pegawai dengan jabatan ini bisa membuka menu satpam di aplikasi gate (daftar kartu, ubah data karyawan).</div>
+                        </div>
                         @if (!string.IsNullOrEmpty(errorMessage))
                         {
                             <div class="alert alert-danger">@errorMessage</div>
@@ -138,6 +175,8 @@ else
     private bool showDeleteConfirm = false;
     private bool isDeleting = false;
     private PositionDto? positionPendingDelete;
+    // Prompt 58 (lanjutan): pilihan divisi untuk jabatan (division_positions).
+    private List<DivisionDto> divisionOptions = new();
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -152,7 +191,10 @@ else
         hasAccess = state.User.HasClaim("module", "MASTER_POSITION");
 
         if (hasAccess == true)
+        {
+            divisionOptions = await DivisionApi.GetActiveAsync();
             await LoadPositions();
+        }
     }
 
     private async Task LoadPositions()
@@ -218,16 +260,31 @@ else
         showForm = true;
     }
 
-    private void OpenEditForm(PositionDto position)
+    private async Task OpenEditForm(PositionDto position)
     {
         isEditMode = true;
         formModel = new PositionFormModel
         {
             Id = position.Id,
-            PositionName = position.PositionName
+            PositionName = position.PositionName,
+            IsGateOperator = position.IsGateOperator,
+            // Dibaca dari pemetaan tersimpan, bukan dari teks DivisionNames di tabel.
+            DivisionIds = await PositionApi.GetDivisionIdsAsync(position.Id)
         };
         errorMessage = string.Empty;
         showForm = true;
+    }
+
+    private void ToggleDivision(int divisionId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            if (!formModel.DivisionIds.Contains(divisionId)) formModel.DivisionIds.Add(divisionId);
+        }
+        else
+        {
+            formModel.DivisionIds.Remove(divisionId);
+        }
     }
 
     private void CloseForm()
@@ -246,14 +303,18 @@ else
             result = await PositionApi.UpdateAsync(new PositionUpdateRequest
             {
                 Id = formModel.Id,
-                PositionName = formModel.PositionName
+                PositionName = formModel.PositionName,
+                IsGateOperator = formModel.IsGateOperator,
+                DivisionIds = formModel.DivisionIds
             });
         }
         else
         {
             result = await PositionApi.CreateAsync(new PositionCreateRequest
             {
-                PositionName = formModel.PositionName
+                PositionName = formModel.PositionName,
+                IsGateOperator = formModel.IsGateOperator,
+                DivisionIds = formModel.DivisionIds
             });
         }
 
@@ -304,5 +365,11 @@ else
         [Required(ErrorMessage = "Nama jabatan wajib diisi.")]
         [StringLength(150, ErrorMessage = "Nama jabatan maksimal 150 karakter.")]
         public string PositionName { get; set; } = string.Empty;
+
+        // Prompt 70: jabatan ini boleh membuka menu satpam di aplikasi gate.
+        public bool IsGateOperator { get; set; }
+
+        // Kosong = jabatan tidak dibatasi divisi (berlaku di semua divisi).
+        public List<int> DivisionIds { get; set; } = new();
     }
 }

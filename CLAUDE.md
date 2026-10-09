@@ -70,3 +70,20 @@ perubahan dieksekusi lewat prompt file bernomor di folder `claude prompt/`.
 - Baca hanya file yang relevan dengan prompt — jangan memindai seluruh repo.
 - Akhiri dengan: daftar file dibuat/diubah + script SQL yang harus dijalankan manual,
   masing-masing sebagai markdown link (`[nama file](path)`) supaya bisa langsung dibuka.
+
+## Module PDH TNI AD (Prompt 60–69)
+
+- Semua objek di schema `tni`: tabel `tni.<tabel>`, SP `tni.SIS_<Nama>`, view `tni.v_<nama>`.
+  Panggil SP SELALU lengkap dengan schema (`EXEC tni.SIS_...`) — tanpa awalan SQL Server mencari di dbo.
+- Script di `sql/tni/`; canonical tabel `sql/tni/create_schema_tni.sql`.
+- Seri 60–69 boleh mengeksekusi script `sql/tni/` dari prompt yang sedang dikerjakan langsung ke
+  database target: server `AGS\SQLEXPRESS` (192.168.8.233), database `TerakarsaDB`
+  (dikonfirmasi owner di Prompt 60). Tidak pernah DROP/ALTER objek di luar schema `tni`
+  (kecuali seed Modules/UserModules).
+- Status personel hanya dari view `tni.v_personel` (`status_progres`); stok hanya dari `SUM(qty)`
+  `tni.stok_mutasi`. Tidak ada kolom status / saldo.
+- UI mobile-first (dipakai di HP): kartu, bukan tabel lebar; tombol aksi utama menempel di bawah.
+  CSS `wwwroot/css/tni.css`, komponen bersama `Pages/Tni/Shared/`. Mockup di `claude prompt/tni/`.
+- Route halaman `/tni/...`, API `api/tni/...`, DTO `TerakarsaApp.Shared/Tni/` (satu file per area),
+  service API `Tni<Area>Service`. Semua halaman bekerja pada order `tni.orders.is_active = 1`.
+- Pesan error SP yang perlu dibedakan UI memakai prefix tetap: `TIDAK_DIKENAL|`, `SUDAH|`, `DITOLAK|`.

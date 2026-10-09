@@ -1,0 +1,65 @@
+@using TerakarsaApp.Shared.Tni
+
+@* Prompt 68: riwayat pembatalan satu personel (dipakai detail personel).
+   Read-only -- memutus hanya di /tni/pembatalan. *@
+
+@if (Items.Count > 0)
+{
+    <div class="tni-sec">Riwayat pembatalan</div>
+    @foreach (var p in Items)
+    {
+        <div class="tni-card">
+            <div class="tni-row">
+                <span class="tni-chip @ChipKelas(p)">@p.JenisLabel</span>
+                <span class="tni-note">@p.DiajukanAt.ToString("dd/MM/yy HH:mm")</span>
+            </div>
+
+            <div class="tni-note" style="margin-top:4px">
+                "@p.Alasan"
+                @if (!string.IsNullOrEmpty(p.DiajukanOlehNama))
+                {
+                    <text> — @p.DiajukanOlehNama</text>
+                }
+            </div>
+
+            <div class="tni-row" style="margin-top:6px">
+                <span class="tni-chip @StatusKelas(p)">@StatusLabel(p)</span>
+                @if (p.DiputusAt.HasValue)
+                {
+                    <span class="tni-note">
+                        @p.DiputusAt.Value.ToString("dd/MM/yy HH:mm")
+                        @if (!string.IsNullOrEmpty(p.DiputusOlehNama))
+                        {
+                            <text> · @p.DiputusOlehNama</text>
+                        }
+                    </span>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(p.CatatanKeputusan))
+            {
+                <div class="tni-note" style="margin-top:4px">Catatan: @p.CatatanKeputusan</div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public List<TniPembatalanDto> Items { get; set; } = new();
+
+    private static string ChipKelas(TniPembatalanDto p) => p.JenisBox ? "tni-chip-warn" : "tni-chip-bad";
+
+    private static string StatusKelas(TniPembatalanDto p) => p.Status switch
+    {
+        "DISETUJUI" => "tni-chip-ok",
+        "DITOLAK" => "tni-chip-mut",
+        _ => "tni-chip-warn"
+    };
+
+    private static string StatusLabel(TniPembatalanDto p) => p.Status switch
+    {
+        "DISETUJUI" => "Disetujui",
+        "DITOLAK" => "Ditolak",
+        _ => "Menunggu persetujuan"
+    };
+}

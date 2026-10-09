@@ -61,6 +61,10 @@ CREATE TABLE divisions(
 CREATE TABLE positions(
  position_id int primary key identity(1,1),
  position_name varchar(150) not null,
+ is_gate_operator bit not null default 0,   -- Prompt 70: jabatan ini boleh membuka menu satpam
+                                            -- di aplikasi gate. Akses melekat pada JABATAN,
+                                            -- bukan pada kartu dan bukan pada user login
+                                            -- (aplikasi gate memang tanpa login).
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -173,6 +177,10 @@ CREATE TABLE resources(
    foreign key references resources(resource_id),     -- auto-terima WAJIB pakai ini (bukan lagi fallback ke
                                                         -- pengirim) bila valid terhadap divisi tujuan; kalau tidak,
                                                         -- operator wajib pilih penerima manual. Satu arah, opsional.
+ color_hex varchar(7) null,                         -- Prompt 70: warna holder/lanyard fisik line ini
+                                                    -- (mis. '#1E5FA8'), dipakai badge warna di layar
+                                                    -- gate supaya satpam bisa mencocokkan dengan holder
+                                                    -- yang dipakai karyawan. NULL = warna netral.
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -195,6 +203,11 @@ CREATE TABLE employees(
  employee_name varchar(150) not null,
  join_date date null,
  is_active bit not null default 1,  -- Prompt 53: nonaktif = hilang dari dropdown employee, data lama (log/bundle/project) tetap utuh
+ phone_no varchar(20) null,         -- Prompt 58: HANYA digit (normalisasi di SP: buang non-digit,
+                                    -- awalan 62 -> 0). Dipakai station sebagai penanda "orang yang
+                                    -- sama" saat menawarkan "Aktifkan lagi?"
+ inactive_date date null,           -- Prompt 58: tanggal terakhir kerja, diisi saat dinonaktifkan
+ inactive_reason varchar(20) null,  -- Prompt 58: RESIGN / HABIS_KONTRAK / DIBERHENTIKAN / PINDAH_DIVISI
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -392,6 +405,8 @@ CREATE TABLE workflow_template_steps(
  requires_bundle bit not null default 1,     -- 0 = step boleh log tanpa bundle (mis. Cutting)
  auto_receive bit not null default 0,       -- serah ke step ini otomatis diterima (received_at terisi saat insert log)
  print_kupon bit not null default 0,        -- Prompt 41: cetak kupon borongan saat baris step ini diterima (hanya valid requires_bundle = 1)
+ unit_price decimal(19,4) not null default 0,  -- Prompt 59: harga ARAHAN per pcs; disalin ke article_workflows saat APPLY.
+                                                -- Perubahan di sini TIDAK merambat ke artikel yang sudah ada.
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -422,6 +437,10 @@ CREATE TABLE article_workflows(
  requires_bundle bit not null default 1,     -- salinan dari template step
  auto_receive bit not null default 0,       -- salinan dari template step; selalu 0 utk step Bundling implisit
  print_kupon bit not null default 0,        -- Prompt 41: salinan dari template step; selalu 0 utk step Bundling implisit
+ unit_price decimal(19,4) not null default 0,  -- Prompt 59: harga per pcs yang BERLAKU untuk artikel ini (dasar upah di
+                                                -- Rekap Produksi stasiun). Disalin dari template saat APPLY, lalu bebas
+                                                -- diubah per artikel lewat SAVE -- tidak pernah di-snapshot ke log.
+                                                -- Step Bundling implisit selalu 0.
  is_bundling bit not null default 0,         -- step Bundling implisit (disisipkan sistem saat APPLY, bukan dari template)
  inactive_at datetime2 null,    -- Prompt 50: diisi = step berhenti jadi jalur untuk unit baru
                                  -- (restrukturisasi setelah ada log). Baris tetap deleted_at
@@ -1093,7 +1112,202 @@ CREATE TABLE unlock_request_items(
 );
 GO
 
+-- ============ 9h. ABSENSI PEGAWAI (Prompt 58) ============
+-- Absen harian diisi MANUAL oleh PIC line lewat perangkat stasiun (belum ada RFID).
+-- Nanti data RFID mengisi tabel yang sama dengan source = 'RFID', PIC tinggal mengoreksi.
+-- Telat TIDAK disimpan -- dihitung saat dibaca dari work_schedule_defaults divisi station.
+
+CREATE TABLE employee_attendances(
+ attendance_id int primary key identity(1,1),
+ employee_id int not null
+   constraint FK_ea_employees foreign key references employees(employee_id),
+ attendance_date date not null,
+ resource_id int not null                   -- line tempat absen DICATAT (bukan line pegawai saat ini)
+   constraint FK_ea_resources foreign key references resources(resource_id),
+ status char(1) not null                    -- H Hadir, I Izin, S Sakit, A Alpa, C Cuti
+   constraint CK_ea_status check (status IN ('H','I','S','A','C')),
+ check_in time(0) null,                     -- hanya boleh terisi kalau status = 'H'
+ check_out time(0) null,                    -- boleh lebih kecil dari check_in (lewat tengah malam)
+ note varchar(200) null,                    -- keterangan, mis. 'Surat dokter'
+ source varchar(10) not null
+   constraint DF_ea_source default 'MANUAL', -- MANUAL / RFID (RFID belum dipakai)
+ station_id int null                        -- station yang TERAKHIR menyimpan
+   constraint FK_ea_stations foreign key references stations(station_id),
+ recorded_by_resource_id int not null       -- operator sesi saat pertama diisi
+   constraint FK_ea_recorded_resource foreign key references resources(resource_id),
+ updated_by_resource_id int null            -- operator sesi saat terakhir diubah
+   constraint FK_ea_updated_resource foreign key references resources(resource_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,                   -- user sistem station_system
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ constraint CK_ea_time_only_hadir check (status = 'H' OR (check_in IS NULL AND check_out IS NULL))
+);
+GO
+
+
+-- ============ 9i. JABATAN PER DIVISI (Prompt 58 lanjutan) ============
+-- Pembatas pilihan jabatan saat mendaftar pegawai (mis. divisi Sew + QC hanya menawarkan
+-- Penjahit/Helper/QC). Many-to-many: satu jabatan dipakai beberapa divisi, dan positions yang
+-- sudah ada memang dipakai lintas divisi oleh employees.
+-- Diatur dari halaman Master Jabatan. Divisi TANPA satu pun baris di sini dianggap "belum
+-- diatur" dan tetap menawarkan SEMUA jabatan -- lihat SIS_Position_GetByDivision.
+
+CREATE TABLE division_positions(
+ division_position_id int primary key identity(1,1),
+ division_id int not null
+   constraint FK_divpos_divisions foreign key references divisions(division_id),
+ position_id int not null
+   constraint FK_divpos_positions foreign key references positions(position_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
+-- ============ 9j. OUTPUT NON-PO (Prompt 59) ============
+-- Pekerjaan di luar PO/bundle yang diinput PIC dari stasiun (sampel, order toko tanpa PO,
+-- dsb). MASUK UPAH resource, jadi punya periode gajian sendiri -- tapi TIDAK ikut mekanisme
+-- lock Prompt 55: edit/hapus bebas selama periodenya belum finalized_at.
+-- payroll_period_id DISIMPAN (bukan dihitung ulang saat baca) supaya rekap periode cukup
+-- satu join; SP menghitungnya ulang dari output_at setiap CREATE/UPDATE.
+-- Tidak ada kolom "jenis" -- keterangan bebas sudah cukup (keputusan prompt).
+
+CREATE TABLE non_po_outputs(
+ non_po_output_id int primary key identity(1,1),
+ resource_id int not null                  -- resource sesi stasiun (pemilik upah)
+   constraint FK_npo_resources foreign key references resources(resource_id),
+ division_id int not null                  -- divisi resource, disalin SP (bukan dari client)
+   constraint FK_npo_divisions foreign key references divisions(division_id),
+ payroll_period_id int not null            -- dihitung SP dari output_at (cut-off Sabtu 10:00)
+   constraint FK_npo_payroll_periods foreign key references payroll_periods(payroll_period_id),
+ output_at datetime2 not null,             -- tanggal + jam pekerjaan; penentu periode
+ qty int not null,                         -- > 0 (ditegakkan SIS_NonPoOutput_Manage)
+ unit_price decimal(19,4) not null,        -- >= 0 (ditegakkan SIS_NonPoOutput_Manage)
+ remark nvarchar(500) not null,            -- wajib diisi
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,                  -- user sistem station_system
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
+-- ============ 9k. ABSENSI RFID (Prompt 70) ============
+-- Kartu RFID TIDAK dibawa pulang: dititip di rak gate, diambil pagi, dikembalikan sore. Karena
+-- itu status kartu = status orang, dan absensi diturunkan dari tap ambil/kembali kartu -- tanpa
+-- tombol MASUK/PULANG. Seluruh keputusan in/out ada di SIS_Gate_Tap (sql/sp_Gate.sql).
+-- Hanya UID kartu yang dipakai; TIDAK ADA data yang ditulis ke kartu.
+--
+-- CATATAN: no. telp karyawan yang dikumpulkan satpam di gate masuk ke employees.phone_no
+-- (kolom Prompt 58), BUKAN kolom baru -- lihat catatan di sql/alter_70_absensi_rfid.sql.
+
+-- Lapis identitas UMUM, bukan tabel milik modul absensi: kartu yang sama nantinya dipakai
+-- untuk pengambilan barang di gudang (di luar cakupan Prompt 70).
+CREATE TABLE employee_cards(
+ employee_card_id int primary key identity(1,1),
+ employee_id int not null
+   constraint FK_ec_employees foreign key references employees(employee_id),
+ card_uid varchar(20) not null,             -- 10 digit desimal, DISIMPAN SUDAH DI-PAD NOL DI DEPAN
+ card_type varchar(20) not null             -- TETAP / SEMENTARA
+   constraint CK_ec_card_type check (card_type IN ('TETAP','SEMENTARA')),
+ card_status varchar(20) not null           -- AKTIF / NONAKTIF
+   constraint CK_ec_card_status check (card_status IN ('AKTIF','NONAKTIF')),
+ issued_at datetime2 not null
+   constraint DF_ec_issued_at default sysdatetime(),
+ issued_by_employee_id int null             -- satpam yang mendaftarkan dari gate; NULL kalau
+   constraint FK_ec_issued_by_employee     -- didaftarkan dari admin panel (pelakunya sudah
+   foreign key references employees(employee_id),   -- tercatat di created_by)
+ remarks varchar(255) null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+GO
+
+-- Sesi melekat pada KARYAWAN, bukan pada kartu: beberapa kartu aktif milik satu orang tetap
+-- bermuara ke satu sesi.
+CREATE TABLE attendance_sessions(
+ attendance_session_id int primary key identity(1,1),
+ employee_id int not null
+   constraint FK_as_employees foreign key references employees(employee_id),
+ -- division_id/resource_id di-SNAPSHOT saat check in supaya mutasi line tidak mengubah
+ -- riwayat absensi.
+ division_id int not null
+   constraint FK_as_divisions foreign key references divisions(division_id),
+ resource_id int null
+   constraint FK_as_resources foreign key references resources(resource_id),
+ work_date date not null,                   -- tanggal check in (pemilik sesi)
+ check_in_at datetime2 not null,
+ check_out_at datetime2 null,               -- NULL = belum / tidak diketahui
+ session_status varchar(20) not null        -- OPEN / CLOSED / ANOMALI
+   constraint CK_as_status check (session_status IN ('OPEN','CLOSED','ANOMALI')),
+ session_flag varchar(30) null,             -- LEMBUR_DIKONFIRMASI / BELUM_CHECKOUT /
+                                            -- LUPA_KEMBALI / DIKOREKSI / DIVERIFIKASI
+ entry_source varchar(10) not null          -- GATE / MANUAL
+   constraint CK_as_entry_source check (entry_source IN ('GATE','MANUAL')),
+ remarks varchar(255) null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,                   -- user sistem gate_system untuk sesi dari gate
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null,
+ -- ANOMALI = ditutup paksa, check_out_at WAJIB NULL (jamnya tidak diketahui, bukan ditebak);
+ -- OPEN = kartu sedang diambil, orang ada di dalam.
+ constraint CK_as_checkout_shape check (
+     (session_status = 'CLOSED' AND check_out_at IS NOT NULL)
+  OR (session_status <> 'CLOSED' AND check_out_at IS NULL)
+ )
+);
+GO
+
+-- Log MENTAH: tidak ada update, tidak ada soft delete.
+CREATE TABLE gate_taps(
+ gate_tap_id int primary key identity(1,1),
+ tap_uid uniqueidentifier not null,         -- digenerate GateApp, kunci idempoten
+ card_uid varchar(20) not null,
+ tapped_at datetime2 not null,              -- WAKTU TAP ASLI dari gate, BUKAN waktu terima server
+ gate_code varchar(30) not null,
+ result_code varchar(30) not null,
+ attendance_session_id int null
+   constraint FK_gt_sessions foreign key references attendance_sessions(attendance_session_id),
+ employee_id int null                       -- NULL kalau kartu tidak dikenal
+   constraint FK_gt_employees foreign key references employees(employee_id),
+ is_offline_replay bit not null
+   constraint DF_gt_offline_replay default 0,
+ created_at datetime2 not null default sysdatetime()
+);
+GO
+
+-- Log MENTAH. Tanpa tabel ini, data karyawan bisa berubah dari gate tanpa jejak.
+CREATE TABLE employee_change_log(
+ employee_change_log_id int primary key identity(1,1),
+ employee_id int not null
+   constraint FK_ecl_employees foreign key references employees(employee_id),
+ field_name varchar(50) not null,           -- employee_name / phone_no (nama kolom asli)
+ old_value varchar(255) null,
+ new_value varchar(255) null,
+ changed_by_employee_id int null            -- satpam, kalau dari gate
+   constraint FK_ecl_changed_by_employee foreign key references employees(employee_id),
+ source varchar(10) not null                -- GATE / ADMIN
+   constraint CK_ecl_source check (source IN ('GATE','ADMIN')),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
+
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
 
 CREATE UNIQUE INDEX UX_buyers_code            ON buyers(buyer_code)                 WHERE deleted_at IS NULL;
@@ -1130,6 +1344,21 @@ CREATE UNIQUE INDEX UX_payroll_periods_year_no ON payroll_periods(period_year, p
 CREATE UNIQUE INDEX UX_payroll_periods_code   ON payroll_periods(period_code)             WHERE deleted_at IS NULL;
 -- Satu baris log maksimal punya SATU lock aktif.
 CREATE UNIQUE INDEX UX_wli_log_active         ON workflow_lock_items(workflow_log_id)     WHERE released_at IS NULL AND deleted_at IS NULL;
+-- Prompt 58: satu pegawai maksimal satu baris absen per tanggal (resource TIDAK ikut --
+-- pegawai hanya bisa anggota satu line).
+CREATE UNIQUE INDEX UX_ea_employee_date       ON employee_attendances(employee_id, attendance_date) WHERE deleted_at IS NULL;
+-- Prompt 58 (lanjutan): satu jabatan maksimal satu baris aktif per divisi.
+CREATE UNIQUE INDEX UX_divpos_division_position ON division_positions(division_id, position_id)  WHERE deleted_at IS NULL;
+-- Prompt 70: satu UID hanya boleh AKTIF di satu karyawan, tapi kartu lama yang sudah NONAKTIF
+-- tetap tersimpan sebagai riwayat (kartu hilang/diganti) -- itulah sebabnya card_status ikut
+-- masuk klausa WHERE, bukan cuma deleted_at.
+CREATE UNIQUE INDEX UX_employee_cards_uid     ON employee_cards(card_uid)      WHERE deleted_at IS NULL AND card_status = 'AKTIF';
+-- Hanya boleh ada SATU sesi OPEN per karyawan -- beberapa kartu aktif milik satu orang tetap
+-- bermuara ke satu sesi.
+CREATE UNIQUE INDEX UX_as_open_per_employee   ON attendance_sessions(employee_id) WHERE session_status = 'OPEN' AND deleted_at IS NULL;
+-- Inilah yang mencegah tap terhitung dua kali kalau jaringan putus setelah server commit tapi
+-- sebelum GateApp menerima balasan (GateApp mengirim ulang baris antrian yang sama).
+CREATE UNIQUE INDEX UX_gate_taps_tap_uid      ON gate_taps(tap_uid);
 GO
 
 -- ============ 11. INDEX FK UNTUK PERFORMA QUERY HARIAN ============
@@ -1153,6 +1382,20 @@ CREATE INDEX IX_pack_items_pack     ON pack_items(pack_id) WHERE deleted_at IS N
 CREATE INDEX IX_awl_lock_id         ON article_workflow_logs(lock_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_wli_lock_id         ON workflow_lock_items(lock_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_uri_request_id      ON unlock_request_items(request_id);
+-- Prompt 58: list & rekap absen per line per tanggal; pencarian no. telp (BUKAN unique --
+-- keunikan dicek di SP supaya nomor pegawai nonaktif bisa ditawarkan "Aktifkan lagi?").
+CREATE INDEX IX_ea_resource_date     ON employee_attendances(resource_id, attendance_date) WHERE deleted_at IS NULL;
+CREATE INDEX IX_employees_phone_no   ON employees(phone_no) WHERE deleted_at IS NULL AND phone_no IS NOT NULL;
+-- Prompt 59: rekap produksi stasiun membaca non-PO per resource + periode.
+CREATE INDEX IX_npo_resource_period  ON non_po_outputs(resource_id, payroll_period_id) WHERE deleted_at IS NULL;
+-- Prompt 70: absensi RFID. SENGAJA TIDAK unique per employee di employee_cards -- satu karyawan
+-- boleh punya beberapa kartu AKTIF sekaligus (kartu tetap + kartu sementara).
+CREATE INDEX IX_employee_cards_employee ON employee_cards(employee_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_as_date_division     ON attendance_sessions(work_date, division_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_as_employee_date     ON attendance_sessions(employee_id, work_date) WHERE deleted_at IS NULL;
+-- Cooldown 30 detik SIS_Gate_Tap dibaca dari index ini.
+CREATE INDEX IX_gate_taps_card_time  ON gate_taps(card_uid, tapped_at DESC);
+CREATE INDEX IX_ecl_employee         ON employee_change_log(employee_id, created_at DESC);
 GO
 
 -- ============ 12. FK YANG BARU BISA DIPASANG SETELAH SEMUA TABEL ADA ============

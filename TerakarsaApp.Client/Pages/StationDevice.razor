@@ -186,9 +186,35 @@ else
                         </a>
                     </li>
                 }
+                @* Prompt 59: rekap ini milik SATU line, jadi tanpa operator sesi tidak ada yang
+                   bisa ditampilkan -- tab dimatikan, bukan dibuka lalu kosong. Saat ini halaman
+                   sudah menggantikan SELURUH isinya dengan layar "Pilih Operator" ketika
+                   currentOperatorId null, jadi cabang ini praktis tidak terlihat -- disimpan
+                   sebagai pengaman kalau gate halaman itu berubah (endpoint-nya pun menolak
+                   sendiri dengan "Operator wajib dipilih."). *@
                 <li class="nav-item">
-                    <a class="nav-link small py-1 px-2 @(activeTab == "rekap" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekap")'>
-                        Settlement
+                    @if (currentOperatorId is null)
+                    {
+                        <span class="nav-link small py-1 px-2 disabled text-muted" title="Pilih operator dulu">
+                            Report
+                        </span>
+                    }
+                    else
+                    {
+                        <a class="nav-link small py-1 px-2 @(activeTab == "rekapproduksi" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekapproduksi")'>
+                            Report
+                        </a>
+                    }
+                </li>
+                @* Prompt 58: badge = pegawai aktif line ini yang absennya belum diisi HARI INI.
+                   Hari libur tidak pernah masuk daftar tunggakan, jadi otomatis tanpa badge. *@
+                <li class="nav-item">
+                    <a class="nav-link small py-1 px-2 @(activeTab == "absen" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("absen")'>
+                        Absen
+                        @if (AbsenTodayPendingCount > 0)
+                        {
+                            <span class="badge bg-warning text-dark ms-1">@AbsenTodayPendingCount</span>
+                        }
                     </a>
                 </li>
             </ul>
@@ -879,8 +905,20 @@ else
                     <div class="alert alert-success mt-3 mb-0">@packingFeedback</div>
                 }
             }
-            else if (activeTab == "rekap")
+            else if (activeTab == "rekapproduksi")
             {
+                @* Prompt 59: tab "Report" (label lama: "Rekap Produksi"; nama file/komponen
+                   sengaja TIDAK ikut di-rename). Isinya di StationRekapProduksiTab supaya
+                   halaman ini tidak makin besar (pola sama dengan tab Absen). Divisi tidak dikirim dari sini --
+                   komponen hanya meneruskan operator sesi sebagai resourceId. *@
+                <StationRekapProduksiTab ResourceId="currentOperatorId ?? 0" />
+
+                @* Dulu tab "Settlement" tersendiri; digabung ke dasar tab ini supaya cetak
+                   struk/WIP ada di layar yang sama dengan angka yang dicetaknya. Tombolnya
+                   tetap memanggil handler di halaman ini (modal struk juga tinggal di sini),
+                   jadi yang pindah hanya posisinya. *@
+                <hr class="my-4" />
+                <h6 class="text-muted text-uppercase mb-2" style="font-size: 0.75rem; letter-spacing: 0.04em;">Settlement</h6>
                 <div class="d-flex gap-2 mb-2" style="max-width: 480px;">
                     <button type="button" class="btn btn-primary flex-fill" disabled="@(RekapResourceId <= 0)" @onclick="OpenRekapStrukModal">Print Rekap</button>
                     <button type="button" class="btn btn-outline-primary flex-fill" disabled="@(RekapResourceId <= 0 || isBusy)" @onclick="PrintRekapWip">Cetak WIP</button>
@@ -888,6 +926,17 @@ else
                 <p class="text-muted mb-0">
                     Rekap dicetak untuk <strong>@station.DivisionName</strong> &middot; <strong>@currentOperatorName</strong>.
                 </p>
+            }
+            else if (activeTab == "absen")
+            {
+                @* Prompt 58: isinya di StationAttendanceTab (+ 3 komponen sub-tab) supaya
+                   halaman ini tidak makin besar. Divisi/line tidak dikirim ke server dari
+                   sini -- komponen hanya meneruskan operator sesi sebagai resourceId. *@
+                <StationAttendanceTab ResourceId="currentOperatorId ?? 0"
+                                      DivisionName="@station.DivisionName"
+                                      ResourceName="@(currentOperatorName ?? "-")"
+                                      OnDirtyCountChanged="HandleAbsenDirtyCountChanged"
+                                      OnDataChanged="HandleAbsenDataChanged" />
             }
 
             @if (!string.IsNullOrEmpty(actionError))
@@ -1934,6 +1983,13 @@ else
     <Message>Perangkat akan keluar dan token saat ini tidak berlaku lagi. Untuk masuk kembali, minta kode pairing baru ke admin.</Message>
 </ConfirmDeleteModal>
 
+@* Prompt 58: keluar dari tab Absen sementara masih ada perubahan absen yang belum disimpan. *@
+<ConfirmDeleteModal Show="showAbsenLeaveConfirm" Title="Perubahan Absen Belum Disimpan"
+                     ConfirmText="Ya, Buang" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
+                     OnConfirm="ConfirmLeaveAbsenTab" OnCancel="() => showAbsenLeaveConfirm = false">
+    <Message>Ada @absenDirtyCount perubahan absen yang belum disimpan. Pindah tab akan membuang perubahan itu.</Message>
+</ConfirmDeleteModal>
+
 @code {
     private const string TokenKey = "stationToken";
     private const string OperatorIdKey = "stationOperatorId";
@@ -2509,7 +2565,12 @@ else
         var countsTask = StationApi.GetCountsAsync(currentOperatorId);
         // Prompt 56: chip "Belum lock" -- lintas tanggal, jadi tidak ikut filter outboundDate.
         var unlockedDatesTask = StationApi.GetOutUnlockedDatesAsync(currentOperatorId);
-        await Task.WhenAll(pendingReceivesTask, inProgressTask, activeWorkTask, outboundTask, countsTask, unlockedDatesTask);
+        // Prompt 58: badge tunggakan absen -- ikut polling supaya angkanya tetap hidup kalau
+        // PIC lain di line yang sama sudah mengisi.
+        var absenPendingTask = currentOperatorId is int absenResourceId && absenResourceId > 0
+            ? StationApi.GetAttendancePendingDatesAsync(absenResourceId)
+            : Task.FromResult(new List<StationAttendancePendingDateDto>());
+        await Task.WhenAll(pendingReceivesTask, inProgressTask, activeWorkTask, outboundTask, countsTask, unlockedDatesTask, absenPendingTask);
 
         pendingReceives = pendingReceivesTask.Result;
         inProgress = inProgressTask.Result;
@@ -2517,6 +2578,7 @@ else
         outbound = outboundTask.Result;
         counts = countsTask.Result;
         outUnlockedDates = unlockedDatesTask.Result;
+        absenPendingDates = absenPendingTask.Result;
         // Prompt 56: buang pilihan yang barisnya sudah tidak ada / berubah status (mis. hasil
         // polling atau setelah lock dari perangkat lain).
         outSelected.RemoveWhere(id => !outbound.Any(r => r.WorkflowLogId == id && IsOutRowSelectable(r)));
@@ -2580,8 +2642,62 @@ else
         StateHasChanged();
     }
 
+    // Prompt 58: tunggakan absen hari ini (badge tab "Absen") + perubahan absen yang belum
+    // disimpan (penjaga saat pindah tab). Daftar tanggalnya sendiri dimuat di dalam
+    // StationAttendanceInput -- di sini hanya angka hari ini.
+    private List<StationAttendancePendingDateDto> absenPendingDates = new();
+    private int absenDirtyCount = 0;
+    private bool showAbsenLeaveConfirm = false;
+    private string? absenPendingTab;
+
+    private int AbsenTodayPendingCount =>
+        absenPendingDates.FirstOrDefault(p => p.AttendanceDate.Date == DateTime.Today)?.PendingCount ?? 0;
+
+    private async Task LoadAbsenPendingDates()
+    {
+        absenPendingDates = currentOperatorId is int resourceId && resourceId > 0
+            ? await StationApi.GetAttendancePendingDatesAsync(resourceId)
+            : new();
+    }
+
+    private void HandleAbsenDirtyCountChanged(int count) => absenDirtyCount = count;
+
+    // Absen tersimpan / pegawai line berubah: badge disegarkan, dan opsi dropdown "Penjahit"
+    // di modal Buat/Edit Bundle (Prompt 32) ikut dimuat ulang supaya pegawai baru langsung
+    // ada dan yang dinonaktifkan langsung hilang.
+    private async Task HandleAbsenDataChanged()
+    {
+        await LoadAbsenPendingDates();
+
+        if (buatBundleTailorResourceId > 0)
+            buatBundleTailorEmployeeOptions = await StationApi.GetEmployeesByResourceAsync(buatBundleTailorResourceId);
+        if (editBundleTailorResourceId > 0)
+            editBundleTailorEmployeeOptions = await StationApi.GetEmployeesByResourceAsync(editBundleTailorResourceId);
+    }
+
+    private async Task ConfirmLeaveAbsenTab()
+    {
+        showAbsenLeaveConfirm = false;
+        var target = absenPendingTab;
+        absenPendingTab = null;
+        if (target is null) return;
+
+        // Perubahan dibuang: komponen Absen dibongkar saat tab berganti, jadi cukup lupakan
+        // hitungannya -- isi form dimuat ulang dari DB saat tab dibuka lagi.
+        absenDirtyCount = 0;
+        await SetTab(target);
+    }
+
     private async Task SetTab(string tab)
     {
+        // Prompt 58: keluar dari tab Absen dengan perubahan belum disimpan -> konfirmasi.
+        if (activeTab == "absen" && tab != "absen" && absenDirtyCount > 0)
+        {
+            absenPendingTab = tab;
+            showAbsenLeaveConfirm = true;
+            return;
+        }
+
         activeTab = tab;
         // Prompt 56: pindah tab mengosongkan pilihan baris tab OUT.
         ClearOutSelection();
@@ -3810,7 +3926,8 @@ else
     private string packingError = string.Empty;
     private string packingFeedback = string.Empty;
 
-    // Ad hoc (2026-09-28): tab Settlement dikunci ke divisi stasiun + resource operator sesi ini.
+    // Ad hoc (2026-09-28): Settlement dikunci ke divisi stasiun + resource operator sesi ini.
+    // (Dulu tab tersendiri; sejak Prompt 59 jadi bagian paling bawah tab "Report".)
     // Dropdown Divisi/Resource/Penjahit (Prompt 42) dihapus supaya operator tidak bisa mencetak
     // rekap milik divisi/resource lain; level per penjahit tidak dipakai.
     private const string RekapLevel = "RESOURCE";

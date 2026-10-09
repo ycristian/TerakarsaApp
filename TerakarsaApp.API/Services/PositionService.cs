@@ -1,6 +1,7 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using TerakarsaApp.API.Data;
+using System.Text.Json;
 using TerakarsaApp.Shared.Positions;
 
 namespace TerakarsaApp.API.Services;
@@ -74,13 +75,15 @@ public class PositionService
     {
         var actionParam = new SqlParameter("@Action", "CREATE");
         var nameParam = new SqlParameter("@PositionName", request.PositionName);
+        var gateOperatorParam = new SqlParameter("@IsGateOperator", request.IsGateOperator);
+        var divisionIdsParam = new SqlParameter("@DivisionIdsJson", DivisionIdsJson(request.DivisionIds));
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Position_Manage @Action = @Action, @PositionName = @PositionName, @UserId = @UserId",
-                actionParam, nameParam, userIdParam);
+                "EXEC SIS_Position_Manage @Action = @Action, @PositionName = @PositionName, @IsGateOperator = @IsGateOperator, @DivisionIdsJson = @DivisionIdsJson, @UserId = @UserId",
+                actionParam, nameParam, gateOperatorParam, divisionIdsParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -94,13 +97,15 @@ public class PositionService
         var actionParam = new SqlParameter("@Action", "UPDATE");
         var idParam = new SqlParameter("@Id", request.Id);
         var nameParam = new SqlParameter("@PositionName", request.PositionName);
+        var gateOperatorParam = new SqlParameter("@IsGateOperator", request.IsGateOperator);
+        var divisionIdsParam = new SqlParameter("@DivisionIdsJson", DivisionIdsJson(request.DivisionIds));
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Position_Manage @Action = @Action, @Id = @Id, @PositionName = @PositionName, @UserId = @UserId",
-                actionParam, idParam, nameParam, userIdParam);
+                "EXEC SIS_Position_Manage @Action = @Action, @Id = @Id, @PositionName = @PositionName, @IsGateOperator = @IsGateOperator, @DivisionIdsJson = @DivisionIdsJson, @UserId = @UserId",
+                actionParam, idParam, nameParam, gateOperatorParam, divisionIdsParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -119,4 +124,31 @@ public class PositionService
             "EXEC SIS_Position_Manage @Action = @Action, @Id = @Id, @UserId = @UserId",
             actionParam, idParam, userIdParam);
     }
+
+    // Prompt 58 (lanjutan): divisi yang sudah dipilih untuk satu jabatan -- form Master
+    // Jabatan memakainya untuk mencentang ulang pilihan tersimpan.
+    public async Task<List<int>> GetDivisionIdsAsync(int positionId)
+    {
+        var positionIdParam = new SqlParameter("@PositionId", positionId);
+
+        return await _db.Database
+            .SqlQueryRaw<int>("EXEC SIS_Position_GetDivisions @PositionId = @PositionId", positionIdParam)
+            .ToListAsync();
+    }
+
+    // Pilihan jabatan untuk satu divisi (dipakai form pegawai di stasiun). Divisi yang belum
+    // punya pemetaan tetap mendapat SEMUA jabatan -- lihat SIS_Position_GetByDivision.
+    public async Task<List<PositionDto>> GetByDivisionAsync(int divisionId)
+    {
+        var divisionIdParam = new SqlParameter("@DivisionId", divisionId);
+
+        return await _db.Database
+            .SqlQueryRaw<PositionDto>(
+                "EXEC SIS_Position_GetByDivision @DivisionId = @DivisionId", divisionIdParam)
+            .ToListAsync();
+    }
+
+    // NULL = SP tidak menyentuh pemetaan sama sekali (caller lama); daftar kosong = dikosongkan.
+    private static object DivisionIdsJson(List<int>? divisionIds) =>
+        divisionIds is null ? DBNull.Value : JsonSerializer.Serialize(divisionIds);
 }

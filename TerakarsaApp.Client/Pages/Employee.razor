@@ -153,6 +153,15 @@ else
                             <InputText class="form-control" @bind-Value="formModel.EmployeeName" />
                             <ValidationMessage For="@(() => formModel.EmployeeName)" class="text-danger" />
                         </div>
+                        @* Prompt 58: no. telp OPSIONAL di sini (wajib hanya saat pegawai
+                           didaftar dari station). Dinormalisasi jadi digit di SP; dikosongkan
+                           = nomor lama TIDAK terhapus (COALESCE di SIS_Employee_Manage). *@
+                        <div class="mb-3">
+                            <label class="form-label">No. Telp (opsional)</label>
+                            <InputText class="form-control" inputmode="tel" @bind-Value="formModel.PhoneNo" />
+                            <ValidationMessage For="@(() => formModel.PhoneNo)" class="text-danger" />
+                            <div class="form-text">Disimpan hanya angka; awalan 62 otomatis jadi 0. Dikosongkan = nomor lama tetap.</div>
+                        </div>
                         <div class="mb-3">
                             <label class="form-label">Divisi</label>
                             <InputSelect class="form-select" @bind-Value="formModel.DivisionId" @bind-Value:after="OnDivisionChanged">
@@ -166,7 +175,10 @@ else
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Jabatan</label>
-                            <InputSelect class="form-select" @bind-Value="formModel.PositionId">
+                            @* Prompt 58 (lanjutan): pilihan jabatan mengikuti divisi yang dipilih
+                               (division_positions, diatur di Master Jabatan). Divisi yang
+                               pemetaannya belum diatur tetap menawarkan semua jabatan. *@
+                            <InputSelect class="form-select" @bind-Value="formModel.PositionId" disabled="@(formModel.DivisionId <= 0)">
                                 <option value="0">-- Pilih Jabatan --</option>
                                 @foreach (var p in positionOptions)
                                 {
@@ -174,6 +186,10 @@ else
                                 }
                             </InputSelect>
                             <ValidationMessage For="@(() => formModel.PositionId)" class="text-danger" />
+                            @if (formModel.DivisionId <= 0)
+                            {
+                                <div class="form-text">Pilih divisi terlebih dahulu untuk memilih jabatan.</div>
+                            }
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Resource</label>
@@ -258,7 +274,8 @@ else
         if (hasAccess == true)
         {
             divisionOptions = await DivisionApi.GetActiveAsync();
-            positionOptions = await PositionApi.GetActiveAsync();
+            // Jabatan TIDAK dimuat di sini: daftarnya mengikuti divisi yang dipilih di form
+            // (Prompt 58 lanjutan, lihat LoadPositionOptions).
             await LoadEmployees();
         }
     }
@@ -321,7 +338,11 @@ else
     private async Task OnDivisionChanged()
     {
         formModel.ResourceId = 0;
+        // Prompt 58 (lanjutan): jabatan ikut divisi -- pilihan lama dibuang kalau tidak ada
+        // di daftar jabatan divisi yang baru.
+        formModel.PositionId = 0;
         await LoadResourceOptions();
+        await LoadPositionOptions();
         await ApplyAutoCode();
     }
 
@@ -330,6 +351,20 @@ else
         resourceOptions = formModel.DivisionId > 0
             ? await ResourceApi.GetActiveByDivisionAsync(formModel.DivisionId)
             : new();
+    }
+
+    // Prompt 58 (lanjutan): daftar jabatan milik divisi terpilih. Tanpa divisi, dropdown
+    // Jabatan kosong dan dimatikan -- jabatan tidak bisa diisi sebelum divisi dipilih.
+    private async Task LoadPositionOptions(int? keepPositionId = null, string? keepPositionName = null)
+    {
+        positionOptions = formModel.DivisionId > 0
+            ? await PositionApi.GetByDivisionAsync(formModel.DivisionId)
+            : new();
+
+        // Jabatan tersimpan bisa saja sudah tidak dipetakan ke divisi ini (pemetaan diubah
+        // setelah karyawannya dibuat) -- tetap ditampilkan supaya tidak diam-diam hilang.
+        if (keepPositionId is int id && id > 0 && !positionOptions.Any(p => p.Id == id))
+            positionOptions.Insert(0, new PositionDto { Id = id, PositionName = keepPositionName ?? "(jabatan lama)" });
     }
 
     // Prompt 53: isi kode otomatis saat divisi dipilih/diganti. Kalau field kode sudah pernah
@@ -389,6 +424,7 @@ else
         isEditMode = false;
         formModel = new EmployeeFormModel();
         resourceOptions = new();
+        positionOptions = new();
         codeManuallyEdited = false;
         showOverwriteCodeConfirm = false;
         errorMessage = string.Empty;
@@ -406,7 +442,8 @@ else
             DivisionId = employee.DivisionId,
             PositionId = employee.PositionId,
             ResourceId = employee.ResourceId ?? 0,
-            JoinDate = employee.JoinDate
+            JoinDate = employee.JoinDate,
+            PhoneNo = employee.PhoneNo
         };
         // Kode sudah ada (dari data tersimpan) -> perlakukan sebagai "manual" supaya ganti
         // divisi di form edit minta konfirmasi dulu, bukan langsung menimpa.
@@ -414,6 +451,7 @@ else
         showOverwriteCodeConfirm = false;
         errorMessage = string.Empty;
         await LoadResourceOptions();
+        await LoadPositionOptions(employee.PositionId, employee.PositionName);
         showForm = true;
     }
 
@@ -438,7 +476,8 @@ else
                 DivisionId = formModel.DivisionId,
                 PositionId = formModel.PositionId,
                 ResourceId = formModel.ResourceId > 0 ? formModel.ResourceId : null,
-                JoinDate = formModel.JoinDate
+                JoinDate = formModel.JoinDate,
+                PhoneNo = formModel.PhoneNo
             });
         }
         else
@@ -450,7 +489,8 @@ else
                 DivisionId = formModel.DivisionId,
                 PositionId = formModel.PositionId,
                 ResourceId = formModel.ResourceId > 0 ? formModel.ResourceId : null,
-                JoinDate = formModel.JoinDate
+                JoinDate = formModel.JoinDate,
+                PhoneNo = formModel.PhoneNo
             });
         }
 
@@ -514,5 +554,10 @@ else
         public int ResourceId { get; set; }
 
         public DateTime? JoinDate { get; set; }
+
+        // Prompt 58: opsional -- dikosongkan berarti nomor lama tidak diubah (SP memakai COALESCE).
+        [StringLength(30, ErrorMessage = "No. telp maksimal 30 karakter.")]
+        [PhoneNo]
+        public string? PhoneNo { get; set; }
     }
 }

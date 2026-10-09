@@ -1,0 +1,192 @@
+@* Prompt 70 -- Gate 9 (Ubah Data Karyawan). SIS_Gate_UpdateEmployee.
+   HANYA nama + no. telepon. Divisi, line dan jabatan ditampilkan TERKUNCI: resource menentukan
+   siapa dibayar untuk hasil produksi (Laporan Hanca), itu keputusan supervisor bukan satpam --
+   dan SP-nya memang tidak punya parameter untuk ketiganya.
+   BUTUH ONLINE: perubahannya harus langsung tercatat di employee_change_log beserta nama satpam. *@
+
+<div style="width: 100%; height: 100%; box-sizing: border-box; background: #12161F; color: #FFFFFF; display: flex; flex-direction: column">
+
+    <div style="height: 76px; box-sizing: border-box; padding: 0 30px; border-bottom: 1px solid #252C3B; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0">
+        <div style="display: flex; align-items: center; gap: 14px">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#5BD98A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <div style="font-size: 22px; font-weight: 600">Ubah Data Karyawan</div>
+            <div style="font-size: 18px; color: #9AA4B5">@Operator.EmployeeName@(string.IsNullOrWhiteSpace(Operator.EmployeeCode) ? "" : " · " + Operator.EmployeeCode)</div>
+        </div>
+        <button type="button" @onclick="OnBack"
+                style="font-size: 17px; font-weight: 600; color: #D6DCE6; background: transparent; border: 1px solid #39425A; border-radius: 10px; padding: 13px 24px; cursor: pointer">Kembali</button>
+    </div>
+
+    @if (!IsOnline)
+    {
+        <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 70px; box-sizing: border-box; text-align: center">
+            <svg width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="#F3B14E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h.01"></path>
+                <path d="M8.5 16.4a5 5 0 0 1 7 0"></path>
+                <path d="M5 12.9a10 10 0 0 1 5.2-2.7"></path>
+                <path d="M19 12.9a10 10 0 0 0-3.1-2.1"></path>
+                <path d="m2 2 20 20"></path>
+            </svg>
+            <div style="font-size: 52px; font-weight: 700; margin-top: 24px">Tidak bisa mengubah data saat offline</div>
+            <div style="font-size: 26px; color: #9AA4B5; margin-top: 14px; max-width: 820px; line-height: 1.5">
+                Perubahan data karyawan sengaja tidak diantrekan &mdash; jejaknya harus langsung tercatat beserta nama petugas dan waktunya.
+            </div>
+        </div>
+    }
+    else if (Selected is null)
+    {
+        @* Pemilihan karyawan: daftar penuh dengan pencarian, baris 64 px. *@
+        <div style="flex-grow: 1; padding: 24px 40px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0">
+            <div style="display: flex; align-items: center; gap: 16px; flex-shrink: 0; background: #171D2B; border: 2px dashed #39425A; border-radius: 14px; padding: 18px 22px">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#7D8899" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                    <rect x="2" y="5" width="13" height="14" rx="2"></rect>
+                    <path d="M17.5 8.5a5 5 0 0 1 0 7"></path>
+                    <path d="M20.5 6a9 9 0 0 1 0 12"></path>
+                </svg>
+                <div>
+                    <div style="font-size: 24px; font-weight: 600; color: #E6EAF1">Tempelkan kartu karyawan</div>
+                    <div style="font-size: 17px; color: #8892A4; margin-top: 2px">Form ubah data pemilik kartu langsung terbuka. Atau cari namanya di bawah.</div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div style="margin-top: 14px; flex-shrink: 0; font-size: 20px; color: #F3A6A6; background: #2A1414; border: 1px solid #5E2A2A; border-radius: 12px; padding: 14px 20px">@ErrorMessage</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(SuccessMessage))
+            {
+                <div style="margin-top: 14px; flex-shrink: 0; font-size: 20px; color: #A8E6BF; background: #10301E; border: 1px solid #1A8549; border-radius: 12px; padding: 14px 20px">@SuccessMessage</div>
+            }
+
+            <div style="font-size: 20px; font-weight: 600; flex-shrink: 0; margin-top: 20px">Pilih karyawan</div>
+            @* Selama kotak ini dipakai, pembaca kartu tidak merebut fokus (OnSearchFocusChanged). *@
+            <input type="text" placeholder="Cari nama atau kode karyawan..." value="@Search"
+                   @oninput="e => OnSearchChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)"
+                   @onfocus="() => OnSearchFocusChanged.InvokeAsync(true)"
+                   @onblur="() => OnSearchFocusChanged.InvokeAsync(false)"
+                   style="width: 100%; box-sizing: border-box; margin-top: 14px; flex-shrink: 0; font-size: 22px; padding: 16px 18px; border: 1px solid #39425A; border-radius: 10px; background: #171D2B; color: #FFFFFF" />
+
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0">
+                @foreach (var emp in VisibleRows)
+                {
+                    <button type="button" @onclick="() => OnSelect.InvokeAsync(emp)"
+                            style="text-align: left; background: transparent; border: 1px solid #2B3245; border-radius: 12px; padding: 16px 18px; min-height: 64px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px">
+                        <span>
+                            <span style="display: block; font-size: 22px; font-weight: 500; color: #E6EAF1">@emp.EmployeeName</span>
+                            <span style="display: block; font-size: 16px; color: #8892A4; margin-top: 2px">@(emp.EmployeeCode ?? "tanpa kode") &middot; @emp.DivisionName</span>
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(emp.ResourceName))
+                        {
+                            <span style="display: inline-block; background: @GateFormat.BadgeColor(emp.ColorHex); color: #FFFFFF; font-size: 15px; font-weight: 600; padding: 5px 15px; border-radius: 999px; flex-shrink: 0">@emp.ResourceName</span>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div style="flex-grow: 1; padding: 28px 40px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; overflow-y: auto">
+
+            <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 14px; padding: 20px 24px; display: flex; align-items: center; gap: 18px; flex-shrink: 0">
+                <div style="flex-grow: 1">
+                    <div style="font-size: 16px; letter-spacing: 0.1em; color: #6E7A8C; font-weight: 600">KARYAWAN</div>
+                    <div style="font-size: 34px; font-weight: 700; margin-top: 4px">@Selected.EmployeeName</div>
+                    <div style="font-size: 18px; color: #9AA4B5; margin-top: 2px">@(Selected.EmployeeCode ?? "tanpa kode")</div>
+                </div>
+                <button type="button" @onclick="OnClearSelection"
+                        style="font-size: 18px; font-weight: 600; color: #D6DCE6; background: transparent; border: 1px solid #39425A; border-radius: 10px; padding: 15px 24px; cursor: pointer">Ganti karyawan</button>
+            </div>
+
+            <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 20px">
+
+                <div>
+                    <label for="e-nama" style="display: block; font-size: 19px; font-weight: 600; color: #C3CBD8; margin-bottom: 8px">Nama</label>
+                    <input id="e-nama" type="text" value="@Name"
+                           @oninput="e => OnNameChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)"
+                           style="width: 100%; box-sizing: border-box; font-size: 26px; padding: 18px 20px; border: 1px solid #39425A; border-radius: 12px; background: #171D2B; color: #FFFFFF" />
+                </div>
+
+                <div>
+                    <label for="e-telp" style="display: block; font-size: 19px; font-weight: 600; color: #C3CBD8; margin-bottom: 8px">No. telepon</label>
+                    <input id="e-telp" type="tel" inputmode="tel" value="@Phone"
+                           @oninput="e => OnPhoneChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)"
+                           style="width: 100%; box-sizing: border-box; font-size: 26px; padding: 18px 20px; border: 2px solid #2F6098; border-radius: 12px; background: #16243A; color: #FFFFFF" />
+                </div>
+
+                @* Terkunci. SP SIS_Gate_UpdateEmployee memang tidak punya parameter untuk ketiganya,
+                   jadi tidak ada jalan apa pun mengubahnya dari layar ini. *@
+                <div style="border: 1px solid #252C3B; border-radius: 12px; background: #161B26; padding: 20px 22px">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8892A4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="4" y="11" width="16" height="10" rx="2"></rect>
+                            <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+                        </svg>
+                        <div style="font-size: 17px; color: #8892A4">Hanya bisa diubah dari admin panel</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px">
+                        <div>
+                            <div style="font-size: 16px; color: #6E7A8C">Divisi</div>
+                            <div style="font-size: 22px; color: #8892A4; margin-top: 2px">@Selected.DivisionName</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; color: #6E7A8C">Line / Resource</div>
+                            <div style="font-size: 22px; color: #8892A4; margin-top: 2px">@(Selected.ResourceName ?? "—")</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; color: #6E7A8C">Jabatan</div>
+                            <div style="font-size: 22px; color: #8892A4; margin-top: 2px">@Selected.PositionName</div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                {
+                    <div style="font-size: 20px; color: #F3A6A6; background: #2A1414; border: 1px solid #5E2A2A; border-radius: 12px; padding: 16px 20px">@ErrorMessage</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(SuccessMessage))
+                {
+                    <div style="font-size: 20px; color: #A8E6BF; background: #10301E; border: 1px solid #1A8549; border-radius: 12px; padding: 16px 20px">@SuccessMessage</div>
+                }
+
+            </div>
+
+            <div style="flex-grow: 1; min-height: 20px"></div>
+
+            <div style="display: flex; align-items: center; gap: 14px; padding-top: 20px">
+                <div style="flex-grow: 1; font-size: 17px; color: #8892A4">Perubahan dicatat beserta nama satpam dan waktunya</div>
+                <button type="button" @onclick="OnCancel"
+                        style="font-size: 21px; font-weight: 500; color: #C3CBD8; background: transparent; border: 1px solid #39425A; border-radius: 12px; padding: 18px 34px; cursor: pointer">Batal</button>
+                <button type="button" disabled="@IsSaving" @onclick="OnSave"
+                        style="font-size: 21px; font-weight: 600; color: #FFFFFF; background: #0E6B38; border: 1px solid #1A8549; border-radius: 12px; padding: 18px 46px; cursor: pointer">@(IsSaving ? "Menyimpan..." : "Simpan")</button>
+            </div>
+
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public GateCardDto Operator { get; set; } = new();
+    [Parameter] public bool IsOnline { get; set; }
+    [Parameter] public List<GateEmployeeDto> VisibleRows { get; set; } = new();
+    [Parameter] public GateEmployeeDto? Selected { get; set; }
+    [Parameter] public string Search { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Phone { get; set; } = string.Empty;
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public string? SuccessMessage { get; set; }
+
+    [Parameter] public EventCallback OnBack { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnClearSelection { get; set; }
+    [Parameter] public EventCallback<GateEmployeeDto> OnSelect { get; set; }
+    [Parameter] public EventCallback<string> OnSearchChanged { get; set; }
+    [Parameter] public EventCallback<string> OnNameChanged { get; set; }
+    [Parameter] public EventCallback<string> OnPhoneChanged { get; set; }
+    // true saat kotak cari fokus -- Gate.razor berhenti merebut fokus untuk pembaca kartu.
+    [Parameter] public EventCallback<bool> OnSearchFocusChanged { get; set; }
+}

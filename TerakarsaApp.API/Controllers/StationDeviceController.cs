@@ -31,6 +31,9 @@ public class StationDeviceController : ControllerBase
     private readonly ArticlePhotoService _articlePhotoService;
     private readonly RekapProduksiService _rekapProduksiService;
     private readonly DivisionService _divisionService;
+    private readonly StationAttendanceService _attendanceService;
+    private readonly StationRekapProduksiService _stationRekapService;
+    private readonly PositionService _positionService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
@@ -44,6 +47,9 @@ public class StationDeviceController : ControllerBase
         ArticlePhotoService articlePhotoService,
         RekapProduksiService rekapProduksiService,
         DivisionService divisionService,
+        StationAttendanceService attendanceService,
+        StationRekapProduksiService stationRekapService,
+        PositionService positionService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
@@ -56,6 +62,9 @@ public class StationDeviceController : ControllerBase
         _articlePhotoService = articlePhotoService;
         _rekapProduksiService = rekapProduksiService;
         _divisionService = divisionService;
+        _attendanceService = attendanceService;
+        _stationRekapService = stationRekapService;
+        _positionService = positionService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -797,5 +806,242 @@ public class StationDeviceController : ControllerBase
         var result = await _packService.GetScanInfoAsync(serial);
         if (result is null) return NotFound("Karung tidak ditemukan.");
         return Ok(result);
+    }
+
+    // ===== Prompt 58: tab "Absen" (Input / Rekap 4 hari / Pegawai) =====
+    // Divisi SELALU dari token perangkat, line dari operator sesi lewat EffectiveResourceId
+    // (stasiun terkunci memaksa default_resource_id, mengabaikan resourceId dari client).
+    // Tanpa operator sesi tidak ada yang bisa dibaca/ditulis -- absen itu milik satu line.
+    private int ResolveOperatorResourceId(int? requestedResourceId) =>
+        EffectiveResourceId(requestedResourceId) ?? 0;
+
+    [HttpGet("attendance")]
+    public async Task<IActionResult> GetAttendance([FromQuery] int? resourceId, [FromQuery] DateTime? date)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var result = await _attendanceService.GetListAsync(
+            CurrentStation.DivisionId, operatorResourceId, date ?? DateTime.Today);
+        return Ok(result);
+    }
+
+    // Satu kali Simpan = banyak baris (upsert dalam satu transaksi di SP). Jendela 4 hari,
+    // keanggotaan line, dan pengosongan jam untuk status non-Hadir ditegakkan di SP --
+    // pesan errornya diteruskan apa adanya karena sudah menyebut nama pegawai.
+    [HttpPost("attendance")]
+    public async Task<IActionResult> SaveAttendance([FromBody] StationAttendanceSaveRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.Items is null || request.Items.Count == 0)
+            return BadRequest("Tidak ada perubahan untuk disimpan.");
+
+        var (success, error) = await _attendanceService.SaveAsync(
+            request, operatorResourceId, CurrentStation.StationId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Rekap per PERIODE GAJIAN (payrollPeriodId kosong = periode absen berjalan). Hari Sabtu
+    // dihitung utuh milik periode yang berakhir di hari itu -- lihat SIS_StationAttendance_Recap.
+    [HttpGet("attendance/recap")]
+    public async Task<IActionResult> GetAttendanceRecap([FromQuery] int? resourceId, [FromQuery] int? payrollPeriodId)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var result = await _attendanceService.GetRecapAsync(
+            CurrentStation.DivisionId, operatorResourceId, payrollPeriodId);
+        return Ok(result);
+    }
+
+    // Isi dropdown periode di sub-tab Rekap (12 periode terakhir sampai periode berjalan).
+    [HttpGet("attendance/periods")]
+    public async Task<IActionResult> GetAttendancePeriods()
+    {
+        var result = await _attendanceService.GetPeriodsAsync();
+        return Ok(result);
+    }
+
+    // Chip kuning di sub-tab Input + badge angka di tab "Absen" (hari kerja saja).
+    [HttpGet("attendance/pending-dates")]
+    public async Task<IActionResult> GetAttendancePendingDates([FromQuery] int? resourceId)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var result = await _attendanceService.GetPendingDatesAsync(CurrentStation.DivisionId, operatorResourceId);
+        return Ok(result);
+    }
+
+    [HttpGet("station-employees")]
+    public async Task<IActionResult> GetStationEmployees(
+        [FromQuery] int? resourceId, [FromQuery] bool isActive = true, [FromQuery] string? search = null)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var result = await _attendanceService.GetEmployeesAsync(operatorResourceId, isActive, search);
+        return Ok(result);
+    }
+
+    // Kode karyawan, divisi, line, dan tanggal masuk ditentukan server (SIS_StationEmployee_Manage
+    // CREATE) -- client hanya mengirim nama, no. telp, dan jabatan.
+    [HttpPost("station-employees")]
+    public async Task<IActionResult> CreateStationEmployee([FromBody] StationEmployeeCreateRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (string.IsNullOrWhiteSpace(request.EmployeeName))
+            return BadRequest("Nama pegawai wajib diisi.");
+        if (request.PositionId <= 0)
+            return BadRequest("Jabatan wajib dipilih.");
+
+        var (success, error) = await _attendanceService.CreateEmployeeAsync(
+            request, CurrentStation.DivisionId, operatorResourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Edit pegawai line ini: nama, no. telp, jabatan. Divisi/line/kode karyawan tidak ikut.
+    [HttpPut("station-employees/{id:int}")]
+    public async Task<IActionResult> UpdateStationEmployee(int id, [FromBody] StationEmployeeUpdateRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (string.IsNullOrWhiteSpace(request.EmployeeName))
+            return BadRequest("Nama pegawai wajib diisi.");
+        if (request.PositionId <= 0)
+            return BadRequest("Jabatan wajib dipilih.");
+
+        var (success, error) = await _attendanceService.UpdateEmployeeAsync(
+            id, request, CurrentStation.DivisionId, operatorResourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    [HttpPost("station-employees/{id:int}/inactive")]
+    public async Task<IActionResult> SetStationEmployeeInactive(int id, [FromBody] StationEmployeeInactiveRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _attendanceService.SetEmployeeInactiveAsync(
+            id, request, CurrentStation.DivisionId, operatorResourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Aktifkan lagi: pegawai nonaktif dari line/divisi mana pun ikut dipindah ke divisi
+    // stasiun ini & line operator sesi (kode karyawannya tidak berubah).
+    [HttpPost("station-employees/{id:int}/reactivate")]
+    public async Task<IActionResult> ReactivateStationEmployee(int id, [FromBody] StationEmployeeReactivateRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _attendanceService.ReactivateEmployeeAsync(
+            id, CurrentStation.DivisionId, operatorResourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Dropdown "Jabatan" di form pegawai -- setara api/positions (PositionController) tapi
+    // lewat token stasiun, bukan JWT, DAN dibatasi ke jabatan yang dipetakan ke divisi
+    // stasiun ini (diatur di Master Jabatan). Divisi yang pemetaannya belum diisi tetap
+    // mendapat semua jabatan -- lihat SIS_Position_GetByDivision.
+    [HttpGet("positions")]
+    public async Task<IActionResult> GetStationPositions()
+    {
+        var result = await _positionService.GetByDivisionAsync(CurrentStation.DivisionId);
+        return Ok(result);
+    }
+
+    // ===== Prompt 59: tab "Rekap Produksi" + output non-PO =====
+    // Semua endpoint di bawah memakai operator sesi (ResolveOperatorResourceId) -- rekap ini
+    // milik SATU line, jadi tanpa operator terpilih tidak ada yang bisa dibaca/ditulis.
+    // Periode gajian memakai endpoint payroll-periods yang sudah ada (Prompt 56, modal LOCK).
+
+    [HttpGet("rekap-produksi")]
+    public async Task<IActionResult> GetRekapProduksi(
+        [FromQuery] int? resourceId, [FromQuery] int payrollPeriodId, [FromQuery] string mode = "OUTPUT")
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (payrollPeriodId <= 0) return BadRequest("Periode gajian wajib dipilih.");
+
+        var result = await _stationRekapService.GetAsync(operatorResourceId, payrollPeriodId, mode);
+        return Ok(result);
+    }
+
+    // File .xlsx -- isinya sama dengan matriks di layar, tapi kolom Harga & Nilai SELALU ikut
+    // (tidak tergantung checkbox Price).
+    [HttpGet("rekap-produksi/export")]
+    public async Task<IActionResult> ExportRekapProduksi(
+        [FromQuery] int? resourceId, [FromQuery] int payrollPeriodId, [FromQuery] string mode = "OUTPUT")
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (payrollPeriodId <= 0) return BadRequest("Periode gajian wajib dipilih.");
+
+        var (content, fileName) = await _stationRekapService.ExportAsync(operatorResourceId, payrollPeriodId, mode);
+        return File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    [HttpGet("non-po")]
+    public async Task<IActionResult> GetNonPoOutputs([FromQuery] int? resourceId, [FromQuery] int payrollPeriodId)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (payrollPeriodId <= 0) return BadRequest("Periode gajian wajib dipilih.");
+
+        var result = await _stationRekapService.GetNonPoAsync(operatorResourceId, payrollPeriodId);
+        return Ok(result);
+    }
+
+    // Qty/harga/keterangan/tanggal divalidasi di SP (pesan Indonesia) -- di sini hanya guard
+    // operator, sisanya diteruskan supaya aturannya tidak punya dua versi.
+    [HttpPost("non-po")]
+    public async Task<IActionResult> CreateNonPoOutput([FromBody] NonPoOutputSaveRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _stationRekapService.CreateNonPoAsync(request, operatorResourceId, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    [HttpPut("non-po/{id:int}")]
+    public async Task<IActionResult> UpdateNonPoOutput(int id, [FromBody] NonPoOutputSaveRequest request)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _stationRekapService.UpdateNonPoAsync(id, request, operatorResourceId, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // resourceId lewat query string (DELETE tidak membawa body) -- kepemilikan baris tetap
+    // dicek SP terhadap resource itu, bukan cuma di sini.
+    [HttpDelete("non-po/{id:int}")]
+    public async Task<IActionResult> DeleteNonPoOutput(int id, [FromQuery] int? resourceId)
+    {
+        var operatorResourceId = ResolveOperatorResourceId(resourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _stationRekapService.DeleteNonPoAsync(id, operatorResourceId, _systemUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
     }
 }

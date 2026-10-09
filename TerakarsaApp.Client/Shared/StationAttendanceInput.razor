@@ -1,0 +1,590 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Stations
+@using System.Globalization
+@inject StationDeviceApiService StationApi
+
+@* Prompt 58: sub-tab "Input" tab Absen (/station). Semua perubahan ditahan di client sampai
+   tombol Simpan ditekan. Jendela tanggal, keanggotaan line, dan pengosongan jam untuk status
+   non-Hadir ditegakkan SIS_StationAttendance_Manage; di sini hanya tampilannya.
+   Pengisian massal "Belum -> Hadir" DIHAPUS atas permintaan (2026-10-01) -- diganti filter
+   "Belum diisi" supaya PIC menyaring sisanya lalu mengisi satu per satu. *@
+
+<div class="d-flex flex-column gap-3">
+
+    <div>
+        @* Periode gajian memilih DERET TANGGAL yang tampil di chip (Minggu s/d Sabtu, Sabtu
+           milik periode yang berakhir di hari itu -- sama dengan sub-tab Rekap). Periode lama
+           tetap bisa dibuka untuk DILIHAT; yang bisa diisi tetap hanya hari ini s/d 4 hari ke
+           belakang (ditegakkan SIS_StationAttendance_Manage). *@
+        <label class="form-label small fw-semibold text-muted mb-1">Periode gajian</label>
+        <select class="form-select form-select-sm mb-2" disabled="@(isLoading || periods.Count == 0)"
+                value="@(selectedPeriodId?.ToString() ?? "")"
+                @onchange="HandlePeriodChanged">
+            @if (periods.Count == 0)
+            {
+                <option value="">Periode gajian belum di-generate</option>
+            }
+            @foreach (var p in periods)
+            {
+                <option value="@p.PayrollPeriodId">
+                    @p.PeriodCode &middot; @p.StartDate.ToString("dd/MM") &ndash; @p.EndDate.ToString("dd/MM")@(p.IsCurrent ? " (berjalan)" : "")
+                </option>
+            }
+        </select>
+
+        <div class="small fw-semibold text-muted mb-1">
+            Tanggal absen <span class="fw-normal">(bisa diisi: hari ini s/d 4 hari ke belakang)</span>
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+            @* Chip abu-abu & mati = tanggal yang tidak bisa DIBUKA sama sekali (hari yang
+               belum tiba). Tanggal lampau di luar jendela input tetap bisa dibuka, tapi
+               isinya hanya bisa dilihat -- lihat pemberitahuan di bawah. *@
+            @foreach (var date in ChipDates)
+            {
+                var selectable = date <= DateTime.Today;
+                var isSelected = date == selectedDate;
+                var pending = PendingCountFor(date);
+                <button type="button" class="btn btn-sm px-1 py-1 lh-sm flex-grow-1"
+                        style="@ChipStyle(isSelected, selectable, pending)"
+                        disabled="@(!selectable || isLoading)"
+                        @onclick="() => RequestDateChange(date)">
+                    <span class="d-block" style="font-size: 0.7rem;">@DayLabel(date)</span>
+                    <span class="d-block fw-bold" style="font-size: 0.75rem;">
+                        @date.ToString("dd/MM")@(pending > 0 ? " •" : "")
+                    </span>
+                </button>
+            }
+        </div>
+        @foreach (var p in pendingDates.Where(p => p.AttendanceDate.Date != selectedDate))
+        {
+            <div class="small" style="color: #8A5A00;">• @p.AttendanceDate.ToString("dd/MM") masih ada @p.PendingCount orang belum diisi</div>
+        }
+        @if (!CanEdit)
+        {
+            <div class="small" style="color: #8A5A00;">
+                Tanggal ini di luar jendela input (maks. 4 hari ke belakang) -- hanya bisa dilihat.
+            </div>
+        }
+        @if (!schedule.IsWorkingDay)
+        {
+            <div class="small text-muted">Hari libur menurut jadwal divisi -- absen tetap boleh diisi, tanpa hitungan telat.</div>
+        }
+        else if (schedule.StartTime is { } start)
+        {
+            <div class="small text-muted">Jam kerja @FormatTime(start)@(schedule.EndTime is { } end ? $" - {FormatTime(end)}" : "")</div>
+        }
+    </div>
+
+    <div class="row g-1 text-center">
+        <div class="col">
+            <div class="py-1" style="background: #E8F6EE; border-radius: 8px;">
+                <div class="fw-bold fs-5 lh-1" style="color: #157347;">@CountOf("H")</div>
+                <div style="font-size: 0.7rem;" class="text-muted">Hadir</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="py-1" style="background: #EAF1FC; border-radius: 8px;">
+                <div class="fw-bold fs-5 lh-1" style="color: #1E56B0;">@CountOf("I")</div>
+                <div style="font-size: 0.7rem;" class="text-muted">Izin</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="py-1" style="background: #FFF3E3; border-radius: 8px;">
+                <div class="fw-bold fs-5 lh-1" style="color: #A35400;">@CountOf("S")</div>
+                <div style="font-size: 0.7rem;" class="text-muted">Sakit</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="py-1" style="background: #FDECEC; border-radius: 8px;">
+                <div class="fw-bold fs-5 lh-1" style="color: #B42318;">@CountOf("A")</div>
+                <div style="font-size: 0.7rem;" class="text-muted">Alpa</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="py-1" style="background: #F1F2F6; border-radius: 8px;">
+                <div class="fw-bold fs-5 lh-1">@rows.Count(r => r.Status is null)</div>
+                <div style="font-size: 0.7rem;" class="text-muted">Belum</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        @* min-width: 0 wajib: tanpa itu input teks menolak menyusut di bawah lebar bawaannya
+           dan mendorong tombol filter keluar kartu di layar HP. *@
+        <input class="form-control" style="flex: 1 1 auto; min-width: 0;" placeholder="Cari nama..."
+               @bind="searchText" @bind:event="oninput" />
+        @* Filter "Belum diisi" -- menggantikan tombol massal "Belum -> Hadir": PIC menyaring
+           dulu sisanya, lalu mengisi satu per satu. *@
+        <button type="button" class="btn text-nowrap px-2 @(onlyBelum ? "btn-warning" : "btn-outline-secondary")"
+                style="flex: 0 0 auto;"
+                @onclick="() => onlyBelum = !onlyBelum">
+            Belum @rows.Count(r => r.Status is null)
+        </button>
+    </div>
+    <div class="small text-muted">@rows.Count(r => r.IsActive) pegawai aktif &middot; H Hadir &middot; I Izin &middot; S Sakit &middot; A Alpa &middot; C Cuti</div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger mb-0">@error</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="text-muted mb-0">Memuat...</p>
+    }
+    else if (VisibleRows.Count == 0)
+    {
+        <p class="text-muted mb-0">Belum ada pegawai di line ini.</p>
+    }
+    else
+    {
+        <div class="border" style="border-radius: 10px;">
+            @foreach (var row in VisibleRows)
+            {
+                <div class="p-2 border-bottom" style="@(row.Status is null ? "background: #FAFAFC;" : "")" id="@($"absen-emp-{row.EmployeeId}")">
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <div class="fw-bold">
+                            @row.EmployeeName
+                            @if (!row.IsActive)
+                            {
+                                <span class="badge bg-secondary ms-1" style="font-size: 0.6rem;">Nonaktif</span>
+                            }
+                        </div>
+                        <div class="small text-muted">@row.PositionName</div>
+                    </div>
+                    <div class="d-flex gap-1 align-items-center mt-1 flex-wrap">
+                        @foreach (var statusCode in StatusCodes)
+                        {
+                            <button type="button" class="btn btn-sm fw-bold p-0"
+                                    style="@StatusButtonStyle(statusCode, row.Status == statusCode)"
+                                    disabled="@(!CanEdit)"
+                                    @onclick="() => SetStatus(row, statusCode)">
+                                @statusCode
+                            </button>
+                        }
+                        @* Jam masuk & pulang dibungkus SATU elemen: kalau tidak muat sebaris
+                           dengan H I S A C, keduanya turun bersama ke baris berikutnya
+                           (ms-auto membuatnya rata kanan, sebaris maupun setelah turun). *@
+                        @if (row.Status == "H")
+                        {
+                            <div class="d-flex gap-1 ms-auto">
+                                <input type="time" class="form-control form-control-sm" style="@TimeInputStyle(row)" aria-label="Jam masuk"
+                                       disabled="@(!CanEdit)"
+                                       value="@row.CheckIn" @onchange="e => SetCheckIn(row, e.Value?.ToString())" />
+                                <input type="time" class="form-control form-control-sm" style="width: 4.8rem;" aria-label="Jam pulang"
+                                       disabled="@(!CanEdit)"
+                                       value="@row.CheckOut" @onchange="e => SetCheckOut(row, e.Value?.ToString())" />
+                            </div>
+                        }
+                        else if (row.Status is null)
+                        {
+                            <span class="small text-muted ms-auto">belum diisi</span>
+                        }
+                        else
+                        {
+                            <input class="form-control form-control-sm" style="flex: 1 1 6rem; min-width: 6rem;" placeholder="Keterangan" aria-label="Keterangan"
+                                   maxlength="200" disabled="@(!CanEdit)"
+                                   value="@row.Note" @onchange="e => SetNote(row, e.Value?.ToString())" />
+                        }
+                    </div>
+                    @if (LateMinutes(row) is int late && late > 0)
+                    {
+                        <div class="small" style="color: #8A5A00;">Telat @late menit</div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (DirtyCount > 0)
+    {
+        <div class="position-sticky bg-white border p-2 d-flex align-items-center gap-2 shadow-sm" style="bottom: 0.5rem; border-radius: 10px;">
+            <div class="flex-grow-1 small text-muted">@DirtyCount perubahan belum disimpan</div>
+            <button type="button" class="btn btn-primary" disabled="@isSaving" @onclick="Save">
+                @(isSaving ? "Menyimpan..." : "Simpan")
+            </button>
+        </div>
+    }
+</div>
+
+<ConfirmDeleteModal Show="showDiscardConfirm" Title="Perubahan Belum Disimpan"
+                     ConfirmText="Ya, Buang" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
+                     OnConfirm="ConfirmDateChange" OnCancel="() => showDiscardConfirm = false">
+    <Message>Ada @DirtyCount perubahan absen yang belum disimpan. Pindah tanggal akan membuang perubahan itu.</Message>
+</ConfirmDeleteModal>
+
+@code {
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    [Parameter] public EventCallback<int> OnDirtyCountChanged { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private static readonly string[] StatusCodes = new[] { "H", "I", "S", "A", "C" };
+
+    private DateTime selectedDate = DateTime.Today;
+    private List<EditRow> rows = new();
+    private StationAttendanceScheduleDto schedule = new();
+    private List<StationAttendancePendingDateDto> pendingDates = new();
+    // Periode gajian menentukan deret tanggal di chip. Dimuat sekali.
+    private List<StationAttendancePeriodDto> periods = new();
+    private int? selectedPeriodId;
+    private string searchText = string.Empty;
+    // Filter "Belum diisi" -- hanya menyembunyikan baris, tidak mengubah data.
+    private bool onlyBelum = false;
+    private bool isLoading = false;
+    private bool isSaving = false;
+    private string error = string.Empty;
+    private int lastDirtyReported = -1;
+    private bool showDiscardConfirm = false;
+    private DateTime? pendingDateChange;
+    private int? pendingFocusEmployeeId;
+    private int loadedForResourceId;
+
+    // Perubahan lokal yang belum tersimpan. Baris "belum diisi" yang tetap dibiarkan kosong
+    // TIDAK dihitung -- hanya yang benar-benar berubah dari isi DB.
+    private int DirtyCount => rows.Count(r => r.IsDirty);
+
+    private List<EditRow> VisibleRows
+    {
+        get
+        {
+            IEnumerable<EditRow> query = rows;
+            if (onlyBelum) query = query.Where(r => r.Status is null);
+            if (!string.IsNullOrWhiteSpace(searchText))
+                query = query.Where(r => r.EmployeeName.Contains(searchText.Trim(), StringComparison.OrdinalIgnoreCase));
+            return query.ToList();
+        }
+    }
+
+    // Muat sekali saat sub-tab pertama kali dirender (atau operator sesi berganti). Navigasi
+    // selanjutnya -- pindah tanggal, tap sel Rekap, pegawai berubah -- lewat OpenAsync/
+    // ReloadAsync dari AttendanceTab, supaya re-render parent tidak pernah menarik tanggal
+    // yang sedang dilihat PIC kembali ke hari ini.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ResourceId <= 0 || loadedForResourceId == ResourceId) return;
+
+        selectedDate = DateTime.Today;
+        await LoadAsync();
+    }
+
+    // Dipanggil AttendanceTab saat PIC men-tap sel di Rekap 4 hari.
+    public async Task OpenAsync(DateTime date, int? focusEmployeeId)
+    {
+        selectedDate = date.Date;
+        pendingFocusEmployeeId = focusEmployeeId;
+        await LoadAsync();
+    }
+
+    // Muat ulang tanggal yang sedang dibuka -- membuang perubahan yang belum disimpan.
+    public Task ReloadAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        error = string.Empty;
+        loadedForResourceId = ResourceId;
+
+        var result = await StationApi.GetAttendanceAsync(ResourceId, selectedDate);
+        pendingDates = await StationApi.GetAttendancePendingDatesAsync(ResourceId);
+
+        if (periods.Count == 0)
+            periods = await StationApi.GetAttendancePeriodsAsync();
+
+        // Pilihan dropdown SELALU diturunkan dari tanggal yang sedang dibuka -- termasuk saat
+        // Input dibuka dari tap sel Rekap (OpenAsync) yang bisa menunjuk periode lain.
+        var owningPeriod = periods.FirstOrDefault(p => selectedDate >= p.StartDate.Date && selectedDate <= p.EndDate.Date);
+        if (owningPeriod is not null) selectedPeriodId = owningPeriod.PayrollPeriodId;
+
+        if (result is null)
+        {
+            rows = new();
+            schedule = new();
+            error = "Gagal memuat data absen.";
+        }
+        else
+        {
+            schedule = result.Schedule;
+            rows = result.Rows.Select(r => new EditRow
+            {
+                EmployeeId = r.EmployeeId,
+                EmployeeName = r.EmployeeName,
+                PositionName = r.PositionName,
+                IsActive = r.IsActive,
+                OrigStatus = r.Status,
+                OrigCheckIn = FormatTime(r.CheckIn),
+                OrigCheckOut = FormatTime(r.CheckOut),
+                OrigNote = r.Note,
+                Status = r.Status,
+                CheckIn = FormatTime(r.CheckIn),
+                CheckOut = FormatTime(r.CheckOut),
+                Note = r.Note
+            }).ToList();
+        }
+
+        isLoading = false;
+        await NotifyDirty();
+
+        if (pendingFocusEmployeeId is int focusId)
+        {
+            pendingFocusEmployeeId = null;
+            // Baris hasil tap sel Rekap -- digulirkan setelah data dimuat supaya elemennya ada.
+            StateHasChanged();
+            await JS.InvokeVoidAsync("scrollElementIntoView", $"absen-emp-{focusId}");
+        }
+    }
+
+    // Ganti tanggal dengan perubahan belum disimpan = konfirmasi dulu (pola sama dengan
+    // pindah sub-tab di AttendanceTab dan pindah tab di StationDevice).
+    private Task RequestDateChange(DateTime date)
+    {
+        if (date.Date == selectedDate) return Task.CompletedTask;
+
+        if (DirtyCount > 0)
+        {
+            pendingDateChange = date.Date;
+            showDiscardConfirm = true;
+            return Task.CompletedTask;
+        }
+
+        selectedDate = date.Date;
+        return LoadAsync();
+    }
+
+    // Ganti periode = ganti tanggal terpilih (periode di dropdown diturunkan dari tanggal,
+    // lihat LoadAsync). Tujuannya hari ini kalau periode itu memuatnya, kalau tidak hari
+    // terakhir periode (Sabtu penutup) -- tidak pernah ke tanggal yang belum tiba.
+    private Task HandlePeriodChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var periodId)) return Task.CompletedTask;
+
+        var period = periods.FirstOrDefault(p => p.PayrollPeriodId == periodId);
+        if (period is null) return Task.CompletedTask;
+
+        var target = DateTime.Today >= period.StartDate.Date && DateTime.Today <= period.EndDate.Date
+            ? DateTime.Today
+            : (period.EndDate.Date > DateTime.Today ? DateTime.Today : period.EndDate.Date);
+
+        return RequestDateChange(target);
+    }
+
+    private async Task ConfirmDateChange()
+    {
+        showDiscardConfirm = false;
+        if (pendingDateChange is not DateTime date) return;
+
+        pendingDateChange = null;
+        selectedDate = date;
+        await LoadAsync();
+    }
+
+    private async Task SetStatus(EditRow row, string code)
+    {
+        // Tap status yang sama = batalkan pilihan, tapi hanya untuk baris yang MEMANG belum
+        // tersimpan (baris yang sudah ada di DB tidak bisa dikosongkan dari sini -- hapus
+        // absen bukan cakupan Prompt 58).
+        if (row.Status == code)
+        {
+            if (row.OrigStatus is null) row.Status = null;
+        }
+        else
+        {
+            row.Status = code;
+            if (code == "H")
+            {
+                // Jam masuk default = jadwal hari itu (kosong di hari libur), sama dengan
+                // perilaku tombol "Belum -> Hadir".
+                row.CheckIn ??= DefaultCheckIn();
+                row.Note = null;
+            }
+            else
+            {
+                row.CheckIn = null;
+                row.CheckOut = null;
+            }
+        }
+
+        await NotifyDirty();
+    }
+
+    private async Task SetCheckIn(EditRow row, string? value)
+    {
+        row.CheckIn = NormalizeTime(value);
+        await NotifyDirty();
+    }
+
+    private async Task SetCheckOut(EditRow row, string? value)
+    {
+        row.CheckOut = NormalizeTime(value);
+        await NotifyDirty();
+    }
+
+    private async Task SetNote(EditRow row, string? value)
+    {
+        row.Note = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        await NotifyDirty();
+    }
+
+    private async Task Save()
+    {
+        var dirty = rows.Where(r => r.IsDirty).ToList();
+        if (dirty.Count == 0) return;
+
+        isSaving = true;
+        error = string.Empty;
+
+        var (success, saveError) = await StationApi.SaveAttendanceAsync(new StationAttendanceSaveRequest
+        {
+            ResourceId = ResourceId,
+            AttendanceDate = selectedDate,
+            Items = dirty.Select(r => new StationAttendanceSaveItem
+            {
+                EmployeeId = r.EmployeeId,
+                Status = r.Status!,
+                CheckIn = r.CheckIn,
+                CheckOut = r.CheckOut,
+                Note = r.Note
+            }).ToList()
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = saveError;
+            return;
+        }
+
+        await LoadAsync();
+        await OnSaved.InvokeAsync();
+    }
+
+    private async Task NotifyDirty()
+    {
+        var count = DirtyCount;
+        if (count == lastDirtyReported) return;
+
+        lastDirtyReported = count;
+        await OnDirtyCountChanged.InvokeAsync(count);
+    }
+
+    // Periode yang sedang dibuka. NULL kalau periode gajian belum di-generate -- chip jatuh
+    // balik ke jendela input 5 hari di bawah.
+    private StationAttendancePeriodDto? SelectedPeriod =>
+        periods.FirstOrDefault(p => p.PayrollPeriodId == selectedPeriodId)
+        ?? periods.FirstOrDefault(p => selectedDate >= p.StartDate.Date && selectedDate <= p.EndDate.Date);
+
+    // Deret chip tanggal = semua tanggal periode terpilih (Minggu s/d Sabtu). Tanpa periode
+    // (belum di-generate), pakai jendela input saja: hari ini s/d 4 hari ke belakang.
+    private List<DateTime> ChipDates
+    {
+        get
+        {
+            if (SelectedPeriod is { } period)
+            {
+                var days = (period.EndDate.Date - period.StartDate.Date).Days;
+                return Enumerable.Range(0, days + 1).Select(i => period.StartDate.Date.AddDays(i)).ToList();
+            }
+
+            return Enumerable.Range(0, 5).Select(i => DateTime.Today.AddDays(-4 + i)).ToList();
+        }
+    }
+
+    // Jendela yang boleh DIISI (ditegakkan ulang di SP). Di luar itu baris tampil read-only.
+    private bool CanEdit =>
+        selectedDate <= DateTime.Today && selectedDate >= DateTime.Today.AddDays(-4);
+
+    private int CountOf(string code) => rows.Count(r => r.Status == code);
+
+    private int PendingCountFor(DateTime date) =>
+        pendingDates.FirstOrDefault(p => p.AttendanceDate.Date == date.Date)?.PendingCount ?? 0;
+
+    private string? DefaultCheckIn() => schedule.IsWorkingDay ? FormatTime(schedule.StartTime) : null;
+
+    // Telat dihitung ulang di client supaya angkanya ikut berubah saat jam masuk diedit
+    // (nilai IsLate/LateMinutes dari SP hanya menggambarkan isi DB).
+    private int? LateMinutes(EditRow row)
+    {
+        if (row.Status != "H" || schedule.StartTime is not { } start) return null;
+        if (!TimeSpan.TryParse(row.CheckIn, CultureInfo.InvariantCulture, out var checkIn)) return null;
+        return checkIn > start ? (int)(checkIn - start).TotalMinutes : 0;
+    }
+
+    private static string? FormatTime(TimeSpan? value) => value?.ToString(@"hh\:mm");
+
+    private static string? NormalizeTime(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed.ToString(@"hh\:mm")
+            : null;
+    }
+
+    private static string DayLabel(DateTime date) => date.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "Sen",
+        DayOfWeek.Tuesday => "Sel",
+        DayOfWeek.Wednesday => "Rab",
+        DayOfWeek.Thursday => "Kam",
+        DayOfWeek.Friday => "Jum",
+        DayOfWeek.Saturday => "Sab",
+        _ => "Min"
+    };
+
+    private static string ChipStyle(bool isSelected, bool selectable, int pending)
+    {
+        if (!selectable) return "border: 1px solid #E6E8EE; background: #F7F8FA; color: #9AA0AE;";
+        if (isSelected) return "border: 1px solid #0d6efd; background: #0d6efd; color: #fff;";
+        if (pending > 0) return "border: 1px solid #E0A100; background: #FFF8E6; color: #8A5A00;";
+        return "border: 1px solid #D5D8E0; background: #fff; color: #1F2330;";
+    }
+
+    // 34x34 seperti mockup: cukup besar untuk jari, tapi kelimanya tetap muat satu baris
+    // bersama input jam/keterangan di layar HP (~390px).
+    private static string StatusButtonStyle(string code, bool isSelected)
+    {
+        var baseStyle = "width: 34px; height: 34px; border-radius: 8px; font-size: 0.8rem;";
+        if (!isSelected) return baseStyle + " border: 1px solid #D5D8E0; background: #fff; color: #5A5F6E;";
+
+        var color = code switch
+        {
+            "H" => "#157347",
+            "I" => "#1E56B0",
+            "S" => "#A35400",
+            "A" => "#B42318",
+            _ => "#5B4BD6"
+        };
+        return $"{baseStyle} border: 1px solid {color}; background: {color}; color: #fff;";
+    }
+
+    private string TimeInputStyle(EditRow row) =>
+        LateMinutes(row) is int late && late > 0
+            ? "width: 4.8rem; border-color: #E0A100; color: #8A5A00;"
+            : "width: 4.8rem;";
+
+    private class EditRow
+    {
+        public int EmployeeId;
+        public string EmployeeName = string.Empty;
+        public string PositionName = string.Empty;
+        public bool IsActive;
+
+        public string? OrigStatus;
+        public string? OrigCheckIn;
+        public string? OrigCheckOut;
+        public string? OrigNote;
+
+        public string? Status;
+        public string? CheckIn;
+        public string? CheckOut;
+        public string? Note;
+
+        public bool IsDirty =>
+            !Same(Status, OrigStatus) || !Same(CheckIn, OrigCheckIn)
+            || !Same(CheckOut, OrigCheckOut) || !Same(Note, OrigNote);
+
+        private static bool Same(string? a, string? b) =>
+            string.Equals(a ?? string.Empty, b ?? string.Empty, StringComparison.Ordinal);
+    }
+}

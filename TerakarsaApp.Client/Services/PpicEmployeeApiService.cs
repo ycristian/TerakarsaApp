@@ -38,6 +38,14 @@ public class PpicEmployeeApiService
         return await response.Content.ReadFromJsonAsync<List<PositionDto>>() ?? new();
     }
 
+    // Prompt 58 (lanjutan): jabatan dibatasi ke divisi yang dipilih di form.
+    public async Task<List<PositionDto>> GetPositionsByDivisionAsync(int divisionId)
+    {
+        var response = await _http.GetAsync($"api/ppic-employee/positions/{divisionId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PositionDto>>() ?? new();
+    }
+
     public async Task<List<ResourceLookupDto>> GetResourcesByDivisionAsync(int divisionId)
     {
         var response = await _http.GetAsync($"api/ppic-employee/resources/{divisionId}");

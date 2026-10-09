@@ -12,6 +12,9 @@ public class WorkflowTemplateStepDto
     // Prompt 41: cetak kupon borongan otomatis saat baris step ini diterima -- hanya valid
     // utk RequiresBundle = true, ditolak SP kalau tidak.
     public bool PrintKupon { get; set; }
+    // Prompt 59: harga ARAHAN per pcs. Disalin ke article_workflows saat APPLY -- mengubahnya
+    // di sini TIDAK merambat ke artikel yang sudah ada.
+    public decimal UnitPrice { get; set; }
 }
 
 public class WorkflowTemplateDto
@@ -36,6 +39,7 @@ public class WorkflowTemplateStepRequest
     public bool RequiresBundle { get; set; } = true;
     public bool AutoReceive { get; set; }
     public bool PrintKupon { get; set; }
+    public decimal UnitPrice { get; set; }
 }
 
 public class WorkflowTemplateCreateRequest

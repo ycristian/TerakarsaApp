@@ -1,0 +1,509 @@
+@page "/tni/box/{Id:int}"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniBoxApiService BoxApi
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* Prompt 67: detail box (mockup layar 8).
+   Bar aksi menyesuaikan status: Terbuka -> Tutup box & buat PDF;
+   Tertutup -> Unduh PDF + Tandai terkirim; Terkirim -> Unduh PDF + Batal kirim
+   (2026-10-06, langsung tanpa persetujuan, alasan wajib -> keterangan box).
+   PDF HANYA DIUNDUH, tidak pernah lewat print job. *@
+
+<PageTitle>@(h?.BoxCode ?? "Box") — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (h is null)
+{
+    <div class="tni">
+        <div class="alert alert-warning">Box tidak ditemukan.</div>
+        <TniCloseButton FallbackUrl="/tni/box" />
+    </div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-s" style="font-weight:700;opacity:1">No. Box @h.BoxNo</div>
+                <div class="tni-t" style="font-family:ui-monospace,Consolas,monospace;font-size:22px">
+                    @h.BoxCode
+                </div>
+                <div class="tni-s">@h.SatuanName · @h.AreaName</div>
+            </div>
+            <TniCloseButton FallbackUrl="/tni/box" />
+        </div>
+        <div style="margin-top:8px">
+            <span class="tni-chip @ChipClass(h.Status)">@ChipLabel(h.Status)</span>
+            <span class="tni-chip tni-chip-mut">Isi @h.Isi / @h.Kapasitas</span>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @* ---------- info ---------- *@
+    <div class="tni-card">
+        <table class="tni-mini">
+            <tr><td>Rawatan</td><td class="tni-n">@h.AreaName</td></tr>
+            <tr><td>Satuan</td><td class="tni-n">@h.SatuanName</td></tr>
+            @if (h.Gabungan)
+            {
+                <tr><td>Satuan di dalamnya</td><td class="tni-n">@h.JumlahSatuan</td></tr>
+            }
+            <tr>
+                <td>Ditutup</td>
+                <td class="tni-n">
+                    @if (h.PackedAt.HasValue)
+                    {
+                        @h.PackedAt.Value.ToString("dd/MM/yyyy HH:mm")
+                        <div class="tni-note">@h.PackedByNama</div>
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+            <tr>
+                <td>Terkirim</td>
+                <td class="tni-n">
+                    @if (h.ShippedAt.HasValue)
+                    {
+                        @h.ShippedAt.Value.ToString("dd/MM/yyyy HH:mm")
+                        <div class="tni-note">@h.ShippedByNama</div>
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+        </table>
+        @if (!string.IsNullOrEmpty(h.Keterangan))
+        {
+            <div class="tni-note" style="margin-top:6px;font-style:italic">@h.Keterangan</div>
+        }
+    </div>
+
+    @* ---------- rekap pola ---------- *@
+    @if (detail!.Rekap.Count > 0)
+    {
+        <div class="tni-sec">Rekap pola</div>
+        <div style="display:flex;gap:8px">
+            <div class="tni-card" style="flex:1;margin:0">
+                <div class="tni-k" style="font-weight:700;margin-bottom:4px">KEMEJA</div>
+                @foreach (var r in detail.RekapKemeja)
+                {
+                    <div class="tni-row" style="font-size:12px">
+                        <span class="tni-pola">@r.Kode</span><span class="tni-b">@r.Jumlah</span>
+                    </div>
+                }
+            </div>
+            <div class="tni-card" style="flex:1;margin:0">
+                <div class="tni-k" style="font-weight:700;margin-bottom:4px">CELANA</div>
+                @foreach (var r in detail.RekapCelana)
+                {
+                    <div class="tni-row" style="font-size:12px">
+                        <span class="tni-pola">@r.Kode</span><span class="tni-b">@r.Jumlah</span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @* ---------- daftar isi ---------- *@
+    <div class="tni-sec">Isi box (@detail.Isi.Count)</div>
+    @if (detail.Isi.Count == 0)
+    {
+        <div class="tni-card">
+            <span class="tni-note">
+                Box masih kosong. Scan kartu lewat menu Scan → tab Masuk Box.
+            </span>
+        </div>
+    }
+    else
+    {
+        <div class="tni-card">
+            @foreach (var p in detail.Isi)
+            {
+                <div class="tni-li">
+                    @* Detail personel dibuka di TAB BARU (tanpa rel="noopener" -- lihat Personel.razor). *@
+                    <a href="@($"/tni/personel/{p.PersonelId}")" target="_blank"
+                       style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;text-decoration:none;color:inherit">
+                        <span class="tni-k" style="width:22px;flex-shrink:0">@p.UrutDalamBox</span>
+                        <span style="flex:1;min-width:0">
+                            <b class="tni-pola">@p.KodeRef</b>
+                            <span class="tni-note" style="margin-left:4px">@p.Pangkat @p.Nama</span>
+                            @if (h.Gabungan || p.SatuanCode != h.SatuanCode)
+                            {
+                                <div class="tni-note">@p.SatuanCode · @p.AreaCode</div>
+                            }
+                        </span>
+                        <span class="tni-pola" style="font-size:11px">
+                            @p.PolaKemejaKode<br />@p.PolaCelanaKode
+                        </span>
+                    </a>
+
+                    @* 2026-10-07: keluarkan personel dari box -- LANGSUNG, tanpa persetujuan
+                       (TniAjukanBatal jenis BOX). Box terkirim tidak bisa dibatalkan. *@
+                    @if (!h.Terkirim)
+                    {
+                        <button class="tni-btn tni-btn-r" style="flex:0 0 auto;padding:4px 8px;font-size:11px"
+                                title="Keluarkan dari box" @onclick="@(() => batalPersonel = p)">
+                            Batal
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* ---------- bar aksi sesuai status ---------- *@
+    <div class="tni-bot">
+        @if (h.Terbuka)
+        {
+            @if (!konfirmTutup)
+            {
+                @if (h.BolehHapus)
+                {
+                    <button class="tni-btn tni-btn-r" @onclick="@(() => sheetHapus = true)">Hapus box</button>
+                }
+                <button class="tni-btn tni-btn-c" disabled="@(h.Isi == 0 || isSaving)"
+                        @onclick="@(() => konfirmTutup = true)">
+                    Tutup box & buat PDF
+                </button>
+            }
+            else
+            {
+                <span class="tni-note" style="flex:1">
+                    Tutup box berisi @h.Isi set? Box tidak bisa menerima scan lagi.
+                </span>
+                <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmTutup = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="TutupAsync">
+                    @(isSaving ? "..." : "Ya, tutup")
+                </button>
+            }
+        }
+        else
+        {
+            <button class="tni-btn tni-btn-o" disabled="@isSaving" @onclick="UnduhPdfAsync">
+                &#8595; Unduh PDF
+            </button>
+
+            @if (h.Tertutup)
+            {
+                @if (!konfirmKirim)
+                {
+                    @* 2026-10-07: batal tutup -- box kembali terbuka, bisa discan lagi *@
+                    <button class="tni-btn tni-btn-r" disabled="@isSaving"
+                            @onclick="@(() => BukaSheetBatal("TUTUP"))">
+                        Batal tutup
+                    </button>
+                    <button class="tni-btn tni-btn-g" disabled="@isSaving"
+                            @onclick="@(() => konfirmKirim = true)">
+                        Tandai terkirim
+                    </button>
+                }
+                else
+                {
+                    <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmKirim = false)">Batal</button>
+                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="KirimAsync">
+                        @(isSaving ? "..." : "Ya, terkirim")
+                    </button>
+                }
+            }
+            else if (h.Terkirim)
+            {
+                <button class="tni-btn tni-btn-r" disabled="@isSaving"
+                        @onclick="@(() => BukaSheetBatal("KIRIM"))">
+                    Batal kirim
+                </button>
+            }
+        }
+    </div>
+</div>
+
+@* ---------------- sheet batal kirim (2026-10-06) / batal tutup (2026-10-07) ---------------- *@
+@if (sheetBatal is not null)
+{
+    var tutup = sheetBatal == "TUTUP";
+    <div class="tni-sheet-backdrop" @onclick="@(() => sheetBatal = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-bad)">Batal @(tutup ? "tutup" : "kirim") box @h.BoxCode</div>
+                <button class="tni-btn" @onclick="@(() => sheetBatal = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-note">
+                @if (tutup)
+                {
+                    <text>Box kembali berstatus <b>Terbuka</b> (isi @h.Isi set tetap di dalam box) dan
+                    bisa menerima scan lagi. <b>PDF daftar isi yang sudah dicetak tidak berlaku</b> —
+                    tutup ulang untuk membuat PDF baru. Alasan dicatat di keterangan box.</text>
+                }
+                else
+                {
+                    <text>Box kembali berstatus <b>Tertutup</b> (isi @h.Isi set tetap di dalam box) dan
+                    bisa ditandai terkirim lagi nanti. Alasan dicatat di keterangan box.</text>
+                }
+            </div>
+
+            <div class="tni-k" style="margin-top:8px">Alasan (wajib)</div>
+            <input class="tni-inp" @bind="alasanBatal" @bind:event="oninput"
+                   placeholder="@(tutup ? "mis. masih ada personel yang belum masuk" : "mis. salah tandai, box belum diangkut")"
+                   maxlength="150" />
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => sheetBatal = null)">Batal</button>
+                <button class="tni-btn tni-btn-c"
+                        disabled="@(isSaving || string.IsNullOrWhiteSpace(alasanBatal))"
+                        @onclick="BatalAsync">
+                    @(isSaving ? "..." : tutup ? "Ya, batal tutup" : "Ya, batal kirim")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet keluarkan satu personel dari box (2026-10-07) ----------------
+   Memakai TniAjukanBatal jenis BOX: LANGSUNG dieksekusi tanpa persetujuan (alasan
+   wajib, tercatat di riwayat pembatalan). Box tertutup ikut terbuka lagi. *@
+@if (batalPersonel is not null)
+{
+    var bp = batalPersonel;
+    <div class="tni-sheet-backdrop" @onclick="@(() => batalPersonel = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-k">KELUARKAN DARI BOX @h.BoxCode</div>
+                    <b class="tni-pola">@bp.KodeRef</b>
+                    <span class="tni-note" style="margin-left:4px">@bp.Pangkat @bp.Nama</span>
+                    <div class="tni-note">@bp.SatuanName · @bp.AreaName</div>
+                </div>
+                <button class="tni-btn" @onclick="@(() => batalPersonel = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <TniAjukanBatal PersonelId="bp.PersonelId"
+                            StatusProgres="MASUK_BOX"
+                            BoxCode="@h.BoxCode"
+                            OnDiajukan="BatalDiajukanAsync" />
+        </div>
+    </div>
+}
+
+@* ---------------- sheet hapus box ---------------- *@
+@if (sheetHapus)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => sheetHapus = false)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-bad)">Hapus box @h.BoxCode</div>
+                <button class="tni-btn" @onclick="@(() => sheetHapus = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-note">
+                Box ini masih kosong dan belum ditutup, jadi boleh dihapus.
+                Nomor <b>@h.BoxCode</b> <b>tidak akan dipakai ulang</b>.
+            </div>
+
+            <div class="tni-k" style="margin-top:8px">Alasan</div>
+            <input class="tni-inp" @bind="alasanHapus" placeholder="mis. salah buka box" />
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => sheetHapus = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="HapusAsync">
+                    @(isSaving ? "..." : "Ya, hapus")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool? hasAccess;
+    private bool isSaving;
+    private bool konfirmTutup;
+    private bool konfirmKirim;
+    private bool sheetHapus;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+    private string sheetError = string.Empty;
+    private string alasanHapus = string.Empty;
+    private TniBoxIsiDto? batalPersonel;         // sheet batal masuk box satu personel
+    private string? sheetBatal;                  // null | "KIRIM" | "TUTUP"
+    private string alasanBatal = string.Empty;
+
+    private TniBoxDetailDto? detail;
+    private TniBoxHeaderDto? h => detail?.Header;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess == true) await LoadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (hasAccess == true && h is not null && h.BoxId != Id) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        konfirmTutup = false;
+        konfirmKirim = false;
+        detail = await BoxApi.GetByIdAsync(Id);
+    }
+
+    private async Task TutupAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err) = await BoxApi.TutupAsync(Id);
+
+        isSaving = false;
+        konfirmTutup = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = "Box ditutup — PDF daftar isi sudah bisa diunduh.";
+        await LoadAsync();
+    }
+
+    private async Task KirimAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err) = await BoxApi.KirimAsync(Id);
+
+        isSaving = false;
+        konfirmKirim = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = "Box ditandai terkirim.";
+        await LoadAsync();
+    }
+
+    private async Task BatalDiajukanAsync()
+    {
+        infoMessage = $"{batalPersonel?.KodeRef} dikeluarkan dari box.";
+        batalPersonel = null;
+        await LoadAsync();
+    }
+
+    private void BukaSheetBatal(string jenis)
+    {
+        sheetBatal = jenis;
+        alasanBatal = string.Empty;
+        sheetError = string.Empty;
+    }
+
+    // Batal kirim (TERKIRIM -> TERTUTUP) atau batal tutup (TERTUTUP -> TERBUKA).
+    private async Task BatalAsync()
+    {
+        var tutup = sheetBatal == "TUTUP";
+        isSaving = true;
+        sheetError = string.Empty;
+        errorMessage = string.Empty;
+
+        var (ok, err) = tutup
+            ? await BoxApi.BatalTutupAsync(Id, alasanBatal.Trim())
+            : await BoxApi.BatalKirimAsync(Id, alasanBatal.Trim());
+
+        isSaving = false;
+
+        if (!ok) { sheetError = err; return; }
+
+        sheetBatal = null;
+        alasanBatal = string.Empty;
+        infoMessage = tutup
+            ? "Tutup box dibatalkan — box terbuka lagi dan bisa menerima scan."
+            : "Pengiriman dibatalkan — box kembali tertutup.";
+        await LoadAsync();
+    }
+
+    private async Task HapusAsync()
+    {
+        if (string.IsNullOrWhiteSpace(alasanHapus))
+        {
+            sheetError = "Alasan wajib diisi.";
+            return;
+        }
+
+        isSaving = true;
+        sheetError = string.Empty;
+
+        var (ok, err) = await BoxApi.HapusAsync(Id, alasanHapus);
+
+        isSaving = false;
+        if (!ok) { sheetError = err; return; }
+
+        Nav.NavigateTo("/tni/box");
+    }
+
+    private async Task UnduhPdfAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err, bytes, nama) = await BoxApi.GetPdfAsync(Id);
+
+        isSaving = false;
+        if (!ok) { errorMessage = err; return; }
+
+        try
+        {
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                nama, "application/pdf", Convert.ToBase64String(bytes!));
+            infoMessage = $"PDF {nama} diunduh.";
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+    }
+
+    private static string ChipClass(string status) => status switch
+    {
+        "TERBUKA" => "tni-chip-warn",
+        "TERTUTUP" => "tni-chip-navy",
+        "TERKIRIM" => "tni-chip-ok",
+        _ => "tni-chip-mut"
+    };
+
+    private static string ChipLabel(string status) => status switch
+    {
+        "TERBUKA" => "Terbuka",
+        "TERTUTUP" => "Tertutup",
+        "TERKIRIM" => "Terkirim",
+        _ => status
+    };
+}

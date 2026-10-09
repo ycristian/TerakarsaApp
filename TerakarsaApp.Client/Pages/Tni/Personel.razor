@@ -1,0 +1,298 @@
+@page "/tni/personel"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPersonelApiService PersonelApi
+@inject TniOrderState OrderState
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Prompt 63: daftar personel PDH TNI AD -- cari satu orang lewat kode / NRP / nama,
+   lihat posisinya di alur, filter per area / satuan / status / perlu review.
+   Muat bertahap 30 per halaman. *@
+
+<PageTitle>Personel — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-users"></i> Personel</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    <input class="tni-inp tni-search" style="font-size:15px;padding:12px"
+           placeholder="Cari kode / NRP / nama..."
+           @bind="search" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+
+    <div class="tni-row" style="margin-bottom:10px">
+        <button class="tni-btn @(AdaFilter ? "tni-btn-p" : "tni-btn-o")" @onclick="@(() => showFilter = true)">
+            <i class="fe fe-filter"></i> Filter@(AdaFilter ? $" ({JumlahFilter})" : "")
+        </button>
+        <span class="tni-k">@total.ToString("N0") orang</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (items.Count == 0 && !isLoading)
+    {
+        <div class="tni-card"><span class="tni-note">Tidak ada personel yang cocok.</span></div>
+    }
+
+    @foreach (var p in items)
+    {
+        @* Dibuka di TAB BARU supaya daftar + filter + posisi scroll-nya tetap utuh saat
+           detail ditutup. Anchor target="_blank" TANPA rel="noopener" -- itu syarat browser
+           mengizinkan window.close() di halaman detail (lihat CloseButton.razor). *@
+        <a class="tni-card tni-tap" href="@($"/tni/personel/{p.PersonelId}")" target="_blank"
+           style="display:block;text-decoration:none;color:inherit">
+            <div class="tni-row">
+                <span>
+                    <span class="tni-pola-lg" style="font-size:15px">@p.KodeRef</span>
+                    <span class="tni-note" style="margin-left:5px">@p.Pangkat</span>
+                </span>
+                <span>
+                    @if (p.PerluReview)
+                    {
+                        <span class="tni-chip tni-chip-bad">review</span>
+                    }
+                    <TniStatusChip Status="@p.StatusProgres" />
+                </span>
+            </div>
+            <div class="tni-b" style="margin-top:2px">@p.Nama</div>
+            <div class="tni-row" style="margin-top:3px">
+                <span class="tni-pola" style="font-size:11.5px">@p.PolaKemejaKode · @p.PolaCelanaKode</span>
+                <span class="tni-k">
+                    @p.SatuanCode
+                    @if (!string.IsNullOrEmpty(p.BoxCode))
+                    {
+                        <text> · @p.BoxCode</text>
+                    }
+                </span>
+            </div>
+        </a>
+    }
+
+    @if (isLoading)
+    {
+        <p class="tni-note">Memuat...</p>
+    }
+    else if (items.Count < total)
+    {
+        <button class="tni-btn tni-btn-o" style="width:100%" @onclick="LoadMoreAsync">
+            Muat lagi (@((total - items.Count).ToString("N0")) sisa)
+        </button>
+    }
+</div>
+
+@* ---------------- bottom sheet FILTER ---------------- *@
+@if (showFilter)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => showFilter = false)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">Filter</div>
+                <button class="tni-btn" @onclick="@(() => showFilter = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-k">Rawatan</div>
+            <select class="tni-inp" @bind="areaId" @bind:after="OnAreaChanged">
+                <option value="0">Semua rawatan</option>
+                @foreach (var a in areas)
+                {
+                    <option value="@a.AreaId">@a.AreaName</option>
+                }
+            </select>
+
+            <div class="tni-k" style="margin-top:8px">Satuan</div>
+            <select class="tni-inp" @bind="satuanId">
+                <option value="0">Semua satuan</option>
+                @foreach (var sa in SatuanPilihan)
+                {
+                    <option value="@sa.SatuanId">@sa.SatuanCode — @sa.SatuanName</option>
+                }
+            </select>
+
+            <div class="tni-k" style="margin-top:8px">Status</div>
+            <select class="tni-inp" @bind="status">
+                <option value="">Semua status</option>
+                <option value="BELUM_CETAK">Belum cetak</option>
+                <option value="DICETAK">Kartu dicetak</option>
+                <option value="SET_JADI">Set jadi</option>
+                <option value="MASUK_BOX">Masuk box</option>
+                <option value="TERKIRIM">Terkirim</option>
+            </select>
+
+            <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin-top:10px">
+                <input type="checkbox" @bind="perluReview" />
+                Hanya yang perlu review
+            </label>
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="ResetFilterAsync">Reset</button>
+                <button class="tni-btn tni-btn-p" @onclick="TerapkanFilterAsync">Terapkan</button>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    private const int PageSize = 30;
+
+    // Filter awal dari query string -- chip di beranda menautkan ke sini
+    // (mis. /tni/personel?status=SET_JADI, /tni/personel?review=1).
+    [SupplyParameterFromQuery(Name = "status")] public string? QStatus { get; set; }
+    [SupplyParameterFromQuery(Name = "review")] public string? QReview { get; set; }
+    [SupplyParameterFromQuery(Name = "areaId")] public int? QAreaId { get; set; }
+    [SupplyParameterFromQuery(Name = "satuanId")] public int? QSatuanId { get; set; }
+
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool showFilter;
+    private string errorMessage = string.Empty;
+
+    private string search = string.Empty;
+    private int areaId;
+    private int satuanId;
+    private string status = string.Empty;
+    private bool perluReview;
+
+    private int page = 1;
+    private int total;
+    private List<TniPersonelListItemDto> items = new();
+    private List<TniWilayahRowDto> wilayah = new();
+
+    private System.Threading.Timer? debounceTimer;
+
+    private List<TniWilayahRowDto> areas =>
+        wilayah.GroupBy(w => w.AreaId).Select(g => g.First()).OrderBy(w => w.AreaCode).ToList();
+
+    private List<TniWilayahRowDto> SatuanPilihan =>
+        wilayah.Where(w => w.SatuanId.HasValue && (areaId == 0 || w.AreaId == areaId))
+               .OrderBy(w => w.SatuanCode)
+               .ToList();
+
+    private bool AdaFilter => areaId > 0 || satuanId > 0 || !string.IsNullOrEmpty(status) || perluReview;
+
+    private int JumlahFilter =>
+        (areaId > 0 ? 1 : 0) + (satuanId > 0 ? 1 : 0) +
+        (string.IsNullOrEmpty(status) ? 0 : 1) + (perluReview ? 1 : 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess != true) return;
+
+        if (!string.IsNullOrEmpty(QStatus)) status = QStatus;
+        if (QReview is "1" or "true") perluReview = true;
+        if (QAreaId is > 0) areaId = QAreaId.Value;
+        if (QSatuanId is > 0) satuanId = QSatuanId.Value;
+
+        await OrderState.EnsureLoadedAsync();
+        wilayah = await PersonelApi.GetWilayahAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+        page = 1;
+
+        try
+        {
+            var result = await PersonelApi.GetListAsync(
+                search, areaId > 0 ? areaId : null, satuanId > 0 ? satuanId : null,
+                string.IsNullOrEmpty(status) ? null : status, perluReview, page, PageSize);
+
+            items = result.Items;
+            total = result.TotalCount;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+
+        isLoading = false;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        isLoading = true;
+        page++;
+
+        try
+        {
+            var result = await PersonelApi.GetListAsync(
+                search, areaId > 0 ? areaId : null, satuanId > 0 ? satuanId : null,
+                string.IsNullOrEmpty(status) ? null : status, perluReview, page, PageSize);
+
+            items.AddRange(result.Items);
+            total = result.TotalCount;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+
+        isLoading = false;
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadAsync();
+                StateHasChanged();
+            });
+        }, null, 300, Timeout.Infinite);
+    }
+
+    // Ganti rawatan -> satuan yang terpilih mungkin tidak lagi masuk daftar.
+    private void OnAreaChanged()
+    {
+        if (satuanId > 0 && !SatuanPilihan.Any(x => x.SatuanId == satuanId)) satuanId = 0;
+    }
+
+    private async Task TerapkanFilterAsync()
+    {
+        showFilter = false;
+        await LoadAsync();
+    }
+
+    private async Task ResetFilterAsync()
+    {
+        areaId = 0;
+        satuanId = 0;
+        status = string.Empty;
+        perluReview = false;
+        showFilter = false;
+        await LoadAsync();
+    }
+
+    public void Dispose() => debounceTimer?.Dispose();
+}

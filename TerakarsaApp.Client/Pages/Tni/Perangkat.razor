@@ -1,0 +1,363 @@
+@page "/tni/perangkat"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPerangkatApiService PerangkatApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Pengelolaan PERANGKAT modul PDH TNI AD.
+
+   SATU-SATUNYA halaman /tni yang MASIH BUTUH LOGIN selain /tni/pembatalan:
+   dari sini admin membuat kode pairing, dan kode itulah yang memberi sebuah
+   tablet/HP akses ke seluruh modul tanpa login. Jadi halaman ini TIDAK boleh
+   ikut dibuka tanpa login -- karena itu layout-nya bukan TniLayout.
+
+   alter_75: SATU nama petugas per perangkat (wajib), tanpa pemilihan petugas
+   di perangkat. Nama itulah yang tampil di jejak scan/box/stok/pembatalan --
+   mengganti nama ikut mengganti nama di riwayat lama. *@
+
+<PageTitle>Perangkat TNI — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-tablet"></i> Perangkat</div>
+                <div class="tni-s">Perangkat dipakai tanpa login — aksesnya lewat kode pairing</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+        @if (formPerangkat is not null)
+        {
+            <div class="tni-card" style="border-color:var(--tni-navy)">
+                <div class="tni-sec" style="margin-top:0">
+                    @(editPerangkatId is null ? "Perangkat baru" : "Ubah perangkat")
+                </div>
+
+                <div class="tni-k">Kode (singkat, mis. TAB01)</div>
+                <input class="tni-inp" maxlength="30" style="text-transform:uppercase"
+                       @bind="formPerangkat.PerangkatCode" />
+
+                <div class="tni-k" style="margin-top:6px">Nama perangkat</div>
+                <input class="tni-inp" maxlength="150" @bind="formPerangkat.PerangkatName" />
+
+                <div class="tni-k" style="margin-top:6px">Nama petugas (wajib — satu petugas per perangkat)</div>
+                <input class="tni-inp" maxlength="150" placeholder="nama yang tercatat di setiap scan"
+                       @bind="formPerangkat.NamaPetugas" @bind:event="oninput" />
+
+                <div class="tni-k" style="margin-top:6px">Keterangan (opsional)</div>
+                <input class="tni-inp" maxlength="255" @bind="formPerangkat.Keterangan" />
+
+                <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px">
+                    <input type="checkbox" @bind="formPerangkat.IsActive" />
+                    Aktif (perangkat nonaktif tidak bisa dipakai maupun di-pairing)
+                </label>
+
+                @* alter_74: menu yang boleh dibuka perangkat ini *@
+                <div class="tni-row" style="margin-top:10px">
+                    <span class="tni-k">Akses menu</span>
+                    <span>
+                        <button class="tni-btn" style="padding:3px 8px;font-size:11px"
+                                @onclick="@(() => formMenu = TniMenu.Semua.Select(m => m.Code).ToHashSet())">Semua</button>
+                        <button class="tni-btn" style="padding:3px 8px;font-size:11px"
+                                @onclick="@(() => formMenu.Clear())">Kosongkan</button>
+                    </span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;margin-top:4px">
+                    @foreach (var m in TniMenu.Semua)
+                    {
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 0">
+                            <input type="checkbox" checked="@formMenu.Contains(m.Code)"
+                                   @onchange="@(e => UbahMenu(m.Code, e.Value is true))" />
+                            <i class="@m.Icon" style="color:var(--tni-navy)"></i> @m.Label
+                        </label>
+                    }
+                </div>
+                @if (formMenu.Count == 0)
+                {
+                    <div class="tni-note" style="color:var(--tni-bad)">Pilih minimal satu menu.</div>
+                }
+
+                <div class="tni-row" style="margin-top:10px;gap:6px">
+                    <button class="tni-btn tni-btn-o" style="flex:1" @onclick="@(() => formPerangkat = null)">
+                        Batal
+                    </button>
+                    <button class="tni-btn tni-btn-p" style="flex:1" disabled="@(isSaving || formMenu.Count == 0 || string.IsNullOrWhiteSpace(formPerangkat.NamaPetugas))"
+                            @onclick="SimpanPerangkatAsync">
+                        @(isSaving ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <button class="tni-btn tni-btn-p" style="width:100%" @onclick="BaruPerangkat">
+                <i class="fe fe-plus"></i> Perangkat baru
+            </button>
+        }
+
+        @if (isLoading)
+        {
+            <p class="tni-note">Memuat...</p>
+        }
+        else if (perangkatList.Count == 0)
+        {
+            <div class="tni-card">
+                <span class="tni-note">
+                    Belum ada perangkat. Buat satu, lalu tekan "Buat kode pairing" dan masukkan
+                    kodenya di tablet/HP yang akan dipakai.
+                </span>
+            </div>
+        }
+        else
+        {
+            @foreach (var d in perangkatList)
+            {
+                <div class="tni-card">
+                    <div class="tni-row">
+                        <span>
+                            <b style="font-family:ui-monospace,Consolas,monospace">@d.PerangkatCode</b>
+                            <span style="margin-left:6px">@d.PerangkatName</span>
+                        </span>
+                        <span class="tni-chip @(d.Terhubung ? "tni-chip-ok" : "tni-chip-mut")">
+                            @(d.Terhubung ? "terhubung" : "belum terhubung")
+                        </span>
+                    </div>
+
+                    @if (!d.IsActive)
+                    {
+                        <div style="margin-top:4px"><span class="tni-chip tni-chip-bad">nonaktif</span></div>
+                    }
+
+                    <div class="tni-note" style="margin-top:4px">
+                        @if (d.PairedAt.HasValue)
+                        {
+                            <text>Pairing @d.PairedAt.Value.ToString("dd/MM/yy HH:mm")</text>
+                        }
+                        @if (d.LastSeenAt.HasValue)
+                        {
+                            <text> · terakhir dipakai @d.LastSeenAt.Value.ToString("dd/MM/yy HH:mm")</text>
+                        }
+                        @if (!string.IsNullOrEmpty(d.Keterangan))
+                        {
+                            <div>@d.Keterangan</div>
+                        }
+                    </div>
+
+                    @* alter_74: menu yang diizinkan *@
+                    <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">
+                        @if (d.MenuList.Count == TniMenu.Semua.Count)
+                        {
+                            <span class="tni-chip tni-chip-ok">semua menu</span>
+                        }
+                        else
+                        {
+                            @foreach (var m in TniMenu.Semua.Where(x => d.MenuList.Contains(x.Code)))
+                            {
+                                <span class="tni-chip tni-chip-navy">@m.Label</span>
+                            }
+                        }
+                    </div>
+
+                    <div style="margin-top:4px;font-size:12.5px">
+                        <i class="fe fe-user"></i> Petugas: <b>@d.NamaPetugas</b>
+                    </div>
+
+                    @* Kode hanya muncul selama masih berlaku -- ditampilkan besar
+                       supaya mudah dibaca & diketik di perangkat lain. *@
+                    @if (d.AdaKodeAktif)
+                    {
+                        <div class="tni-card" style="margin:8px 0 0;text-align:center;
+                                                     border-color:var(--tni-gold);background:#FFFBF0">
+                            <div class="tni-k">KODE PAIRING</div>
+                            <div style="font-family:ui-monospace,Consolas,monospace;font-size:32px;
+                                        font-weight:800;letter-spacing:6px;color:var(--tni-navy)">
+                                @d.PairingCode
+                            </div>
+                            <div class="tni-note">
+                                Berlaku sampai @d.PairingCodeExpiresAt!.Value.ToString("HH:mm:ss") · sekali pakai
+                            </div>
+                        </div>
+                    }
+
+                    <div class="tni-row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+                        <button class="tni-btn tni-btn-p" disabled="@isSaving"
+                                @onclick="@(() => BuatKodeAsync(d))">
+                            <i class="fe fe-key"></i> Buat kode pairing
+                        </button>
+                        <button class="tni-btn tni-btn-o" @onclick="@(() => UbahPerangkat(d))">Ubah</button>
+                        @if (d.Terhubung)
+                        {
+                            <button class="tni-btn tni-btn-r" disabled="@isSaving"
+                                    @onclick="@(() => UnpairAsync(d))">
+                                Putuskan
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="tni-btn tni-btn-r" disabled="@isSaving"
+                                    @onclick="@(() => HapusPerangkatAsync(d))">
+                                Hapus
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        }
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private List<TniPerangkatDto> perangkatList = new();
+
+    private TniPerangkatCreateRequest? formPerangkat;
+    private int? editPerangkatId;
+    private HashSet<string> formMenu = new();   // alter_74: centang akses menu
+
+    private void UbahMenu(string code, bool on)
+    {
+        if (on) formMenu.Add(code);
+        else formMenu.Remove(code);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "TNI_PDH");
+        if (hasAccess != true) return;
+
+        await LoadPerangkatAsync();
+    }
+
+    private async Task LoadPerangkatAsync()
+    {
+        isLoading = true;
+        perangkatList = await PerangkatApi.GetListAsync();
+        isLoading = false;
+    }
+
+    // ---------- perangkat ----------
+
+    private void BaruPerangkat()
+    {
+        editPerangkatId = null;
+        formPerangkat = new TniPerangkatCreateRequest { IsActive = true };
+        formMenu = TniMenu.Semua.Select(m => m.Code).ToHashSet();   // default semua menu
+        Bersih();
+    }
+
+    private void UbahPerangkat(TniPerangkatDto d)
+    {
+        editPerangkatId = d.PerangkatId;
+        formPerangkat = new TniPerangkatCreateRequest
+        {
+            PerangkatCode = d.PerangkatCode,
+            PerangkatName = d.PerangkatName,
+            NamaPetugas = d.NamaPetugas,
+            Keterangan = d.Keterangan,
+            IsActive = d.IsActive
+        };
+        formMenu = d.MenuList.ToHashSet();
+        Bersih();
+    }
+
+    private async Task SimpanPerangkatAsync()
+    {
+        if (formPerangkat is null) return;
+
+        formPerangkat.PerangkatCode = (formPerangkat.PerangkatCode ?? string.Empty).Trim().ToUpperInvariant();
+        formPerangkat.NamaPetugas = (formPerangkat.NamaPetugas ?? string.Empty).Trim();
+        // urut sesuai daftar menu, supaya rapi di DB & tampilan
+        formPerangkat.Menu = TniMenu.Semua.Where(m => formMenu.Contains(m.Code)).Select(m => m.Code).ToList();
+
+        isSaving = true;
+        var (ok, error) = await PerangkatApi.SimpanAsync(editPerangkatId, formPerangkat);
+        isSaving = false;
+
+        if (!ok) { errorMessage = error; return; }
+
+        formPerangkat = null;
+        infoMessage = "Perangkat disimpan.";
+        await LoadPerangkatAsync();
+    }
+
+    private async Task BuatKodeAsync(TniPerangkatDto d)
+    {
+        isSaving = true;
+        Bersih();
+
+        var (ok, error, hasil) = await PerangkatApi.GeneratePairingAsync(d.PerangkatId);
+        isSaving = false;
+
+        if (!ok) { errorMessage = error; return; }
+
+        infoMessage = $"Kode untuk {d.PerangkatCode}: {hasil?.PairingCode} — masukkan di perangkat sebelum "
+                    + $"{hasil?.ExpiresAt.ToString("HH:mm")}.";
+
+        await LoadPerangkatAsync();
+    }
+
+    private async Task UnpairAsync(TniPerangkatDto d)
+    {
+        isSaving = true;
+        Bersih();
+
+        var (ok, error) = await PerangkatApi.UnpairAsync(d.PerangkatId);
+        isSaving = false;
+
+        if (!ok) { errorMessage = error; return; }
+
+        infoMessage = $"{d.PerangkatCode} diputus — perangkat itu harus pairing ulang.";
+        await LoadPerangkatAsync();
+    }
+
+    private async Task HapusPerangkatAsync(TniPerangkatDto d)
+    {
+        isSaving = true;
+        Bersih();
+
+        var (ok, error) = await PerangkatApi.HapusAsync(d.PerangkatId);
+        isSaving = false;
+
+        if (!ok) { errorMessage = error; return; }
+
+        infoMessage = $"{d.PerangkatCode} dihapus.";
+        await LoadPerangkatAsync();
+    }
+
+
+    private void Bersih()
+    {
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+    }
+}

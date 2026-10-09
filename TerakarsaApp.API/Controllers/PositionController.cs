@@ -44,6 +44,25 @@ public class PositionController : ControllerBase
         return Ok(position);
     }
 
+    // Prompt 58 (lanjutan): jabatan yang boleh dipakai satu divisi -- dipakai dropdown
+    // "Jabatan" di form Master Karyawan (cascading di bawah Divisi). Divisi yang pemetaannya
+    // belum diatur tetap mendapat semua jabatan (lihat SIS_Position_GetByDivision).
+    [HttpGet("by-division/{divisionId:int}")]
+    public async Task<IActionResult> GetByDivision(int divisionId)
+    {
+        var result = await _positionService.GetByDivisionAsync(divisionId);
+        return Ok(result);
+    }
+
+    // Prompt 58 (lanjutan): divisi yang sudah dipetakan ke jabatan ini -- untuk mencentang
+    // ulang pilihan di form Master Jabatan.
+    [HttpGet("{id:int}/divisions")]
+    public async Task<IActionResult> GetDivisions(int id)
+    {
+        var result = await _positionService.GetDivisionIdsAsync(id);
+        return Ok(result);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PositionCreateRequest request)
     {

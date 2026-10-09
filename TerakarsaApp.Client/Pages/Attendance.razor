@@ -1,0 +1,1064 @@
+@* Prompt 70 -- halaman Absensi (module HR_ATTENDANCE), tiga tab:
+     1. Kartu Karyawan  -> CRUD employee_cards
+     2. Rekap Absensi   -> SIS_Attendance_Report
+     3. Koreksi Absensi -> SIS_Attendance_Anomali + SIS_Attendance_Manage
+
+   Tata letak & isi kolom mengikuti claude prompt/mockup_70_absensi_rfid.html bagian Admin 1-3,
+   tapi dibangun dengan Bootstrap seperti halaman master TMOS lain (mockup itu acuan susunan,
+   bukan CSS yang disalin).
+
+   Izin/sakit/cuti TIDAK ada di sini: tidak ada tap = tidak ada baris. *@
+
+@page "/attendance"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Text
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Attendance
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Resources
+@inject AttendanceApiService AttendanceApi
+@inject DivisionApiService DivisionApi
+@inject ResourceApiService ResourceApi
+@inject EmployeeApiService EmployeeApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<PageTitle>Absensi</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Absensi</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Absensi</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="card">
+    <div class="card-header">
+        <ul class="nav nav-tabs card-header-tabs">
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "kartu" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("kartu")'>Kartu Karyawan</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "rekap" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("rekap")'>Rekap Absensi</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "koreksi" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("koreksi")'>
+                    Koreksi Absensi
+                    @if (anomaliRows.Count > 0)
+                    {
+                        <span class="badge bg-warning text-dark ms-1">@anomaliRows.Count</span>
+                    }
+                </a>
+            </li>
+        </ul>
+    </div>
+    <div class="card-body">
+
+@* ============================ TAB 1: KARTU KARYAWAN ============================ *@
+@if (activeTab == "kartu")
+{
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-primary" @onclick="OpenCreateCard">+ Tambah Kartu</button>
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="card-only-active"
+                       checked="@cardOnlyActive" @onchange="OnCardOnlyActiveChanged" />
+                <label class="form-check-label" for="card-only-active">Hanya aktif</label>
+            </div>
+        </div>
+        <div style="width: 320px;">
+            <input class="form-control" placeholder="Cari kartu, nama, kode, divisi..."
+                   @bind="cardSearch" @bind:event="oninput" @onkeyup="HandleCardSearchKeyUp" />
+        </div>
+    </div>
+
+    @if (isLoadingCards)
+    {
+        <p>Memuat data...</p>
+    }
+    else if (cards.Count == 0)
+    {
+        <p>Tidak ada kartu.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-bordered text-nowrap mb-0" style="border: 1px solid #dee2e6;">
+                <thead>
+                    <tr>
+                        <th>UID Kartu</th>
+                        <th>Nama</th>
+                        <th>Kode</th>
+                        <th>Divisi</th>
+                        <th>Jabatan</th>
+                        <th>Resource</th>
+                        <th>Status</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var card in cards)
+                    {
+                        <tr>
+                            <td style="font-family: ui-monospace, Consolas, monospace; letter-spacing: 0.08em;">@card.CardUid</td>
+                            <td>
+                                @card.EmployeeName
+                                @if (card.CardType == "SEMENTARA")
+                                {
+                                    <span class="badge bg-info text-dark ms-1">Sementara</span>
+                                }
+                            </td>
+                            <td>@(card.EmployeeCode ?? "—")</td>
+                            <td>@card.DivisionName</td>
+                            <td>@card.PositionName</td>
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(card.ResourceName))
+                                {
+                                    @* Warna holder fisik line ini (resources.color_hex) -- sama
+                                       dengan badge di layar gate. *@
+                                    <span class="badge" style="background-color: @(string.IsNullOrWhiteSpace(card.ColorHex) ? "#6c757d" : card.ColorHex); color: #fff;">@card.ResourceName</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (card.CardStatus == "AKTIF")
+                                {
+                                    <span class="badge bg-success">Aktif</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Nonaktif</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(card.Remarks))
+                                {
+                                    <div class="small text-muted">@card.Remarks</div>
+                                }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-primary me-1" title="Ubah" @onclick="() => OpenEditCard(card)"><i class="fe fe-edit"></i></button>
+                                @if (card.CardStatus == "AKTIF")
+                                {
+                                    @* Nonaktifkan TERPISAH dari Hapus: ini jalur normal kartu
+                                       hilang/diganti, riwayatnya harus tetap ada. *@
+                                    <button class="btn btn-sm btn-warning me-1" title="Nonaktifkan" @onclick="() => OpenDeactivate(card)"><i class="fe fe-slash"></i></button>
+                                }
+                                <button class="btn btn-sm btn-danger" title="Hapus (salah input)" @onclick="() => OpenDeleteCard(card)"><i class="fe fe-trash-2"></i></button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="small text-muted mt-2">Menampilkan @cards.Count kartu.</div>
+    }
+}
+
+@* ============================ TAB 2: REKAP ABSENSI ============================ *@
+@if (activeTab == "rekap")
+{
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-auto">
+            <label class="form-label mb-1">Dari tanggal</label>
+            <input type="date" class="form-control" @bind="reportFrom" />
+        </div>
+        <div class="col-auto">
+            <label class="form-label mb-1">Sampai tanggal</label>
+            <input type="date" class="form-control" @bind="reportTo" />
+        </div>
+        <div class="col-auto" style="min-width: 190px;">
+            <label class="form-label mb-1">Divisi</label>
+            <SearchableSelect TItem="DivisionDto" Items="divisionOptions" Value="reportDivisionId"
+                              ValueChanged="OnReportDivisionChanged"
+                              IdSelector="d => d.Id" TextSelector="d => d.DivisionName"
+                              Placeholder="Semua divisi" AllowNone="true" NoneLabel="Semua divisi" />
+        </div>
+        <div class="col-auto" style="min-width: 190px;">
+            <label class="form-label mb-1">Resource</label>
+            <SearchableSelect TItem="ResourceDto" Items="ReportResourceOptions" Value="reportResourceId"
+                              ValueChanged="v => reportResourceId = v"
+                              IdSelector="r => r.Id" TextSelector="r => r.ResourceName"
+                              Placeholder="Semua resource" AllowNone="true" NoneLabel="Semua resource" />
+        </div>
+        <div class="col-auto" style="min-width: 220px;">
+            <label class="form-label mb-1">Karyawan</label>
+            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" Value="reportEmployeeId"
+                              ValueChanged="v => reportEmployeeId = v"
+                              IdSelector="e => e.Id" TextSelector="e => e.EmployeeName"
+                              Placeholder="Semua karyawan" AllowNone="true" NoneLabel="Semua karyawan" />
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" @onclick="LoadReport" disabled="@isLoadingReport">
+                @(isLoadingReport ? "Memuat..." : "Tampilkan")
+            </button>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-outline-success" @onclick="ExportReport" disabled="@(reportRows.Count == 0)">
+                <i class="fe fe-download"></i> Export Excel
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-2 mb-3">
+        <div class="col-auto">
+            <div class="p-3" style="background-color: #f8f9fa; border: 1px solid #dee2e6; min-width: 160px;">
+                <div class="small text-muted">Total sesi</div>
+                <div class="fs-4 fw-semibold">@reportRows.Count.ToString("N0")</div>
+            </div>
+        </div>
+        <div class="col-auto">
+            <div class="p-3" style="background-color: #f8f9fa; border: 1px solid #dee2e6; min-width: 160px;">
+                <div class="small text-muted">Perlu koreksi</div>
+                <div class="fs-4 fw-semibold text-warning">@reportRows.Count(r => r.SessionStatus == AttendanceSessionStatuses.Anomali).ToString("N0")</div>
+            </div>
+        </div>
+        <div class="col-auto">
+            <div class="p-3" style="background-color: #f8f9fa; border: 1px solid #dee2e6; min-width: 190px;">
+                <div class="small text-muted">Total jam tercatat</div>
+                @* Hanya sesi yang punya jam pulang bisa dihitung -- sesi anomali sengaja tidak
+                   ditebak-tebak jamnya. *@
+                <div class="fs-4 fw-semibold">@TotalHoursText</div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoadingReport)
+    {
+        <p>Memuat data...</p>
+    }
+    else if (reportRows.Count == 0)
+    {
+        <p>Tidak ada sesi absensi pada rentang ini.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-bordered text-nowrap mb-0" style="border: 1px solid #dee2e6;">
+                <thead>
+                    <tr>
+                        <th>Tanggal</th>
+                        <th>Nama</th>
+                        <th>Kode</th>
+                        <th>Divisi</th>
+                        <th>Resource</th>
+                        <th>Masuk</th>
+                        <th>Pulang</th>
+                        <th>Durasi</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in reportRows)
+                    {
+                        <tr style="@(row.SessionStatus == AttendanceSessionStatuses.Anomali ? "background-color: #fff6e5;" : "")">
+                            <td>@row.WorkDate.ToString("d MMM yyyy")</td>
+                            <td>@row.EmployeeName</td>
+                            <td>@(row.EmployeeCode ?? "—")</td>
+                            <td>@row.DivisionName</td>
+                            <td>@(row.ResourceName ?? "—")</td>
+                            <td>@row.CheckInAt.ToString("HH:mm")</td>
+                            <td>
+                                @if (row.CheckOutAt is null)
+                                {
+                                    <span class="text-warning">Belum check out</span>
+                                }
+                                else
+                                {
+                                    @row.CheckOutAt.Value.ToString("HH:mm")
+                                }
+                            </td>
+                            <td>@DurationText(row.DurationMinutes)</td>
+                            <td>@StatusLabel(row)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="small text-muted mt-2">Menampilkan @reportRows.Count.ToString("N0") sesi.</div>
+    }
+}
+
+@* ============================ TAB 3: KOREKSI ABSENSI ============================ *@
+@if (activeTab == "koreksi")
+{
+    <div class="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label mb-1">Dari tanggal</label>
+                <input type="date" class="form-control" @bind="anomaliFrom" />
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1">Sampai tanggal</label>
+                <input type="date" class="form-control" @bind="anomaliTo" />
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary" @onclick="LoadAnomali" disabled="@isLoadingAnomali">
+                    @(isLoadingAnomali ? "Memuat..." : "Tampilkan")
+                </button>
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="OpenManual">+ Tambah Absensi Manual</button>
+    </div>
+
+    <div class="alert alert-warning">
+        <strong>@anomaliRows.Count sesi perlu dikoreksi.</strong>
+        Jam pulang kosong karena kartu tidak dikembalikan atau sesi ditutup otomatis saat kartu di-tap lagi.
+        Setiap perubahan wajib diberi catatan.
+    </div>
+
+    @if (isLoadingAnomali)
+    {
+        <p>Memuat data...</p>
+    }
+    else if (anomaliRows.Count == 0)
+    {
+        <p>Tidak ada sesi yang perlu dikoreksi pada rentang ini.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-bordered text-nowrap mb-0" style="border: 1px solid #dee2e6;">
+                <thead>
+                    <tr>
+                        <th>Tanggal</th>
+                        <th>Nama</th>
+                        <th>Kode</th>
+                        <th>Divisi</th>
+                        <th>Masuk</th>
+                        <th>Penyebab</th>
+                        <th>Catatan</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in anomaliRows)
+                    {
+                        <tr>
+                            <td>@row.WorkDate.ToString("d MMM yyyy")</td>
+                            <td>@row.EmployeeName</td>
+                            <td>@(row.EmployeeCode ?? "—")</td>
+                            <td>@row.DivisionName</td>
+                            <td>@row.CheckInAt.ToString("HH:mm")</td>
+                            <td>@FlagLabel(row.SessionFlag)</td>
+                            <td>@(string.IsNullOrWhiteSpace(row.Remarks) ? "—" : row.Remarks)</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary me-1" @onclick="() => OpenCorrect(row)">Koreksi</button>
+                                <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenAck(row)">Sudah benar</button>
+                                <button class="btn btn-sm btn-danger" @onclick="() => OpenDeleteSession(row)">Hapus</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="small text-muted mt-2">Menampilkan @anomaliRows.Count sesi yang perlu dikoreksi &mdash; setiap perubahan wajib diberi catatan.</div>
+    }
+}
+
+    </div>
+</div>
+
+@* ============================ MODAL: tambah/ubah kartu ============================ *@
+@if (showCardForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(cardForm.Id == 0 ? "Tambah Kartu" : "Ubah Kartu")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseCardForm"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Karyawan</label>
+                        <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" Value="cardForm.EmployeeId"
+                                          ValueChanged="v => cardForm.EmployeeId = v"
+                                          IdSelector="e => e.Id" TextSelector="EmployeeLabel"
+                                          Placeholder="Cari karyawan..." />
+                    </div>
+
+                    @* MODE TAP: input ini di-fokus otomatis supaya kartu bisa langsung di-tap
+                       dengan reader yang dicolok ke PC admin (reader = keyboard, mengetik 10
+                       digit + Enter). *@
+                    <div class="mb-3">
+                        <label class="form-label">UID Kartu</label>
+                        <input @ref="cardUidInput" class="form-control" inputmode="numeric"
+                               style="font-family: ui-monospace, Consolas, monospace; letter-spacing: 0.08em;"
+                               @bind="cardForm.CardUid" @bind:event="oninput"
+                               @onkeydown="OnCardUidKeyDown" />
+                        <div class="form-text">Tempelkan kartu ke reader &mdash; UID 10 digit terisi sendiri. Nol di depan ditambahkan otomatis.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Jenis Kartu</label>
+                        <select class="form-select" @bind="cardForm.CardType">
+                            <option value="TETAP">Kartu tetap</option>
+                            <option value="SEMENTARA">Kartu sementara</option>
+                        </select>
+                        <div class="form-text">Satu karyawan boleh punya beberapa kartu aktif sekaligus.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Catatan</label>
+                        <input class="form-control" @bind="cardForm.Remarks" placeholder="mis. pengganti kartu hilang" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(cardFormError))
+                    {
+                        <div class="alert alert-danger">@cardFormError</div>
+                    }
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-secondary flex-grow-1" @onclick="CloseCardForm">Batal</button>
+                        <button class="btn btn-primary flex-grow-1" @onclick="SaveCard" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : "Simpan")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ============================ MODAL: aksi yang butuh catatan ============================ *@
+@* Satu modal untuk semua aksi bercatatan (nonaktifkan kartu, hapus kartu, koreksi jam, tandai
+   sudah benar, hapus sesi, absensi manual) -- bentuknya sama: beberapa field + catatan +
+   konfirmasi, jadi enam modal terpisah hanya akan jadi enam tempat untuk tidak sinkron. *@
+@if (remarkAction is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@remarkAction.Title</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseRemarkAction"></button>
+                </div>
+                <div class="modal-body">
+                    <p>@remarkAction.Message</p>
+
+                    @if (remarkAction.Kind == RemarkActionKind.Manual)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Karyawan</label>
+                            <SearchableSelect TItem="EmployeeDto" Items="employeeOptions" Value="manualEmployeeId"
+                                              ValueChanged="v => manualEmployeeId = v"
+                                              IdSelector="e => e.Id" TextSelector="EmployeeLabel"
+                                              Placeholder="Cari karyawan..." />
+                        </div>
+                    }
+
+                    @if (remarkAction.Kind is RemarkActionKind.Correct or RemarkActionKind.Manual)
+                    {
+                        <div class="row g-2 mb-3">
+                            <div class="col">
+                                <label class="form-label">Jam masuk</label>
+                                <input type="datetime-local" class="form-control" @bind="editCheckInAt" />
+                            </div>
+                            <div class="col">
+                                <label class="form-label">Jam pulang</label>
+                                <input type="datetime-local" class="form-control" @bind="editCheckOutAt" />
+                                @if (remarkAction.Kind == RemarkActionKind.Manual)
+                                {
+                                    <div class="form-text">Boleh dikosongkan &mdash; sesinya masuk daftar koreksi.</div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">Catatan @(remarkAction.RemarksRequired ? "(wajib)" : "")</label>
+                        <input class="form-control" @bind="remarkText" placeholder="@remarkAction.RemarksPlaceholder" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(remarkError))
+                    {
+                        <div class="alert alert-danger">@remarkError</div>
+                    }
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-secondary flex-grow-1" @onclick="CloseRemarkAction">Batal</button>
+                        <button class="btn @remarkAction.ConfirmClass flex-grow-1" @onclick="SubmitRemarkAction" disabled="@isSaving">
+                            @(isSaving ? "Menyimpan..." : remarkAction.ConfirmLabel)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    private bool? hasAccess;
+    private string activeTab = "kartu";
+    private bool isSaving;
+
+    // ---- lookup ----
+    private List<DivisionDto> divisionOptions = new();
+    private List<ResourceDto> resourceOptions = new();
+    private List<EmployeeDto> employeeOptions = new();
+
+    // ---- tab 1 ----
+    private List<EmployeeCardDto> cards = new();
+    private bool isLoadingCards;
+    private string cardSearch = string.Empty;
+    private bool cardOnlyActive = true;
+    private System.Threading.Timer? cardSearchTimer;
+
+    private CardFormModel cardForm = new();
+    private bool showCardForm;
+    private string cardFormError = string.Empty;
+    private ElementReference cardUidInput;
+    private bool focusCardUidOnRender;
+
+    // ---- tab 2 ----
+    private DateTime reportFrom = StartOfWeek(DateTime.Today);
+    private DateTime reportTo = StartOfWeek(DateTime.Today).AddDays(6);
+    private int reportDivisionId;
+    private int reportResourceId;
+    private int reportEmployeeId;
+    private List<AttendanceSessionDto> reportRows = new();
+    private bool isLoadingReport;
+
+    // ---- tab 3 ----
+    private DateTime anomaliFrom = DateTime.Today.AddDays(-30);
+    private DateTime anomaliTo = DateTime.Today;
+    private List<AttendanceSessionDto> anomaliRows = new();
+    private bool isLoadingAnomali;
+
+    // ---- modal beraksi-catatan ----
+    private RemarkAction? remarkAction;
+    private string remarkText = string.Empty;
+    private string remarkError = string.Empty;
+    private DateTime? editCheckInAt;
+    private DateTime? editCheckOutAt;
+    private int manualEmployeeId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = state.User.HasClaim("module", "HR_ATTENDANCE");
+        if (hasAccess != true) return;
+
+        divisionOptions = await DivisionApi.GetActiveAsync();
+        employeeOptions = await EmployeeApi.GetActiveAsync();
+
+        // Semua resource sekali, lalu difilter per divisi di sisi klien -- jumlahnya puluhan,
+        // tidak perlu bolak-balik ke server setiap divisi diganti.
+        var resourcePage = await ResourceApi.GetPagedAsync(new ResourcePagedRequest
+        {
+            PageNumber = 1,
+            PageSize = 1000,
+            SortColumn = "ResourceName",
+            SortDirection = "asc"
+        });
+        resourceOptions = resourcePage.Items;
+
+        await LoadCards();
+        // Badge jumlah anomali di judul tab harus terisi sejak awal, tanpa harus membuka tabnya.
+        await LoadAnomali();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusCardUidOnRender)
+        {
+            focusCardUidOnRender = false;
+            try { await cardUidInput.FocusAsync(); } catch (Exception) { /* elemen belum siap */ }
+        }
+    }
+
+    private async Task SetTab(string tab)
+    {
+        activeTab = tab;
+        if (tab == "rekap" && reportRows.Count == 0) await LoadReport();
+        if (tab == "koreksi") await LoadAnomali();
+    }
+
+    // ======================= Tab 1: kartu =======================
+
+    private async Task LoadCards()
+    {
+        isLoadingCards = true;
+        cards = await AttendanceApi.GetCardsAsync(new EmployeeCardListRequest
+        {
+            Search = string.IsNullOrWhiteSpace(cardSearch) ? null : cardSearch,
+            OnlyActive = cardOnlyActive
+        });
+        isLoadingCards = false;
+    }
+
+    private async Task OnCardOnlyActiveChanged(ChangeEventArgs e)
+    {
+        cardOnlyActive = e.Value is bool b && b;
+        await LoadCards();
+    }
+
+    private void HandleCardSearchKeyUp(KeyboardEventArgs e)
+    {
+        cardSearchTimer?.Dispose();
+        cardSearchTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadCards();
+                StateHasChanged();
+            });
+        }, null, 400, Timeout.Infinite);
+    }
+
+    private void OpenCreateCard()
+    {
+        cardForm = new CardFormModel();
+        cardFormError = string.Empty;
+        showCardForm = true;
+        focusCardUidOnRender = true;
+    }
+
+    private void OpenEditCard(EmployeeCardDto card)
+    {
+        cardForm = new CardFormModel
+        {
+            Id = card.Id,
+            EmployeeId = card.EmployeeId,
+            CardUid = card.CardUid,
+            CardType = card.CardType,
+            Remarks = card.Remarks ?? string.Empty
+        };
+        cardFormError = string.Empty;
+        showCardForm = true;
+        focusCardUidOnRender = true;
+    }
+
+    private void CloseCardForm() => showCardForm = false;
+
+    // Reader "mengetik" UID lalu menekan Enter -- Enter langsung menyimpan, supaya pendaftaran
+    // massal cukup: pilih karyawan, tap, pilih karyawan, tap.
+    private async Task OnCardUidKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or "NumpadEnter") await SaveCard();
+    }
+
+    private async Task SaveCard()
+    {
+        if (isSaving) return;
+        cardFormError = string.Empty;
+
+        if (cardForm.EmployeeId <= 0) { cardFormError = "Karyawan wajib dipilih."; return; }
+
+        var digits = new string((cardForm.CardUid ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (digits.Length == 0 || digits.Length > 10)
+        {
+            cardFormError = "UID kartu harus 10 digit angka dari reader.";
+            return;
+        }
+        // Nol di depan dipulihkan di sini juga (SP melakukan hal yang sama) supaya yang tampil
+        // di form sudah bentuk final yang tersimpan.
+        var uid = digits.PadLeft(10, '0');
+
+        isSaving = true;
+        var result = cardForm.Id == 0
+            ? await AttendanceApi.CreateCardAsync(new EmployeeCardCreateRequest
+            {
+                EmployeeId = cardForm.EmployeeId,
+                CardUid = uid,
+                CardType = cardForm.CardType,
+                Remarks = NullIfBlank(cardForm.Remarks)
+            })
+            : await AttendanceApi.UpdateCardAsync(new EmployeeCardUpdateRequest
+            {
+                Id = cardForm.Id,
+                EmployeeId = cardForm.EmployeeId,
+                CardUid = uid,
+                CardType = cardForm.CardType,
+                Remarks = NullIfBlank(cardForm.Remarks)
+            });
+        isSaving = false;
+
+        if (!result.Success) { cardFormError = result.Error; return; }
+
+        if (cardForm.Id == 0)
+        {
+            // Pendaftaran massal: form tetap terbuka, karyawan dikosongkan, fokus balik ke UID.
+            cardForm = new CardFormModel { CardType = cardForm.CardType };
+            focusCardUidOnRender = true;
+        }
+        else
+        {
+            showCardForm = false;
+        }
+
+        await LoadCards();
+    }
+
+    // ======================= Tab 2: rekap =======================
+
+    private List<ResourceDto> ReportResourceOptions =>
+        reportDivisionId <= 0
+            ? resourceOptions
+            : resourceOptions.Where(r => r.DivisionId == reportDivisionId).ToList();
+
+    private void OnReportDivisionChanged(int divisionId)
+    {
+        reportDivisionId = divisionId;
+        // Resource yang jadi tidak valid harus direset, kalau tidak filternya menyaring ke
+        // kombinasi divisi+resource yang tidak mungkin dan tabelnya kosong tanpa sebab jelas.
+        if (reportResourceId > 0 && !ReportResourceOptions.Any(r => r.Id == reportResourceId))
+            reportResourceId = 0;
+    }
+
+    private async Task LoadReport()
+    {
+        isLoadingReport = true;
+        reportRows = await AttendanceApi.GetReportAsync(new AttendanceReportRequest
+        {
+            DateFrom = reportFrom,
+            DateTo = reportTo,
+            DivisionId = reportDivisionId > 0 ? reportDivisionId : null,
+            ResourceId = reportResourceId > 0 ? reportResourceId : null,
+            EmployeeId = reportEmployeeId > 0 ? reportEmployeeId : null,
+        });
+        isLoadingReport = false;
+    }
+
+    private string TotalHoursText
+    {
+        get
+        {
+            var minutes = reportRows.Where(r => r.DurationMinutes.HasValue).Sum(r => r.DurationMinutes!.Value);
+            return $"{minutes / 60.0:N0}j";
+        }
+    }
+
+    // Export = CSV dipisah ";" (cocok default locale id-ID), lewat JS interop
+    // downloadFileFromBytes yang sudah dipakai ReportProduksi.razor.
+    private async Task ExportReport()
+    {
+        var sb = new StringBuilder();
+        AppendCsvLine(sb, "Tanggal", "Nama", "Kode", "Divisi", "Resource", "Masuk", "Pulang",
+            "Durasi (menit)", "Status", "Flag", "Sumber", "Catatan");
+
+        foreach (var row in reportRows)
+        {
+            AppendCsvLine(sb,
+                row.WorkDate.ToString("yyyy-MM-dd"),
+                row.EmployeeName,
+                row.EmployeeCode ?? string.Empty,
+                row.DivisionName,
+                row.ResourceName ?? string.Empty,
+                row.CheckInAt.ToString("HH:mm"),
+                row.CheckOutAt?.ToString("HH:mm") ?? string.Empty,
+                row.DurationMinutes?.ToString() ?? string.Empty,
+                row.SessionStatus,
+                row.SessionFlag ?? string.Empty,
+                row.EntrySource,
+                row.Remarks ?? string.Empty);
+        }
+
+        var fileName = $"absensi-{reportFrom:yyyyMMdd}-{reportTo:yyyyMMdd}.csv";
+        var bytes = new UTF8Encoding(true).GetBytes(sb.ToString());
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/csv;charset=utf-8;", Convert.ToBase64String(bytes));
+    }
+
+    private static void AppendCsvLine(StringBuilder sb, params string[] values)
+    {
+        sb.AppendLine(string.Join(';', values.Select(v =>
+            v.Contains(';') || v.Contains('"') || v.Contains('\n')
+                ? '"' + v.Replace("\"", "\"\"") + '"'
+                : v)));
+    }
+
+    // ======================= Tab 3: koreksi =======================
+
+    private async Task LoadAnomali()
+    {
+        isLoadingAnomali = true;
+        anomaliRows = await AttendanceApi.GetAnomaliAsync(new AttendanceAnomaliRequest
+        {
+            DateFrom = anomaliFrom,
+            DateTo = anomaliTo
+        });
+        isLoadingAnomali = false;
+    }
+
+    private enum RemarkActionKind { DeactivateCard, DeleteCard, Correct, Ack, DeleteSession, Manual }
+
+    private class RemarkAction
+    {
+        public RemarkActionKind Kind { get; init; }
+        public int TargetId { get; init; }
+        public string Title { get; init; } = string.Empty;
+        public string Message { get; init; } = string.Empty;
+        public string ConfirmLabel { get; init; } = "Simpan";
+        public string ConfirmClass { get; init; } = "btn-primary";
+        public bool RemarksRequired { get; init; } = true;
+        public string RemarksPlaceholder { get; init; } = string.Empty;
+    }
+
+    private void OpenRemarkAction(RemarkAction action)
+    {
+        remarkAction = action;
+        remarkText = string.Empty;
+        remarkError = string.Empty;
+    }
+
+    private void CloseRemarkAction()
+    {
+        remarkAction = null;
+        remarkText = string.Empty;
+        remarkError = string.Empty;
+        editCheckInAt = null;
+        editCheckOutAt = null;
+        manualEmployeeId = 0;
+    }
+
+    private void OpenDeactivate(EmployeeCardDto card) => OpenRemarkAction(new RemarkAction
+    {
+        Kind = RemarkActionKind.DeactivateCard,
+        TargetId = card.Id,
+        Title = "Nonaktifkan Kartu",
+        Message = $"Kartu {card.CardUid} milik {card.EmployeeName} akan dinonaktifkan. Barisnya tetap tersimpan sebagai riwayat, dan UID-nya bebas didaftarkan ke kartu baru.",
+        ConfirmLabel = "Nonaktifkan",
+        ConfirmClass = "btn-warning",
+        RemarksRequired = false,
+        RemarksPlaceholder = "mis. hilang 6 Okt"
+    });
+
+    private void OpenDeleteCard(EmployeeCardDto card) => OpenRemarkAction(new RemarkAction
+    {
+        Kind = RemarkActionKind.DeleteCard,
+        TargetId = card.Id,
+        Title = "Hapus Kartu",
+        Message = $"Hapus kartu {card.CardUid} ({card.EmployeeName})? Hapus hanya untuk SALAH INPUT. Untuk kartu hilang atau diganti, pakai Nonaktifkan supaya riwayatnya tetap utuh.",
+        ConfirmLabel = "Hapus",
+        ConfirmClass = "btn-danger",
+        RemarksRequired = false
+    });
+
+    private void OpenCorrect(AttendanceSessionDto row)
+    {
+        editCheckInAt = row.CheckInAt;
+        // Jam pulang tidak ditebak: admin yang mengisi dari informasi line/supervisor.
+        editCheckOutAt = null;
+        OpenRemarkAction(new RemarkAction
+        {
+            Kind = RemarkActionKind.Correct,
+            TargetId = row.Id,
+            Title = "Koreksi Jam Absensi",
+            Message = $"{row.EmployeeName} — {row.WorkDate:d MMM yyyy}. Isi jam pulang yang benar; sesi ini akan jadi CLOSED dengan tanda DIKOREKSI.",
+            ConfirmLabel = "Simpan koreksi",
+            RemarksPlaceholder = "mis. info dari PIC line, pulang 16:00"
+        });
+    }
+
+    private void OpenAck(AttendanceSessionDto row) => OpenRemarkAction(new RemarkAction
+    {
+        Kind = RemarkActionKind.Ack,
+        TargetId = row.Id,
+        Title = "Tandai Sudah Benar",
+        Message = $"{row.EmployeeName} — {row.WorkDate:d MMM yyyy}. Jam pulangnya memang tidak diketahui dan tidak akan diisi. Sesi tetap bertanda anomali, tapi keluar dari daftar koreksi.",
+        ConfirmLabel = "Tandai sudah benar",
+        ConfirmClass = "btn-secondary",
+        RemarksPlaceholder = "mis. kartu dibawa pulang, jam tidak diketahui"
+    });
+
+    private void OpenDeleteSession(AttendanceSessionDto row) => OpenRemarkAction(new RemarkAction
+    {
+        Kind = RemarkActionKind.DeleteSession,
+        TargetId = row.Id,
+        Title = "Hapus Sesi Absensi",
+        Message = $"Hapus sesi {row.EmployeeName} — {row.WorkDate:d MMM yyyy}?",
+        ConfirmLabel = "Hapus",
+        ConfirmClass = "btn-danger",
+        RemarksPlaceholder = "mis. salah tap orang lain"
+    });
+
+    private void OpenManual()
+    {
+        manualEmployeeId = 0;
+        editCheckInAt = DateTime.Today.AddHours(7);
+        editCheckOutAt = DateTime.Today.AddHours(16);
+        OpenRemarkAction(new RemarkAction
+        {
+            Kind = RemarkActionKind.Manual,
+            Title = "Tambah Absensi Manual",
+            Message = "Untuk karyawan yang kartunya hilang atau lupa tap sama sekali. Sumber sesinya dicatat MANUAL.",
+            ConfirmLabel = "Simpan",
+            RemarksPlaceholder = "mis. kartu hilang, hadir dikonfirmasi PIC line"
+        });
+    }
+
+    private async Task SubmitRemarkAction()
+    {
+        if (remarkAction is null || isSaving) return;
+        remarkError = string.Empty;
+
+        if (remarkAction.RemarksRequired && string.IsNullOrWhiteSpace(remarkText))
+        {
+            remarkError = "Catatan wajib diisi.";
+            return;
+        }
+
+        isSaving = true;
+        (bool Success, string Error) result;
+
+        switch (remarkAction.Kind)
+        {
+            case RemarkActionKind.DeactivateCard:
+                result = await AttendanceApi.DeactivateCardAsync(new EmployeeCardDeactivateRequest
+                {
+                    Id = remarkAction.TargetId,
+                    Remarks = NullIfBlank(remarkText)
+                });
+                break;
+
+            case RemarkActionKind.DeleteCard:
+                result = await AttendanceApi.DeleteCardAsync(remarkAction.TargetId);
+                break;
+
+            case RemarkActionKind.Correct:
+                if (editCheckInAt is null || editCheckOutAt is null)
+                {
+                    isSaving = false;
+                    remarkError = "Jam masuk dan jam pulang wajib diisi.";
+                    return;
+                }
+                result = await AttendanceApi.CorrectAsync(new AttendanceCorrectRequest
+                {
+                    Id = remarkAction.TargetId,
+                    CheckInAt = editCheckInAt.Value,
+                    CheckOutAt = editCheckOutAt.Value,
+                    Remarks = remarkText
+                });
+                break;
+
+            case RemarkActionKind.Ack:
+                result = await AttendanceApi.AckAsync(new AttendanceAckRequest
+                {
+                    Id = remarkAction.TargetId,
+                    Remarks = remarkText
+                });
+                break;
+
+            case RemarkActionKind.DeleteSession:
+                result = await AttendanceApi.DeleteSessionAsync(new AttendanceDeleteRequest
+                {
+                    Id = remarkAction.TargetId,
+                    Remarks = remarkText
+                });
+                break;
+
+            case RemarkActionKind.Manual:
+                if (manualEmployeeId <= 0)
+                {
+                    isSaving = false;
+                    remarkError = "Karyawan wajib dipilih.";
+                    return;
+                }
+                if (editCheckInAt is null)
+                {
+                    isSaving = false;
+                    remarkError = "Jam masuk wajib diisi.";
+                    return;
+                }
+                result = await AttendanceApi.CreateManualAsync(new AttendanceManualRequest
+                {
+                    EmployeeId = manualEmployeeId,
+                    CheckInAt = editCheckInAt.Value,
+                    CheckOutAt = editCheckOutAt,
+                    Remarks = remarkText
+                });
+                break;
+
+            default:
+                isSaving = false;
+                return;
+        }
+
+        isSaving = false;
+
+        if (!result.Success) { remarkError = result.Error; return; }
+
+        var kind = remarkAction.Kind;
+        CloseRemarkAction();
+
+        if (kind is RemarkActionKind.DeactivateCard or RemarkActionKind.DeleteCard)
+        {
+            await LoadCards();
+        }
+        else
+        {
+            await LoadAnomali();
+            if (reportRows.Count > 0) await LoadReport();
+        }
+    }
+
+    // ======================= Label & util =======================
+
+    private static string EmployeeLabel(EmployeeDto e) =>
+        string.IsNullOrWhiteSpace(e.EmployeeCode) ? e.EmployeeName : $"{e.EmployeeName} ({e.EmployeeCode})";
+
+    private static string DurationText(int? minutes)
+    {
+        if (minutes is null) return "—";
+        var total = Math.Max(0, minutes.Value);
+        return $"{total / 60}j {total % 60:00}m";
+    }
+
+    private static string StatusLabel(AttendanceSessionDto row) => row.SessionStatus switch
+    {
+        AttendanceSessionStatuses.Open => "Sedang di dalam",
+        AttendanceSessionStatuses.Anomali => "Perlu koreksi",
+        _ => row.SessionFlag switch
+        {
+            AttendanceSessionFlags.LemburDikonfirmasi => "Lembur",
+            AttendanceSessionFlags.Dikoreksi => "Dikoreksi",
+            _ => row.EntrySource == "MANUAL" ? "Manual" : "Normal",
+        }
+    };
+
+    private static string FlagLabel(string? flag) => flag switch
+    {
+        AttendanceSessionFlags.LupaKembali => "Lupa kembalikan",
+        AttendanceSessionFlags.BelumCheckout => "Tersapu tap baru",
+        AttendanceSessionFlags.Diverifikasi => "Sudah diperiksa",
+        _ => "Jam pulang kosong",
+    };
+
+    // Minggu berjalan = Senin s/d Minggu.
+    private static DateTime StartOfWeek(DateTime date)
+    {
+        var diff = ((int)date.DayOfWeek + 6) % 7;   // Senin = 0
+        return date.Date.AddDays(-diff);
+    }
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private class CardFormModel
+    {
+        public int Id { get; set; }
+        public int EmployeeId { get; set; }
+        public string CardUid { get; set; } = string.Empty;
+        public string CardType { get; set; } = "TETAP";
+        public string Remarks { get; set; } = string.Empty;
+    }
+}

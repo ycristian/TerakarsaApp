@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="TerakarsaApp.GateApp.app" />
+
+  <!-- Prompt 70: tablet 10 inci berjalan pada skala tampilan Windows 150%. PerMonitorV2 supaya
+       WebView2 ikut diskalakan oleh Windows (1920x1280 fisik -> 1280x853 CSS px, ukuran yang
+       dipakai semua layar gate). Tanpa ini, UI akan tampil kecil dan tombol sulit disentuh. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
+    </windowsSettings>
+  </application>
+</assembly>

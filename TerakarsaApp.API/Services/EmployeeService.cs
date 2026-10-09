@@ -102,13 +102,15 @@ public class EmployeeService
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);
         var resourceIdParam = new SqlParameter("@ResourceId", request.ResourceId ?? (object)DBNull.Value);
         var joinDateParam = new SqlParameter("@JoinDate", request.JoinDate ?? (object)DBNull.Value);
+        // Prompt 58: NULL = tidak mengubah no. telp yang sudah ada (COALESCE di SP).
+        var phoneParam = new SqlParameter("@PhoneNo", (object?)request.PhoneNo ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Employee_Manage @Action = @Action, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @UserId = @UserId",
-                actionParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, userIdParam);
+                "EXEC SIS_Employee_Manage @Action = @Action, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @PhoneNo = @PhoneNo, @UserId = @UserId",
+                actionParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, phoneParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)
@@ -127,13 +129,15 @@ public class EmployeeService
         var positionIdParam = new SqlParameter("@PositionId", request.PositionId);
         var resourceIdParam = new SqlParameter("@ResourceId", request.ResourceId ?? (object)DBNull.Value);
         var joinDateParam = new SqlParameter("@JoinDate", request.JoinDate ?? (object)DBNull.Value);
+        // Prompt 58: NULL = tidak mengubah no. telp yang sudah ada (COALESCE di SP).
+        var phoneParam = new SqlParameter("@PhoneNo", (object?)request.PhoneNo ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Employee_Manage @Action = @Action, @Id = @Id, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @UserId = @UserId",
-                actionParam, idParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, userIdParam);
+                "EXEC SIS_Employee_Manage @Action = @Action, @Id = @Id, @EmployeeCode = @EmployeeCode, @EmployeeName = @EmployeeName, @DivisionId = @DivisionId, @PositionId = @PositionId, @ResourceId = @ResourceId, @JoinDate = @JoinDate, @PhoneNo = @PhoneNo, @UserId = @UserId",
+                actionParam, idParam, codeParam, nameParam, divisionIdParam, positionIdParam, resourceIdParam, joinDateParam, phoneParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

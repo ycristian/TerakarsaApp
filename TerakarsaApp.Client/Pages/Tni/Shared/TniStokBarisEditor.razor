@@ -1,0 +1,112 @@
+@* Baris isi setoran / pengeluaran stok (2026-10-07): jenis · pola · qty · hapus.
+   Dipakai di tab Setoran, tab Keluarkan, dan pop up edit keduanya supaya
+   tampilannya SAMA PERSIS. Daftar Baris diubah langsung (by reference);
+   OnChanged dipanggil setiap ada perubahan supaya induk menghitung ulang total
+   dan membatalkan konfirmasi yang sedang terbuka. Qty selalu positif --
+   tanda (+/-) ditentukan master pengeluaran, bukan per baris. *@
+@using TerakarsaApp.Shared.Tni
+
+@if (Compact)
+{
+    @* Mode tabel kecil (pop up edit, 2026-10-07): bentuknya sama dengan tabel
+       isi di kartu riwayat -- Size | Qty, dikelompokkan Kemeja / Celana.
+       overflow:visible supaya dropdown SearchableSelect tidak terpotong. *@
+    <div class="tni-tblwrap tni-tbl-edit" style="overflow:visible;margin-bottom:8px">
+        <table class="tni-tbl tni-tbl-sm">
+            <thead>
+                <tr>
+                    <th>Size</th>
+                    <th style="width:64px;text-align:center">Qty</th>
+                    <th style="width:34px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Baris.Count == 0)
+                {
+                    <tr><td colspan="3" class="tni-note" style="text-align:left">Belum ada baris.</td></tr>
+                }
+                @foreach (var jenis in new[] { "KEMEJA", "CELANA" }.Where(j => Baris.Any(x => x.JenisItem == j)))
+                {
+                    var isi = Baris.Where(x => x.JenisItem == jenis).ToList();
+                    <tr class="tni-tbl-grp">
+                        <td colspan="3">@(jenis == "KEMEJA" ? "Kemeja" : "Celana") (@isi.Sum(x => x.Qty))</td>
+                    </tr>
+                    @foreach (var b in isi)
+                    {
+                        <tr @key="b">
+                            <td>
+                                <SearchableSelect TItem="TniPolaDto"
+                                                  Items="@(b.JenisItem == "KEMEJA" ? PolaKemeja : PolaCelana)"
+                                                  Value="b.PolaId"
+                                                  ValueChanged="@(v => UbahAsync(() => b.PolaId = v))"
+                                                  IdSelector="@(x => x.PolaId)"
+                                                  TextSelector="@(x => x.Kode)"
+                                                  Placeholder="Cari kode pola..." />
+                            </td>
+                            <td>
+                                <input class="tni-inp tni-qty-sm" type="number" inputmode="numeric" min="1" placeholder="0"
+                                       value="@(b.Qty == 0 ? "" : b.Qty.ToString())"
+                                       @onchange="@(e => UbahAsync(() => b.Qty = ParseInt(e.Value?.ToString())))" />
+                            </td>
+                            <td style="text-align:center">
+                                <button class="tni-btn" style="padding:3px 6px" title="Hapus baris"
+                                        @onclick="@(() => UbahAsync(() => Baris.Remove(b)))">
+                                    <i class="fe fe-trash-2"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+@for (var i = 0; i < Baris.Count; i++)
+{
+    var idx = i;
+    var b = Baris[idx];
+    <div class="tni-card" style="display:flex;align-items:center;gap:6px;padding:6px 8px">
+        <span class="tni-chip @(b.JenisItem == "KEMEJA" ? "tni-chip-navy" : "tni-chip-warn")"
+              style="flex:0 0 auto">
+            @(b.JenisItem == "KEMEJA" ? "Kemeja" : "Celana")
+        </span>
+        <div style="flex:1 1 auto;min-width:0">
+            <SearchableSelect TItem="TniPolaDto"
+                              Items="@(b.JenisItem == "KEMEJA" ? PolaKemeja : PolaCelana)"
+                              Value="b.PolaId"
+                              ValueChanged="@(v => UbahAsync(() => b.PolaId = v))"
+                              IdSelector="@(x => x.PolaId)"
+                              TextSelector="@(x => x.Kode)"
+                              Placeholder="Cari kode pola..." />
+        </div>
+        <input class="tni-inp" style="flex:0 0 76px;width:76px;font-size:17px;font-weight:700;text-align:center;padding:7px 4px"
+               type="number" inputmode="numeric" min="1" placeholder="0"
+               value="@(b.Qty == 0 ? "" : b.Qty.ToString())"
+               @onchange="@(e => UbahAsync(() => b.Qty = ParseInt(e.Value?.ToString())))" />
+        <button class="tni-btn" style="flex:0 0 auto;padding:6px 8px" title="Hapus baris"
+                @onclick="@(() => UbahAsync(() => Baris.RemoveAt(idx)))">
+            <i class="fe fe-trash-2"></i>
+        </button>
+    </div>
+}
+}
+
+@code {
+    // true = tabel kecil (pop up edit); false = kartu besar per baris (tab input)
+    [Parameter] public bool Compact { get; set; }
+    [Parameter, EditorRequired] public List<TniStokSetoranItem> Baris { get; set; } = new();
+    [Parameter, EditorRequired] public List<TniPolaDto> PolaKemeja { get; set; } = new();
+    [Parameter, EditorRequired] public List<TniPolaDto> PolaCelana { get; set; } = new();
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task UbahAsync(Action ubah)
+    {
+        ubah();
+        await OnChanged.InvokeAsync();
+    }
+
+    private static int ParseInt(string? raw) =>
+        int.TryParse(raw, out var v) && v > 0 ? v : 0;
+}

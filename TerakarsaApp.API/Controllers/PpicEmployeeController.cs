@@ -56,6 +56,14 @@ public class PpicEmployeeController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 58 (lanjutan): jabatan dibatasi ke divisi yang dipilih di form.
+    [HttpGet("positions/{divisionId:int}")]
+    public async Task<IActionResult> GetPositionsByDivision(int divisionId)
+    {
+        var result = await _ppicEmployeeService.GetPositionsByDivisionAsync(divisionId);
+        return Ok(result);
+    }
+
     [HttpGet("resources/{divisionId:int}")]
     public async Task<IActionResult> GetResourcesByDivision(int divisionId)
     {

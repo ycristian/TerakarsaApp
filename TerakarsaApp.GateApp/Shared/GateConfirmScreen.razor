@@ -1,0 +1,89 @@
+@* Prompt 70 -- Gate 5 (Konfirmasi Sesi Panjang). result_code = PERLU_KONFIRMASI.
+   TIDAK auto-dismiss: hanya satpam yang tahu mana yang benar. "Nanti saja" ada supaya antrian
+   pagi tidak macet oleh satu orang yang tidak bisa ditanya saat itu. *@
+
+<div style="width: 100%; height: 100%; box-sizing: border-box; background: #6B4405; color: #FFFFFF; display: flex; flex-direction: column">
+
+    <div style="height: 76px; box-sizing: border-box; padding: 0 44px; border-bottom: 1px solid #8A5A0C; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0">
+        <div style="font-size: 20px; font-weight: 600; letter-spacing: 0.14em; color: #E8C98F">@GateName</div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 600; color: #FFFFFF">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 6v6l4 2"></path>
+            </svg>
+            SESI LEBIH DARI 14 JAM
+        </div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 0 70px; box-sizing: border-box; text-align: center">
+
+        <div style="font-size: 62px; font-weight: 700; line-height: 1.1">@Result.EmployeeName</div>
+        <div style="font-size: 25px; color: #EBD2A5; margin-top: 6px">@SubLine</div>
+        @if (!string.IsNullOrWhiteSpace(Result.ResourceName))
+        {
+            <div style="display: inline-block; margin-top: 16px; background: @GateFormat.BadgeColor(Result.ColorHex); color: #FFFFFF; font-size: 23px; font-weight: 600; padding: 9px 28px; border-radius: 999px">@Result.ResourceName</div>
+        }
+
+        <div style="margin-top: 30px; width: 100%; max-width: 900px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; background: #593703; border: 1px solid #8A5A0C; border-radius: 14px; padding: 22px 28px; box-sizing: border-box">
+            <div>
+                <div style="font-size: 19px; color: #E8C98F">Ambil kartu</div>
+                <div style="font-size: 36px; font-weight: 600; line-height: 1.25">@(Result.CheckInAt is null ? "-" : GateFormat.ShortDayTime(Result.CheckInAt.Value))</div>
+            </div>
+            <div>
+                <div style="font-size: 19px; color: #E8C98F">Sekarang</div>
+                <div style="font-size: 36px; font-weight: 600; line-height: 1.25">@GateFormat.ShortDayTime(TappedAt)</div>
+            </div>
+            <div>
+                <div style="font-size: 19px; color: #E8C98F">Durasi</div>
+                <div style="font-size: 36px; font-weight: 600; line-height: 1.25">@GateFormat.Duration(Result.DurationMinutes)</div>
+            </div>
+        </div>
+
+        <div style="font-size: 27px; color: #F3E0BC; margin-top: 28px">Mana yang benar?</div>
+
+        <div style="margin-top: 20px; width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 14px">
+            @* LEMBUR -> sesi ditutup normal dengan jam pulang sekarang (tidak masuk laporan anomali). *@
+            <button type="button" disabled="@IsBusy" @onclick="OnLembur"
+                    style="font-size: 29px; font-weight: 600; color: #FFFFFF; background: #0E6B38; border: 1px solid #1A8549; border-radius: 12px; padding: 24px; cursor: pointer">LEMBUR &mdash; baru selesai kerja</button>
+            @* LUPA KEMBALIKAN -> sesi jadi ANOMALI tanpa jam pulang, masuk tab Koreksi. *@
+            <button type="button" disabled="@IsBusy" @onclick="OnLupaKembali"
+                    style="font-size: 29px; font-weight: 600; color: #FFFFFF; background: #8E1D1D; border: 1px solid #B23A3A; border-radius: 12px; padding: 24px; cursor: pointer">KARTU LUPA DIKEMBALIKAN</button>
+            @* Nanti saja -> sesi dibiarkan apa adanya, tidak ada yang dikirim ke server. *@
+            <button type="button" disabled="@IsBusy" @onclick="OnLater"
+                    style="font-size: 23px; font-weight: 500; color: #EBD2A5; background: transparent; border: 1px solid #8A5A0C; border-radius: 12px; padding: 16px; cursor: pointer">Nanti saja &mdash; biarkan apa adanya</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div style="margin-top: 20px; font-size: 22px; color: #FFD9D9; background: #7A1616; border: 1px solid #BF4C4C; border-radius: 12px; padding: 14px 22px; max-width: 900px">@ErrorMessage</div>
+        }
+
+    </div>
+
+    <div style="padding: 0 44px 26px; text-align: center; flex-shrink: 0">
+        <div style="font-size: 19px; color: #D9B97F">Layar ini tidak tertutup sendiri</div>
+    </div>
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string GateName { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public GateTapResultDto Result { get; set; } = new();
+    [Parameter] public DateTime TappedAt { get; set; } = DateTime.Now;
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnLembur { get; set; }
+    [Parameter] public EventCallback OnLupaKembali { get; set; }
+    [Parameter] public EventCallback OnLater { get; set; }
+
+    private string SubLine
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(Result.PositionName)) parts.Add(Result.PositionName!);
+            if (!string.IsNullOrWhiteSpace(Result.EmployeeCode)) parts.Add(Result.EmployeeCode!);
+            return string.Join(" · ", parts);
+        }
+    }
+}

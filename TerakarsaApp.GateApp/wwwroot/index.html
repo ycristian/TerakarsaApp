@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gate TMOS</title>
+    <base href="/" />
+    <style>
+        /* Prompt 70: proyek baru, TIDAK ada CSS warisan. Semua gaya layar gate ditulis sebagai
+           inline style di .razor mengikuti claude prompt/mockup_70_absensi_rfid.html, jadi file
+           ini hanya memuat reset dan font. */
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        body {
+            font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+            background: #12161F;
+            color: #FFFFFF;
+            /* Layar sentuh: jangan pernah menyeleksi teks saat disentuh, dan jangan ada
+               highlight biru saat tombol ditekan. */
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* Input nama/telepon di layar "Ubah data karyawan" memang harus bisa diseleksi. */
+        input, textarea { -webkit-user-select: text; user-select: text; }
+        #app { height: 100%; }
+        button { font-family: inherit; }
+        /* Scrollbar tebal supaya bisa digulir dengan jari di daftar panjang. */
+        ::-webkit-scrollbar { width: 14px; }
+        ::-webkit-scrollbar-thumb { background: #39425A; border-radius: 7px; }
+    </style>
+</head>
+<body>
+    <div id="app">Memuat...</div>
+
+    <!-- JANGAN beri autostart="false": tanpa pemanggilan Blazor.start() manual, Blazor tidak
+         pernah boot dan layar berhenti di "Memuat..." selamanya. -->
+    <script src="_framework/blazor.webview.js"></script>
+</body>
+</html>

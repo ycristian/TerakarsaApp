@@ -14,11 +14,13 @@ public class PublicController : ControllerBase
 {
     private readonly BundleService _bundleService;
     private readonly PackService _packService;
+    private readonly TniScanService _scanService;
 
-    public PublicController(BundleService bundleService, PackService packService)
+    public PublicController(BundleService bundleService, PackService packService, TniScanService scanService)
     {
         _bundleService = bundleService;
         _packService = packService;
+        _scanService = scanService;
     }
 
     // Fix: /b/{Serial} publik menerima format "{huruf}{nomor}" (mis. "D347") juga, bukan cuma
@@ -51,5 +53,18 @@ public class PublicController : ControllerBase
         var scanInfo = await _packService.GetScanInfoAsync(serial);
         if (scanInfo is null) return NotFound("Karung tidak ditemukan.");
         return Ok(scanInfo);
+    }
+
+    // Prompt 66: link QR kartu personel PDH TNI AD = {Tni:QrBaseUrl}/t/{qr_token}.
+    // HANYA data terbatas -- sejak 2026-10-06 owner mengizinkan NRP, size, TB/BB,
+    // kategori, rawatan; No HP & ukuran badan TETAP tidak, karena halaman ini bisa
+    // dibuka siapa pun dari internet. Token dipakai (bukan
+    // kode_ref) justru karena kode_ref berurutan sehingga mudah ditebak.
+    [HttpGet("tni/{token}")]
+    public async Task<IActionResult> GetTniPersonel(string token)
+    {
+        var personel = await _scanService.GetPublicByTokenAsync(token);
+        if (personel is null) return NotFound("Kartu tidak ditemukan.");
+        return Ok(personel);
     }
 }

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prompt 59 — Mockup Rekap Produksi Station</title>
+<!-- Mockup referensi Prompt 59. Data contoh. Bukan kode produksi: implementasi pakai Bootstrap + Blazor seperti StationDevice.razor. -->
+<style>
+body{margin:0;background:#EEF1F5;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1B2533}
+a{color:#1F5FBF}
+.wrap{max-width:1200px;margin:0 auto;padding:24px 16px 40px;display:flex;flex-direction:column;gap:16px}
+.card{background:#fff;border:1px solid #E3E8EF;border-radius:10px;overflow:hidden}
+nav{display:flex;gap:4px;padding:0 12px;border-bottom:1px solid #E3E8EF;overflow-x:auto}
+nav span{padding:14px 12px;font-size:14px;color:#5B6778;white-space:nowrap}
+nav span.on{color:#1F5FBF;font-weight:600;border-bottom:3px solid #1F5FBF}
+.body{padding:16px;display:flex;flex-direction:column;gap:14px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{height:44px;display:inline-flex;align-items:center;gap:6px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn-o{border:1px solid #1F5FBF;color:#1F5FBF;background:#fff}
+.btn-g{border:0;background:#1E7B4A;color:#fff}
+.btn-p{border:0;background:#1F5FBF;color:#fff}
+.btn-s{border:1px solid #CBD3DF;background:#fff;color:#3B4656}
+.per{display:flex;align-items:center;border:1px solid #CBD3DF;border-radius:8px;overflow:hidden}
+.per button{height:44px;border:0;background:#fff;cursor:pointer;font-family:inherit}
+.per .arw{width:44px;font-size:18px;color:#3B4656}
+.per .lbl{border-left:1px solid #E3E8EF;border-right:1px solid #E3E8EF;padding:0 14px;text-align:left}
+.per b{display:block;font-size:14px}.per small{display:block;font-size:11px;color:#5B6778}
+.seg{display:flex;background:#EEF1F5;border-radius:8px;padding:3px}
+.seg button{height:38px;padding:0 20px;border:0;border-radius:6px;background:transparent;color:#4A5568;font-size:14px;cursor:pointer;font-family:inherit}
+.seg button.on{background:#fff;color:#1F5FBF;font-weight:700;box-shadow:0 1px 2px rgba(20,30,50,.15)}
+.chk{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 12px;border:1px solid #CBD3DF;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;background:#fff}
+.chk input{width:18px;height:18px;accent-color:#1E7B4A}
+.info{font-size:13px;color:#3B4656;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{background:#FDECEC;color:#A61B1B;border-radius:999px;padding:4px 10px;font-weight:600;font-size:12px}
+.scroll{overflow-x:auto;border:1px solid #E3E8EF;border-radius:8px}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid #E3E8EF;padding:10px 12px;text-align:right;white-space:nowrap;background:#fff}
+th{background:#F6F8FB;color:#4A5568;font-size:12px;font-weight:600;vertical-align:bottom}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;border-right:1px solid #E3E8EF;min-width:180px;z-index:1}
+.dn{display:block;font-size:11px;color:#5B6778;font-weight:500}.dh{display:block;font-size:14px;color:#1B2533;font-weight:700}
+th.x{background:#FFF1D6;color:#7A4B00}td.x{background:#FFFAF0}
+.tq{background:#FFF8E1;font-weight:700;border-left:1px solid #F0DFA8}th.tq{background:#FDF0C4;color:#5C4500}
+.hp{background:#F3FAF6}.nv{background:#E8F5EE;font-weight:700;color:#14532D}th.hp,th.nv{background:#DCEFE4;color:#14532D}
+.z{color:#A0AABA}.sub{display:block;font-size:12px;color:#5B6778;font-weight:400;margin-top:2px}
+tr.tot td{background:#F2F6FC;font-weight:700;border-bottom:2px solid #C9D6EA}
+tr.sep td{background:#F6F8FB;color:#5B6778;font-size:12px;font-weight:600;text-align:left}
+tr.np td:first-child{cursor:pointer;color:#1F5FBF;font-weight:600}
+.ov{position:fixed;inset:0;background:rgba(20,28,40,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+.ov.show{display:flex}
+.mdl{width:100%;max-width:480px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(10,20,40,.25);overflow:hidden}
+.mh{padding:18px 20px;border-bottom:1px solid #E3E8EF;display:flex;justify-content:space-between;align-items:center}
+.mh b{font-size:18px}.mh small{display:block;font-size:12px;color:#5B6778}
+.x-btn{width:44px;height:44px;border:0;background:none;font-size:22px;color:#4A5568;cursor:pointer}
+.mb{padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+.mb label{font-size:13px;font-weight:600;display:flex;flex-direction:column;gap:6px}
+.mb input,.mb textarea{border:1px solid #CBD3DF;border-radius:8px;padding:0 12px;height:44px;font-size:15px;font-family:inherit;box-sizing:border-box;width:100%}
+.mb textarea{height:auto;padding:10px 12px;resize:none}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.okp{font-size:12px;color:#1E5A3A;background:#E8F5EE;border-radius:6px;padding:6px 10px;font-weight:400}
+.nil{display:flex;justify-content:space-between;background:#FFF8E1;border-radius:8px;padding:10px 12px;font-size:14px}
+.mf{padding:14px 20px;border-top:1px solid #E3E8EF;display:flex;justify-content:flex-end;gap:10px;background:#F6F8FB}
+.it{padding:14px 20px;border-bottom:1px solid #E3E8EF;display:flex;gap:12px;align-items:center}
+.it .d{width:56px}.it .d small{display:block;font-size:12px;color:#5B6778}.it .k{flex:1;min-width:0;font-size:14px}.it .k small{display:block;font-size:12px;color:#5B6778}
+.it .v{font-weight:700;width:84px;text-align:right}
+.ib{width:44px;height:44px;border:1px solid #CBD3DF;border-radius:8px;background:#fff;cursor:pointer}
+.ft{padding:14px 20px;font-size:12px;color:#5B6778;background:#F6F8FB}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:12px;color:#5B6778">STATION · SEWING</div><div style="font-size:20px;font-weight:700">Line 3</div></div>
+    <div style="font-size:13px;color:#5B6778">Operator: <b style="color:#1B2533">Line 3</b></div>
+  </div>
+  <div class="card">
+    <nav><span>IN</span><span>WIP</span><span>OUT</span><span>Settlement</span><span class="on">Rekap Produksi</span></nav>
+    <div class="body">
+      <div class="bar">
+        <div class="per"><button class="arw" aria-label="Periode sebelumnya">‹</button><button class="lbl"><b>2026-P40</b><small>Sab 26 Sep 10:00 – Sab 3 Okt 10:00</small></button><button class="arw" aria-label="Periode berikutnya">›</button></div>
+        <div class="seg"><button id="mOut" class="on">Output</button><button id="mTrm">Terima</button></div>
+        <label class="chk" id="priceWrap"><input type="checkbox" id="price">Price</label>
+        <div style="flex:1"></div>
+        <button class="btn btn-o" id="addNp">+ Output Non-PO</button>
+        <button class="btn btn-g">Export Excel</button>
+      </div>
+      <div class="info" id="info"></div>
+      <div class="scroll"><table id="mx"></table></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal input / edit non-PO -->
+<div class="ov" id="ovInput"><div class="mdl">
+  <div class="mh"><div><b>Output Non-PO</b><small>Masuk upah resource ini</small></div><button class="x-btn" data-close aria-label="Tutup">×</button></div>
+  <div class="mb">
+    <label>Tanggal &amp; jam<input type="datetime-local" id="fAt" value="2026-10-01T09:05"><span class="okp" id="fPer">Masuk periode <b>2026-P40</b> (Sab 26 Sep 10:00 – Sab 3 Okt 10:00)</span></label>
+    <div class="g2"><label>Qty (pcs)<input type="number" id="fQty" value="6"></label><label>Harga / pcs (Rp)<input type="number" id="fHrg" value="1500"></label></div>
+    <div class="nil"><span style="color:#5C4500">Nilai upah</span><b id="fNil">Rp 9.000</b></div>
+    <label>Keterangan<textarea rows="3">Sampel kemeja lengan pendek, size M dan L</textarea></label>
+  </div>
+  <div class="mf"><button class="btn btn-s" data-close>Batal</button><button class="btn btn-p" data-close>Simpan</button></div>
+</div></div>
+
+<!-- Modal detail non-PO -->
+<div class="ov" id="ovDetail"><div class="mdl">
+  <div class="mh"><div><b>Di luar PO · 2026-P40</b><small>3 catatan · 58 pcs · Rp 117.000</small></div><button class="x-btn" data-close aria-label="Tutup">×</button></div>
+  <div id="npList"></div>
+  <div class="ft">Edit dan hapus bebas, tanpa lock. Ubah tanggal, periode ikut berubah.</div>
+</div></div>
+
+<script>
+var fmt=function(n){return n.toLocaleString('id-ID')};
+var days=[['Jum','25/9','luar periode',1],['Sab','26/9','mulai 10:00'],['Min','27/9'],['Sen','28/9'],['Sel','29/9'],['Rab','30/9'],['Kam','1/10'],['Jum','2/10'],['Sab','3/10','s/d 10:00']];
+// [artikel, step · PO, harga, qty per kolom tanggal]
+var dataOut=[['Kemeja PDL','Jahit · PO 2409-TNI-01',1500,[40,120,0,310,295,330,288,305,0]],['Celana PDL','Jahit · PO 2409-TNI-01',1200,[0,0,0,180,240,260,250,270,95]],['Kaos Polo Basic','Jahit · PO 2409-UNO-03',900,[0,85,0,0,0,140,160,0,0]]];
+var dataTrm=[['Kemeja PDL','Cutting · PO 2409-TNI-01',800,[0,0,0,350,300,320,310,280,0]],['Celana PDL','Cutting · PO 2409-TNI-01',700,[0,140,0,200,260,240,260,0,0]],['Kaos Polo Basic','Cutting · PO 2409-UNO-03',500,[0,0,0,150,0,180,0,0,0]]];
+var np=[['Sen','28/9','Sampel kemeja PDL revisi kerah','28/9 14:20',12,3000],['Sel','29/9','Jahit 40 kaos order toko, belum ada PO','29/9 16:02',40,1800],['Kam','1/10','Sampel kemeja lengan pendek, size M dan L','1/10 09:05',6,1500]];
+var npCols=[0,0,0,12,40,0,6,0,0];
+var mode='out';
+function cell(v,x){return '<td class="'+(x?'x ':'')+(v?'':'z')+'">'+(v?fmt(v):'–')+'</td>'}
+function render(){
+  var out=mode==='out', price=out&&document.getElementById('price').checked;
+  var cols=days.map(function(d,i){return out||!d[3]?i:-1}).filter(function(i){return i>=0});
+  var rows=out?dataOut:dataTrm;
+  var h='<thead><tr><th>Artikel</th>'+cols.map(function(i){var d=days[i];return '<th class="'+(d[3]?'x':'')+'"><span class="dn">'+d[0]+'</span><span class="dh">'+d[1]+'</span><span class="dn">'+(d[2]||'&nbsp;')+'</span></th>'}).join('')+'<th class="tq">Total Qty</th>'+(price?'<th class="hp">Harga</th><th class="nv">Nilai (Rp)</th>':'')+'</tr></thead><tbody>';
+  var colTot=cols.map(function(){return 0}), totQ=0, totN=0;
+  rows.forEach(function(r){var t=0;h+='<tr><td><b>'+r[0]+'</b><span class="sub">'+r[1]+'</span></td>'+cols.map(function(i,k){var v=r[3][i];t+=v;colTot[k]+=v;return cell(v,days[i][3])}).join('');totQ+=t;totN+=t*r[2];
+    h+='<td class="tq">'+fmt(t)+'</td>'+(price?'<td class="hp">'+fmt(r[2])+'</td><td class="nv">'+fmt(t*r[2])+'</td>':'')+'</tr>'});
+  h+='<tr class="tot"><td>Total PO<span class="sub">dasar upah</span></td>'+colTot.map(function(v,k){return cell(v,days[cols[k]][3])}).join('')+'<td class="tq">'+fmt(totQ)+'</td>'+(price?'<td class="hp"></td><td class="nv">'+fmt(totN)+'</td>':'')+'</tr>';
+  if(out){var nq=np.reduce(function(a,r){return a+r[4]},0),nn=np.reduce(function(a,r){return a+r[4]*r[5]},0);
+    h+='<tr class="sep"><td colspan="'+(cols.length+2+(price?2:0))+'">DI LUAR PO · masuk upah, harga diisi PIC</td></tr>';
+    h+='<tr class="np"><td id="npRow">Di luar PO ›</td>'+cols.map(function(i){return cell(npCols[i],days[i][3])}).join('')+'<td class="tq">'+fmt(nq)+'</td>'+(price?'<td class="hp z">–</td><td class="nv">'+fmt(nn)+'</td>':'')+'</tr>';}
+  document.getElementById('mx').innerHTML=h+'</tbody>';
+  document.getElementById('info').innerHTML=out?'<span>Output yang sudah <b>lock</b> ke 2026-P40. Kolom = tanggal output. Angka = OK + reject bahan.</span><span class="chip">4 baris belum lock, tidak dihitung</span>':'<span>Semua penerimaan Sab 26 Sep 10:00 s/d Sab 3 Okt 10:00, tanpa syarat lock. Kolom = tanggal terima. Angka = OK + reject bahan.</span>';
+  document.getElementById('priceWrap').style.display=out?'':'none';
+  document.getElementById('addNp').style.display=out?'':'none';
+  document.getElementById('mOut').className=out?'on':'';document.getElementById('mTrm').className=out?'':'on';
+  var r=document.getElementById('npRow');if(r)r.onclick=function(){show('ovDetail')};
+}
+function show(id){document.getElementById(id).classList.add('show')}
+document.querySelectorAll('[data-close]').forEach(function(b){b.onclick=function(){b.closest('.ov').classList.remove('show')}});
+document.getElementById('mOut').onclick=function(){mode='out';render()};
+document.getElementById('mTrm').onclick=function(){mode='trm';render()};
+document.getElementById('price').onchange=render;
+document.getElementById('addNp').onclick=function(){show('ovInput')};
+function nil(){document.getElementById('fNil').textContent='Rp '+fmt((+document.getElementById('fQty').value||0)*(+document.getElementById('fHrg').value||0))}
+document.getElementById('fQty').oninput=nil;document.getElementById('fHrg').oninput=nil;
+document.getElementById('npList').innerHTML=np.map(function(r){return '<div class="it"><div class="d"><small>'+r[0]+'</small><b>'+r[1]+'</b></div><div class="k">'+r[2]+'<small>'+r[4]+' pcs × Rp '+fmt(r[5])+' · diinput '+r[3]+'</small></div><div class="v">Rp '+fmt(r[4]*r[5])+'</div><button class="ib" aria-label="Edit" onclick="show(\'ovInput\')">✎</button><button class="ib" aria-label="Hapus" style="color:#B42318">✕</button></div>'}).join('');
+render();
+</script>
+</body>
+</html>

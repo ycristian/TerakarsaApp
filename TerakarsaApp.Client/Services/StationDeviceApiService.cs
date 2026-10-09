@@ -3,6 +3,7 @@ using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Divisions;
 using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Packs;
+using TerakarsaApp.Shared.Positions;
 using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Resources;
@@ -481,5 +482,161 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak WIP." : error.Trim('"'));
+    }
+
+    // ===== Prompt 58: tab "Absen" =====
+    // resourceId = operator sesi. Server tetap yang menentukan (EffectiveResourceId) kalau
+    // stasiun terkunci; divisi tidak pernah dikirim dari sini.
+
+    public async Task<StationAttendanceListResult?> GetAttendanceAsync(int resourceId, DateTime date)
+    {
+        var response = await _http.GetAsync($"api/station/attendance?resourceId={resourceId}&date={date:yyyy-MM-dd}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<StationAttendanceListResult>();
+    }
+
+    public async Task<(bool Success, string Error)> SaveAttendanceAsync(StationAttendanceSaveRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/attendance", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan absen." : error.Trim('"'));
+    }
+
+    // payrollPeriodId null = periode absen berjalan (ditentukan server).
+    public async Task<StationAttendanceRecapResult?> GetAttendanceRecapAsync(int resourceId, int? payrollPeriodId)
+    {
+        var url = $"api/station/attendance/recap?resourceId={resourceId}";
+        if (payrollPeriodId.HasValue) url += $"&payrollPeriodId={payrollPeriodId.Value}";
+
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<StationAttendanceRecapResult>();
+    }
+
+    public async Task<List<StationAttendancePeriodDto>> GetAttendancePeriodsAsync()
+    {
+        var response = await _http.GetAsync("api/station/attendance/periods");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationAttendancePeriodDto>>() ?? new();
+    }
+
+    public async Task<List<StationAttendancePendingDateDto>> GetAttendancePendingDatesAsync(int resourceId)
+    {
+        var response = await _http.GetAsync($"api/station/attendance/pending-dates?resourceId={resourceId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<StationAttendancePendingDateDto>>() ?? new();
+    }
+
+    public async Task<StationEmployeeListResult?> GetStationEmployeesAsync(int resourceId, bool isActive, string? search)
+    {
+        var url = $"api/station/station-employees?resourceId={resourceId}&isActive={(isActive ? "true" : "false")}";
+        if (!string.IsNullOrWhiteSpace(search))
+            url += $"&search={Uri.EscapeDataString(search)}";
+
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<StationEmployeeListResult>();
+    }
+
+    // Error PHONE_ACTIVE|/PHONE_INACTIVE| dari SP diteruskan apa adanya ke pemanggil --
+    // AttendanceEmployees yang mengubahnya jadi kalimat + tawaran "Aktifkan lagi?".
+    public async Task<(bool Success, string Error)> CreateStationEmployeeAsync(StationEmployeeCreateRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/station-employees", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan pegawai." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> UpdateStationEmployeeAsync(int employeeId, StationEmployeeUpdateRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/station-employees/{employeeId}", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan pegawai." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> SetStationEmployeeInactiveAsync(int employeeId, StationEmployeeInactiveRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/station/station-employees/{employeeId}/inactive", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menonaktifkan pegawai." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> ReactivateStationEmployeeAsync(int employeeId, int resourceId)
+    {
+        var response = await _http.PostAsJsonAsync($"api/station/station-employees/{employeeId}/reactivate",
+            new StationEmployeeReactivateRequest { ResourceId = resourceId });
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengaktifkan pegawai." : error.Trim('"'));
+    }
+
+    // Dropdown "Jabatan" di form pegawai baru.
+    public async Task<List<PositionDto>> GetStationPositionsAsync()
+    {
+        var response = await _http.GetAsync("api/station/positions");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PositionDto>>() ?? new();
+    }
+
+    // ===== Prompt 59: tab "Rekap Produksi" + output non-PO =====
+    // resourceId = operator sesi. Server tetap yang menentukan (EffectiveResourceId) kalau
+    // stasiun terkunci; periode gajian memakai GetPayrollPeriodsAsync di atas (Prompt 56).
+
+    public async Task<RekapProduksiResultDto?> GetRekapProduksiAsync(int resourceId, int payrollPeriodId, string mode)
+    {
+        var response = await _http.GetAsync(
+            $"api/station/rekap-produksi?resourceId={resourceId}&payrollPeriodId={payrollPeriodId}&mode={Uri.EscapeDataString(mode)}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<RekapProduksiResultDto>();
+    }
+
+    // Berkas .xlsx dikembalikan sebagai byte -- pemanggil yang menyerahkannya ke
+    // downloadFileFromBytes (pola sama dengan ProjectEdit.razor).
+    public async Task<(byte[] Bytes, string FileName)?> ExportRekapProduksiAsync(int resourceId, int payrollPeriodId, string mode)
+    {
+        var response = await _http.GetAsync(
+            $"api/station/rekap-produksi/export?resourceId={resourceId}&payrollPeriodId={payrollPeriodId}&mode={Uri.EscapeDataString(mode)}");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+            ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+            ?? "RekapProduksi.xlsx";
+        return (bytes, fileName);
+    }
+
+    public async Task<List<NonPoOutputDto>> GetNonPoOutputsAsync(int resourceId, int payrollPeriodId)
+    {
+        var response = await _http.GetAsync($"api/station/non-po?resourceId={resourceId}&payrollPeriodId={payrollPeriodId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<NonPoOutputDto>>() ?? new();
+    }
+
+    public async Task<(bool Success, string Error)> CreateNonPoOutputAsync(NonPoOutputSaveRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/non-po", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan output non-PO." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> UpdateNonPoOutputAsync(int id, NonPoOutputSaveRequest request)
+    {
+        var response = await _http.PutAsJsonAsync($"api/station/non-po/{id}", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan perubahan output non-PO." : error.Trim('"'));
+    }
+
+    public async Task<(bool Success, string Error)> DeleteNonPoOutputAsync(int id, int resourceId)
+    {
+        var response = await _http.DeleteAsync($"api/station/non-po/{id}?resourceId={resourceId}");
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus output non-PO." : error.Trim('"'));
     }
 }

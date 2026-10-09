@@ -4,8 +4,34 @@ Windows Worker Service yang berjalan di PC printer: polling `api/print/claim` di
 merakit TSPL dari payload job, dan mengirim ke printer TSC TTP-244 Pro lewat USB (raw printing
 via winspool, tanpa driver/SDK khusus TSC). Hasilnya dilaporkan balik lewat `api/print/report`.
 
-Saat ini hanya menangani `job_type = BUNDLE_LABEL`. Job type lain akan langsung dilaporkan gagal
-dengan pesan "Job type belum didukung." (menyusul di fase berikutnya, mis. `MATERIAL_LABEL`).
+Job type yang ditangani dikelompokkan jadi tiga jalur:
+
+| Jalur | Dirakit oleh | job_type |
+|---|---|---|
+| `RAW_TSPL` | `TsplBuilder.cs` (C#) | `BUNDLE_LABEL`, `PACK_LABEL`, `REJECT_NOTE` |
+| `TOKEN` | SP `SIS_Print_Dispatch` + `EscPosRenderer.cs` | job_type kupon/struk, didaftarkan di tabel `print_kupon_job_types` |
+| ESC/POS di C# | `TniKartuEscPosBuilder.cs` | `TNI_KARTU` (Prompt 65) |
+
+Job type di luar ketiganya dilaporkan gagal dengan pesan "Job type belum didukung."
+
+**`TNI_KARTU` (kartu personel PDH TNI AD, Prompt 65)** — thermal 80mm, Font A 48 kolom.
+Dirakit di C# dari payload (`TniKartuPayload`), BUKAN lewat token SP, jadi:
+
+- ditangkap berdasarkan **job_type** di `ProcessJobAsync` SEBELUM switch `RenderMode`
+  (lihat array `EscPosJobTypes` di `Worker.cs`);
+- **tidak** didaftarkan di `print_kupon_job_types`;
+- diklaim hanya saat `PrinterThermalOn: true` (printer fisiknya sama dengan struk);
+- routing-nya tetap lewat `print_job_routes` (`job_type = 'TNI_KARTU'`), jadi bisa dipindah
+  ke printer 80mm lain lewat SQL tanpa restart — lihat `sql/tni/seed_65_print_route_tni_kartu.sql`.
+
+QR di kartu digenerate sendiri lewat **QRCoder** lalu dicetak sebagai **raster bit image**
+(`GS v 0`), sama dengan `EscPosRenderer.EmitQr` — **bukan** command QR native (`GS ( k`),
+karena printer thermal di sini salah merender QR native.
+
+**Percepatan batch (Prompt 65)**: kalau satu klaim mengembalikan job sebanyak `BatchSize`,
+worker langsung klaim lagi tanpa menunggu `PollSeconds` (maks 50 batch per siklus) — supaya
+cetak ratusan kartu satuan tidak tertahan jeda polling. Perilaku saat antrian kosong atau
+batch belum penuh tidak berubah.
 
 ## Konfigurasi (`appsettings.json`)
 
@@ -26,12 +52,15 @@ dengan pesan "Job type belum didukung." (menyusul di fase berikutnya, mis. `MATE
   milik TerakarsaApp.API (dicocokkan lewat header `X-Print-Api-Key`). Beda satu karakter saja
   akan membuat semua request ditolak 401.
 - `PollSeconds` — jeda antar siklus polling (detik).
-- `BatchSize` — jumlah job maksimum yang diklaim per siklus.
+- `BatchSize` — jumlah job maksimum yang diklaim per siklus. Kalau satu klaim penuh
+  sebanyak nilai ini, worker langsung klaim lagi tanpa menunggu `PollSeconds`.
 - `DryRun` — jika `true`, tidak ada yang dikirim ke printer fisik; untuk job TSPL ditulis ke
   `./dryrun/{print_job_id}.tspl`, untuk job TOKEN ditulis ke `./dryrun/{print_job_id}.escpos`
   (byte mentah) DAN `./dryrun/{print_job_id}.txt` (pratinjau teks polos, dipakai untuk
-  memeriksa layout tanpa printer fisik) -- semua relatif terhadap folder exe, job langsung
-  dilaporkan sukses. Berguna untuk mengembangkan/menguji tanpa printer fisik.
+  memeriksa layout tanpa printer fisik), untuk `TNI_KARTU` ditulis ke
+  `./dryrun/{print_job_id}.escpos.bin` DAN `./dryrun/{print_job_id}.txt` -- semua relatif
+  terhadap folder exe, job langsung dilaporkan sukses. Berguna untuk mengembangkan/menguji
+  tanpa printer fisik.
 
 ## Nama printer & routing (tabel `print_devices` / `print_job_routes`, Prompt 48)
 

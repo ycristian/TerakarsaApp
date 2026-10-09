@@ -1,0 +1,286 @@
+@* Prompt 70 -- Gate 7 (Menu Satpam). Tertutup sendiri setelah MenuIdleTimeoutSeconds supaya
+   tablet tidak ditinggal terbuka. Markup mengikuti claude prompt/mockup_70_absensi_rfid.html. *@
+
+<div style="width: 100%; height: 100%; box-sizing: border-box; background: #12161F; color: #FFFFFF; display: flex; flex-direction: column">
+
+    <div style="height: 76px; box-sizing: border-box; padding: 0 36px; border-bottom: 1px solid #252C3B; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0">
+        <div style="display: flex; align-items: center; gap: 14px">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#5BD98A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <div style="font-size: 22px; font-weight: 600">Menu Satpam</div>
+            <div style="font-size: 19px; color: #9AA4B5">Dibuka oleh @Operator.EmployeeName@(string.IsNullOrWhiteSpace(Operator.EmployeeCode) ? "" : " · " + Operator.EmployeeCode)</div>
+        </div>
+        <button type="button" @onclick="OnClose"
+                style="font-size: 17px; font-weight: 600; color: #D6DCE6; background: transparent; border: 1px solid #39425A; border-radius: 10px; padding: 11px 24px; cursor: pointer">Tutup menu</button>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; min-height: 0">
+
+        <div style="width: 332px; flex-shrink: 0; border-right: 1px solid #252C3B; padding: 24px 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+
+            <button type="button" @onclick="OnOpenRegisterCard" style="@NavStyle(false)">
+                <span>Daftar kartu</span>
+                <span style="@PillStyle(false)">@NoCardCount</span>
+            </button>
+
+            <button type="button" @onclick="OnOpenEditEmployee" style="@NavStyleSimple(false)">Ubah data karyawan</button>
+
+            <button type="button" @onclick='() => OnSelectPane.InvokeAsync(GatePendingModes.BelumAmbil)' style="@NavStyle(Pane == GatePendingModes.BelumAmbil)">
+                <span>Belum ambil kartu</span>
+                <span style="@PillStyle(Pane == GatePendingModes.BelumAmbil)">@Counts.NotTakenCount</span>
+            </button>
+
+            <button type="button" @onclick='() => OnSelectPane.InvokeAsync(GatePendingModes.BelumKembali)' style="@NavStyle(Pane == GatePendingModes.BelumKembali)">
+                <span>Belum kembalikan kartu</span>
+                <span style="@PillStyle(Pane == GatePendingModes.BelumKembali)">@Counts.PresentCount</span>
+            </button>
+
+            <button type="button" @onclick='() => OnSelectPane.InvokeAsync("STATUS")' style="@NavStyleSimple(Pane == "STATUS")">Status &amp; sinkronisasi</button>
+
+            <div style="flex-grow: 1"></div>
+
+            <div style="border-top: 1px solid #252C3B; padding-top: 16px">
+                <div style="font-size: 16px; color: #8892A4; margin-bottom: 12px">Menu tertutup otomatis dalam @IdleSecondsLeft detik</div>
+                <button type="button" @onclick="OnExitApp"
+                        style="width: 100%; box-sizing: border-box; font-size: 18px; font-weight: 600; color: #F3A6A6; background: transparent; border: 1px solid #5E2A2A; border-radius: 10px; padding: 14px; cursor: pointer">Keluar aplikasi</button>
+            </div>
+        </div>
+
+        <div style="flex-grow: 1; padding: 26px 32px; box-sizing: border-box; min-width: 0; display: flex; flex-direction: column">
+
+            @if (Pane == "STATUS")
+            {
+                <div style="font-size: 26px; font-weight: 600; margin-bottom: 18px">Status &amp; sinkronisasi</div>
+
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+                    <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 12px; padding: 18px 22px">
+                        <div style="font-size: 17px; color: #8892A4">Koneksi</div>
+                        <div style="font-size: 28px; font-weight: 600; margin-top: 4px; color: @(State.IsOnline ? "#5BD98A" : "#F3B14E")">@(State.IsOnline ? "Terhubung" : "Offline")</div>
+                    </div>
+                    <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 12px; padding: 18px 22px">
+                        <div style="font-size: 17px; color: #8892A4">Tap menunggu dikirim</div>
+                        <div style="font-size: 28px; font-weight: 600; margin-top: 4px">@State.PendingTapCount</div>
+                    </div>
+                    <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 12px; padding: 18px 22px">
+                        <div style="font-size: 17px; color: #8892A4">Sinkronisasi terakhir</div>
+                        <div style="font-size: 28px; font-weight: 600; margin-top: 4px">@(State.LastSyncAt is null ? "belum pernah" : State.LastSyncAt.Value.ToString("HH:mm:ss"))</div>
+                    </div>
+                    <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 12px; padding: 18px 22px">
+                        <div style="font-size: 17px; color: #8892A4">Selisih jam tablet</div>
+                        <div style="font-size: 28px; font-weight: 600; margin-top: 4px; color: @(State.ClockDriftWarning ? "#F3B14E" : "#FFFFFF")">@ClockDriftText</div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(State.LastError))
+                {
+                    <div style="margin-top: 16px; font-size: 17px; color: #F3A6A6; background: #2A1414; border: 1px solid #5E2A2A; border-radius: 10px; padding: 14px 18px">@State.LastError</div>
+                }
+
+                <div style="margin-top: 20px; display: flex; gap: 12px">
+                    <button type="button" disabled="@IsSyncing" @onclick="OnForceSync"
+                            style="font-size: 19px; font-weight: 600; color: #FFFFFF; background: #1E3A5F; border: 1px solid #2F6098; border-radius: 10px; padding: 16px 28px; cursor: pointer">@(IsSyncing ? "Menyinkronkan..." : "Sinkronkan sekarang")</button>
+                </div>
+
+                @* Speaker bawaan tablet 10 inci kecil dan mudah tenggelam di keramaian pagi.
+                   Tombol tes ada supaya satpam bisa memastikan speaker hidup TANPA menunggu
+                   ada yang tap. *@
+                <div style="margin-top: 26px; border-top: 1px solid #252C3B; padding-top: 22px">
+                    <div style="font-size: 20px; font-weight: 600; margin-bottom: 6px">Suara</div>
+                    <div style="font-size: 16px; color: #8892A4; margin-bottom: 16px">
+                        Bunyi berbeda per hasil adalah penanda utama &mdash; layar tidak selalu terlihat saat mencari kartu di rak.
+                        @if (HasWavOverrides)
+                        {
+                            <span> Ada file WAV di folder aplikasi, jadi pengatur volume di bawah tidak berlaku untuk bunyi itu.</span>
+                        }
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 18px">
+                        <div style="font-size: 18px; color: #C3CBD8; width: 90px">Volume</div>
+                        <input type="range" min="0" max="100" step="10" value="@Volume"
+                               @onchange="e => OnVolumeChanged.InvokeAsync(int.TryParse(e.Value?.ToString(), out var v) ? v : Volume)"
+                               style="flex-grow: 1; max-width: 420px; height: 40px" />
+                        <div style="font-size: 20px; font-weight: 600; width: 70px">@Volume%</div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; max-width: 760px">
+                        <button type="button" @onclick='() => OnTestSound.InvokeAsync(GateSound.CheckIn)' style="@TestSoundStyle">Tes masuk</button>
+                        <button type="button" @onclick='() => OnTestSound.InvokeAsync(GateSound.CheckOut)' style="@TestSoundStyle">Tes pulang</button>
+                        <button type="button" @onclick='() => OnTestSound.InvokeAsync(GateSound.Duplicate)' style="@TestSoundStyle">Tes duplikat</button>
+                        <button type="button" @onclick='() => OnTestSound.InvokeAsync(GateSound.Reject)' style="@TestSoundStyle">Tes ditolak</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px">
+                    <div style="font-size: 26px; font-weight: 600">@(Pane == GatePendingModes.BelumKembali ? "Belum kembalikan kartu" : "Belum ambil kartu")</div>
+                    <div style="font-size: 18px; color: #9AA4B5">@GateFormat.LongDate(Now) &middot; @Now.ToString("HH:mm")</div>
+                </div>
+
+                @if (IsLoadingList)
+                {
+                    <div style="font-size: 20px; color: #8892A4">Memuat...</div>
+                }
+                else if (!State.IsOnline && PendingRows.Count == 0)
+                {
+                    <div style="font-size: 20px; color: #F3B14E; background: #332200; border: 1px solid #7A5406; border-radius: 12px; padding: 18px 22px">
+                        Daftar ini dibaca langsung dari server dan sekarang offline. Coba lagi setelah jaringan tersambung.
+                    </div>
+                }
+                else if (PendingRows.Count == 0)
+                {
+                    <div style="font-size: 20px; color: #8892A4">Tidak ada.</div>
+                }
+                else
+                {
+                    @if (!string.IsNullOrWhiteSpace(CancelSuccess))
+                    {
+                        <div style="margin-bottom: 14px; font-size: 19px; color: #A8E6BF; background: #10301E; border: 1px solid #1A8549; border-radius: 12px; padding: 14px 20px">@CancelSuccess</div>
+                    }
+
+                    <div style="border: 1px solid #252C3B; border-radius: 12px; overflow: hidden; min-height: 0; display: flex; flex-direction: column">
+                        <div style="display: grid; grid-template-columns: @GridColumns; gap: 12px; padding: 14px 20px; background: #1A2030; font-size: 15px; font-weight: 600; letter-spacing: 0.08em; color: #8892A4; flex-shrink: 0">
+                            <div>NAMA</div><div>KODE</div><div>RESOURCE</div><div>MASUK</div>
+                            @if (CanCancel)
+                            {
+                                <div></div>
+                            }
+                        </div>
+                        <div style="overflow-y: auto">
+                            @foreach (var row in PendingRows)
+                            {
+                                <div style="display: grid; grid-template-columns: @GridColumns; gap: 12px; padding: 16px 20px; border-top: 1px solid #222838; font-size: 19px; align-items: center">
+                                    <div>@row.EmployeeName</div>
+                                    <div style="color: #9AA4B5">@(row.EmployeeCode ?? "—")</div>
+                                    <div>@(row.ResourceName ?? "—")</div>
+                                    <div>@(row.CheckInAt is null ? "—" : row.CheckInAt.Value.ToString("HH:mm"))</div>
+                                    @if (CanCancel)
+                                    {
+                                        <div style="text-align: right">
+                                            <button type="button" disabled="@(!State.IsOnline || row.SessionId is null)" @onclick="() => OnRequestCancel.InvokeAsync(row)"
+                                                    title="@(State.IsOnline ? "Batalkan absensi ini" : "Butuh koneksi ke server")"
+                                                    style="font-size: 17px; font-weight: 600; color: #F3A6A6; background: transparent; border: 1px solid #5E2A2A; border-radius: 10px; padding: 12px 18px; min-height: 48px; cursor: pointer; opacity: @(State.IsOnline ? "1" : "0.45")">Batalkan</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 14px; font-size: 17px; color: #8892A4">@PendingRows.Count orang &mdash; gulir untuk melihat sisanya</div>
+                }
+            }
+
+        </div>
+
+    </div>
+
+    @if (CancelTarget is not null)
+    {
+        @* Dialog pembatalan. Alasan berupa tombol (bukan ketik) -- layar sentuh, satpam berdiri.
+           Ditaruh di atas seluruh menu supaya tidak ada tombol lain yang bisa tertekan. *@
+        <div style="position: fixed; inset: 0; background: rgba(8, 10, 16, 0.78); display: flex; align-items: center; justify-content: center; z-index: 50">
+            <div style="width: 760px; max-width: calc(100vw - 80px); background: #161B26; border: 1px solid #39425A; border-radius: 16px; padding: 30px 34px; box-sizing: border-box">
+                <div style="font-size: 17px; letter-spacing: 0.1em; color: #F3A6A6; font-weight: 600">BATALKAN ABSENSI</div>
+                <div style="font-size: 38px; font-weight: 700; margin-top: 8px">@CancelTarget.EmployeeName</div>
+                <div style="font-size: 19px; color: #9AA4B5; margin-top: 4px">
+                    @(CancelTarget.EmployeeCode ?? "tanpa kode") &middot; @CancelTarget.DivisionName &middot; masuk @(CancelTarget.CheckInAt is null ? "—" : CancelTarget.CheckInAt.Value.ToString("HH:mm"))
+                </div>
+                <div style="font-size: 18px; color: #C3CBD8; margin-top: 18px; line-height: 1.5">
+                    Sesi masuk ini dihapus dan orangnya kembali ke daftar "Belum ambil kartu". Pemilik kartu yang sebenarnya tinggal tap kartunya sendiri.
+                </div>
+
+                <div style="font-size: 18px; font-weight: 600; color: #C3CBD8; margin: 22px 0 10px">Alasan</div>
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+                    @foreach (var reason in CancelReasons)
+                    {
+                        var active = CancelReason == reason;
+                        <button type="button" @onclick="() => OnCancelReasonChanged.InvokeAsync(reason)"
+                                style="font-size: 20px; font-weight: @(active ? "600" : "500"); color: @(active ? "#FFFFFF" : "#C3CBD8"); background: @(active ? "#5E1F1F" : "transparent"); border: @(active ? "2px solid #BF4C4C" : "1px solid #2B3245"); border-radius: 12px; padding: 18px; min-height: 60px; cursor: pointer">@reason</button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(CancelError))
+                {
+                    <div style="margin-top: 18px; font-size: 19px; color: #F3A6A6; background: #2A1414; border: 1px solid #5E2A2A; border-radius: 12px; padding: 14px 18px">@CancelError</div>
+                }
+
+                <div style="display: flex; gap: 12px; margin-top: 26px">
+                    <button type="button" disabled="@IsCancelling" @onclick="OnDismissCancel"
+                            style="flex-grow: 1; font-size: 21px; font-weight: 500; color: #C3CBD8; background: transparent; border: 1px solid #39425A; border-radius: 12px; padding: 20px; cursor: pointer">Kembali</button>
+                    <button type="button" disabled="@(IsCancelling || string.IsNullOrEmpty(CancelReason))" @onclick="OnConfirmCancel"
+                            style="flex-grow: 2; font-size: 21px; font-weight: 600; color: #FFFFFF; background: @(string.IsNullOrEmpty(CancelReason) ? "#4A1E1E" : "#A12A2A"); border: 1px solid #BF4C4C; border-radius: 12px; padding: 20px; cursor: pointer">
+                        @(IsCancelling ? "Membatalkan..." : "Ya, batalkan absensi")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public GateCardDto Operator { get; set; } = new();
+    [Parameter, EditorRequired] public GateState State { get; set; } = default!;
+    [Parameter] public GateCountsDto Counts { get; set; } = new();
+    // GatePendingModes.BelumAmbil / BelumKembali / "STATUS"
+    [Parameter] public string Pane { get; set; } = GatePendingModes.BelumAmbil;
+    [Parameter] public List<GatePendingRowDto> PendingRows { get; set; } = new();
+    [Parameter] public bool IsLoadingList { get; set; }
+    [Parameter] public int NoCardCount { get; set; }
+    [Parameter] public int IdleSecondsLeft { get; set; }
+    [Parameter] public DateTime Now { get; set; } = DateTime.Now;
+    [Parameter] public string ClockDriftText { get; set; } = string.Empty;
+    [Parameter] public bool IsSyncing { get; set; }
+    [Parameter] public int Volume { get; set; }
+    [Parameter] public bool HasWavOverrides { get; set; }
+
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnExitApp { get; set; }
+    [Parameter] public EventCallback OnOpenRegisterCard { get; set; }
+    [Parameter] public EventCallback OnOpenEditEmployee { get; set; }
+    [Parameter] public EventCallback<string> OnSelectPane { get; set; }
+    [Parameter] public EventCallback OnForceSync { get; set; }
+    [Parameter] public EventCallback<int> OnVolumeChanged { get; set; }
+    [Parameter] public EventCallback<GateSound> OnTestSound { get; set; }
+
+    // Pembatalan sesi OPEN dari daftar "Belum kembalikan kartu" (SIS_Gate_CancelSession).
+    [Parameter] public GatePendingRowDto? CancelTarget { get; set; }
+    [Parameter] public string CancelReason { get; set; } = string.Empty;
+    [Parameter] public string? CancelError { get; set; }
+    [Parameter] public string? CancelSuccess { get; set; }
+    [Parameter] public bool IsCancelling { get; set; }
+    [Parameter] public EventCallback<GatePendingRowDto> OnRequestCancel { get; set; }
+    [Parameter] public EventCallback<string> OnCancelReasonChanged { get; set; }
+    [Parameter] public EventCallback OnConfirmCancel { get; set; }
+    [Parameter] public EventCallback OnDismissCancel { get; set; }
+
+    public static readonly string[] CancelReasons = { "Salah ambil kartu", "Tap tidak sengaja" };
+
+    // Tombol Batalkan hanya di daftar sesi OPEN.
+    private bool CanCancel => Pane == GatePendingModes.BelumKembali;
+    private string GridColumns => CanCancel ? "2.1fr 1fr 1.1fr 0.9fr 1fr" : "2.1fr 1fr 1.1fr 0.9fr";
+
+    // Tinggi tombol nav >= 48 px (18px teks + padding 18px) sesuai target sentuh prompt.
+    private static string NavStyle(bool active) =>
+        "text-align: left; font-size: 20px; font-weight: " + (active ? "600" : "500") +
+        "; color: " + (active ? "#FFFFFF" : "#D6DCE6") +
+        "; background: " + (active ? "#1E3A5F" : "transparent") +
+        "; border: 1px solid " + (active ? "#2F6098" : "#2B3245") +
+        "; border-radius: 10px; padding: 18px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center";
+
+    private static string NavStyleSimple(bool active) =>
+        "text-align: left; font-size: 20px; font-weight: " + (active ? "600" : "500") +
+        "; color: " + (active ? "#FFFFFF" : "#D6DCE6") +
+        "; background: " + (active ? "#1E3A5F" : "transparent") +
+        "; border: 1px solid " + (active ? "#2F6098" : "#2B3245") +
+        "; border-radius: 10px; padding: 18px 20px; cursor: pointer; width: 100%; box-sizing: border-box";
+
+    private static string PillStyle(bool active) =>
+        "font-size: 17px; font-weight: 600; background: " + (active ? "#2F6098" : "#2B3245") +
+        "; border-radius: 999px; padding: 4px 13px";
+
+    private const string TestSoundStyle =
+        "font-size: 18px; font-weight: 500; color: #D6DCE6; background: transparent; border: 1px solid #39425A; border-radius: 10px; padding: 16px 12px; cursor: pointer";
+}

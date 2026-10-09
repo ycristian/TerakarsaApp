@@ -1,0 +1,182 @@
+@page "/tni"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPersonelApiService PersonelApi
+@inject TniOrderState OrderState
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@inject TniPerangkatState Sesi
+
+@* Prompt 63: beranda module PDH TNI AD -- pintu masuk module di HP (mockup layar 1).
+   Semua angka dari tni.SIS_Beranda_Summary, yang membacanya dari tni.v_personel. *@
+
+<PageTitle>PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-shield"></i> @(OrderState.Order?.OrderName ?? "PDH TNI AD")</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <button class="tni-btn" style="background:rgba(255,255,255,.15);color:#fff"
+                    @onclick="RefreshAsync" disabled="@isLoading">
+                <i class="fe fe-refresh-cw"></i>
+            </button>
+        </div>
+    </div>
+
+    @* ---------- 4 kotak angka ---------- *@
+    <div class="tni-stat4">
+        <div>
+            <span class="tni-k">Kartu dicetak</span>
+            <b>@s.Dicetak.ToString("N0")</b>
+        </div>
+        <div>
+            <span class="tni-k">Dapat set</span>
+            <b>@s.DapatSet.ToString("N0")</b>
+        </div>
+        <div>
+            <span class="tni-k">Masuk box</span>
+            <b>@s.MasukBox.ToString("N0")</b>
+        </div>
+        <div>
+            <span class="tni-k">Terkirim</span>
+            <b style="color:var(--tni-ok)">@s.Terkirim.ToString("N0")</b>
+        </div>
+    </div>
+
+    @* ---------- progres masuk box ---------- *@
+    <div class="tni-card">
+        <div class="tni-row">
+            <span class="tni-k">Progres masuk box</span>
+            <span class="tni-b">@s.PersenBox%</span>
+        </div>
+        <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+            <div style="height:100%;width:@(s.PersenBox)%;background:var(--tni-navy2)"></div>
+        </div>
+        <div class="tni-note" style="margin-top:5px">
+            @s.MasukBox.ToString("N0") dari @s.Total.ToString("N0") personel
+        </div>
+
+        @* chip menuju daftar Personel -- hanya bila perangkat boleh membuka Personel *@
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;@(Sesi.BolehMenu("PERSONEL") ? "" : "display:none")">
+            @if (s.SetBelumBox > 0)
+            {
+                <span class="tni-chip tni-chip-warn" style="cursor:pointer"
+                      @onclick="@(() => Nav.NavigateTo("/tni/personel?status=SET_JADI"))">
+                    @s.SetBelumBox set belum masuk box
+                </span>
+            }
+            @if (s.KartuBelumScan > 0)
+            {
+                <span class="tni-chip tni-chip-mut" style="cursor:pointer"
+                      @onclick="@(() => Nav.NavigateTo("/tni/personel?status=DICETAK"))">
+                    @s.KartuBelumScan kartu belum di-scan
+                </span>
+            }
+            @if (s.PerluReview > 0)
+            {
+                <span class="tni-chip tni-chip-bad" style="cursor:pointer"
+                      @onclick="@(() => Nav.NavigateTo("/tni/personel?review=1"))">
+                    @s.PerluReview perlu review
+                </span>
+            }
+        </div>
+    </div>
+
+    @* ---------- grid tile ---------- *@
+    <div class="tni-sec">Menu</div>
+    @if (tiles.Count == 0)
+    {
+        <div class="tni-card"><span class="tni-note">Perangkat ini belum diberi akses menu apa pun.</span></div>
+    }
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
+        @foreach (var t in tiles)
+        {
+            <div class="tni-card tni-tap" style="text-align:center;padding:12px 4px;margin:0;position:relative"
+                 @onclick="@(() => Nav.NavigateTo(t.Route))">
+                <i class="@t.Icon" style="font-size:20px;display:block;margin-bottom:4px;color:var(--tni-navy)"></i>
+                <span style="font-size:11.5px;font-weight:600">@t.Label</span>
+                @if (t.Badge > 0)
+                {
+                    <span style="position:absolute;top:4px;right:6px;background:var(--tni-coral);color:#fff;font-size:9px;border-radius:10px;padding:1px 5px">
+                        @t.Badge
+                    </span>
+                }
+            </div>
+        }
+    </div>
+</div>
+}
+
+@code {
+    private bool? hasAccess;
+    private bool bolehApprove;      // module TNI_PDH_APPROVE -- tile Pembatalan
+    private bool isLoading;
+    private TniBerandaSummaryDto s = new();
+
+    private record Tile(string Label, string Route, string Icon, int Badge = 0);
+
+    // Halaman yang dibuat di prompt berikutnya (65-69) boleh belum ada.
+    private List<Tile> tiles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout.
+        hasAccess = true;
+
+        // Tile Pembatalan HANYA untuk user yang login & punya TNI_PDH_APPROVE --
+        // memutus pembatalan tetap tidak boleh dilakukan dari perangkat kios.
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        bolehApprove = authState.User.HasClaim("module", "TNI_PDH_APPROVE");
+
+        if (hasAccess == true)
+        {
+            await OrderState.EnsureLoadedAsync();
+            await RefreshAsync();
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        // Akses menu bisa diubah admin kapan saja -- muat ulang identitas perangkat.
+        await Sesi.EnsureLoadedAsync(paksa: true);
+        s = await PersonelApi.GetSummaryAsync();
+        await OrderState.RefreshAsync();
+        BuildTiles();
+        isLoading = false;
+    }
+
+    private void BuildTiles()
+    {
+        // alter_74: hanya menu yang diizinkan untuk perangkat ini.
+        tiles = TniMenu.Semua
+            .Where(m => Sesi.BolehMenu(m.Code))
+            .Select(m => new Tile(m.Label, m.Route, m.Icon))
+            .ToList();
+
+        // Prompt 68: memutus pembatalan butuh TNI_PDH_APPROVE -- tile hanya
+        // muncul untuk yang bisa membukanya. Badge = jumlah MENUNGGU dari
+        // SIS_Beranda_Summary, ikut turun setelah RefreshAsync.
+        if (bolehApprove)
+        {
+            tiles.Insert(Math.Min(5, tiles.Count), new Tile("Pembatalan", "/tni/pembatalan",
+                "fe fe-rotate-ccw", s.PembatalanMenunggu));
+        }
+    }
+}

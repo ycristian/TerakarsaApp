@@ -21,7 +21,10 @@ BEGIN
            aw.workflow_template_id AS WorkflowTemplateId, wt.workflow_name AS WorkflowTemplateName,
            aw.step_name AS StepName, aw.division_id AS DivisionId, d.division_name AS DivisionName,
            aw.sort_order AS SortOrder, aw.requires_bundle AS RequiresBundle, aw.auto_receive AS AutoReceive,
-           aw.print_kupon AS PrintKupon, aw.is_bundling AS IsBundling
+           aw.print_kupon AS PrintKupon, aw.is_bundling AS IsBundling,
+           -- Prompt 59: harga per pcs yang BERLAKU untuk step artikel ini (dasar upah di Rekap
+           -- Produksi stasiun). Step Bundling implisit selalu 0.
+           aw.unit_price AS UnitPrice
     FROM article_workflows aw
     INNER JOIN divisions d ON d.division_id = aw.division_id
     LEFT JOIN workflow_templates wt ON wt.workflow_template_id = aw.workflow_template_id

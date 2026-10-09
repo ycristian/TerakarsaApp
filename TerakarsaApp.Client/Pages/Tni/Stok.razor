@@ -1,0 +1,870 @@
+@page "/tni/stok"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniStokApiService StokApi
+@inject TniPolaApiService PolaApi
+@inject TniOrderState OrderState
+@implements IDisposable
+
+@* Prompt 64: stok kemeja & celana PDH TNI AD (mockup layar 9).
+   Produksi menyetor bertahap TANPA nomor surat jalan; stok ANONIM per pola.
+   Saldo tidak pernah disimpan -- selalu SUM(qty) tni.stok_mutasi.
+   TERPAKAI & BONGKAR tidak bisa diinput di sini (otomatis dari scan & pembatalan).
+   2026-10-06: setoran mencatat SUPPLIER; tab Riwayat menampilkan setoran &
+   pengeluaran manual dan bisa MENGHAPUSNYA (soft delete).
+   2026-10-07 (alter_76): setoran = header per tanggal & supplier; Riwayat
+   menampilkan satu kartu per setoran + tabel size, edit master & isi lewat
+   pop up, hapus satu setoran sekaligus.
+   2026-10-07 (alter_77): Keluarkan SAMA PERSIS dengan Setoran -- input banyak
+   baris, kartu riwayat + tabel size, edit pop up, hapus seluruh pengeluaran.
+   Baris input memakai komponen bersama Shared/TniStokBarisEditor. *@
+
+<PageTitle>Stok — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-layers"></i> Stok</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    <div class="tni-seg">
+        <button class="@(tab == "SETORAN" ? "on" : "")" @onclick="@(() => tab = "SETORAN")">Setoran</button>
+        <button class="@(tab == "KELUAR" ? "on" : "")" @onclick="@(() => tab = "KELUAR")">Keluarkan</button>
+        <button class="@(tab == "SALDO" ? "on" : "")" @onclick="GoSaldo">Sisa stok</button>
+        <button class="@(tab == "RIWAYAT" ? "on" : "")" @onclick="GoRiwayat">Riwayat</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @* ==================== TAB SETORAN ==================== *@
+    @if (tab == "SETORAN")
+    {
+        <div class="tni-card">
+            <div class="tni-k">Tanggal setoran</div>
+            <input class="tni-inp" type="date" @bind="tanggal" />
+
+            <div class="tni-k" style="margin-top:8px">Supplier</div>
+            <input class="tni-inp" maxlength="150" placeholder="nama supplier / penjahit"
+                   @bind="supplier" @bind:event="oninput" />
+        </div>
+
+        <div class="tni-note" style="margin-bottom:8px">
+            Segmented di bawah hanya memfilter pilihan pola untuk baris <b>baru</b> —
+            satu setoran boleh berisi kemeja <b>dan</b> celana sekaligus.
+        </div>
+
+        <div class="tni-seg">
+            <button class="@(jenisBaris == "KEMEJA" ? "on" : "")" @onclick="@(() => jenisBaris = "KEMEJA")">Kemeja</button>
+            <button class="@(jenisBaris == "CELANA" ? "on" : "")" @onclick="@(() => jenisBaris = "CELANA")">Celana</button>
+        </div>
+
+        <TniStokBarisEditor Baris="baris" PolaKemeja="polaKemeja" PolaCelana="polaCelana"
+                            OnChanged="@(() => konfirmSetoran = false)" />
+
+        <button class="tni-btn tni-btn-o" style="width:100%" @onclick="TambahBaris">
+            + Tambah baris
+        </button>
+
+        @if (baris.Count > 0)
+        {
+            <div class="tni-card" style="margin-top:8px">
+                <div class="tni-row">
+                    <span class="tni-k">Total setoran</span>
+                    <span class="tni-b">
+                        @Total(baris, "KEMEJA") kemeja · @Total(baris, "CELANA") celana
+                    </span>
+                </div>
+            </div>
+        }
+
+        <div class="tni-bot">
+            @if (!konfirmSetoran)
+            {
+                <button class="tni-btn tni-btn-p" disabled="@(!BarisValid(baris) || isSaving)"
+                        @onclick="@(() => konfirmSetoran = true)">
+                    Simpan setoran
+                </button>
+            }
+            else
+            {
+                <span class="tni-note" style="flex:1">
+                    Simpan @Total(baris, "KEMEJA") kemeja + @Total(baris, "CELANA") celana@(string.IsNullOrWhiteSpace(supplier) ? "" : $" dari {supplier.Trim()}")?
+                </span>
+                <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmSetoran = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="SimpanSetoranAsync">
+                    @(isSaving ? "Menyimpan..." : "Ya, simpan")
+                </button>
+            }
+        </div>
+    }
+
+    @* ==================== TAB KELUARKAN ====================
+       2026-10-07 (alter_77): SAMA PERSIS dengan Setoran -- master di atas,
+       banyak baris pola di bawah. Master: tanggal, alasan. Hanya BARANG RUSAK
+       (Koreksi dihapus dari UI 2026-10-07). Qty baris positif, disimpan negatif. *@
+    @if (tab == "KELUAR")
+    {
+        <div class="tni-card">
+            @* 2026-10-07: Koreksi dihapus dari UI atas permintaan owner -- pengeluaran
+               selalu Barang rusak (SP masih menerima KOREKSI untuk data lama). *@
+            <div class="tni-k">Tanggal barang rusak</div>
+            <input class="tni-inp" type="date" @bind="tanggal" />
+
+            <div class="tni-k" style="margin-top:8px">Alasan (wajib)</div>
+            <input class="tni-inp" maxlength="500" @bind="keluarAlasan" @bind:event="oninput"
+                   placeholder="mis. kena noda oli" />
+        </div>
+
+        <div class="tni-note" style="margin-bottom:8px">
+            Segmented di bawah hanya memfilter pilihan pola untuk baris <b>baru</b> —
+            satu pengeluaran boleh berisi kemeja <b>dan</b> celana sekaligus.
+        </div>
+
+        <div class="tni-seg">
+            <button class="@(jenisBarisKeluar == "KEMEJA" ? "on" : "")" @onclick="@(() => jenisBarisKeluar = "KEMEJA")">Kemeja</button>
+            <button class="@(jenisBarisKeluar == "CELANA" ? "on" : "")" @onclick="@(() => jenisBarisKeluar = "CELANA")">Celana</button>
+        </div>
+
+        <TniStokBarisEditor Baris="barisKeluar" PolaKemeja="polaKemeja" PolaCelana="polaCelana"
+                            OnChanged="@(() => konfirmKeluar = false)" />
+
+        <button class="tni-btn tni-btn-o" style="width:100%" @onclick="TambahBarisKeluar">
+            + Tambah baris
+        </button>
+
+        @if (barisKeluar.Count > 0)
+        {
+            <div class="tni-card" style="margin-top:8px">
+                <div class="tni-row">
+                    <span class="tni-k">Total @LabelKeluar(keluarJenis, keluarArah).ToLower()</span>
+                    <span class="tni-b" style="color:@(ArahPakai(keluarJenis, keluarArah) < 0 ? "var(--tni-bad)" : "var(--tni-ok)")">
+                        @Tanda(keluarJenis, keluarArah)@Total(barisKeluar, "KEMEJA") kemeja ·
+                        @Tanda(keluarJenis, keluarArah)@Total(barisKeluar, "CELANA") celana
+                    </span>
+                </div>
+            </div>
+        }
+
+        <div class="tni-bot">
+            @if (!konfirmKeluar)
+            {
+                <button class="tni-btn tni-btn-p"
+                        disabled="@(!BarisValid(barisKeluar) || string.IsNullOrWhiteSpace(keluarAlasan) || isSaving)"
+                        @onclick="@(() => konfirmKeluar = true)">
+                    Simpan pengeluaran
+                </button>
+            }
+            else
+            {
+                <span class="tni-note" style="flex:1">
+                    @LabelKeluar(keluarJenis, keluarArah): @Tanda(keluarJenis, keluarArah)@Total(barisKeluar, "KEMEJA") kemeja,
+                    @Tanda(keluarJenis, keluarArah)@Total(barisKeluar, "CELANA") celana?
+                </span>
+                <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmKeluar = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="SimpanKeluarAsync">
+                    @(isSaving ? "Menyimpan..." : "Ya, simpan")
+                </button>
+            }
+        </div>
+    }
+
+    @* ==================== TAB SISA STOK ==================== *@
+    @if (tab == "SALDO")
+    {
+        <div class="tni-seg">
+            <button class="@(jenisSaldo == "KEMEJA" ? "on" : "")" @onclick="@(() => GantiJenisSaldo("KEMEJA"))">Kemeja</button>
+            <button class="@(jenisSaldo == "CELANA" ? "on" : "")" @onclick="@(() => GantiJenisSaldo("CELANA"))">Celana</button>
+        </div>
+
+        <input class="tni-inp tni-search" placeholder="Cari kode pola..."
+               @bind="searchSaldo" @bind:event="oninput" @onkeyup="HandleSaldoKeyUp" />
+
+        <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+            <input type="checkbox" @bind="hanyaAda" @bind:after="LoadSaldoAsync" />
+            Hanya yang ada stoknya
+        </label>
+
+        @if (isLoading)
+        {
+            <p class="tni-note">Memuat...</p>
+        }
+        else if (saldo.Count == 0)
+        {
+            <div class="tni-card"><span class="tni-note">Tidak ada pola yang cocok.</span></div>
+        }
+        else
+        {
+            @* Tabel ringkas (2026-10-07): baris diketuk = riwayat mutasi pola itu. *@
+            <div class="tni-tblwrap">
+                <table class="tni-tbl">
+                    <thead>
+                        <tr><th>Pola</th><th>Saldo</th><th>Bebas</th><th>Butuh</th><th>Kurang</th></tr>
+                    </thead>
+                    <tbody>
+                        @* Baris sudah terurut per grup gender dari SP -- header tiap ganti grup. *@
+                        @for (var i = 0; i < saldo.Count; i++)
+                        {
+                            var s = saldo[i];
+                            @if (i == 0 || saldo[i - 1].GrupGender != s.GrupGender)
+                            {
+                                <tr class="tni-tbl-grp">
+                                    <td colspan="5">
+                                        _@s.GrupGender · @TniUrutStok.Label(s.GrupGender)
+                                        <span style="font-weight:400">(@saldo.Count(x => x.GrupGender == s.GrupGender) pola)</span>
+                                    </td>
+                                </tr>
+                            }
+                            <tr @onclick="@(() => OpenRiwayatAsync(s))"
+                                title="@(s.SaldoMinus ? "Saldo minus — setoran belum dicatat?" : null)">
+                                <td>
+                                    <span class="tni-code">@s.Kode</span>
+                                    @if (!s.IsActive)
+                                    {
+                                        <span class="tni-chip tni-chip-mut" style="margin-left:4px">nonaktif</span>
+                                    }
+                                </td>
+                                <td style="@(s.SaldoMinus ? "color:var(--tni-bad);font-weight:700" : "")">@s.Saldo</td>
+                                <td>@s.StokBebas</td>
+                                <td>@s.KebutuhanSisa</td>
+                                <td style="font-weight:700;color:@(s.Kurang ? "var(--tni-ink)" : "var(--tni-mut)")">@s.Kekurangan</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (saldo.Any(s => s.SaldoMinus))
+            {
+                <p class="tni-note" style="color:var(--tni-bad);margin-top:6px">
+                    Saldo merah = minus — setoran belum dicatat?
+                </p>
+            }
+        }
+    }
+
+    @* ==================== TAB RIWAYAT (2026-10-06) ====================
+       Setoran & pengeluaran manual, terbaru dulu, bisa DIEDIT & DIHAPUS per header.
+       TERPAKAI (scan) & BONGKAR (pembatalan) tidak tampil di sini. *@
+    @if (tab == "RIWAYAT")
+    {
+        <div class="tni-seg">
+            <button class="@(filterRiwayat == "" ? "on" : "")" @onclick="@(() => GantiFilterRiwayat(""))">Semua</button>
+            <button class="@(filterRiwayat == "MASUK" ? "on" : "")" @onclick="@(() => GantiFilterRiwayat("MASUK"))">Setoran</button>
+            <button class="@(filterRiwayat == "RUSAK" ? "on" : "")" @onclick="@(() => GantiFilterRiwayat("RUSAK"))">Rusak</button>
+        </div>
+
+        @* 2026-10-07: SATU bentuk kartu untuk setoran (per tanggal & supplier) dan
+           pengeluaran (RUSAK / KOREKSI, alter_77): master di atas, tabel kecil isi
+           size di bawah, tombol Edit (pop up) & Hapus (seluruh isi). *@
+        @if (isLoading && entri.Count == 0)
+        {
+            <p class="tni-note">Memuat...</p>
+        }
+        else if (entri.Count == 0)
+        {
+            <div class="tni-card"><span class="tni-note">Belum ada setoran atau pengeluaran.</span></div>
+        }
+        else
+        {
+            @foreach (var g in entri)
+            {
+                var e = g[0];
+                var setoran = e.EntriTipe == "SETORAN";
+                var kunci = $"{e.EntriTipe}-{e.EntriId}";
+                var arah = setoran ? 1 : Math.Sign(g.Sum(x => x.Qty));
+                var label = setoran ? "Setoran" : LabelKeluar(e.JenisMutasi, arah);
+                var totalK = g.Where(x => x.JenisItem == "KEMEJA").Sum(x => Math.Abs(x.Qty));
+                var totalC = g.Where(x => x.JenisItem == "CELANA").Sum(x => Math.Abs(x.Qty));
+                var master = setoran ? e.Supplier : e.Alasan;
+                <div class="tni-card">
+                    <div class="tni-row">
+                        <span>
+                            <span class="tni-chip @(setoran ? "tni-chip-ok" : e.JenisMutasi == "RUSAK" ? "tni-chip-bad" : "tni-chip-warn")">@label</span>
+                            <b style="margin-left:4px">@e.Tanggal.ToString("dd/MM/yyyy")</b>
+                            <span class="tni-k">·</span>
+                            @if (string.IsNullOrEmpty(master))
+                            {
+                                <span class="tni-k">@(setoran ? "tanpa supplier" : "tanpa alasan")</span>
+                            }
+                            else
+                            {
+                                <b>@master</b>
+                            }
+                        </span>
+                        <span class="tni-b" style="font-size:16px;flex:0 0 auto;color:@(arah < 0 ? "var(--tni-bad)" : "var(--tni-ok)")">
+                            @(arah < 0 ? "−" : "+")@(totalK + totalC)
+                        </span>
+                    </div>
+                    <div class="tni-note" style="margin-top:2px">
+                        @totalK kemeja · @totalC celana
+                        @if (!string.IsNullOrEmpty(e.CreatedByNama))
+                        {
+                            <text> · @e.CreatedByNama</text>
+                        }
+                        @if (e.UpdatedAt.HasValue)
+                        {
+                            <text> · diubah @e.UpdatedAt.Value.ToString("dd/MM HH:mm")</text>
+                        }
+                    </div>
+
+                    <div class="tni-tblwrap" style="margin-top:6px">
+                        <table class="tni-tbl tni-tbl-sm">
+                            <thead>
+                                <tr><th>Size</th><th>Qty</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var jenis in new[] { "KEMEJA", "CELANA" }.Where(j => g.Any(x => x.JenisItem == j)))
+                                {
+                                    var isi = g.Where(x => x.JenisItem == jenis).ToList();
+                                    <tr class="tni-tbl-grp">
+                                        <td colspan="2">@(jenis == "KEMEJA" ? "Kemeja" : "Celana") (@isi.Sum(x => Math.Abs(x.Qty)))</td>
+                                    </tr>
+                                    @foreach (var x in isi)
+                                    {
+                                        <tr>
+                                            <td><span class="tni-code">@x.Kode</span></td>
+                                            <td style="font-weight:700">@Math.Abs(x.Qty)</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px">
+                        @if (konfirmHapusKey != kunci)
+                        {
+                            <button class="tni-btn tni-btn-o" style="padding:4px 10px;font-size:11.5px"
+                                    @onclick="@(() => BukaEdit(g))">
+                                <i class="fe fe-edit-2"></i> Edit
+                            </button>
+                            <button class="tni-btn tni-btn-r" style="padding:4px 10px;font-size:11.5px"
+                                    @onclick="@(() => konfirmHapusKey = kunci)">
+                                <i class="fe fe-trash-2"></i> Hapus
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="tni-note" style="flex:1;align-self:center">
+                                Hapus seluruh @label.ToLower() ini (@(totalK + totalC) pcs)? Saldo ikut berubah.
+                            </span>
+                            <button class="tni-btn tni-btn-o" style="padding:4px 10px;font-size:11.5px"
+                                    @onclick="@(() => konfirmHapusKey = null)">Batal</button>
+                            <button class="tni-btn tni-btn-c" style="padding:4px 10px;font-size:11.5px;flex:0 0 auto"
+                                    disabled="@isSaving" @onclick="@(() => HapusEntriAsync(e, label))">
+                                @(isSaving ? "..." : "Ya, hapus")
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (entri.Count < riwayatTotal)
+            {
+                <button class="tni-btn tni-btn-o" style="width:100%" disabled="@isLoading"
+                        @onclick="MuatRiwayatLagiAsync">
+                    @(isLoading ? "Memuat..." : $"Muat lagi ({entri.Count} dari {riwayatTotal})")
+                </button>
+            }
+        }
+    }
+</div>
+
+@* ---------------- sheet riwayat mutasi satu pola ---------------- *@
+@if (riwayatPola is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => riwayatPola = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-k">RIWAYAT MUTASI</div>
+                    <div class="tni-pola-lg">@riwayatPola.Kode</div>
+                </div>
+                <button class="tni-btn" @onclick="@(() => riwayatPola = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (riwayat.Count == 0)
+            {
+                <span class="tni-note">Belum ada mutasi untuk pola ini.</span>
+            }
+            else
+            {
+                @foreach (var m in riwayat)
+                {
+                    <div class="tni-li">
+                        <span style="flex:1">
+                            <b>@m.JenisMutasiLabel</b>
+                            <div class="tni-note">
+                                @m.Tanggal.ToString("dd/MM/yy")
+                                @if (!string.IsNullOrEmpty(m.Supplier))
+                                {
+                                    <text> · supplier <b>@m.Supplier</b></text>
+                                }
+                                @if (!string.IsNullOrEmpty(m.PersonelKodeRef))
+                                {
+                                    <text> · @m.PersonelKodeRef</text>
+                                }
+                                @if (!string.IsNullOrEmpty(m.CreatedByNama))
+                                {
+                                    <text> · @m.CreatedByNama</text>
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(m.Alasan))
+                            {
+                                <div class="tni-note" style="font-style:italic">@m.Alasan</div>
+                            }
+                        </span>
+                        <span class="tni-b" style="color:@(m.Qty < 0 ? "var(--tni-bad)" : "var(--tni-ok)")">
+                            @(m.Qty > 0 ? "+" : "")@m.Qty
+                        </span>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@* ---------------- pop up edit setoran / pengeluaran: master + isi (2026-10-07) ----------------
+   Isinya sama dengan tab input masing-masing (master di atas, baris di bawah). *@
+@if (editId is not null)
+{
+    var editSetoran = editTipe == "SETORAN";
+    <div class="tni-sheet-backdrop" @onclick="TutupEdit">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-k">EDIT @(editSetoran ? "SETORAN" : "PENGELUARAN")</div>
+                    <b>@Total(editBaris, "KEMEJA") kemeja · @Total(editBaris, "CELANA") celana</b>
+                </div>
+                <button class="tni-btn" @onclick="TutupEdit"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (editSetoran)
+            {
+                <div class="tni-k">Tanggal setoran</div>
+                <input class="tni-inp" type="date" @bind="editTanggal" />
+
+                <div class="tni-k" style="margin-top:8px">Supplier</div>
+                <input class="tni-inp" maxlength="150" placeholder="nama supplier / penjahit"
+                       @bind="editSupplier" @bind:event="oninput" />
+            }
+            else
+            {
+                <div class="tni-k">Tanggal</div>
+                <input class="tni-inp" type="date" @bind="editTanggal" />
+
+                <div class="tni-k" style="margin-top:8px">Alasan (wajib)</div>
+                <input class="tni-inp" maxlength="500" @bind="editAlasan" @bind:event="oninput" />
+            }
+
+            <div class="tni-seg" style="margin-top:10px">
+                <button class="@(editJenisBaris == "KEMEJA" ? "on" : "")" @onclick="@(() => editJenisBaris = "KEMEJA")">Kemeja</button>
+                <button class="@(editJenisBaris == "CELANA" ? "on" : "")" @onclick="@(() => editJenisBaris = "CELANA")">Celana</button>
+            </div>
+
+            @* OnChanged: supaya total di judul pop up ikut dihitung ulang *@
+            <TniStokBarisEditor Compact="true" Baris="editBaris" PolaKemeja="editPolaKemeja" PolaCelana="editPolaCelana"
+                                OnChanged="@(() => editError = string.Empty)" />
+
+            <button class="tni-btn tni-btn-o" style="width:100%"
+                    @onclick="@(() => editBaris.Add(new TniStokSetoranItem { JenisItem = editJenisBaris }))">
+                + Tambah baris
+            </button>
+
+            @if (!string.IsNullOrEmpty(editError))
+            {
+                <div class="alert alert-danger" style="margin-top:8px">@editError</div>
+            }
+
+            <div style="display:flex;gap:6px;margin-top:12px">
+                <button class="tni-btn tni-btn-o" style="flex:1" @onclick="TutupEdit">Batal</button>
+                <button class="tni-btn tni-btn-p" style="flex:2"
+                        disabled="@(!BarisValid(editBaris) || (!editSetoran && string.IsNullOrWhiteSpace(editAlasan)) || isSaving)"
+                        @onclick="SimpanEditAsync">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private bool konfirmSetoran;
+    private bool konfirmKeluar;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private string tab = "SETORAN";
+    private DateTime tanggal = DateTime.Today;
+
+    // ---- setoran
+    private string jenisBaris = "KEMEJA";
+    private List<TniStokSetoranItem> baris = new();
+    private string supplier = string.Empty;
+
+    // ---- keluarkan (2026-10-07: banyak baris, sama dengan setoran)
+    private string keluarJenis = "RUSAK";          // RUSAK | KOREKSI
+    private int keluarArah = -1;                    // KOREKSI saja: 1 tambah | -1 kurangi
+    private string keluarAlasan = string.Empty;
+    private string jenisBarisKeluar = "KEMEJA";
+    private List<TniStokSetoranItem> barisKeluar = new();
+
+    // ---- riwayat (tab) -- setoran & pengeluaran, satu kartu per header
+    private string filterRiwayat = string.Empty;   // "" | MASUK | RUSAK | KOREKSI
+    private List<TniStokRiwayatManualRow> riwayatRows = new();
+    // satu entri = baris-baris satu setoran atau satu pengeluaran
+    private List<List<TniStokRiwayatManualRow>> entri = new();
+    private int riwayatTotal;                       // jumlah ENTRI
+    private int riwayatPage = 1;
+    private string? konfirmHapusKey;                // "SETORAN-5" | "KELUAR-3"
+    private const int RiwayatPageSize = 15;
+
+    // ---- pop up edit (setoran atau pengeluaran)
+    private int? editId;
+    private string editTipe = "SETORAN";            // SETORAN | KELUAR
+    private DateTime editTanggal = DateTime.Today;
+    private string editSupplier = string.Empty;
+    private string editJenis = "RUSAK";
+    private int editArah = -1;
+    private string editAlasan = string.Empty;
+    private string editJenisBaris = "KEMEJA";
+    private List<TniStokSetoranItem> editBaris = new();
+    private List<TniPolaDto> editPolaKemeja = new();
+    private List<TniPolaDto> editPolaCelana = new();
+    private string editError = string.Empty;
+
+    // ---- sisa stok
+    private string jenisSaldo = "KEMEJA";
+    private string searchSaldo = string.Empty;
+    private bool hanyaAda;
+    private List<TniStokSaldoDto> saldo = new();
+
+    private TniStokSaldoDto? riwayatPola;
+    private List<TniStokMutasiDto> riwayat = new();
+
+    private List<TniPolaDto> polaKemeja = new();
+    private List<TniPolaDto> polaCelana = new();
+
+    private System.Threading.Timer? debounceTimer;
+
+    // ---- helper bersama setoran & pengeluaran
+    private static int Total(List<TniStokSetoranItem> b, string jenis) =>
+        b.Where(x => x.JenisItem == jenis).Sum(x => x.Qty);
+
+    private static bool BarisValid(List<TniStokSetoranItem> b) =>
+        b.Count > 0 && b.All(x => x.PolaId > 0 && x.Qty > 0);
+
+    // RUSAK selalu mengurangi; KOREKSI mengikuti arah.
+    private static int ArahPakai(string jenis, int arah) => jenis == "RUSAK" ? -1 : arah;
+
+    private static string Tanda(string jenis, int arah) => ArahPakai(jenis, arah) < 0 ? "−" : "+";
+
+    private static string LabelKeluar(string jenis, int arah) =>
+        jenis == "RUSAK" ? "Rusak" : arah < 0 ? "Koreksi kurangi" : "Koreksi tambah";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+        if (hasAccess != true) return;
+
+        await OrderState.EnsureLoadedAsync();
+
+        // Hanya pola AKTIF yang boleh dipilih untuk setoran / pengeluaran.
+        polaKemeja = TniUrutStok.Urutkan(await PolaApi.GetListAsync("KEMEJA", hanyaAktif: true));
+        polaCelana = TniUrutStok.Urutkan(await PolaApi.GetListAsync("CELANA", hanyaAktif: true));
+
+        TambahBaris();
+        TambahBarisKeluar();
+    }
+
+    // ---------- setoran ----------
+    private void TambahBaris()
+    {
+        baris.Add(new TniStokSetoranItem { JenisItem = jenisBaris });
+        konfirmSetoran = false;
+    }
+
+    private async Task SimpanSetoranAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err, hasil) = await StokApi.SetoranAsync(new TniStokSetoranRequest
+        {
+            Tanggal = tanggal,
+            Supplier = string.IsNullOrWhiteSpace(supplier) ? null : supplier.Trim(),
+            Items = baris
+        });
+
+        isSaving = false;
+        konfirmSetoran = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        // 2026-10-07: tanggal & supplier sama -> masuk ke setoran yang sudah ada
+        infoMessage = $"Setoran tersimpan: {hasil?.TotalKemeja ?? 0} kemeja, {hasil?.TotalCelana ?? 0} celana " +
+                      $"({hasil?.JumlahBaris ?? 0} pola)" +
+                      (hasil?.Digabung == true ? " — digabung ke setoran tanggal & supplier yang sama." : ".");
+
+        // form kosong lagi
+        baris = new List<TniStokSetoranItem>();
+        supplier = string.Empty;
+        TambahBaris();
+    }
+
+    // ---------- keluarkan ----------
+    private void TambahBarisKeluar()
+    {
+        barisKeluar.Add(new TniStokSetoranItem { JenisItem = jenisBarisKeluar });
+        konfirmKeluar = false;
+    }
+
+    private async Task SimpanKeluarAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var label = LabelKeluar(keluarJenis, keluarArah);
+        var tanda = Tanda(keluarJenis, keluarArah);
+        var k = Total(barisKeluar, "KEMEJA");
+        var c = Total(barisKeluar, "CELANA");
+
+        var (ok, err) = await StokApi.KeluarAsync(new TniStokKeluarRequest
+        {
+            Tanggal = tanggal,
+            JenisMutasi = keluarJenis,
+            Arah = ArahPakai(keluarJenis, keluarArah),
+            Alasan = keluarAlasan.Trim(),
+            Items = barisKeluar
+        });
+
+        isSaving = false;
+        konfirmKeluar = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"{label} tersimpan: {tanda}{k} kemeja, {tanda}{c} celana.";
+
+        // form kosong lagi (jenis & arah dipertahankan)
+        barisKeluar = new List<TniStokSetoranItem>();
+        keluarAlasan = string.Empty;
+        TambahBarisKeluar();
+    }
+
+    // ---------- riwayat (tab) ----------
+    private async Task GoRiwayat()
+    {
+        tab = "RIWAYAT";
+        await MuatRiwayatAsync(reset: true);
+    }
+
+    private async Task GantiFilterRiwayat(string f)
+    {
+        if (filterRiwayat == f) return;
+        filterRiwayat = f;
+        await MuatRiwayatAsync(reset: true);
+    }
+
+    private async Task MuatRiwayatLagiAsync() => await MuatRiwayatAsync(reset: false);
+
+    private async Task MuatRiwayatAsync(bool reset)
+    {
+        isLoading = true;
+        konfirmHapusKey = null;
+
+        if (reset) { riwayatPage = 1; riwayatRows = new(); }
+        else riwayatPage++;
+
+        // paging per ENTRI -- satu setoran/pengeluaran tidak pernah terpotong antar halaman
+        var result = await StokApi.GetRiwayatManualAsync(
+            jenisMutasi: string.IsNullOrEmpty(filterRiwayat) ? null : filterRiwayat,
+            pageNumber: riwayatPage, pageSize: RiwayatPageSize);
+
+        riwayatRows.AddRange(result.Items);
+        entri = riwayatRows
+            .GroupBy(r => (r.EntriTipe, r.EntriId))   // urutan kemunculan pertama dipertahankan
+            .Select(g => g.ToList())
+            .ToList();
+        riwayatTotal = result.TotalEntri;
+        isLoading = false;
+    }
+
+    private async Task HapusEntriAsync(TniStokRiwayatManualRow e, string label)
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err) = e.EntriTipe == "SETORAN"
+            ? await StokApi.HapusSetoranAsync(e.EntriId)
+            : await StokApi.HapusKeluarAsync(e.EntriId);
+
+        isSaving = false;
+        konfirmHapusKey = null;
+
+        if (!ok) { errorMessage = err; return; }
+
+        var master = e.EntriTipe == "SETORAN" ? e.Supplier : e.Alasan;
+        infoMessage = $"{label} {e.Tanggal:dd/MM/yyyy}" +
+                      (string.IsNullOrEmpty(master) ? "" : $" ({master})") + " dihapus.";
+        await MuatRiwayatAsync(reset: true);
+    }
+
+    // ---------- pop up edit ----------
+    private void BukaEdit(List<TniStokRiwayatManualRow> g)
+    {
+        var e = g[0];
+        editId = e.EntriId;
+        editTipe = e.EntriTipe;
+        editTanggal = e.Tanggal;
+        editSupplier = e.Supplier ?? string.Empty;
+        editJenis = e.EntriTipe == "KELUAR" ? e.JenisMutasi : "RUSAK";
+        editArah = e.EntriTipe == "KELUAR" && g.Sum(x => x.Qty) > 0 ? 1 : -1;
+        editAlasan = e.Alasan ?? string.Empty;
+        editJenisBaris = "KEMEJA";
+        editError = string.Empty;
+        konfirmHapusKey = null;
+
+        // qty di form selalu positif -- tanda pengeluaran dari jenis/arah
+        editBaris = g.Select(x => new TniStokSetoranItem
+        {
+            JenisItem = x.JenisItem,
+            PolaId = x.PolaId,
+            Qty = Math.Abs(x.Qty)
+        }).ToList();
+
+        // Pola yang kini NONAKTIF tetap harus tampil untuk baris lamanya
+        // (SP mengizinkan baris lama dipertahankan; pola baru wajib aktif).
+        editPolaKemeja = TambahPolaLama(polaKemeja, g, "KEMEJA");
+        editPolaCelana = TambahPolaLama(polaCelana, g, "CELANA");
+    }
+
+    private static List<TniPolaDto> TambahPolaLama(
+        List<TniPolaDto> aktif, List<TniStokRiwayatManualRow> isi, string jenis)
+    {
+        var hasil = new List<TniPolaDto>(aktif);
+        foreach (var x in isi.Where(x => x.JenisItem == jenis && aktif.All(p => p.PolaId != x.PolaId)))
+            hasil.Add(new TniPolaDto { PolaId = x.PolaId, JenisItem = jenis, Kode = $"{x.Kode} (nonaktif)" });
+        return hasil;
+    }
+
+    private void TutupEdit()
+    {
+        if (isSaving) return;
+        editId = null;
+    }
+
+    private async Task SimpanEditAsync()
+    {
+        if (editId is null) return;
+
+        isSaving = true;
+        editError = string.Empty;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var k = Total(editBaris, "KEMEJA");
+        var c = Total(editBaris, "CELANA");
+
+        (bool ok, string err) = editTipe == "SETORAN"
+            ? await StokApi.EditSetoranAsync(editId.Value, new TniStokSetoranRequest
+            {
+                Tanggal = editTanggal,
+                Supplier = string.IsNullOrWhiteSpace(editSupplier) ? null : editSupplier.Trim(),
+                Items = editBaris
+            })
+            : await StokApi.EditKeluarAsync(editId.Value, new TniStokKeluarRequest
+            {
+                Tanggal = editTanggal,
+                JenisMutasi = editJenis,
+                Arah = ArahPakai(editJenis, editArah),
+                Alasan = editAlasan.Trim(),
+                Items = editBaris
+            });
+
+        isSaving = false;
+
+        if (!ok) { editError = err; return; }   // pop up tetap terbuka
+
+        var label = editTipe == "SETORAN" ? "Setoran" : LabelKeluar(editJenis, editArah);
+        editId = null;
+        infoMessage = $"{label} diperbarui: {k} kemeja, {c} celana.";
+        await MuatRiwayatAsync(reset: true);
+    }
+
+    // ---------- sisa stok ----------
+    private async Task GoSaldo()
+    {
+        tab = "SALDO";
+        await LoadSaldoAsync();
+    }
+
+    private async Task GantiJenisSaldo(string j)
+    {
+        if (jenisSaldo == j) return;
+        jenisSaldo = j;
+        await LoadSaldoAsync();
+    }
+
+    private async Task LoadSaldoAsync()
+    {
+        isLoading = true;
+        saldo = await StokApi.GetSaldoAsync(jenisSaldo, searchSaldo, hanyaAda);
+        isLoading = false;
+    }
+
+    private void HandleSaldoKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadSaldoAsync();
+                StateHasChanged();
+            });
+        }, null, 300, Timeout.Infinite);
+    }
+
+    private async Task OpenRiwayatAsync(TniStokSaldoDto s)
+    {
+        riwayatPola = s;
+        var result = await StokApi.GetRiwayatAsync(s.JenisItem, s.PolaId, pageSize: 50);
+        riwayat = result.Items;
+    }
+
+    public void Dispose() => debounceTimer?.Dispose();
+}

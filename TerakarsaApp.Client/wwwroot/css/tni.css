@@ -1,0 +1,366 @@
+/* =============================================================
+   Module PDH TNI AD (Prompt 60-69) -- design system halaman /tni/...
+   Diambil dari mockup owner: claude prompt/tni/mockup_tampilan.html
+
+   MOBILE-FIRST: semua halaman dipakai di HP. Kartu, bukan tabel lebar;
+   tombol aksi utama menempel di bawah (.tni-bot).
+
+   JANGAN memakai class Bootstrap `rounded` atau `border` di halaman /tni/...
+   -- tema app meng-override keduanya (radius jadi elips + padding siluman
+   0.75rem). Border & radius selalu dari class di file ini atau inline.
+   ============================================================= */
+
+.tni {
+    --tni-navy: #042C53;
+    --tni-navy2: #0B3D6E;
+    --tni-coral: #C8553D;
+    --tni-gold: #C99A2E;
+    --tni-ok: #1E8E5A;
+    --tni-okbg: #E6F4EC;
+    --tni-warn: #B7791F;
+    --tni-warnbg: #FDF3DC;
+    --tni-bad: #C0392B;
+    --tni-badbg: #FBE7E4;
+    --tni-ink: #1B2430;
+    --tni-mut: #6B7685;
+    --tni-line: #E3E7EC;
+    --tni-bg: #F3F5F8;
+    --tni-card: #fff;
+
+    color: var(--tni-ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* ---------- kepala halaman ---------- */
+.tni-top {
+    background: var(--tni-navy);
+    color: #fff;
+    padding: 12px 14px 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+.tni-top .tni-t {
+    font-size: 17px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tni-top .tni-s {
+    font-size: 12px;
+    opacity: .82;
+    margin-top: 3px;
+}
+
+/* ---------- kartu ---------- */
+.tni-card {
+    background: var(--tni-card);
+    border: 1px solid var(--tni-line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+.tni-card.tni-tap { cursor: pointer; }
+.tni-card.tni-tap:hover { border-color: var(--tni-navy2); }
+.tni-card.tni-off { background: #FAFBFC; }
+
+.tni-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.tni-k { font-size: 11.5px; color: var(--tni-mut); }
+.tni-b { font-weight: 700; }
+.tni-note { font-size: 11px; color: var(--tni-mut); line-height: 1.4; }
+.tni-sec {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--tni-mut);
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    margin: 10px 0 6px;
+}
+
+/* ---------- chip ---------- */
+.tni-chip {
+    display: inline-block;
+    font-size: 10.5px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tni-chip-ok   { background: var(--tni-okbg);   color: var(--tni-ok); }
+.tni-chip-warn { background: var(--tni-warnbg); color: var(--tni-warn); }
+.tni-chip-bad  { background: var(--tni-badbg);  color: var(--tni-bad); }
+.tni-chip-mut  { background: #EEF1F4;           color: var(--tni-mut); }
+.tni-chip-navy { background: #E3ECF5;           color: var(--tni-navy); }
+
+/* ---------- kode pola / box: selalu monospace ---------- */
+.tni-pola {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-weight: 700;
+    color: var(--tni-navy);
+}
+.tni-pola-lg {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-weight: 800;
+    font-size: 17px;
+    color: var(--tni-navy);
+    letter-spacing: .3px;
+}
+
+/* ---------- segmented ---------- */
+.tni-seg {
+    display: flex;
+    background: #E3E8EE;
+    border-radius: 9px;
+    padding: 3px;
+    margin-bottom: 10px;
+}
+.tni-seg > button {
+    flex: 1;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 0;
+    border-radius: 7px;
+    color: var(--tni-mut);
+    background: transparent;
+    border: 0;
+}
+.tni-seg > button.on { background: var(--tni-navy); color: #fff; }
+
+/* ---------- angka besar ---------- */
+.tni-stat4 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.tni-stat4 > div {
+    background: #fff;
+    border: 1px solid var(--tni-line);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.tni-stat4 b { display: block; font-size: 19px; line-height: 1.2; }
+
+/* ---------- bar bawah yang menempel ---------- */
+.tni-bot {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    border-top: 1px solid var(--tni-line);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px -12px -12px;
+    z-index: 5;
+}
+
+/* ---------- tombol ---------- */
+.tni-btn {
+    border-radius: 9px;
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    text-align: center;
+    border: 0;
+    background: #EEF1F4;
+    color: var(--tni-ink);
+}
+.tni-btn-p { background: var(--tni-navy);  color: #fff; flex: 1; }
+.tni-btn-c { background: var(--tni-coral); color: #fff; flex: 1; }
+.tni-btn-g { background: var(--tni-ok);    color: #fff; }
+.tni-btn-o { background: #fff; border: 1.5px solid var(--tni-navy); color: var(--tni-navy); }
+.tni-btn-r { background: #fff; border: 1.5px solid var(--tni-bad);  color: var(--tni-bad); }
+.tni-btn:disabled { opacity: .5; }
+
+/* ---------- input ---------- */
+.tni-inp {
+    border: 1px solid #CBD3DC;
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 13px;
+    background: #fff;
+    color: var(--tni-ink);
+    width: 100%;
+}
+.tni-inp:focus { outline: 0; border-color: var(--tni-navy2); }
+.tni-search { margin-bottom: 10px; }
+
+/* ---------- tabel mini (dipakai daftar ukuran) ---------- */
+.tni-mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tni-mini td { padding: 6px 2px; border-bottom: 1px solid var(--tni-line); }
+.tni-mini td.tni-n { text-align: right; font-weight: 700; }
+.tni-mini tr:last-child td { border-bottom: 0; }
+
+/* ---------- tabel ringkas dalam kartu (Sisa stok, 2026-10-07) ---------- */
+.tni-tblwrap {
+    background: var(--tni-card);
+    border: 1px solid var(--tni-line);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.tni-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tni-tbl th {
+    background: #F1F3F6;
+    font-weight: 600;
+    text-align: right;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--tni-line);
+    white-space: nowrap;
+}
+.tni-tbl td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--tni-line);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.tni-tbl th:first-child, .tni-tbl td:first-child { text-align: left; }
+.tni-tbl tr:last-child td { border-bottom: 0; }
+.tni-tbl tbody tr { cursor: pointer; }
+.tni-tbl tbody tr:active { background: #F6F8FA; }
+.tni-tbl tr.tni-tbl-grp { cursor: default; }
+/* varian kecil, baris tidak bisa diketuk (isi setoran di tab Riwayat) */
+.tni-tbl-sm { font-size: 12px; }
+.tni-tbl-sm th, .tni-tbl-sm td { padding: 5px 10px; }
+.tni-tbl-sm tbody tr { cursor: default; }
+.tni-tbl-sm tbody tr:active { background: transparent; }
+/* tabel kecil yang bisa diedit (pop up edit setoran / pengeluaran) */
+.tni-tbl-edit td { padding: 3px 6px; vertical-align: middle; }
+.tni-tbl-edit .form-control { font-size: 12px; padding: 4px 8px; min-height: 0; height: auto; }
+.tni-tbl-edit .tni-qty-sm {
+    width: 58px;
+    padding: 4px 4px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+}
+.tni-tbl tr.tni-tbl-grp td {
+    background: #E8EDF3;
+    color: var(--tni-navy);
+    font-weight: 700;
+    font-size: 12px;
+    text-align: left;
+    padding: 6px 10px;
+}
+.tni-code {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 12px;
+    color: var(--tni-coral);
+    background: #F6F7F9;
+    border: 1px solid var(--tni-line);
+    border-radius: 5px;
+    padding: 1px 6px;
+}
+
+/* ---------- daftar baris ---------- */
+.tni-li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--tni-line);
+    font-size: 12.5px;
+}
+.tni-li:last-child { border-bottom: 0; }
+
+/* ---------- sheet bawah (pengganti modal di HP) ---------- */
+.tni-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 20, 30, .45);
+    z-index: 1050;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+.tni-sheet {
+    background: #fff;
+    width: 100%;
+    max-width: 560px;
+    max-height: 88vh;
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+    padding: 14px 14px 18px;
+}
+.tni-sheet-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+/* ---------- progress bar BERTUMPUK (Prompt 69, dashboard) ----------
+   Lima segmen dalam satu batang: terkirim · masuk box · dapat set ·
+   dicetak · belum cetak. Lebar tiap segmen di-set inline dari data
+   (persen), bukan dari kelas, karena nilainya kontinu.
+   Radius & border ditulis inline di komponen yang memakainya mengikuti
+   aturan "jangan pakai class Bootstrap rounded/border". */
+.tni-prog {
+    display: flex;
+    width: 100%;
+    height: 9px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: #EEF1F4;
+    margin: 7px 0 5px;
+}
+.tni-prog > span { display: block; height: 100%; }
+
+.tni-prog-kirim  { background: var(--tni-ok); }
+.tni-prog-box    { background: var(--tni-navy); }
+.tni-prog-set    { background: var(--tni-navy2); }
+.tni-prog-cetak  { background: var(--tni-gold); }
+.tni-prog-belum  { background: #D7DDE4; }
+
+/* legenda kecil di bawah batang */
+.tni-leg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 10.5px;
+    color: var(--tni-mut);
+}
+.tni-leg > span { display: inline-flex; align-items: center; gap: 4px; }
+.tni-leg i {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+/* angka besar persen di kanan nama rawatan */
+.tni-pct { font-size: 20px; font-weight: 800; color: var(--tni-navy); line-height: 1; }
+
+/* ---------- layar lebar: tetap enak dibaca, tidak melebar penuh ---------- */
+@media (min-width: 768px) {
+    .tni { max-width: 760px; }
+    .tni-stat4 { grid-template-columns: repeat(4, 1fr); }
+    .tni-sheet { border-radius: 14px; margin-bottom: 4vh; }
+    .tni-sheet-backdrop { align-items: center; }
+}
+
+/* ---------- bar atas perangkat (tanpa login): tombol Menu + petugas ----------
+   Dipakai TniLayout. Menempel di atas supaya tombol kembali ke menu utama
+   selalu terjangkau jempol di perangkat kios. */
+.tni-bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 0 8px;
+    margin-bottom: 2px;
+    background: var(--tni-bg, #F7F8FA);
+    border-bottom: 1px solid var(--tni-line);
+}
+.tni-bar .tni-btn { padding: 6px 10px; font-size: 12px; }
+.tni-bar .tni-chip { max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

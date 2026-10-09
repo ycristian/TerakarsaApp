@@ -1,0 +1,174 @@
+@inherits LayoutComponentBase
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPerangkatApiService PerangkatApi
+@inject TniPerangkatState Sesi
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Layout semua halaman /tni -- modul ini dipakai SEPERTI STASIUN, TANPA LOGIN.
+   Dua gerbang berurutan, persis alur perangkat stasiun:
+
+     1. belum punya token -> layar KODE PAIRING
+     2. siap              -> halaman isi (@Body)
+
+   TIDAK ADA pemilihan petugas (alter_75): nama petugas melekat pada
+   perangkat dan diatur admin di halaman pengelolaan perangkat.
+
+   Bar atas HANYA memuat identitas perangkat + nama petugasnya. Tombol kembali ke menu
+   utama ADA DI HEADER TIAP HALAMAN lewat komponen TniBackButton -- jangan
+   ditambahkan lagi di sini, nanti ada dua tombol back yang membingungkan.
+
+   Halaman /tni/pembatalan TIDAK memakai layout ini: memutus pembatalan tetap
+   wajib login + module TNI_PDH_APPROVE. *@
+
+@* Padding kiri-kanan 12px (2026-10-07): konten tidak menempel ke tepi layar HP.
+   Hanya di sini -- halaman di dalamnya juga memakai class tni, jadi padding
+   jangan ditaruh di class .tni (bisa dobel). *@
+<div class="tni" style="padding:0 12px 10px">
+
+    @if (!Sesi.IsLoaded)
+    {
+        <p class="tni-note" style="text-align:center;margin-top:40px">Memuat perangkat...</p>
+    }
+
+    @* ---------------- 1. PAIRING ---------------- *@
+    else if (!Sesi.SudahPairing)
+    {
+        <div class="tni-top">
+            <div class="tni-t">Perangkat PDH TNI AD</div>
+            <div class="tni-s">Perangkat ini belum terdaftar</div>
+        </div>
+
+        <div class="tni-card">
+            <div class="tni-note" style="margin-bottom:10px">
+                Masukkan <b>kode pairing 5 karakter</b> dari admin untuk mengaktifkan
+                perangkat ini. Setelah aktif, perangkat tidak perlu login lagi.
+            </div>
+
+            <input class="tni-inp"
+                   style="text-transform:uppercase;font-size:28px;font-weight:800;
+                          text-align:center;letter-spacing:6px"
+                   maxlength="5" inputmode="text" autocomplete="off"
+                   placeholder="-----"
+                   @bind="kodePairing" @bind:event="oninput"
+                   @onkeydown="KodeKeyDown" />
+
+            @if (!string.IsNullOrEmpty(pairingError))
+            {
+                <div class="alert alert-danger" style="margin-top:8px">@pairingError</div>
+            }
+
+            <button class="tni-btn tni-btn-p" style="width:100%;margin-top:10px"
+                    disabled="@(isPairing || kodePairing.Trim().Length < 5)"
+                    @onclick="PairingAsync">
+                @(isPairing ? "Memeriksa..." : "Aktifkan Perangkat")
+            </button>
+
+            <div class="tni-note" style="margin-top:10px">
+                Kode berlaku 15 menit dan hanya bisa dipakai sekali.
+            </div>
+        </div>
+    }
+
+    @* ---------------- 2. SIAP ---------------- *@
+    else
+    {
+        <div class="tni-bar">
+            <span class="tni-k" style="font-weight:700">@Sesi.Perangkat!.PerangkatCode</span>
+            <span style="flex:1"></span>
+
+            <span class="tni-chip tni-chip-navy" title="Petugas perangkat ini">
+                <i class="fe fe-user"></i> @Sesi.PetugasNama
+            </span>
+
+            @* 2026-10-07: tutup tab ini (halaman sering dibuka di tab baru). Kalau
+               browser menolak menutup tab, kembali ke beranda /tni. *@
+            <TniCloseButton Compact="true" FallbackUrl="/tni" />
+        </div>
+
+        @* alter_74: halaman menu yang TIDAK diizinkan untuk perangkat ini diblok. *@
+        @if (MenuTerlarang is { } m)
+        {
+            <div class="tni-card" style="text-align:center;margin-top:24px">
+                <i class="fe fe-lock" style="font-size:26px;color:var(--tni-mut)"></i>
+                <div style="font-weight:700;margin-top:6px">Menu @m.Label tidak diizinkan</div>
+                <div class="tni-note" style="margin-top:4px">
+                    Perangkat <b>@Sesi.Perangkat!.PerangkatCode</b> tidak punya akses ke menu ini.
+                    Minta admin menambahkannya di halaman pengelolaan perangkat.
+                </div>
+                <button class="tni-btn tni-btn-p" style="width:100%;margin-top:10px"
+                        @onclick="@(() => Nav.NavigateTo("/tni"))">
+                    Kembali ke menu
+                </button>
+            </div>
+        }
+        else
+        {
+            @Body
+        }
+    }
+</div>
+
+@code {
+    private string kodePairing = string.Empty;
+    private string pairingError = string.Empty;
+    private bool isPairing;
+
+
+    // Menu pemilik halaman saat ini, bila perangkat TIDAK punya aksesnya.
+    private TniMenu? MenuTerlarang
+    {
+        get
+        {
+            var menu = TniMenu.DariPath(Nav.ToBaseRelativePath(Nav.Uri));
+            return menu is not null && !Sesi.BolehMenu(menu.Code) ? menu : null;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Sesi.OnChange += Berubah;
+        Nav.LocationChanged += LokasiBerubah;
+
+        await Sesi.EnsureLoadedAsync();
+
+    }
+
+    private void Berubah() => StateHasChanged();
+
+    private void LokasiBerubah(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    private async Task KodeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && kodePairing.Trim().Length == 5) await PairingAsync();
+    }
+
+    private async Task PairingAsync()
+    {
+        isPairing = true;
+        pairingError = string.Empty;
+
+        var (ok, error, hasil) = await PerangkatApi.ClaimAsync(kodePairing.Trim().ToUpperInvariant());
+
+        isPairing = false;
+
+        if (!ok || hasil is null || string.IsNullOrEmpty(hasil.Token))
+        {
+            pairingError = ok ? "Kode pairing tidak valid." : error;
+            kodePairing = string.Empty;
+            return;
+        }
+
+        await Sesi.SimpanTokenAsync(hasil.Token, hasil.Perangkat);
+        kodePairing = string.Empty;
+    }
+
+
+    public void Dispose()
+    {
+        Sesi.OnChange -= Berubah;
+        Nav.LocationChanged -= LokasiBerubah;
+    }
+}

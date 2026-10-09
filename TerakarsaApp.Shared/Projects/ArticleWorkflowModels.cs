@@ -14,6 +14,9 @@ public class ArticleWorkflowStepDto
     // Prompt 41: cetak kupon borongan otomatis saat baris step ini diterima -- hanya valid
     // utk RequiresBundle = true, ditolak SP kalau tidak.
     public bool PrintKupon { get; set; }
+    // Prompt 59: harga per pcs yang BERLAKU untuk step artikel ini (dasar upah di Rekap
+    // Produksi stasiun). Bisa diedit per artikel; step Bundling implisit selalu 0.
+    public decimal UnitPrice { get; set; }
     public bool IsBundling { get; set; }
 }
 
@@ -34,6 +37,7 @@ public class ArticleWorkflowStepRequest
     public bool RequiresBundle { get; set; } = true;
     public bool AutoReceive { get; set; }
     public bool PrintKupon { get; set; }
+    public decimal UnitPrice { get; set; }
 }
 
 public class ArticleWorkflowApplyRequest

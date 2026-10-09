@@ -1,0 +1,91 @@
+@* Prompt 70 -- Gate 1 (Layar Tunggu) + banner offline Gate 6. Markup & ukuran mengikuti
+   claude prompt/mockup_70_absensi_rfid.html, 1280x853 CSS px. *@
+
+<div style="width: 100%; height: 100%; box-sizing: border-box; background: #12161F; color: #FFFFFF; display: flex; flex-direction: column">
+
+    <div style="height: 76px; box-sizing: border-box; padding: 0 44px; border-bottom: 1px solid #252C3B; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0">
+        <div style="font-size: 20px; font-weight: 600; letter-spacing: 0.14em; color: #9AA4B5">@GateName</div>
+        <div style="display: flex; align-items: center; gap: 22px">
+            @if (IsOnline)
+            {
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 500; color: #5BD98A">
+                    <span style="width: 12px; height: 12px; border-radius: 50%; background: #5BD98A; display: inline-block"></span>
+                    Terhubung
+                </div>
+            }
+            else
+            {
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 600; color: #F3B14E">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 20h.01"></path>
+                        <path d="M8.5 16.4a5 5 0 0 1 7 0"></path>
+                        <path d="M5 12.9a10 10 0 0 1 5.2-2.7"></path>
+                        <path d="M19 12.9a10 10 0 0 0-3.1-2.1"></path>
+                        <path d="m2 2 20 20"></path>
+                    </svg>
+                    Offline &mdash; @PendingCount tap menunggu dikirim
+                </div>
+            }
+            <button type="button" @onclick="OnMenuClick"
+                    style="font-size: 18px; font-weight: 600; color: #D6DCE6; background: transparent; border: 1px solid #39425A; border-radius: 10px; padding: 12px 28px; cursor: pointer">Menu</button>
+        </div>
+    </div>
+
+    @* Jam tablet yang salah merusak SEMUA jam absensi (check_in_at memakai tapped_at dari gate),
+       jadi peringatannya ditaruh di tempat paling tidak bisa dilewatkan. *@
+    @if (ClockDriftWarning)
+    {
+        <div style="flex-shrink: 0; background: #6B4405; border-bottom: 1px solid #8A5A0C; padding: 14px 44px; display: flex; align-items: center; gap: 14px">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F3E0BC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 6v6l4 2"></path>
+            </svg>
+            <div style="font-size: 19px; font-weight: 600; color: #F3E0BC">
+                Jam tablet beda @ClockDriftText dari jam server &mdash; lapor ke admin, jam absensi bisa salah.
+            </div>
+        </div>
+    }
+
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px; padding: 0 44px; box-sizing: border-box">
+        <div style="text-align: center">
+            <div style="font-size: 148px; font-weight: 600; line-height: 1; letter-spacing: -0.02em">@Now.ToString("HH:mm")</div>
+            <div style="font-size: 26px; color: #9AA4B5; margin-top: 10px">@GateFormat.LongDate(Now)</div>
+        </div>
+        <div style="width: 100%; max-width: 760px; height: 1px; background: #252C3B"></div>
+        <div style="display: flex; align-items: center; gap: 26px">
+            <svg width="78" height="78" viewBox="0 0 24 24" fill="none" stroke="#7D8899" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                <rect x="2" y="5" width="13" height="14" rx="2"></rect>
+                <path d="M17.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M20.5 6a9 9 0 0 1 0 12"></path>
+            </svg>
+            <div style="font-size: 60px; font-weight: 500; color: #E6EAF1">Tempelkan kartu</div>
+        </div>
+    </div>
+
+    <div style="padding: 0 44px 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; flex-shrink: 0">
+        <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 14px; padding: 22px 26px">
+            <div style="font-size: 19px; color: #9AA4B5">Hadir</div>
+            <div style="font-size: 54px; font-weight: 600; line-height: 1.1">@Counts.PresentCount</div>
+        </div>
+        <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 14px; padding: 22px 26px">
+            <div style="font-size: 19px; color: #9AA4B5">Belum ambil kartu</div>
+            <div style="font-size: 54px; font-weight: 600; line-height: 1.1">@Counts.NotTakenCount</div>
+        </div>
+        <div style="background: #1A2030; border: 1px solid #252C3B; border-radius: 14px; padding: 22px 26px">
+            <div style="font-size: 19px; color: #9AA4B5">Perlu cek</div>
+            <div style="font-size: 54px; font-weight: 600; line-height: 1.1; color: #F3B14E">@Counts.NeedCheckCount</div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string GateName { get; set; } = string.Empty;
+    [Parameter] public bool IsOnline { get; set; }
+    [Parameter] public int PendingCount { get; set; }
+    [Parameter] public GateCountsDto Counts { get; set; } = new();
+    [Parameter] public bool ClockDriftWarning { get; set; }
+    [Parameter] public string ClockDriftText { get; set; } = string.Empty;
+    [Parameter] public DateTime Now { get; set; } = DateTime.Now;
+    [Parameter] public EventCallback OnMenuClick { get; set; }
+}

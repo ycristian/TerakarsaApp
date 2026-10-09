@@ -64,6 +64,7 @@ BEGIN
                    e.position_id AS PositionId, p.position_name AS PositionName,
                    e.resource_id AS ResourceId, r.resource_name AS ResourceName,
                    e.join_date AS JoinDate, e.is_active AS IsActive,
+                   e.phone_no AS PhoneNo, e.inactive_date AS InactiveDate, e.inactive_reason AS InactiveReason,
                    e.created_at AS CreatedAt, e.created_by AS CreatedBy,
                    e.updated_at AS UpdatedAt, e.updated_by AS UpdatedBy
             FROM employees e
@@ -104,6 +105,7 @@ BEGIN
            e.position_id AS PositionId, p.position_name AS PositionName,
            e.resource_id AS ResourceId, r.resource_name AS ResourceName,
            e.join_date AS JoinDate, e.is_active AS IsActive,
+           e.phone_no AS PhoneNo, e.inactive_date AS InactiveDate, e.inactive_reason AS InactiveReason,
            e.created_at AS CreatedAt, e.created_by AS CreatedBy,
            e.updated_at AS UpdatedAt, e.updated_by AS UpdatedBy
     FROM employees e
@@ -130,6 +132,7 @@ BEGIN
            e.position_id AS PositionId, p.position_name AS PositionName,
            e.resource_id AS ResourceId, r.resource_name AS ResourceName,
            e.join_date AS JoinDate, e.is_active AS IsActive,
+           e.phone_no AS PhoneNo, e.inactive_date AS InactiveDate, e.inactive_reason AS InactiveReason,
            e.created_at AS CreatedAt, e.created_by AS CreatedBy,
            e.updated_at AS UpdatedAt, e.updated_by AS UpdatedBy
     FROM employees e

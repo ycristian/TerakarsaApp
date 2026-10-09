@@ -1,0 +1,629 @@
+@page "/tni/personel/{Id:int}"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPersonelApiService PersonelApi
+@inject TniPolaApiService PolaApi
+@inject TniPerintahKerjaApiService PkApi
+@inject TniPembatalanApiService PembatalanApi
+@inject NavigationManager Nav
+
+@* Prompt 63: detail satu personel PDH TNI AD.
+   Satuan, kode_ref, dan qr_token TIDAK BISA diubah dari sini (kode sudah tercetak
+   di kartu fisik, token sudah jadi isi QR) -- SP juga menolaknya.
+   Scan TIDAK BISA dihapus dari sini -- hanya lewat pengajuan pembatalan
+   (Prompt 68), yang diputus di /tni/pembatalan oleh user TNI_PDH_APPROVE. *@
+
+<PageTitle>@(p?.KodeRef ?? "Personel") — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (p is null)
+{
+    <div class="tni">
+        <div class="alert alert-warning">Personel tidak ditemukan.</div>
+        <TniCloseButton FallbackUrl="/tni/personel" />
+    </div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t" style="font-family:ui-monospace,Consolas,monospace;font-size:22px">@p.KodeRef</div>
+                <div class="tni-s">@p.Pangkat @p.Nama</div>
+                <div class="tni-s">@p.SatuanName · @p.AreaName</div>
+            </div>
+            <TniCloseButton FallbackUrl="/tni/personel" />
+        </div>
+        <div style="margin-top:8px">
+            <TniStatusChip Status="@p.StatusProgres" />
+            @if (p.PerluReview)
+            {
+                <span class="tni-chip tni-chip-bad">perlu review</span>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
+    }
+
+    @* ---------- POLA ---------- *@
+    <div class="tni-sec">Pola</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div class="tni-card tni-tap" style="flex:1;text-align:center;margin:0"
+             @onclick="@(() => sheetPola = "KEMEJA")">
+            <div class="tni-k">KEMEJA</div>
+            <div class="tni-pola-lg">@p.PolaKemejaKode</div>
+        </div>
+        <div class="tni-card tni-tap" style="flex:1;text-align:center;margin:0"
+             @onclick="@(() => sheetPola = "CELANA")">
+            <div class="tni-k">CELANA</div>
+            <div class="tni-pola-lg">@p.PolaCelanaKode</div>
+        </div>
+    </div>
+
+    @* ---------- RIWAYAT ---------- *@
+    <div class="tni-sec">Riwayat</div>
+    <div class="tni-card">
+        <table class="tni-mini">
+            <tr>
+                <td>Dicetak</td>
+                <td class="tni-n">
+                    @if (p.PrintedAt.HasValue)
+                    {
+                        @p.PrintedAt.Value.ToString("dd/MM/yy HH:mm")
+                        <div class="tni-note">@p.PrintedByNama · @p.PrintCount kali</div>
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+            <tr>
+                <td>Set jadi</td>
+                <td class="tni-n">
+                    @if (p.SetAt.HasValue)
+                    {
+                        @p.SetAt.Value.ToString("dd/MM/yy HH:mm")
+                        <div class="tni-note">@p.SetByNama</div>
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+            <tr>
+                <td>Masuk box</td>
+                <td class="tni-n">
+                    @if (p.BoxedAt.HasValue)
+                    {
+                        <span class="tni-pola">@p.BoxCode</span>
+                        <div class="tni-note">@p.BoxedAt.Value.ToString("dd/MM/yy HH:mm") · @p.BoxedByNama</div>
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+            <tr>
+                <td>Terkirim</td>
+                <td class="tni-n">
+                    @if (p.BoxShippedAt.HasValue)
+                    {
+                        @p.BoxShippedAt.Value.ToString("dd/MM/yy HH:mm")
+                    }
+                    else { <span class="tni-note">belum</span> }
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    @* ---------- IDENTITAS ---------- *@
+    <div class="tni-sec">Identitas</div>
+    <div class="tni-card">
+        <table class="tni-mini">
+            <tr><td>NRP</td><td class="tni-n">@p.Nrp</td></tr>
+            <tr><td>No HP</td><td class="tni-n">@(string.IsNullOrEmpty(p.NoHp) ? "—" : p.NoHp)</td></tr>
+            <tr><td>TB / BB</td><td class="tni-n">
+                @(p.TinggiBadan.HasValue ? $"{p.TinggiBadan} cm" : "—") /
+                @(p.BeratBadan.HasValue ? $"{p.BeratBadan} kg" : "—")
+            </td></tr>
+            <tr><td>Gender</td><td class="tni-n">@p.GenderLabel</td></tr>
+            <tr><td>Kategori</td><td class="tni-n">@p.KategoriLabel</td></tr>
+        </table>
+    </div>
+
+    @* ---------- UKURAN BADAN ---------- *@
+    <div class="tni-sec">Ukuran badan</div>
+    @if (p.TidakHadirUkur)
+    {
+        <div class="tni-card" style="text-align:center">
+            <b>Tidak hadir pengukuran</b>
+            <div class="tni-note" style="margin-top:3px">Memakai pola standar sesuai size di atas</div>
+        </div>
+    }
+    else
+    {
+        <div class="tni-card">
+            <div class="tni-k" style="font-weight:700;margin-bottom:4px">KEMEJA</div>
+            <table class="tni-mini">
+                @foreach (var (label, val) in UkuranKemeja)
+                {
+                    <tr><td>@label</td><td class="tni-n">@Num(val)</td></tr>
+                }
+            </table>
+            <div class="tni-k" style="font-weight:700;margin:10px 0 4px">CELANA</div>
+            <table class="tni-mini">
+                @foreach (var (label, val) in UkuranCelana)
+                {
+                    <tr><td>@label</td><td class="tni-n">@Num(val)</td></tr>
+                }
+            </table>
+        </div>
+    }
+
+    @* ---------- REVIEW ---------- *@
+    @if (p.PerluReview)
+    {
+        <div class="tni-sec">Review</div>
+        <div class="tni-card" style="border-color:var(--tni-bad)">
+            <div style="font-size:12.5px;color:var(--tni-bad)">@p.CatatanReview</div>
+            <input class="tni-inp" style="margin-top:8px" placeholder="Catatan perbaikan (opsional)"
+                   @bind="catatanReview" />
+            <button class="tni-btn tni-btn-g" style="width:100%;margin-top:8px"
+                    disabled="@isSaving" @onclick="MarkReviewedAsync">
+                Tandai sudah diperbaiki
+            </button>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(p.CatatanReview))
+    {
+        <div class="tni-sec">Catatan</div>
+        <div class="tni-card"><span class="tni-note">@p.CatatanReview</span></div>
+    }
+
+    @* ---------- PEMBATALAN (Prompt 68) ---------- *@
+    @if (p.StatusProgres is "MASUK_BOX" or "SET_JADI")
+    {
+        <div class="tni-sec">Pembatalan scan</div>
+        <TniAjukanBatal PersonelId="p.PersonelId"
+                        StatusProgres="@p.StatusProgres"
+                        BoxCode="@p.BoxCode"
+                        OnDiajukan="LoadPembatalanAsync" />
+    }
+
+    <TniRiwayatPembatalan Items="pembatalan" />
+
+    @* ---------- AKSI ---------- *@
+    <div class="tni-bot">
+        @if (!konfirmCetak)
+        {
+            @* Prompt 65: cetak ulang kartu -- berlaku untuk status apa pun. *@
+            <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="@(() => konfirmCetak = true)">
+                <i class="fe fe-printer"></i> Cetak ulang
+            </button>
+            <button class="tni-btn tni-btn-o" @onclick="OpenEditIdentitas">Ubah data</button>
+            <button class="tni-btn tni-btn-o" @onclick="OpenEditPola">Ubah pola</button>
+            @if (p.BolehHapus)
+            {
+                <button class="tni-btn tni-btn-r" @onclick="@(() => sheetHapus = true)">Hapus</button>
+            }
+        }
+        else
+        {
+            <span class="tni-note" style="flex:1">
+                Cetak ulang kartu @p.KodeRef?
+                @if (p.PrintCount > 0)
+                {
+                    <text>Sudah dicetak <b>@p.PrintCount</b> kali.</text>
+                }
+            </span>
+            <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmCetak = false)">Batal</button>
+            <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CetakUlangAsync">
+                @(isSaving ? "Mengirim..." : "Ya, cetak")
+            </button>
+        }
+    </div>
+</div>
+
+@* ---------------- sheet ukuran jadi pola ---------------- *@
+@if (sheetPola is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => sheetPola = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-k">UKURAN JADI @sheetPola</div>
+                    <div class="tni-pola-lg">
+                        @(sheetPola == "KEMEJA" ? p.PolaKemejaKode : p.PolaCelanaKode)
+                    </div>
+                </div>
+                <button class="tni-btn" @onclick="@(() => sheetPola = null)"><i class="fe fe-x"></i></button>
+            </div>
+            <table class="tni-mini">
+                @foreach (var (label, val) in (sheetPola == "KEMEJA" ? PolaKemejaUkuran : PolaCelanaUkuran))
+                {
+                    <tr><td>@label</td><td class="tni-n">@Num(val)</td></tr>
+                }
+            </table>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet ubah identitas ---------------- *@
+@if (formIdentitas is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => formIdentitas = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">Ubah data</div>
+                <button class="tni-btn" @onclick="@(() => formIdentitas = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-note" style="margin-bottom:8px">
+                Satuan, kode <b>@p.KodeRef</b>, dan QR tidak bisa diubah.
+            </div>
+
+            <div class="tni-k">NRP</div>
+            <input class="tni-inp" @bind="formIdentitas.Nrp" inputmode="numeric" />
+
+            <div class="tni-k" style="margin-top:8px">Nama</div>
+            <input class="tni-inp" @bind="formIdentitas.Nama" />
+
+            <div class="tni-k" style="margin-top:8px">Pangkat</div>
+            <input class="tni-inp" @bind="formIdentitas.Pangkat" />
+
+            <div class="tni-k" style="margin-top:8px">No HP</div>
+            <input class="tni-inp" @bind="formIdentitas.NoHp" inputmode="tel" />
+
+            <div class="tni-k" style="margin-top:8px">Gender</div>
+            <select class="tni-inp" @bind="formIdentitas.Gender">
+                <option value="PRIA">Pria</option>
+                <option value="WANITA_NON_HIJAB">Wanita — Non Hijab</option>
+                <option value="WANITA_HIJAB">Wanita — Hijab</option>
+            </select>
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => formIdentitas = null)">Batal</button>
+                <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="SimpanIdentitasAsync">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet ubah pola ---------------- *@
+@if (formPola is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => formPola = null)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">Ubah pola</div>
+                <button class="tni-btn" @onclick="@(() => formPola = null)"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (p.SudahSet)
+            {
+                <div class="alert alert-warning">
+                    Set sudah jadi @p.SetAt?.ToString("dd/MM/yy HH:mm") — pola tidak bisa diubah.
+                    Ajukan pembatalan set dulu.
+                </div>
+            }
+            else
+            {
+                <div class="tni-k">Pola kemeja</div>
+                <SearchableSelect TItem="TniPolaDto"
+                                  Items="polaKemeja"
+                                  Value="formPola.PolaKemejaId"
+                                  ValueChanged="@(v => formPola.PolaKemejaId = v)"
+                                  IdSelector="@(x => x.PolaId)"
+                                  TextSelector="@(x => $"{x.Kode} ({x.TargetGenderLabel})")"
+                                  Placeholder="Cari kode pola kemeja..." />
+
+                <div class="tni-k" style="margin-top:8px">Pola celana</div>
+                <SearchableSelect TItem="TniPolaDto"
+                                  Items="polaCelana"
+                                  Value="formPola.PolaCelanaId"
+                                  ValueChanged="@(v => formPola.PolaCelanaId = v)"
+                                  IdSelector="@(x => x.PolaId)"
+                                  TextSelector="@(x => $"{x.Kode} ({x.TargetGenderLabel})")"
+                                  Placeholder="Cari kode pola celana..." />
+            }
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => formPola = null)">Batal</button>
+                @if (!p.SudahSet)
+                {
+                    <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="SimpanPolaAsync">
+                        @(isSaving ? "Menyimpan..." : "Simpan")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet hapus ---------------- *@
+@if (sheetHapus)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => sheetHapus = false)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-bad)">Hapus personel</div>
+                <button class="tni-btn" @onclick="@(() => sheetHapus = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-note">
+                <b>@p.KodeRef — @p.Nama</b> akan dihapus. Kartunya belum pernah dicetak,
+                jadi nomornya tidak akan dipakai ulang.
+            </div>
+
+            <div class="tni-k" style="margin-top:8px">Alasan (wajib)</div>
+            <input class="tni-inp" @bind="alasanHapus" placeholder="mis. pindah satuan, data ganda" />
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => sheetHapus = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="HapusAsync">
+                    @(isSaving ? "Menghapus..." : "Ya, hapus")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool? hasAccess;
+    private bool isSaving;
+    private bool sheetHapus;
+    private bool konfirmCetak;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+    private string sheetError = string.Empty;
+    private string catatanReview = string.Empty;
+    private string alasanHapus = string.Empty;
+    private string? sheetPola;
+
+    private TniPersonelDetailDto? p;
+    private TniPersonelUpdateRequest? formIdentitas;
+    private TniPersonelSetPolaRequest? formPola;
+
+    private List<TniPolaDto> polaKemeja = new();
+    private List<TniPolaDto> polaCelana = new();
+
+    // Prompt 68: riwayat pembatalan personel ini.
+    private List<TniPembatalanDto> pembatalan = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+
+        if (hasAccess == true) await LoadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (hasAccess == true && p is not null && p.PersonelId != Id) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        p = await PersonelApi.GetByIdAsync(Id);
+        catatanReview = string.Empty;
+        await LoadPembatalanAsync();
+    }
+
+    private async Task LoadPembatalanAsync()
+        => pembatalan = await PembatalanApi.GetByPersonelAsync(Id);
+
+    // ---------- identitas ----------
+    private void OpenEditIdentitas()
+    {
+        if (p is null) return;
+        sheetError = string.Empty;
+        formIdentitas = new TniPersonelUpdateRequest
+        {
+            Nrp = p.Nrp,
+            Nama = p.Nama,
+            Pangkat = p.Pangkat,
+            NoHp = p.NoHp,
+            Gender = p.Gender
+        };
+    }
+
+    private async Task SimpanIdentitasAsync()
+    {
+        if (formIdentitas is null) return;
+
+        isSaving = true;
+        sheetError = string.Empty;
+
+        var (ok, err) = await PersonelApi.UpdateAsync(Id, formIdentitas);
+
+        isSaving = false;
+        if (!ok) { sheetError = err; return; }
+
+        formIdentitas = null;
+        infoMessage = "Data identitas tersimpan.";
+        await LoadAsync();
+    }
+
+    // ---------- pola ----------
+    private async Task OpenEditPola()
+    {
+        if (p is null) return;
+        sheetError = string.Empty;
+        formPola = new TniPersonelSetPolaRequest
+        {
+            PolaKemejaId = p.PolaKemejaId,
+            PolaCelanaId = p.PolaCelanaId
+        };
+
+        // hanya pola aktif yang boleh dipilih
+        if (polaKemeja.Count == 0) polaKemeja = await PolaApi.GetListAsync("KEMEJA", hanyaAktif: true);
+        if (polaCelana.Count == 0) polaCelana = await PolaApi.GetListAsync("CELANA", hanyaAktif: true);
+    }
+
+    private async Task SimpanPolaAsync()
+    {
+        if (formPola is null) return;
+
+        isSaving = true;
+        sheetError = string.Empty;
+
+        var (ok, err) = await PersonelApi.SetPolaAsync(Id, formPola);
+
+        isSaving = false;
+        if (!ok) { sheetError = err; return; }
+
+        formPola = null;
+        infoMessage = "Pola tersimpan.";
+        await LoadAsync();
+    }
+
+    // ---------- review ----------
+    private async Task MarkReviewedAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err) = await PersonelApi.MarkReviewedAsync(Id, catatanReview);
+
+        isSaving = false;
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = "Ditandai sudah diperbaiki.";
+        await LoadAsync();
+    }
+
+    // ---------- cetak ulang (Prompt 65) ----------
+    private async Task CetakUlangAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var (ok, err, hasil) = await PkApi.CetakAsync(new List<int> { Id });
+
+        isSaving = false;
+        konfirmCetak = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"{hasil?.JumlahJob ?? 0} kartu masuk antrian cetak.";
+        await LoadAsync();
+    }
+
+    // ---------- hapus ----------
+    private async Task HapusAsync()
+    {
+        if (string.IsNullOrWhiteSpace(alasanHapus))
+        {
+            sheetError = "Alasan hapus wajib diisi.";
+            return;
+        }
+
+        isSaving = true;
+        sheetError = string.Empty;
+
+        var (ok, err) = await PersonelApi.DeleteAsync(Id, alasanHapus);
+
+        isSaving = false;
+        if (!ok) { sheetError = err; return; }
+
+        Nav.NavigateTo("/tni/personel");
+    }
+
+    // ---------- bantuan tampilan ----------
+    private static string Num(decimal? v) =>
+        v is null ? "—" : v.Value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private List<(string, decimal?)> UkuranKemeja => new()
+    {
+        ("Lingkar Leher", p!.LingkarLeher),
+        ("Lebar Bahu", p.LebarBahu),
+        ("Lingkar Dada", p.LingkarDada),
+        ("Lingkar Perut", p.LingkarPerut),
+        ("Panjang Badan Depan", p.PanjangBadanDepan),
+        ("Panjang Lengan", p.PanjangLengan),
+        ("Lingkar Lengan", p.LingkarLengan),
+        ("Lingkar Ketiak", p.LingkarKetiak)
+    };
+
+    private List<(string, decimal?)> UkuranCelana => new()
+    {
+        ("Lingkar Pinggang", p!.LingkarPinggangCelana),
+        ("Lingkar Pinggul", p.LingkarPinggul),
+        ("Lingkar Pesak", p.LingkarPesak),
+        ("Lingkar Paha", p.LingkarPaha),
+        ("Lingkar Lutut", p.LingkarLutut),
+        ("Lingkar Celana Bawah", p.LingkarCelanaBawah),
+        ("Panjang Celana", p.PanjangCelana)
+    };
+
+    private List<(string, decimal?)> PolaKemejaUkuran
+    {
+        get
+        {
+            var list = new List<(string, decimal?)>
+            {
+                ("Lingkar Kerah", p!.PolaKemejaLingkarKerah),
+                ("Lebar Bahu", p.PolaKemejaLebarBahu),
+                ("Lingkar Dada", p.PolaKemejaLingkarDada),
+                ("Lingkar Perut", p.PolaKemejaLingkarPerut),
+                ("Lingkar Pinggul", p.PolaKemejaLingkarPinggul),
+                ("Panjang Baju", p.PolaKemejaPanjangBaju),
+                ("Lingkar Lengan", p.PolaKemejaLingkarLengan),
+                ("Lingkar Kerung Lengan", p.PolaKemejaLingkarKerungLengan),
+                ("Panjang Lengan", p.PolaKemejaPanjangLengan)
+            };
+
+            // manset hanya ada di pola hijab
+            if (p.PolaKemejaLingkarManset.HasValue)
+                list.Add(("Lingkar Manset", p.PolaKemejaLingkarManset));
+
+            return list;
+        }
+    }
+
+    private List<(string, decimal?)> PolaCelanaUkuran => new()
+    {
+        ("Lingkar Pinggang", p!.PolaCelanaLingkarPinggang),
+        ("Lingkar Pinggul", p.PolaCelanaLingkarPinggul),
+        ("Lingkar Selangkang", p.PolaCelanaLingkarSelangkang),
+        ("Lingkar Paha", p.PolaCelanaLingkarPaha),
+        ("Lingkar Lutut", p.PolaCelanaLingkarLutut),
+        ("Lingkar Kaki", p.PolaCelanaLingkarKaki),
+        ("Panjang Celana", p.PolaCelanaPanjangCelana)
+    };
+}

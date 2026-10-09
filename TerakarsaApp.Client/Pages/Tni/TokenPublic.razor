@@ -1,0 +1,566 @@
+@page "/t/{Token}"
+@layout TerakarsaApp.Client.Layout.BlankLayout
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPublicApiService PublicApi
+@inject TniScanApiService ScanApi
+@inject TniBoxApiService BoxApi
+@inject NavigationManager Nav
+@inject TniPerangkatState Sesi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 66: halaman QR kartu personel PDH TNI AD -- isi QR di kartu adalah
+   {Tni:QrBaseUrl}/t/{qr_token}, jadi link ini bisa dibuka dengan kamera biasa.
+
+   TANPA PERANGKAT -> data terbatas: NRP, size, TB/BB, kategori, rawatan (2026-10-06);
+                      No HP & ukuran badan TIDAK. Komplain (no telp + komentar) boleh.
+   SUDAH LOGIN + punya module TNI_PDH -> data lengkap + aksi.
+
+   Scan TIDAK BISA dihapus dari sini -- "Ajukan batal" (Prompt 68) hanya
+   membuat pengajuan; yang memutus adalah user TNI_PDH_APPROVE di
+   /tni/pembatalan.
+
+   2026-10-06: tombol "Scan QR lain" -> kamera di sheet bawah; QR kartu yang
+   terbaca langsung membuka /t/{token}-nya di halaman ini juga. *@
+
+<PageTitle>@(publik?.KodeRef ?? "Kartu Personel")</PageTitle>
+
+<div class="tni" style="max-width:520px;margin:0 auto;padding:12px">
+    @if (isLoading)
+    {
+        <p class="tni-note" style="text-align:center;margin-top:30px">Memuat...</p>
+    }
+    else if (publik is null)
+    {
+        <div class="tni-card" style="text-align:center;margin-top:24px">
+            <b>Kartu tidak ditemukan</b>
+            <div class="tni-note" style="margin-top:4px">
+                QR ini tidak terdaftar. Coba scan ulang, atau hubungi petugas.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="tni-top">
+            <div style="font-family:ui-monospace,Consolas,monospace;font-size:24px;font-weight:800">
+                @publik.KodeRef
+            </div>
+            <div class="tni-s">@publik.Pangkat @publik.Nama</div>
+            <div class="tni-s">@publik.SatuanName</div>
+            <div style="margin-top:8px">
+                <TniStatusChip Status="@publik.StatusProgres" />
+            </div>
+        </div>
+
+        @* ---------- status alur ---------- *@
+        <div class="tni-card">
+            <table class="tni-mini">
+                <tr>
+                    <td>Set jadi</td>
+                    <td class="tni-n">
+                        @(publik.SetAt.HasValue ? publik.SetAt.Value.ToString("dd/MM/yyyy HH:mm") : "belum")
+                    </td>
+                </tr>
+                <tr>
+                    <td>Masuk box</td>
+                    <td class="tni-n">
+                        @if (!string.IsNullOrEmpty(publik.BoxCode))
+                        {
+                            <span class="tni-pola">@publik.BoxCode</span>
+                            @if (publik.BoxedAt.HasValue)
+                            {
+                                <div class="tni-note">@publik.BoxedAt.Value.ToString("dd/MM/yyyy HH:mm")</div>
+                            }
+                        }
+                        else { <span class="tni-note">belum</span> }
+                    </td>
+                </tr>
+                <tr>
+                    <td>Terkirim</td>
+                    <td class="tni-n">
+                        @(publik.ShippedAt.HasValue ? publik.ShippedAt.Value.ToString("dd/MM/yyyy") : "belum")
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        @if (!perangkatSiap)
+        {
+            @* ---------- pengunjung tanpa perangkat: data yang diizinkan owner
+                 (2026-10-06) -- NRP, size, TB/BB, kategori, rawatan.
+                 No HP & ukuran badan TETAP tidak ditampilkan. ---------- *@
+            <div class="tni-sec">Size</div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+                <div class="tni-card" style="flex:1;text-align:center;margin:0">
+                    <div class="tni-k">KEMEJA</div>
+                    <div class="tni-pola-lg">@publik.PolaKemejaKode</div>
+                </div>
+                <div class="tni-card" style="flex:1;text-align:center;margin:0">
+                    <div class="tni-k">CELANA</div>
+                    <div class="tni-pola-lg">@publik.PolaCelanaKode</div>
+                </div>
+            </div>
+
+            <div class="tni-sec">Identitas</div>
+            <div class="tni-card">
+                <table class="tni-mini">
+                    <tr><td>NRP</td><td class="tni-n">@publik.Nrp</td></tr>
+                    <tr><td>TB / BB</td><td class="tni-n">
+                        @(publik.TinggiBadan.HasValue ? $"{publik.TinggiBadan} cm" : "—") /
+                        @(publik.BeratBadan.HasValue ? $"{publik.BeratBadan} kg" : "—")
+                    </td></tr>
+                    <tr><td>Kategori</td><td class="tni-n">@publik.KategoriLabel</td></tr>
+                    <tr><td>Rawatan</td><td class="tni-n">@publik.AreaName</td></tr>
+                </table>
+            </div>
+        }
+        else if (detail is not null)
+        {
+            @* ---------- user login + punya module: data lengkap ---------- *@
+            @if (!string.IsNullOrEmpty(infoMessage))
+            {
+                <div class="alert alert-success">@infoMessage</div>
+            }
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger">@errorMessage</div>
+            }
+
+            <div class="tni-sec">Pola</div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+                <div class="tni-card" style="flex:1;text-align:center;margin:0">
+                    <div class="tni-k">KEMEJA</div>
+                    <div class="tni-pola-lg">@detail.PolaKemejaKode</div>
+                </div>
+                <div class="tni-card" style="flex:1;text-align:center;margin:0">
+                    <div class="tni-k">CELANA</div>
+                    <div class="tni-pola-lg">@detail.PolaCelanaKode</div>
+                </div>
+            </div>
+
+            <div class="tni-sec">Identitas</div>
+            <div class="tni-card">
+                <table class="tni-mini">
+                    <tr><td>NRP</td><td class="tni-n">@detail.Nrp</td></tr>
+                    <tr><td>No HP</td><td class="tni-n">@(string.IsNullOrEmpty(detail.NoHp) ? "—" : detail.NoHp)</td></tr>
+                    <tr><td>TB / BB</td><td class="tni-n">
+                        @(detail.TinggiBadan.HasValue ? $"{detail.TinggiBadan} cm" : "—") /
+                        @(detail.BeratBadan.HasValue ? $"{detail.BeratBadan} kg" : "—")
+                    </td></tr>
+                    <tr><td>Kategori</td><td class="tni-n">@detail.KategoriLabel</td></tr>
+                    <tr><td>Rawatan</td><td class="tni-n">@detail.AreaName</td></tr>
+                </table>
+            </div>
+
+            @if (detail.TidakHadirUkur)
+            {
+                <div class="tni-card" style="text-align:center">
+                    <b>Tidak hadir pengukuran</b>
+                    <div class="tni-note" style="margin-top:3px">Memakai pola standar sesuai size di atas</div>
+                </div>
+            }
+
+            @* Prompt 67: masukkan ke box langsung dari halaman QR. *@
+            @if (pilihBox)
+            {
+                <div class="tni-sec">Pilih box terbuka</div>
+                @if (boxTerbuka.Count == 0)
+                {
+                    <div class="tni-card">
+                        <span class="tni-note">
+                            Belum ada box terbuka untuk satuan/rawatan ini. Buka box baru di menu Box.
+                        </span>
+                    </div>
+                }
+                @* 2026-10-07: beda satuan/rawatan -> SP minta konfirmasi dulu *@
+                @if (konfirmBedaBox is not null)
+                {
+                    <div class="tni-card" style="border-color:var(--tni-warn);background:var(--tni-warnbg)">
+                        <b>Yakin, beda satuan?</b>
+                        <div class="tni-note" style="margin:4px 0 8px">@pesanBeda</div>
+                        <div style="display:flex;gap:6px">
+                            <button class="tni-btn tni-btn-o" style="flex:1" disabled="@isSaving"
+                                    @onclick="@(() => konfirmBedaBox = null)">Batal</button>
+                            <button class="tni-btn tni-btn-c" style="flex:2" disabled="@isSaving"
+                                    @onclick="@(() => MasukBoxAsync(konfirmBedaBox, paksa: true))">
+                                Ya, masukkan ke @konfirmBedaBox.BoxCode
+                            </button>
+                        </div>
+                    </div>
+                }
+                @foreach (var b in boxTerbuka)
+                {
+                    <div class="tni-card tni-tap" @onclick="@(() => MasukBoxAsync(b))">
+                        <div class="tni-row">
+                            <span class="tni-pola-lg" style="font-size:15px">@b.BoxCode</span>
+                            <span class="tni-k">@b.Isi / @b.Kapasitas</span>
+                        </div>
+                        <div class="tni-note">@b.SatuanName · @b.AreaCode</div>
+                    </div>
+                }
+                <button class="tni-btn tni-btn-o" style="width:100%" @onclick="@(() => pilihBox = false)">
+                    Batal
+                </button>
+            }
+
+            @* Prompt 68: ajukan pembatalan scan langsung dari halaman QR. *@
+            @if (!pilihBox && detail.StatusProgres is "MASUK_BOX" or "SET_JADI")
+            {
+                <div class="tni-sec">Pembatalan scan</div>
+                <TniAjukanBatal PersonelId="detail.PersonelId"
+                                StatusProgres="@detail.StatusProgres"
+                                BoxCode="@detail.BoxCode"
+                                OnDiajukan="LoadAsync" />
+            }
+
+            <div class="tni-bot" style="position:static;margin-top:12px">
+                @if (detail.StatusProgres == "SET_JADI" && !pilihBox)
+                {
+                    <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="OpenPilihBoxAsync">
+                        Masukkan ke box
+                    </button>
+                }
+                @if (detail.StatusProgres == "DICETAK")
+                {
+                    @if (!konfirmSet)
+                    {
+                        <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="@(() => konfirmSet = true)">
+                            Tandai set jadi
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="tni-note" style="flex:1">Catat set jadi untuk @detail.KodeRef?</span>
+                        <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmSet = false)">Batal</button>
+                        <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="SetJadiAsync">
+                            @(isSaving ? "..." : "Ya")
+                        </button>
+                    }
+                }
+                @* TAB BARU (tanpa rel="noopener" -- lihat Personel.razor). *@
+                <a class="tni-btn tni-btn-o" href="@($"/tni/personel/{detail.PersonelId}")" target="_blank"
+                   style="text-decoration:none">
+                    Buka detail personel
+                </a>
+            </div>
+        }
+    }
+
+    @* ---------- komplain ukuran (2026-10-06) -- SIAPA PUN, tanpa perangkat ----------
+       No telp & komentar wajib; komentar textarea, Enter = baris baru. *@
+    @if (!isLoading && publik is not null && !pilihBox)
+    {
+        <div class="tni-sec">Komplain ukuran</div>
+        <div class="tni-card">
+            @if (!string.IsNullOrEmpty(komplainInfo))
+            {
+                <div class="alert alert-success" style="margin-bottom:8px">@komplainInfo</div>
+            }
+            @if (!string.IsNullOrEmpty(komplainError))
+            {
+                <div class="alert alert-danger" style="margin-bottom:8px">@komplainError</div>
+            }
+
+            <div class="tni-k">No telp (wajib)</div>
+            <input class="tni-inp" type="tel" inputmode="tel" maxlength="30"
+                   placeholder="08xxxxxxxxxx"
+                   @bind="komplainTelp" @bind:event="oninput" />
+
+            <div class="tni-k" style="margin-top:6px">Komentar (wajib)</div>
+            <textarea class="tni-inp" rows="4" maxlength="2000" style="resize:vertical"
+                      placeholder="mis. celana kepanjangan 3 cm"
+                      @bind="komplainKomentar" @bind:event="oninput"></textarea>
+
+            <button class="tni-btn tni-btn-p" style="width:100%;margin-top:8px"
+                    disabled="@(isSavingKomplain || string.IsNullOrWhiteSpace(komplainTelp) || string.IsNullOrWhiteSpace(komplainKomentar))"
+                    @onclick="SimpanKomplainAsync">
+                @(isSavingKomplain ? "Menyimpan..." : "Simpan")
+            </button>
+        </div>
+
+        @* Riwayat komplain berisi no telp -- hanya untuk perangkat terdaftar. *@
+        @if (perangkatSiap && komplainList.Count > 0)
+        {
+            <div class="tni-card">
+                @foreach (var kp in komplainList)
+                {
+                    <div class="tni-li" style="display:block">
+                        <div class="tni-row">
+                            <b>@kp.NoTelp</b>
+                            <span class="tni-k">@kp.CreatedAt.ToString("dd/MM/yyyy HH:mm")</span>
+                        </div>
+                        <div style="white-space:pre-wrap;margin-top:2px">@kp.Komentar</div>
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    @* ---------- scan QR kartu lain (selalu ada, termasuk saat kartu tak ditemukan) ---------- *@
+    @if (!isLoading)
+    {
+        <button class="tni-btn tni-btn-p" style="width:100%;margin-top:12px;padding:13px"
+                @onclick="BukaScanAsync">
+            <i class="fe fe-camera"></i> Scan QR lain
+        </button>
+    }
+</div>
+
+@if (scanTerbuka)
+{
+    <div class="tni-sheet-backdrop" @onclick="TutupScanAsync">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t">Scan QR kartu</div>
+                <button class="tni-btn" @onclick="TutupScanAsync"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div id="tni-cam-t" style="width:100%;border-radius:12px;overflow:hidden;background:#11161c;min-height:220px"></div>
+
+            @if (!string.IsNullOrEmpty(scanError))
+            {
+                <div class="alert alert-danger" style="margin-top:8px">@scanError</div>
+            }
+            else
+            {
+                <div class="tni-note" style="text-align:center;margin-top:6px">
+                    Arahkan ke QR di kartu personel.
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool konfirmSet;
+    // Data lengkap & aksi hanya di PERANGKAT TERDAFTAR.
+    // Personel yang membuka QR-nya sendiri dari HP pribadi tetap dapat status.
+    private bool perangkatSiap;
+    private string errorMessage = string.Empty;
+    private string infoMessage = string.Empty;
+
+    private TniPublicPersonelDto? publik;
+    private TniPersonelDetailDto? detail;
+
+    // Prompt 67: masukkan ke box dari halaman QR.
+    private bool pilihBox;
+    private List<TniBoxListItemDto> boxTerbuka = new();
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        konfirmSet = false;
+
+        // Pindah ke kartu lain (Scan QR lain) -> form komplain dikosongkan.
+        if (tokenTerakhir != Token)
+        {
+            tokenTerakhir = Token;
+            komplainTelp = komplainKomentar = komplainInfo = komplainError = string.Empty;
+        }
+
+        await Sesi.EnsureLoadedAsync();
+        perangkatSiap = Sesi.Siap;
+
+        // Data minimal SELALU dimuat lewat endpoint publik -- halaman tetap berguna
+        // untuk personel yang membuka QR-nya sendiri tanpa akun.
+        publik = await PublicApi.GetByTokenAsync(Token);
+
+        // Data lengkap hanya untuk user login yang punya module.
+        detail = perangkatSiap && publik is not null
+            ? await ScanApi.GetByTokenAsync(Token)
+            : null;
+
+        komplainList = detail is not null
+            ? await ScanApi.GetKomplainAsync(detail.PersonelId)
+            : new();
+
+        isLoading = false;
+    }
+
+    // ---------- komplain ukuran (2026-10-06) ----------
+    private string komplainTelp = string.Empty;
+    private string komplainKomentar = string.Empty;
+    private string komplainInfo = string.Empty;
+    private string komplainError = string.Empty;
+    private bool isSavingKomplain;
+    private string? tokenTerakhir;
+    private List<TniKomplainDto> komplainList = new();
+
+    private async Task SimpanKomplainAsync()
+    {
+        isSavingKomplain = true;
+        komplainInfo = string.Empty;
+        komplainError = string.Empty;
+
+        var (ok, error) = await PublicApi.KirimKomplainAsync(Token, new TniKomplainRequest
+        {
+            NoTelp = komplainTelp.Trim(),
+            Komentar = komplainKomentar.Trim()
+        });
+
+        isSavingKomplain = false;
+
+        if (!ok) { komplainError = error; return; }
+
+        komplainKomentar = string.Empty;
+        komplainInfo = "Komplain tersimpan. Terima kasih — petugas akan menghubungi nomor Anda.";
+
+        if (detail is not null) komplainList = await ScanApi.GetKomplainAsync(detail.PersonelId);
+    }
+
+    // Box yang relevan: box satuannya sendiri + box gabungan rawatannya.
+    private async Task OpenPilihBoxAsync()
+    {
+        if (detail is null) return;
+
+        errorMessage = string.Empty;
+        var semua = await BoxApi.GetTerbukaAsync(areaId: detail.AreaId);
+
+        boxTerbuka = semua
+            .Where(b => b.Gabungan || b.SatuanId == detail.SatuanId)
+            .ToList();
+
+        pilihBox = true;
+    }
+
+    // 2026-10-07: box yang menunggu konfirmasi "beda satuan / rawatan"
+    private TniBoxListItemDto? konfirmBedaBox;
+    private string pesanBeda = string.Empty;
+
+    private async Task MasukBoxAsync(TniBoxListItemDto b, bool paksa = false)
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var hasil = await BoxApi.MasukBoxAsync(Token, b.BoxId, paksa);
+
+        isSaving = false;
+
+        if (hasil.PerluKonfirmasi)
+        {
+            konfirmBedaBox = b;
+            pesanBeda = hasil.Pesan;
+            return;
+        }
+
+        konfirmBedaBox = null;
+        pilihBox = false;
+
+        if (hasil.Ok) infoMessage = $"{hasil.KodeRef} masuk box {hasil.BoxCode} ({hasil.Isi}/{hasil.Kapasitas}).";
+        else if (hasil.Sudah) infoMessage = hasil.Pesan;
+        else { errorMessage = hasil.Pesan; return; }
+
+        await LoadAsync();
+    }
+
+    private async Task SetJadiAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        var hasil = await ScanApi.SetJadiAsync(Token);
+
+        isSaving = false;
+        konfirmSet = false;
+
+        if (hasil.Ok) infoMessage = $"Set tercatat untuk {hasil.KodeRef}.";
+        else if (hasil.Sudah) infoMessage = hasil.Pesan;
+        else { errorMessage = hasil.Pesan; return; }
+
+        await LoadAsync();
+    }
+
+    // ---------- scan QR kartu lain (2026-10-06) ----------
+    // Kamera baru di-start setelah sheet dirender (elemen #tni-cam-t harus ada).
+
+    private bool scanTerbuka;
+    private bool perluStartKamera;
+    private bool kameraJalan;
+    private string scanError = string.Empty;
+    private DotNetObjectReference<TokenPublic>? selfRef;
+
+    private Task BukaScanAsync()
+    {
+        scanError = string.Empty;
+        scanTerbuka = true;
+        perluStartKamera = true;
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!perluStartKamera) return;
+        perluStartKamera = false;
+
+        selfRef ??= DotNetObjectReference.Create(this);
+        kameraJalan = true;
+        try { await JS.InvokeVoidAsync("tniScanner.start", "tni-cam-t", selfRef); }
+        catch (Exception ex) { scanError = ex.Message; StateHasChanged(); }
+    }
+
+    private async Task TutupScanAsync()
+    {
+        scanTerbuka = false;
+        await StopKameraAsync();
+    }
+
+    private async Task StopKameraAsync()
+    {
+        if (!kameraJalan) return;
+        kameraJalan = false;
+        try { await JS.InvokeVoidAsync("tniScanner.stop"); } catch { }
+    }
+
+    [JSInvokable]
+    public async Task OnScanned(string decodedText)
+    {
+        // Isi QR kartu = '{QrBaseUrl}/t/{qr_token}'. Teks tanpa '/t/' bukan QR
+        // kartu PDH -- jangan dibuka, beri tahu saja.
+        var text = (decodedText ?? string.Empty).Trim();
+        var idx = text.IndexOf("/t/", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            scanError = "Ini bukan QR kartu personel PDH.";
+            try { await JS.InvokeVoidAsync("tniScanner.feedback", "gagal"); } catch { }
+            StateHasChanged();
+            return;
+        }
+
+        var token = text.Substring(idx + 3).Trim('/').Split('?', '#')[0];
+
+        try { await JS.InvokeVoidAsync("tniScanner.feedback", "ok"); } catch { }
+        scanTerbuka = false;
+        await StopKameraAsync();
+
+        infoMessage = string.Empty;
+        errorMessage = string.Empty;
+        pilihBox = false;
+
+        // Rute yang sama -> OnParametersSetAsync memuat kartu baru.
+        Nav.NavigateTo($"/t/{Uri.EscapeDataString(token)}");
+    }
+
+    [JSInvokable]
+    public Task OnScanError(string message)
+    {
+        scanError = message;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopKameraAsync();
+        selfRef?.Dispose();
+    }
+}

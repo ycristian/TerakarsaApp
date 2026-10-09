@@ -1,0 +1,29 @@
+@* Prompt 63: chip status personel PDH TNI AD. Satu-satunya tempat nilai
+   status_progres diterjemahkan jadi label + warna, supaya seluruh halaman
+   /tni/... konsisten. Nilai berasal dari tni.v_personel.status_progres. *@
+
+<span class="tni-chip @ChipClass">@Label</span>
+
+@code {
+    [Parameter] public string? Status { get; set; }
+
+    private string Label => Status switch
+    {
+        "BELUM_CETAK" => "belum cetak",
+        "DICETAK"     => "kartu dicetak",
+        "SET_JADI"    => "set jadi",
+        "MASUK_BOX"   => "masuk box",
+        "TERKIRIM"    => "terkirim",
+        _             => Status ?? "-"
+    };
+
+    private string ChipClass => Status switch
+    {
+        "BELUM_CETAK" => "tni-chip-mut",
+        "DICETAK"     => "tni-chip-navy",
+        "SET_JADI"    => "tni-chip-warn",
+        "MASUK_BOX"   => "tni-chip-navy",
+        "TERKIRIM"    => "tni-chip-ok",
+        _             => "tni-chip-mut"
+    };
+}

@@ -1,0 +1,476 @@
+@page "/tni/pola"
+@layout TerakarsaApp.Client.Layout.TniLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Tni
+@inject TniPolaApiService PolaApi
+@inject TniOrderState OrderState
+
+@* Prompt 61: master pola PDH TNI AD. Pola = ukuran JADI pakaian, bukan ukuran
+   badan personel -- acuan potong untuk personel TU_SIZING yang tidak hadir
+   pengukuran.
+
+   Mobile-first (dipakai di HP): kartu + sheet bawah, bukan tabel lebar.
+   Class dari wwwroot/css/tni.css -- JANGAN memakai class Bootstrap `rounded`
+   atau `border` di sini (tema app meng-override keduanya). *@
+
+<PageTitle>Master Pola — PDH TNI AD</PageTitle>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+<div class="tni">
+    <div class="tni-top">
+        <div class="tni-row">
+            <div>
+                <div class="tni-t"><i class="fe fe-grid"></i> Master Pola</div>
+                <div class="tni-s">@(OrderState.IsLoaded ? OrderState.Subjudul : "Memuat order...")</div>
+            </div>
+            <TniBackButton />
+        </div>
+    </div>
+
+    <div class="tni-seg">
+        <button class="@(jenis == "KEMEJA" ? "on" : "")" @onclick="@(() => GantiJenis("KEMEJA"))">Kemeja</button>
+        <button class="@(jenis == "CELANA" ? "on" : "")" @onclick="@(() => GantiJenis("CELANA"))">Celana</button>
+    </div>
+
+    <input class="tni-inp tni-search" placeholder="Cari kode pola@(jenis == "KEMEJA" ? " / kode lama" : "")..."
+           @bind="search" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+
+    <div class="tni-row" style="margin-bottom:10px">
+        <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin:0">
+            <input type="checkbox" @bind="hanyaAktif" @bind:after="LoadAsync" />
+            Hanya yang aktif
+        </label>
+        <span class="tni-k">@items.Count pola</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="tni-note">Memuat...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="tni-card"><span class="tni-note">Tidak ada pola yang cocok.</span></div>
+    }
+    else
+    {
+        @foreach (var p in items)
+        {
+            <div class="tni-card tni-tap @(p.IsActive ? "" : "tni-off")" @onclick="@(() => OpenDetail(p))">
+                <div class="tni-row">
+                    <span class="tni-pola-lg">@p.Kode</span>
+                    <span>
+                        @if (!p.IsActive)
+                        {
+                            <span class="tni-chip tni-chip-mut">nonaktif</span>
+                        }
+                        <span class="tni-chip tni-chip-navy">@p.TargetGenderLabel</span>
+                    </span>
+                </div>
+                <div class="tni-row" style="margin-top:4px">
+                    <span class="tni-note">
+                        @if (p.IsKemeja)
+                        {
+                            <text>LD acuan @Num(p.LingkarDadaAcuan)</text>
+                            @if (!string.IsNullOrWhiteSpace(p.KodeAlt))
+                            {
+                                <text> · kode lama @p.KodeAlt</text>
+                            }
+                        }
+                        else
+                        {
+                            <text>size @p.SizeAngka</text>
+                        }
+                    </span>
+                    <span class="tni-k">@p.JumlahPemakai pemakai</span>
+                </div>
+            </div>
+        }
+    }
+
+    <div class="tni-bot">
+        <button class="tni-btn tni-btn-p" @onclick="OpenCreate">+ Pola baru</button>
+    </div>
+</div>
+
+@* ---------------- sheet DETAIL ---------------- *@
+@if (detail is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="CloseDetail">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-pola-lg">@detail.Kode</div>
+                    <div class="tni-note">
+                        @detail.TargetGenderLabel · @detail.JumlahPemakai pemakai
+                        @if (!detail.IsActive)
+                        {
+                            <span class="tni-chip tni-chip-mut" style="margin-left:4px">nonaktif</span>
+                        }
+                    </div>
+                </div>
+                <button class="tni-btn" @onclick="CloseDetail"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-sec">Ukuran jadi</div>
+            <table class="tni-mini">
+                @foreach (var (label, val) in Ukuran(detail))
+                {
+                    <tr><td>@label</td><td class="tni-n">@Num(val)</td></tr>
+                }
+            </table>
+
+            @if (!string.IsNullOrEmpty(sheetError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@sheetError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="@(() => OpenEdit(detail))">Ubah</button>
+                <button class="tni-btn @(detail.IsActive ? "tni-btn-o" : "tni-btn-g")" @onclick="ToggleAktif">
+                    @(detail.IsActive ? "Nonaktifkan" : "Aktifkan")
+                </button>
+                @if (detail.BolehHapus)
+                {
+                    <button class="tni-btn tni-btn-r" @onclick="HapusAsync">Hapus</button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet FORM ---------------- *@
+@if (form is not null)
+{
+    <div class="tni-sheet-backdrop" @onclick="CloseForm">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div class="tni-t" style="color:var(--tni-navy)">
+                    @(form.PolaId.HasValue ? "Ubah pola" : "Pola baru") @(form.JenisItem == "KEMEJA" ? "kemeja" : "celana")
+                </div>
+                <button class="tni-btn" @onclick="CloseForm"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-k">Kode</div>
+            <input class="tni-inp" @bind="form.Kode" placeholder="@(form.JenisItem == "KEMEJA" ? "LD_102_P" : "32_P")" />
+
+            @if (form.JenisItem == "KEMEJA")
+            {
+                <div class="tni-k" style="margin-top:8px">Kode lama (opsional)</div>
+                <input class="tni-inp" @bind="form.KodeAlt" placeholder="14,5-3" />
+            }
+
+            <div class="tni-k" style="margin-top:8px">Target gender</div>
+            <select class="tni-inp" @bind="form.TargetGender">
+                @foreach (var g in GenderPilihan(form.JenisItem))
+                {
+                    <option value="@g.Key">@g.Value</option>
+                }
+            </select>
+
+            @if (form.JenisItem == "KEMEJA")
+            {
+                <div class="tni-k" style="margin-top:8px">Lingkar dada acuan</div>
+                <input class="tni-inp" type="number" step="0.5" inputmode="decimal" @bind="form.LingkarDadaAcuan" />
+            }
+            else
+            {
+                <div class="tni-k" style="margin-top:8px">Size angka</div>
+                <input class="tni-inp" type="number" inputmode="numeric" @bind="form.SizeAngka" />
+            }
+
+            <div class="tni-sec">Ukuran jadi (boleh kosong)</div>
+            @foreach (var f in FormFields(form))
+            {
+                <div class="tni-k" style="margin-top:6px">@f.Label</div>
+                <input class="tni-inp" type="number" step="0.5" inputmode="decimal"
+                       value="@f.Get()" @onchange="@(e => f.Set(ParseDec(e.Value?.ToString())))" />
+            }
+
+            @if (!string.IsNullOrEmpty(formError))
+            {
+                <div class="alert alert-danger" style="margin-top:10px">@formError</div>
+            }
+
+            <div class="tni-bot" style="position:static;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="CloseForm">Batal</button>
+                <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="SimpanAsync">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    private bool? hasAccess;
+    private bool isLoading;
+    private bool isSaving;
+    private string errorMessage = string.Empty;
+    private string sheetError = string.Empty;
+    private string formError = string.Empty;
+
+    private string jenis = "KEMEJA";
+    private string search = string.Empty;
+    private bool hanyaAktif;
+
+    private List<TniPolaDto> items = new();
+    private TniPolaDto? detail;
+    private TniPolaSaveRequest? form;
+
+    private System.Threading.Timer? debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TANPA LOGIN: pairing perangkat ditangani TniLayout,
+        // jadi halaman yang sudah dirender pasti sudah berhak.
+        hasAccess = true;
+
+        if (hasAccess == true)
+        {
+            await OrderState.EnsureLoadedAsync();
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+        try
+        {
+            items = await PolaApi.GetListAsync(jenis, search, hanyaAktif);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        isLoading = false;
+    }
+
+    private async Task GantiJenis(string j)
+    {
+        if (jenis == j) return;
+        jenis = j;
+        await LoadAsync();
+    }
+
+    private void HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadAsync();
+                StateHasChanged();
+            });
+        }, null, 300, Timeout.Infinite);
+    }
+
+    // ---------- detail ----------
+    private void OpenDetail(TniPolaDto p)
+    {
+        detail = p;
+        sheetError = string.Empty;
+    }
+
+    private void CloseDetail() => detail = null;
+
+    private async Task ToggleAktif()
+    {
+        if (detail is null) return;
+
+        var (ok, err) = await PolaApi.SetAktifAsync(detail.JenisItem, detail.PolaId, !detail.IsActive);
+        if (!ok) { sheetError = err; return; }
+
+        detail = null;
+        await LoadAsync();
+    }
+
+    private async Task HapusAsync()
+    {
+        if (detail is null) return;
+
+        var (ok, err) = await PolaApi.DeleteAsync(detail.JenisItem, detail.PolaId);
+        if (!ok) { sheetError = err; return; }
+
+        detail = null;
+        await LoadAsync();
+    }
+
+    // ---------- form ----------
+    private void OpenCreate()
+    {
+        formError = string.Empty;
+        form = new TniPolaSaveRequest
+        {
+            JenisItem = jenis,
+            TargetGender = "P"
+        };
+    }
+
+    private void OpenEdit(TniPolaDto p)
+    {
+        formError = string.Empty;
+        detail = null;
+        form = new TniPolaSaveRequest
+        {
+            PolaId = p.PolaId,
+            JenisItem = p.JenisItem,
+            Kode = p.Kode,
+            KodeAlt = p.KodeAlt,
+            TargetGender = p.TargetGender,
+            SizeAngka = p.SizeAngka,
+            LingkarDadaAcuan = p.LingkarDadaAcuan,
+            LingkarKerah = p.LingkarKerah,
+            LebarBahu = p.LebarBahu,
+            LingkarDada = p.LingkarDada,
+            LingkarPerut = p.LingkarPerut,
+            LingkarPinggul = p.LingkarPinggul,
+            PanjangBaju = p.PanjangBaju,
+            LingkarLengan = p.LingkarLengan,
+            LingkarKerungLengan = p.LingkarKerungLengan,
+            PanjangLengan = p.PanjangLengan,
+            LingkarManset = p.LingkarManset,
+            LingkarPinggang = p.LingkarPinggang,
+            LingkarSelangkang = p.LingkarSelangkang,
+            LingkarPaha = p.LingkarPaha,
+            LingkarLutut = p.LingkarLutut,
+            LingkarKaki = p.LingkarKaki,
+            PanjangCelana = p.PanjangCelana
+        };
+    }
+
+    private void CloseForm() => form = null;
+
+    private async Task SimpanAsync()
+    {
+        if (form is null) return;
+
+        isSaving = true;
+        formError = string.Empty;
+
+        var (ok, err) = await PolaApi.SaveAsync(form);
+
+        isSaving = false;
+        if (!ok) { formError = err; return; }
+
+        form = null;
+        await LoadAsync();
+    }
+
+    // ---------- bantuan tampilan ----------
+
+    // Angka tanpa ".0" -- 38.5 tetap 38.5, 42.0 jadi 42.
+    private static string Num(decimal? v) =>
+        v is null ? "—" : v.Value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static decimal? ParseDec(string? raw) =>
+        decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
+                         System.Globalization.CultureInfo.InvariantCulture, out var d)
+            ? d : null;
+
+    private static Dictionary<string, string> GenderPilihan(string jenisItem) =>
+        jenisItem == "KEMEJA"
+            ? new()
+            {
+                ["P"] = "Pria",
+                ["PG"] = "Pria Gemuk",
+                ["W"] = "Wanita non-hijab",
+                ["W_PG"] = "Wanita non-hijab Gemuk",
+                ["WH"] = "Wanita Hijab",
+                ["WH_PG"] = "Wanita Hijab Gemuk"
+            }
+            : new()
+            {
+                ["P"] = "Pria",
+                ["W"] = "Wanita"
+            };
+
+    // Daftar label-nilai untuk sheet detail, urutan seperti kartu cetak.
+    // lingkar_manset hanya ditampilkan untuk pola hijab.
+    private static List<(string Label, decimal? Val)> Ukuran(TniPolaDto p) =>
+        p.IsKemeja
+            ? new List<(string, decimal?)>
+            {
+                ("Lingkar Kerah", p.LingkarKerah),
+                ("Lebar Bahu", p.LebarBahu),
+                ("Lingkar Dada", p.LingkarDada),
+                ("Lingkar Perut", p.LingkarPerut),
+                ("Lingkar Pinggul", p.LingkarPinggul),
+                ("Panjang Baju", p.PanjangBaju),
+                ("Lingkar Lengan", p.LingkarLengan),
+                ("Lingkar Kerung Lengan", p.LingkarKerungLengan),
+                ("Panjang Lengan", p.PanjangLengan)
+            }
+            .Concat(p.IsHijab ? new List<(string, decimal?)> { ("Lingkar Manset", p.LingkarManset) } : new())
+            .ToList()
+            : new List<(string, decimal?)>
+            {
+                ("Lingkar Pinggang", p.LingkarPinggang),
+                ("Lingkar Pinggul", p.LingkarPinggul),
+                ("Lingkar Selangkang", p.LingkarSelangkang),
+                ("Lingkar Paha", p.LingkarPaha),
+                ("Lingkar Lutut", p.LingkarLutut),
+                ("Lingkar Kaki", p.LingkarKaki),
+                ("Panjang Celana", p.PanjangCelana)
+            };
+
+    private record UkuranField(string Label, Func<decimal?> Get, Action<decimal?> Set);
+
+    // Field ukuran jadi di form, mengikuti jenis. Manset hanya muncul untuk hijab
+    // (SP juga memaksa NULL di luar WH/WH_PG, jadi UI dan SP sejalan).
+    private static List<UkuranField> FormFields(TniPolaSaveRequest f)
+    {
+        if (f.JenisItem == "KEMEJA")
+        {
+            var list = new List<UkuranField>
+            {
+                new("Lingkar Kerah", () => f.LingkarKerah, v => f.LingkarKerah = v),
+                new("Lebar Bahu", () => f.LebarBahu, v => f.LebarBahu = v),
+                new("Lingkar Dada", () => f.LingkarDada, v => f.LingkarDada = v),
+                new("Lingkar Perut", () => f.LingkarPerut, v => f.LingkarPerut = v),
+                new("Lingkar Pinggul", () => f.LingkarPinggul, v => f.LingkarPinggul = v),
+                new("Panjang Baju", () => f.PanjangBaju, v => f.PanjangBaju = v),
+                new("Lingkar Lengan", () => f.LingkarLengan, v => f.LingkarLengan = v),
+                new("Lingkar Kerung Lengan", () => f.LingkarKerungLengan, v => f.LingkarKerungLengan = v),
+                new("Panjang Lengan", () => f.PanjangLengan, v => f.PanjangLengan = v)
+            };
+
+            if (f.TargetGender is "WH" or "WH_PG")
+                list.Add(new("Lingkar Manset", () => f.LingkarManset, v => f.LingkarManset = v));
+
+            return list;
+        }
+
+        return new List<UkuranField>
+        {
+            new("Lingkar Pinggang", () => f.LingkarPinggang, v => f.LingkarPinggang = v),
+            new("Lingkar Pinggul", () => f.LingkarPinggul, v => f.LingkarPinggul = v),
+            new("Lingkar Selangkang", () => f.LingkarSelangkang, v => f.LingkarSelangkang = v),
+            new("Lingkar Paha", () => f.LingkarPaha, v => f.LingkarPaha = v),
+            new("Lingkar Lutut", () => f.LingkarLutut, v => f.LingkarLutut = v),
+            new("Lingkar Kaki", () => f.LingkarKaki, v => f.LingkarKaki = v),
+            new("Panjang Celana", () => f.PanjangCelana, v => f.PanjangCelana = v)
+        };
+    }
+
+    public void Dispose() => debounceTimer?.Dispose();
+}

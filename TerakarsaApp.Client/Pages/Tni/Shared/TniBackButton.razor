@@ -1,0 +1,25 @@
+@* Tombol kembali ke menu utama TNI (/tni) untuk SEMUA halaman /tni/*.
+
+   SENGAJA TIDAK memakai CloseButton.razor: komponen itu memanggil window.close(), yang hanya
+   bekerja kalau halamannya dibuka lewat target="_blank". Beranda TNI membuka sub-halaman dengan
+   Nav.NavigateTo (satu tab), jadi window.close() tidak berefek apa pun dan setiap sub-halaman
+   jadi jalan buntu -- fatal di modul ini karena dipakai dari HP yang tidak punya tombol back
+   kalau browser-nya dibuka mode fullscreen/PWA.
+
+   Tetap satu komponen bersama (bukan tombol "Kembali ke X" hardcode di tiap halaman) supaya
+   tujuan dan tampilannya tidak bercabang -- aturan yang sama dengan CloseButton di CLAUDE.md. *@
+@inject NavigationManager Nav
+
+<button type="button" class="tni-btn" style="background:rgba(255,255,255,.15);color:#fff;flex:0 0 auto"
+        title="@Label" @onclick="HandleClick">
+    <i class="fe fe-arrow-left"></i> @Label
+</button>
+
+@code {
+    // Default ke menu utama. Halaman yang punya induk lebih dekat (mis. detail -> daftarnya)
+    // boleh mengisi To, tapi tujuan bawaannya tetap menu utama.
+    [Parameter] public string To { get; set; } = "/tni";
+    [Parameter] public string Label { get; set; } = "Menu";
+
+    private void HandleClick() => Nav.NavigateTo(To);
+}

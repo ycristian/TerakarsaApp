@@ -1,0 +1,45 @@
+@* Tombol tutup untuk halaman ANAK modul TNI (detail personel, detail box, dst.) yang dibuka
+   lewat anchor target="_blank" dari halaman daftarnya. Menutup tab, sehingga pengguna kembali
+   ke tab daftar yang masih utuh (filter + posisi scroll tidak hilang).
+
+   Beda dari CloseButton.razor milik app utama: tampilannya mengikuti header navy modul TNI
+   (tni-btn), bukan Bootstrap btn-light yang akan terlihat asing di sana.
+
+   FALLBACK WAJIB ADA: window.close() hanya diizinkan browser untuk tab yang memang dibuka
+   oleh script/anchor target="_blank". Kalau halaman ini dibuka langsung (bookmark, ketik URL,
+   refresh di tab yang sama, atau link dari luar), close() diam saja -- tanpa fallback halaman
+   ini jadi jalan buntu, persis bug yang ditinggalkan CloseButton di modul ini sebelumnya.
+   Jadi: coba tutup dulu, kalau setelah jeda singkat tab-nya masih hidup, pindah ke FallbackUrl. *@
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@if (Compact)
+{
+    @* Versi kecil seukuran chip -- di bar atas TniLayout, sebelah nama petugas (2026-10-07). *@
+    <button type="button" class="tni-chip tni-chip-bad" style="border:0;cursor:pointer;flex:0 0 auto;font-weight:700"
+            title="Tutup tab" @onclick="HandleClick">X</button>
+}
+else
+{
+    <button type="button" class="tni-btn" style="background:rgba(255,255,255,.15);color:#fff;flex:0 0 auto"
+            title="Tutup" @onclick="HandleClick">
+        <i class="fe fe-x"></i> Tutup
+    </button>
+}
+
+@code {
+    // Tujuan kalau tab ini ternyata tidak bisa ditutup sendiri.
+    [Parameter] public string FallbackUrl { get; set; } = "/tni";
+
+    // true = tombol kecil seukuran chip (bar atas layout)
+    [Parameter] public bool Compact { get; set; }
+
+    private async Task HandleClick()
+    {
+        try { await JS.InvokeVoidAsync("close"); } catch (Exception) { /* diblokir browser */ }
+
+        // Kalau close() berhasil, tab sudah hilang dan baris di bawah tidak pernah terlihat.
+        await Task.Delay(150);
+        Nav.NavigateTo(FallbackUrl);
+    }
+}
