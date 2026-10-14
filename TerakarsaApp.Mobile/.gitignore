@@ -1,0 +1,4 @@
+# Prompt 76: kredensial signing APK TIDAK boleh masuk repo.
+signing.local.json
+*.keystore
+*.jks

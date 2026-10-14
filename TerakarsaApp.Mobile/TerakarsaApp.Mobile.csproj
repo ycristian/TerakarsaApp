@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- Prompt 76: app Android "Terakarsa" — pembungkus WebView untuk web TMOS yang
+	     sudah ada, dengan login native + pemilihan alamat server lokal/publik.
+
+	     ANDROID SAJA (template MAUI menambah ios/maccatalyst/windows; semuanya dibuang
+	     supaya build tidak butuh workload lain). SENGAJA TIDAK didaftarkan di
+	     TerakarsaApp.slnx: `dotnet build TerakarsaApp.slnx -v q` adalah perintah build
+	     harian di CLAUDE.md dan tidak boleh gagal di mesin tanpa workload android
+	     (lihat README.md). Build project ini terpisah:
+	       dotnet build TerakarsaApp.Mobile -v q
+	-->
+
+	<PropertyGroup>
+		<TargetFrameworks>net10.0-android</TargetFrameworks>
+
+		<OutputType>Exe</OutputType>
+		<RootNamespace>TerakarsaApp.Mobile</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<MauiXamlInflator>SourceGen</MauiXamlInflator>
+
+		<ApplicationTitle>Terakarsa</ApplicationTitle>
+		<ApplicationId>id.terakarsa.app</ApplicationId>
+
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<!-- Minimum Android 8.0 (API 26) sesuai prompt. -->
+		<SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+
+		<!-- Keystore release dibaca dari signing.local.json lewat target di bawah. -->
+		<AndroidPackageFormat Condition="'$(Configuration)' == 'Release'">apk</AndroidPackageFormat>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Icon & splash: huruf T di atas warna aksen module gudang (#0f766e). -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#0f766e" />
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0f766e" BaseSize="128,128" />
+
+		<MauiImage Include="Resources\Images\*" />
+		<MauiFont Include="Resources\Fonts\*" />
+		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- DTO login/module dipakai bersama web supaya bentuk request/response tidak
+		     bercabang (LoginRequest/LoginResponse/RefreshTokenRequest, ModuleDto). -->
+		<ProjectReference Include="..\TerakarsaApp.Shared\TerakarsaApp.Shared.csproj" />
+	</ItemGroup>
+
+	<!-- Signing release: nilai diambil dari signing.local.json (gitignored).
+	     Lihat signing.example.json + README.md. -->
+	<Target Name="TerakarsaReadSigning" BeforeTargets="BeforeBuild"
+	        Condition="'$(Configuration)' == 'Release' AND Exists('$(MSBuildProjectDirectory)\signing.local.json')">
+		<PropertyGroup>
+			<_SigningJson>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\signing.local.json'))</_SigningJson>
+			<AndroidKeyStore>true</AndroidKeyStore>
+			<AndroidSigningKeyStore>$([System.Text.RegularExpressions.Regex]::Match($(_SigningJson), '"keystore"\s*:\s*"([^"]*)"').Groups[1].Value)</AndroidSigningKeyStore>
+			<AndroidSigningStorePass>$([System.Text.RegularExpressions.Regex]::Match($(_SigningJson), '"storePassword"\s*:\s*"([^"]*)"').Groups[1].Value)</AndroidSigningStorePass>
+			<AndroidSigningKeyAlias>$([System.Text.RegularExpressions.Regex]::Match($(_SigningJson), '"keyAlias"\s*:\s*"([^"]*)"').Groups[1].Value)</AndroidSigningKeyAlias>
+			<AndroidSigningKeyPass>$([System.Text.RegularExpressions.Regex]::Match($(_SigningJson), '"keyPassword"\s*:\s*"([^"]*)"').Groups[1].Value)</AndroidSigningKeyPass>
+		</PropertyGroup>
+	</Target>
+
+</Project>

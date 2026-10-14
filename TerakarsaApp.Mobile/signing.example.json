@@ -1,0 +1,7 @@
+{
+  "_catatan": "Salin file ini jadi signing.local.json (gitignored) lalu isi sesuai keystore Anda. Dipakai hanya pada build Release (lihat TerakarsaApp.Mobile.csproj target TerakarsaReadSigning).",
+  "keystore": "C:\keys\terakarsa-release.keystore",
+  "storePassword": "ISI_PASSWORD_KEYSTORE",
+  "keyAlias": "terakarsa",
+  "keyPassword": "ISI_PASSWORD_KEY"
+}
