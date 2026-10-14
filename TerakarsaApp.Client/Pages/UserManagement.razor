@@ -80,7 +80,7 @@ else
                                 <td>@u.FullName</td>
                                 <td>
                                     <span class="badge @(u.Role == "Admin" ? "bg-danger" : "bg-secondary")">
-                                        @u.Role
+                                        @(u.Role == "WAREHOUSE" ? "Admin Gudang" : u.Role)
                                     </span>
                                 </td>
                                 <td>
@@ -143,6 +143,9 @@ else
                                 <option value="">-- Pilih Role --</option>
                                 <option value="Admin">Admin</option>
                                 <option value="User">User</option>
+                                @* Prompt 71: role Admin Gudang -- hanya module Stok Benang,
+                                   setelah login langsung ke /gudang/benang. *@
+                                <option value="WAREHOUSE">Admin Gudang</option>
                             </InputSelect>
                             <ValidationMessage For="@(() => formModel.Role)" class="text-danger" />
                         </div>

@@ -1,0 +1,18 @@
+@inherits LayoutComponentBase
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+
+@* Layout semua halaman /gudang/benang -- module Stok Benang (Prompt 71-77).
+   SENGAJA tanpa AppHeader/AppSidebar: halaman ini dipakai admin gudang di HP
+   (mockup claude prompt/benang/mockup/*.dc.html adalah layar penuh), dan role
+   Admin Gudang hanya punya satu module sehingga sidebar admin kosong untuknya.
+
+   Pemakaian login tetap WAJIB (@attribute [Authorize] di tiap halaman) --
+   berbeda dari /tni yang memakai pola perangkat tanpa login.
+
+   Bar menu atas hanya tampil >= 900px (class .bn-topbar display:none di HP);
+   di HP, kepala halaman ada di masing-masing halaman sesuai mockup. *@
+
+<div class="benang">
+    <BenangTopBar />
+    @Body
+</div>

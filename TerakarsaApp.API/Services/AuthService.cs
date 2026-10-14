@@ -66,6 +66,7 @@ public class AuthService
             FullName = stored.FullName,
             Role = stored.Role,
             IsActive = stored.IsActive,
+            HomeRoute = stored.HomeRoute,
             Password = string.Empty
         });
     }
@@ -121,6 +122,13 @@ public class AuthService
             new Claim(ClaimTypes.GivenName, user.FullName),
             new Claim(ClaimTypes.Role, user.Role)
         };
+
+        // Prompt 71: halaman awal setelah login (Users.home_route, dengan fallback per role
+        // di SIS_User_GetByUsername). Dipakai Login.razor -- role WAREHOUSE langsung ke
+        // /gudang/benang, role lain tetap ke dashboard biasa.
+        if (!string.IsNullOrWhiteSpace(user.HomeRoute))
+            claims.Add(new Claim("home_route", user.HomeRoute));
+
         claims.AddRange(moduleCodes.Select(code => new Claim("module", code)));
 
         var token = new JwtSecurityToken(
@@ -145,6 +153,8 @@ public class UserResult
     public string FullName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    // Prompt 71 (sql/inv/alter_71_home_route.sql): halaman awal setelah login.
+    public string? HomeRoute { get; set; }
 }
 
 public class RefreshTokenResult
@@ -154,6 +164,7 @@ public class RefreshTokenResult
     public string FullName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    public string? HomeRoute { get; set; }
     public DateTime TokenExpiresAt { get; set; }
     public DateTime? RevokedAt { get; set; }
 }

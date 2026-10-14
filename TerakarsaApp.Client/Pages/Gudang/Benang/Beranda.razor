@@ -1,0 +1,334 @@
+@page "/gudang/benang"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Prompt 71 -- landing module Stok Benang.
+   Mockup: Main.dc.html (HP) dan TabletBeranda.dc.html (>= 900px, dua panel).
+
+   Tombol Scan dan tiga tombol aksi (Ambil / Kembali / Opname) dibuat di
+   Prompt 72 & 74: di sini sengaja ditampilkan TAPI MATI dengan tooltip
+   "Prompt berikutnya", sesuai instruksi prompt. *@
+
+<PageTitle>Stok Benang</PageTitle>
+
+@* ---------------- kepala gelap (HP) ---------------- *@
+<div class="bn-head bn-hide-wide">
+    <div class="bn-head-row">
+        <div class="bn-head-t">Stok Benang</div>
+        <div class="bn-head-u">Gudang · @namaUser</div>
+    </div>
+
+    <button type="button" class="bn-scan" disabled title="Prompt berikutnya">
+        <i class="fe fe-maximize" style="font-size:24px"></i>
+        <span>Scan barcode / QR</span>
+    </button>
+
+    <input type="search" class="bn-search" placeholder="Cari warna, kode, merk…"
+           aria-label="Cari SKU" value="@search" @oninput="SearchDiubah" />
+</div>
+
+@* ---------------- tiga tombol aksi (HP) ---------------- *@
+<div class="bn-acts bn-hide-wide">
+    <button type="button" class="bn-act bn-act-ambil" disabled title="Prompt berikutnya">
+        <span class="bn-act-i"><i class="fe fe-arrow-down"></i></span>
+        Ambil
+    </button>
+    <button type="button" class="bn-act bn-act-kembali" disabled title="Prompt berikutnya">
+        <span class="bn-act-i"><i class="fe fe-arrow-up"></i></span>
+        Kembali
+    </button>
+    <button type="button" class="bn-act bn-act-opname" disabled title="Prompt berikutnya">
+        <span class="bn-act-i"><i class="fe fe-check-square"></i></span>
+        Opname
+    </button>
+</div>
+
+<div class="bn-two">
+
+    @* ---------------- daftar SKU ---------------- *@
+    <div class="bn-left">
+
+        @* baris filter hanya di layar lebar (di HP, pencarian ada di kepala gelap) *@
+        <div class="bn-left-filter bn-hide-narrow">
+            <input type="search" class="bn-inp" style="height:36px;flex:1;min-width:0"
+                   placeholder="Scan / cari warna, kode, merk…"
+                   aria-label="Cari SKU" value="@search" @oninput="SearchDiubah" />
+
+            <select aria-label="Filter lokasi" value="@(filterLocationId?.ToString() ?? "")"
+                    @onchange="LokasiDiubah">
+                <option value="">Semua lokasi</option>
+                @foreach (var loc in locations)
+                {
+                    <option value="@loc.ThreadLocationId">@loc.Code</option>
+                }
+            </select>
+
+            <select aria-label="Filter jenis" value="@(filterTypeId?.ToString() ?? "")"
+                    @onchange="JenisDiubah">
+                <option value="">Semua jenis</option>
+                @foreach (var t in types)
+                {
+                    <option value="@t.ThreadTypeId">@t.Name</option>
+                }
+            </select>
+        </div>
+
+        <div class="bn-sec">
+            <div class="bn-sec-t">Daftar SKU</div>
+            <div class="bn-sec-n">@totalCount SKU · @locations.Count lokasi</div>
+        </div>
+
+        <div class="bn-list">
+            @if (isLoading)
+            {
+                <div class="bn-card bn-note">Memuat daftar SKU...</div>
+            }
+            else if (items.Count == 0)
+            {
+                <div class="bn-card bn-note">
+                    @(string.IsNullOrWhiteSpace(search) && filterTypeId is null && filterLocationId is null
+                        ? "Belum ada SKU benang. Tambahkan lewat tombol \"+ SKU baru\"."
+                        : "Tidak ada SKU yang cocok dengan pencarian.")
+                </div>
+            }
+            else
+            {
+                @foreach (var item in items)
+                {
+                    <ThreadSkuCard Item="item"
+                                   Selected="@(detail?.Item?.ThreadItemId == item.ThreadItemId)"
+                                   OnClick="SkuDiklik" />
+                }
+
+                @if (items.Count < totalCount)
+                {
+                    <button type="button" class="bn-btn bn-btn-soft" @onclick="MuatLagi" disabled="@isLoadingMore">
+                        @(isLoadingMore ? "Memuat..." : $"Muat {Math.Min(PageSize, totalCount - items.Count)} SKU lagi")
+                    </button>
+                }
+            }
+        </div>
+
+        @* Di HP bar menu atas tidak tampil, jadi jalan ke master disediakan di sini. *@
+        <div class="bn-hide-wide" style="padding:0 16px 8px;display:flex;gap:16px">
+            <a href="/gudang/benang/lokasi" class="bn-note" style="font-weight:600">
+                <i class="fe fe-grid"></i> Kelola rak
+            </a>
+            <a href="/gudang/benang/master" class="bn-note" style="font-weight:600">
+                <i class="fe fe-sliders"></i> Jenis &amp; merk
+            </a>
+        </div>
+
+        <div class="bn-bot">
+            <button type="button" class="bn-btn" @onclick="@(() => Nav.NavigateTo("/gudang/benang/sku/baru"))">
+                + SKU baru
+            </button>
+        </div>
+    </div>
+
+    @* ---------------- panel detail (>= 900px) ---------------- *@
+    <div class="bn-right">
+        @if (detail?.Item is null)
+        {
+            <div class="bn-note">Pilih SKU di daftar kiri untuk melihat detailnya.</div>
+        }
+        else
+        {
+            <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                        @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/{detail!.Item!.ThreadItemId}"))">
+                    Buka halaman detail
+                </button>
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                        @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/edit/{detail!.Item!.ThreadItemId}"))">
+                    Edit
+                </button>
+                <button type="button" class="bn-btn bn-btn-sm" disabled title="Prompt berikutnya">
+                    Cetak label SKU
+                </button>
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-p" disabled title="Prompt berikutnya">
+                    Ambil
+                </button>
+            </div>
+
+            <ThreadSkuDetailPanel Detail="detail" OnPhotoChanged="MuatDetailUlang" />
+        }
+    </div>
+</div>
+
+@code {
+    private const int PageSize = 50;
+
+    private List<ThreadItemDto> items = new();
+    private List<ThreadLocationDto> locations = new();
+    private List<ThreadTypeDto> types = new();
+    private ThreadItemDetailDto? detail;
+
+    private string namaUser = string.Empty;
+    private string search = string.Empty;
+    private int? filterTypeId;
+    private int? filterLocationId;
+    private int totalCount;
+    private int pageNumber = 1;
+    private bool isLoading = true;
+    private bool isLoadingMore;
+
+    private bool layarLebar;
+    private DotNetObjectReference<Beranda>? selfRef;
+
+    // Pencarian diketik per huruf: tunggu sebentar supaya tidak satu request per ketikan.
+    private CancellationTokenSource? searchDebounce;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        namaUser = state.User.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value
+                   ?? state.User.Identity?.Name ?? string.Empty;
+
+        locations = await ThreadApi.GetLocationsAsync();
+        types = await ThreadApi.GetTypesAsync();
+
+        await MuatDaftar();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            layarLebar = await JS.InvokeAsync<bool>("benangLayout.subscribe", selfRef);
+        }
+        catch (JSException)
+        {
+            layarLebar = false;
+        }
+    }
+
+    // Dipanggil benang.js saat lebar layar melewati breakpoint 900px.
+    [JSInvokable]
+    public Task LebarBerubah(bool wide)
+    {
+        layarLebar = wide;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task MuatDaftar()
+    {
+        isLoading = true;
+        pageNumber = 1;
+
+        var result = await ThreadApi.GetItemsAsync(
+            search: search, typeId: filterTypeId, locationId: filterLocationId,
+            pageNumber: pageNumber, pageSize: PageSize);
+
+        items = result.Items;
+        totalCount = result.TotalCount;
+        isLoading = false;
+    }
+
+    private async Task MuatLagi()
+    {
+        isLoadingMore = true;
+        pageNumber++;
+
+        var result = await ThreadApi.GetItemsAsync(
+            search: search, typeId: filterTypeId, locationId: filterLocationId,
+            pageNumber: pageNumber, pageSize: PageSize);
+
+        items.AddRange(result.Items);
+        totalCount = result.TotalCount;
+        isLoadingMore = false;
+    }
+
+    private async Task SearchDiubah(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? string.Empty;
+
+        searchDebounce?.Cancel();
+        searchDebounce = new CancellationTokenSource();
+        var token = searchDebounce.Token;
+
+        try
+        {
+            await Task.Delay(350, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (!token.IsCancellationRequested)
+        {
+            await MuatDaftar();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LokasiDiubah(ChangeEventArgs e)
+    {
+        filterLocationId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await MuatDaftar();
+    }
+
+    private async Task JenisDiubah(ChangeEventArgs e)
+    {
+        filterTypeId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await MuatDaftar();
+    }
+
+    // HP: buka halaman detail. Tablet: isi panel kanan (mockup TabletBeranda).
+    private async Task SkuDiklik(ThreadItemDto item)
+    {
+        if (!layarLebar)
+        {
+            Nav.NavigateTo($"/gudang/benang/sku/{item.ThreadItemId}");
+            return;
+        }
+
+        detail = await ThreadApi.GetItemAsync(item.ThreadItemId);
+    }
+
+    private async Task MuatDetailUlang()
+    {
+        if (detail?.Item is null) return;
+
+        var id = detail.Item.ThreadItemId;
+        detail = await ThreadApi.GetItemAsync(id);
+        await MuatDaftar();
+    }
+
+    public void Dispose()
+    {
+        searchDebounce?.Cancel();
+        searchDebounce?.Dispose();
+
+        if (selfRef is not null)
+        {
+            // Halaman bisa ditutup saat JS sudah tidak tersedia -- abaikan kegagalan.
+            try
+            {
+                _ = JS.InvokeVoidAsync("benangLayout.unsubscribe", selfRef);
+            }
+            catch (JSException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            selfRef.Dispose();
+        }
+    }
+}

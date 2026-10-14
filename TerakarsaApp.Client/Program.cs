@@ -96,6 +96,9 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.DashboardTokenApiService
 builder.Services.AddScoped<TerakarsaApp.Client.Services.UnlockRequestApiService>();
 // Prompt 70: halaman Absensi (kartu karyawan, rekap, koreksi anomali).
 builder.Services.AddScoped<TerakarsaApp.Client.Services.AttendanceApiService>();
+// Prompt 71-77: module Stok Benang (/gudang/benang). Login biasa + module INV_THREAD,
+// BUKAN pola perangkat tanpa login seperti /tni.
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ThreadStockApiService>();
 // Module PDH TNI AD -- dipakai SEPERTI STASIUN, TANPA LOGIN: tiap service di
 // bawah ini memakai HttpClient sendiri yang menyisipkan header X-Tni-Token
 // (TniDeviceTokenHandler), BUKAN JWT. Petugas dikenali server dari perangkat.

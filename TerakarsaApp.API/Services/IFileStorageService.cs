@@ -7,4 +7,7 @@ public interface IFileStorageService
     Stream OpenRead(string relativePath);
 
     bool FileExists(string relativePath);
+
+    // Prompt 71: foto SKU benang hanya satu per SKU -- file lama dihapus saat diganti.
+    void Delete(string relativePath);
 }

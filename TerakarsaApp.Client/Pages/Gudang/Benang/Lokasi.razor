@@ -1,0 +1,223 @@
+@page "/gudang/benang/lokasi"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+
+@* Prompt 71 -- master lokasi (rak) benang. Tidak punya mockup sendiri; gaya
+   mengikuti Sku.dc.html (kepala putih + kartu putih + baris daftar).
+
+   Rak TIDAK di-seed: tiap gudang punya penamaan sendiri, jadi daftarnya dimulai
+   kosong dan diisi dari halaman ini. Rak yang masih berisi kones tidak bisa
+   dihapus (ditolak inv.SIS_ThreadLocation_Manage). *@
+
+<PageTitle>Lokasi Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Lokasi / rak</div>
+</div>
+
+<div class="bn-body">
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger" style="margin:0">@error</div>
+    }
+
+    @* ---------------- form inline ---------------- *@
+    <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+        <div class="bn-sub">@(form.ThreadLocationId.HasValue ? "Ubah rak" : "Rak baru")</div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-rak-kode">Kode rak</label>
+            <input id="bn-rak-kode" class="bn-inp" placeholder="mis. A1"
+                   @bind="form.Code" @bind:event="oninput" />
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-rak-nama">Nama / keterangan (opsional)</label>
+            <input id="bn-rak-nama" class="bn-inp" placeholder="mis. Rak dekat meja timbang"
+                   @bind="form.Name" @bind:event="oninput" />
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-rak-urut">Urutan tampil</label>
+            <input id="bn-rak-urut" class="bn-inp" type="number" @bind="form.SortOrder" />
+        </div>
+
+        <div style="display:flex;gap:10px">
+            <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                    disabled="@(isSaving || string.IsNullOrWhiteSpace(form.Code))" @onclick="Simpan">
+                @(isSaving ? "Menyimpan..." : "Simpan")
+            </button>
+            @if (form.ThreadLocationId.HasValue)
+            {
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="BatalEdit">Batal</button>
+            }
+        </div>
+    </div>
+
+    @* ---------------- daftar ---------------- *@
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="bn-sub">Daftar rak (@locations.Count)</div>
+
+        @if (isLoading)
+        {
+            <div class="bn-card bn-note">Memuat...</div>
+        }
+        else if (locations.Count == 0)
+        {
+            <div class="bn-card bn-note">Belum ada rak. Tambahkan lewat form di atas.</div>
+        }
+        else
+        {
+            <div class="bn-rows">
+                @foreach (var loc in locations)
+                {
+                    <div class="bn-row" style="@(loc.IsActive ? "" : "background:#fafbfa")">
+                        <span style="min-width:0">
+                            <span class="bn-b">@loc.Code</span>
+                            @if (!loc.IsActive)
+                            {
+                                <span class="bn-chip bn-chip-mut" style="margin-left:6px">Nonaktif</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(loc.Name))
+                            {
+                                <span class="bn-k" style="display:block">@loc.Name</span>
+                            }
+                            <span class="bn-k" style="display:block">
+                                @loc.ItemCount SKU · @loc.QtyWholeTotal whole
+                                @if (loc.SplitCount > 0)
+                                {
+                                    <span style="color:var(--bn-amber)"> · @loc.SplitCount split</span>
+                                }
+                            </span>
+                        </span>
+
+                        <span style="display:flex;gap:6px;flex-shrink:0">
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                                    title="Ubah" @onclick="@(() => MulaiEdit(loc))">
+                                <i class="fe fe-edit-2"></i>
+                            </button>
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                                    title="@(loc.IsActive ? "Nonaktifkan" : "Aktifkan")"
+                                    @onclick="@(() => ToggleAktif(loc))">
+                                <i class="fe @(loc.IsActive ? "fe-eye-off" : "fe-eye")"></i>
+                            </button>
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-danger"
+                                    title="Hapus" @onclick="@(() => MintaHapus(loc))">
+                                <i class="fe fe-trash-2"></i>
+                            </button>
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<ConfirmDeleteModal Show="@(hapusTarget is not null)" IsBusy="isDeleting"
+                    Title="Hapus rak" OnConfirm="Hapus"
+                    OnCancel="@(() => hapusTarget = null)">
+    <Message>
+        Hapus rak <strong>@hapusTarget?.Code</strong>? Rak yang masih berisi kones akan
+        ditolak server.
+    </Message>
+</ConfirmDeleteModal>
+
+@code {
+    private List<ThreadLocationDto> locations = new();
+    private ThreadLocationSaveRequest form = new();
+    private ThreadLocationDto? hapusTarget;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool isDeleting;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => Muat();
+
+    private async Task Muat()
+    {
+        isLoading = true;
+        locations = await ThreadApi.GetLocationsAsync();
+        isLoading = false;
+    }
+
+    private void MulaiEdit(ThreadLocationDto loc)
+    {
+        form = new ThreadLocationSaveRequest
+        {
+            ThreadLocationId = loc.ThreadLocationId,
+            Code = loc.Code,
+            Name = loc.Name,
+            SortOrder = loc.SortOrder
+        };
+        error = null;
+    }
+
+    private void BatalEdit()
+    {
+        form = new ThreadLocationSaveRequest();
+        error = null;
+    }
+
+    private async Task Simpan()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.SaveLocationAsync(form);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        form = new ThreadLocationSaveRequest();
+        await Muat();
+    }
+
+    private async Task ToggleAktif(ThreadLocationDto loc)
+    {
+        error = null;
+        var (success, err) = await ThreadApi.SetLocationActiveAsync(loc.ThreadLocationId, !loc.IsActive);
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await Muat();
+    }
+
+    private void MintaHapus(ThreadLocationDto loc)
+    {
+        hapusTarget = loc;
+        error = null;
+    }
+
+    private async Task Hapus()
+    {
+        if (hapusTarget is null) return;
+
+        isDeleting = true;
+        var (success, err) = await ThreadApi.DeleteLocationAsync(hapusTarget.ThreadLocationId);
+        isDeleting = false;
+        hapusTarget = null;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await Muat();
+    }
+}

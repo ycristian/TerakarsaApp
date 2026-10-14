@@ -27,7 +27,11 @@ public class ImageCompressionService
         _options = options;
     }
 
-    public async Task<CompressResult> CompressAsync(Stream input, string fileExtension)
+    // maxWidth/quality: override opsional atas ImageCompression di appsettings.
+    // Dipakai foto SKU benang (Prompt 71) yang hanya butuh 800px / JPEG 80 -- fotonya
+    // dilihat sebagai thumbnail di HP, bukan referensi artikel seperti foto produksi.
+    public async Task<CompressResult> CompressAsync(Stream input, string fileExtension,
+        int? maxWidth = null, int? quality = null)
     {
         var extension = fileExtension.TrimStart('.').ToLowerInvariant();
 
@@ -49,15 +53,17 @@ public class ImageCompressionService
             throw new InvalidOperationException("File gambar tidak dapat dibaca atau rusak.");
 
         var options = _options.Value;
+        var effectiveMaxWidth = maxWidth ?? options.MaxWidth;
+        var effectiveQuality = quality ?? options.Quality;
         var source = original;
         SKBitmap? resized = null;
 
         try
         {
-            if (original.Width > options.MaxWidth)
+            if (original.Width > effectiveMaxWidth)
             {
-                var newHeight = (int)Math.Round(original.Height * (options.MaxWidth / (double)original.Width));
-                resized = original.Resize(new SKImageInfo(options.MaxWidth, newHeight), SKSamplingOptions.Default);
+                var newHeight = (int)Math.Round(original.Height * (effectiveMaxWidth / (double)original.Width));
+                resized = original.Resize(new SKImageInfo(effectiveMaxWidth, newHeight), SKSamplingOptions.Default);
                 if (resized is not null)
                     source = resized;
             }
@@ -68,7 +74,7 @@ public class ImageCompressionService
             canvas.DrawBitmap(source, 0, 0, SKSamplingOptions.Default);
 
             using var image = surface.Snapshot();
-            using var data = image.Encode(SKEncodedImageFormat.Jpeg, options.Quality);
+            using var data = image.Encode(SKEncodedImageFormat.Jpeg, effectiveQuality);
 
             var output = new MemoryStream();
             data.SaveTo(output);

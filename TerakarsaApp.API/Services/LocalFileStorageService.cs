@@ -39,4 +39,23 @@ public class LocalFileStorageService : IFileStorageService
         var fullPath = Path.Combine(_basePath, relativePath);
         return File.Exists(fullPath);
     }
+
+    public void Delete(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return;
+
+        var fullPath = Path.Combine(_basePath, relativePath);
+        // Share jaringan bisa sedang terkunci; kegagalan hapus tidak boleh membatalkan
+        // penggantian foto yang sudah tersimpan.
+        try
+        {
+            if (File.Exists(fullPath)) File.Delete(fullPath);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 }

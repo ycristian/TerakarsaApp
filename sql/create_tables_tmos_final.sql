@@ -20,9 +20,18 @@
 -- di database sebelum Fase 0 di atas, jadi tidak ikut di-CREATE lewat file ini (tidak
 -- pakai konvensi snake_case/soft-delete di atas). Didokumentasikan di sini sebagai
 -- referensi kolom, BUKAN untuk dieksekusi ulang:
---   Users(Id, Username, Password, FullName, Role, IsActive, CreatedAt)
+--   Users(Id, Username, Password, FullName, Role, IsActive, CreatedAt, home_route)
 --   Password varchar(500) sejak Prompt 21 -- format simpanan: PBKDF2$<iterasi>$<saltBase64>$<hashBase64>
 --   (lihat sql/alter_21_password_pbkdf2.sql, TerakarsaApp.API/Services/PasswordHasher.cs)
+--   home_route varchar(100) null sejak Prompt 71 -- halaman awal setelah login
+--   (role baru WAREHOUSE / "Admin Gudang" -> /gudang/benang). Lihat
+--   sql/inv/alter_71_home_route.sql; nilainya dibawa claim JWT "home_route".
+
+-- Catatan schema lain (file ini HANYA canonical untuk schema dbo):
+--   schema `tni` (module PDH TNI AD, Prompt 60-69)  -> sql/tni/create_schema_tni.sql
+--   schema `inv` (module Stok Benang, Prompt 71-77) -> sql/inv/create_71_inv_thread.sql
+-- Keduanya hanya MEMBACA tabel dbo (projects, resources, users) dan menyentuh dbo
+-- sebatas seed Modules/UserModules + kolom Users.home_route di atas.
 
 -- ============ 1. MASTER TANPA DEPENDENSI ============
 

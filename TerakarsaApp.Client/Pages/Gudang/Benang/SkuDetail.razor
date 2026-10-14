@@ -1,0 +1,66 @@
+@page "/gudang/benang/sku/{Id:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 71 -- detail satu SKU benang. Mockup: Sku.dc.html.
+   Tombol "Cetak label SKU" (Prompt 73) dan "Ambil" (Prompt 72) ditampilkan
+   tapi mati dengan tooltip "Prompt berikutnya". *@
+
+<PageTitle>@(detail?.Item?.ColorName ?? "Detail SKU")</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Detail SKU</div>
+    @if (detail?.Item is not null)
+    {
+        <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" style="margin-left:auto"
+                @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/edit/{Id}"))">
+            Edit
+        </button>
+    }
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat detail SKU...</div>
+    }
+    else if (detail?.Item is null)
+    {
+        <div class="bn-card bn-note">SKU tidak ditemukan atau sudah dihapus.</div>
+    }
+    else
+    {
+        <ThreadSkuDetailPanel Detail="detail" OnPhotoChanged="MuatUlang" />
+    }
+</div>
+
+@if (detail?.Item is not null)
+{
+    <div class="bn-bot bn-bot-2">
+        <button type="button" class="bn-btn" disabled title="Prompt berikutnya">Cetak label SKU</button>
+        <button type="button" class="bn-btn bn-btn-p" disabled title="Prompt berikutnya">Ambil</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ThreadItemDetailDto? detail;
+    private bool isLoading = true;
+
+    protected override Task OnParametersSetAsync() => MuatUlang();
+
+    private async Task MuatUlang()
+    {
+        isLoading = true;
+        detail = await ThreadApi.GetItemAsync(Id);
+        isLoading = false;
+    }
+}

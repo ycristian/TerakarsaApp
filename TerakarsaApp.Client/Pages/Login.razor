@@ -1,6 +1,8 @@
 @page "/login"
 @using TerakarsaApp.Client.Auth
+@using Microsoft.AspNetCore.Components.Authorization
 @inject AuthApiService AuthApi
+@inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 
 <PageTitle>Login</PageTitle>
@@ -44,7 +46,14 @@
 
         if (success)
         {
-            Nav.NavigateTo("/", forceLoad: false);
+            // Prompt 71: halaman awal per user. Claim "home_route" berisi Users.home_route
+            // (fallback per role di SIS_User_GetByUsername) -- role WAREHOUSE / Admin Gudang
+            // langsung ke /gudang/benang karena dashboard utama kosong untuknya. Kosong =
+            // dashboard biasa.
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var homeRoute = state.User.FindFirst("home_route")?.Value;
+
+            Nav.NavigateTo(string.IsNullOrWhiteSpace(homeRoute) ? "/" : homeRoute, forceLoad: false);
         }
         else
         {

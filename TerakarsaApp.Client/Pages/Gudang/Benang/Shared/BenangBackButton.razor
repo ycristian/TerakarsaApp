@@ -1,0 +1,24 @@
+@inject NavigationManager Nav
+
+@* Tombol kembali halaman anak /gudang/benang/* (mockup Sku.dc.html: panah di
+   kepala putih).
+
+   SENGAJA TIDAK memakai CloseButton.razor: komponen itu memanggil window.close()
+   yang hanya bekerja untuk halaman yang dibuka target="_blank". Module ini
+   dipakai di HP dan berpindah halaman dengan Nav.NavigateTo dalam satu tab, jadi
+   window.close() tidak berefek dan halaman anak jadi jalan buntu -- alasan yang
+   sama dengan TniBackButton (Prompt 63).
+
+   Satu komponen bersama, bukan tombol "Kembali ke X" hardcode di tiap halaman. *@
+
+<button type="button" class="bn-back" title="@Label" aria-label="@Label" @onclick="HandleClick">
+    <i class="fe fe-chevron-left"></i>
+</button>
+
+@code {
+    // Default ke landing module; halaman yang punya induk lebih dekat boleh mengisi To.
+    [Parameter] public string To { get; set; } = "/gudang/benang";
+    [Parameter] public string Label { get; set; } = "Kembali";
+
+    private void HandleClick() => Nav.NavigateTo(To);
+}

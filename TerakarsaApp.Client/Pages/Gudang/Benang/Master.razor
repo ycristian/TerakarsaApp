@@ -1,0 +1,285 @@
+@page "/gudang/benang/master"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+
+@* Prompt 71 -- master kecil module benang: jenis benang & merk, dua tab.
+   Gaya mengikuti Sku.dc.html / Lokasi (kepala putih + kartu putih).
+
+   Jenis benang sudah di-seed (Poly/Cotton/Spun/Nylon); halaman ini untuk
+   menambah jenis lain dan mengelola merk. Yang masih dipakai SKU tidak bisa
+   dihapus (ditolak SP). *@
+
+<PageTitle>Master Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Master benang</div>
+</div>
+
+<div class="bn-tabs" style="padding-top:12px">
+    <button type="button" class="@(tab == "JENIS" ? "is-on" : "")" @onclick="@(() => GantiTab("JENIS"))">
+        Jenis benang
+    </button>
+    <button type="button" class="@(tab == "MERK" ? "is-on" : "")" @onclick="@(() => GantiTab("MERK"))">
+        Merk
+    </button>
+</div>
+
+<div class="bn-body">
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger" style="margin:0">@error</div>
+    }
+
+    @if (tab == "JENIS")
+    {
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+            <div class="bn-sub">@(typeForm.ThreadTypeId.HasValue ? "Ubah jenis" : "Jenis baru")</div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-type-kode">Kode</label>
+                <input id="bn-type-kode" class="bn-inp" placeholder="mis. POLY"
+                       @bind="typeForm.Code" @bind:event="oninput" />
+                <div class="bn-note">Tiga huruf pertama ikut jadi bagian kode SKU (POLY → POL).</div>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-type-nama">Nama</label>
+                <input id="bn-type-nama" class="bn-inp" placeholder="mis. Poly"
+                       @bind="typeForm.Name" @bind:event="oninput" />
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-type-urut">Urutan tampil</label>
+                <input id="bn-type-urut" class="bn-inp" type="number" @bind="typeForm.SortOrder" />
+            </div>
+
+            <div style="display:flex;gap:10px">
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                        disabled="@(isSaving || string.IsNullOrWhiteSpace(typeForm.Code) || string.IsNullOrWhiteSpace(typeForm.Name))"
+                        @onclick="SimpanJenis">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+                @if (typeForm.ThreadTypeId.HasValue)
+                {
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                            @onclick="@(() => typeForm = new ThreadTypeSaveRequest())">
+                        Batal
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-sub">Daftar jenis (@types.Count)</div>
+            @if (types.Count == 0)
+            {
+                <div class="bn-card bn-note">Belum ada jenis benang.</div>
+            }
+            else
+            {
+                <div class="bn-rows">
+                    @foreach (var t in types)
+                    {
+                        <div class="bn-row">
+                            <span>
+                                <span class="bn-b">@t.Name</span>
+                                <span class="bn-k" style="display:block">@t.Code · @t.ItemCount SKU</span>
+                            </span>
+                            <span style="display:flex;gap:6px;flex-shrink:0">
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" title="Ubah"
+                                        @onclick="@(() => typeForm = new ThreadTypeSaveRequest
+                                        {
+                                            ThreadTypeId = t.ThreadTypeId, Code = t.Code,
+                                            Name = t.Name, SortOrder = t.SortOrder
+                                        })">
+                                    <i class="fe fe-edit-2"></i>
+                                </button>
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-danger" title="Hapus"
+                                        disabled="@(!t.BolehHapus)"
+                                        @onclick="@(() => hapusJenis = t)">
+                                    <i class="fe fe-trash-2"></i>
+                                </button>
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+            <div class="bn-sub">@(brandForm.ThreadBrandId.HasValue ? "Ubah merk" : "Merk baru")</div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-merk-nama">Nama merk</label>
+                <input id="bn-merk-nama" class="bn-inp" placeholder="mis. Astra"
+                       @bind="brandForm.Name" @bind:event="oninput" />
+            </div>
+
+            <div style="display:flex;gap:10px">
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                        disabled="@(isSaving || string.IsNullOrWhiteSpace(brandForm.Name))"
+                        @onclick="SimpanMerk">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+                @if (brandForm.ThreadBrandId.HasValue)
+                {
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                            @onclick="@(() => brandForm = new ThreadBrandSaveRequest())">
+                        Batal
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-sub">Daftar merk (@brands.Count)</div>
+            @if (brands.Count == 0)
+            {
+                <div class="bn-card bn-note">Belum ada merk. Merk juga bisa ditambah langsung dari form SKU.</div>
+            }
+            else
+            {
+                <div class="bn-rows">
+                    @foreach (var b in brands)
+                    {
+                        <div class="bn-row">
+                            <span>
+                                <span class="bn-b">@b.Name</span>
+                                <span class="bn-k" style="display:block">@b.ItemCount SKU</span>
+                            </span>
+                            <span style="display:flex;gap:6px;flex-shrink:0">
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" title="Ubah"
+                                        @onclick="@(() => brandForm = new ThreadBrandSaveRequest
+                                        {
+                                            ThreadBrandId = b.ThreadBrandId, Name = b.Name
+                                        })">
+                                    <i class="fe fe-edit-2"></i>
+                                </button>
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-danger" title="Hapus"
+                                        disabled="@(!b.BolehHapus)"
+                                        @onclick="@(() => hapusMerk = b)">
+                                    <i class="fe fe-trash-2"></i>
+                                </button>
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<ConfirmDeleteModal Show="@(hapusJenis is not null)" IsBusy="isDeleting"
+                    Title="Hapus jenis benang" OnConfirm="HapusJenis"
+                    OnCancel="@(() => hapusJenis = null)">
+    <Message>Hapus jenis <strong>@hapusJenis?.Name</strong>?</Message>
+</ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="@(hapusMerk is not null)" IsBusy="isDeleting"
+                    Title="Hapus merk" OnConfirm="HapusMerk"
+                    OnCancel="@(() => hapusMerk = null)">
+    <Message>Hapus merk <strong>@hapusMerk?.Name</strong>?</Message>
+</ConfirmDeleteModal>
+
+@code {
+    private string tab = "JENIS";
+
+    private List<ThreadTypeDto> types = new();
+    private List<ThreadBrandDto> brands = new();
+
+    private ThreadTypeSaveRequest typeForm = new();
+    private ThreadBrandSaveRequest brandForm = new();
+
+    private ThreadTypeDto? hapusJenis;
+    private ThreadBrandDto? hapusMerk;
+
+    private bool isSaving;
+    private bool isDeleting;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => Muat();
+
+    private async Task Muat()
+    {
+        types = await ThreadApi.GetTypesAsync();
+        brands = await ThreadApi.GetBrandsAsync();
+    }
+
+    private void GantiTab(string t)
+    {
+        tab = t;
+        error = null;
+    }
+
+    private async Task SimpanJenis()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.SaveTypeAsync(typeForm);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        typeForm = new ThreadTypeSaveRequest();
+        await Muat();
+    }
+
+    private async Task SimpanMerk()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.SaveBrandAsync(brandForm);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        brandForm = new ThreadBrandSaveRequest();
+        await Muat();
+    }
+
+    private async Task HapusJenis()
+    {
+        if (hapusJenis is null) return;
+
+        isDeleting = true;
+        var (success, err) = await ThreadApi.DeleteTypeAsync(hapusJenis.ThreadTypeId);
+        isDeleting = false;
+        hapusJenis = null;
+
+        if (!success) error = err;
+        await Muat();
+    }
+
+    private async Task HapusMerk()
+    {
+        if (hapusMerk is null) return;
+
+        isDeleting = true;
+        var (success, err) = await ThreadApi.DeleteBrandAsync(hapusMerk.ThreadBrandId);
+        isDeleting = false;
+        hapusMerk = null;
+
+        if (!success) error = err;
+        await Muat();
+    }
+}

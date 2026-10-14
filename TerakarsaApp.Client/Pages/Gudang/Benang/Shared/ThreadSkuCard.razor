@@ -1,0 +1,62 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@inject ThreadStockApiService ThreadApi
+
+@* Prompt 71: satu kartu SKU benang. Komponen BERSAMA -- dipakai daftar landing
+   (HP & panel kiri tablet), hasil scan (Prompt 72), dan opname (Prompt 74).
+   Bentuknya mengikuti mockup Main.dc.html / TabletBeranda.dc.html:
+   thumbnail . nama+kode . jenis+merk+kones . lokasi . qty whole . +n split. *@
+
+<button type="button" class="bn-sku @(Selected ? "is-sel" : "") @(Item.IsActive ? "" : "bn-off")"
+        @onclick="HandleClick">
+
+    @if (Item.AdaFoto)
+    {
+        <img class="bn-thumb" src="@ThreadApi.PhotoUrl(Item.PhotoPath)" alt="@Item.ColorName" />
+    }
+    else
+    {
+        <span class="bn-noimg">no foto</span>
+    }
+
+    <span class="bn-sku-mid">
+        <span class="bn-sku-t">@Item.Judul</span>
+        <span class="bn-sku-s">@Item.Keterangan</span>
+        @if (!string.IsNullOrWhiteSpace(Item.LocationCodes))
+        {
+            <span class="bn-sku-l">@Item.LocationCodes.Replace(" / ", " · ")</span>
+        }
+        else
+        {
+            <span class="bn-sku-l">Belum ada stok di rak</span>
+        }
+        @if (!Item.IsActive)
+        {
+            <span class="bn-chip bn-chip-mut" style="align-self:flex-start">Nonaktif</span>
+        }
+    </span>
+
+    <span class="bn-sku-right">
+        <span class="bn-sku-n">@Item.QtyWholeTotal</span>
+        <span class="bn-sku-u">whole</span>
+        @if (Item.SplitCountInStock > 0)
+        {
+            <span class="bn-sku-sp">+@Item.SplitCountInStock split</span>
+        }
+        else
+        {
+            <span class="bn-sku-sp0">0 split</span>
+        }
+    </span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public ThreadItemDto Item { get; set; } = default!;
+
+    // Panel kiri tablet menandai SKU yang sedang dibuka di panel kanan.
+    [Parameter] public bool Selected { get; set; }
+
+    [Parameter] public EventCallback<ThreadItemDto> OnClick { get; set; }
+
+    private Task HandleClick() => OnClick.InvokeAsync(Item);
+}

@@ -1,0 +1,155 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@using Microsoft.AspNetCore.Components.Forms
+@inject ThreadStockApiService ThreadApi
+
+@* Prompt 71: isi detail SKU -- foto + tombol ganti foto, ringkasan whole/split,
+   stok per lokasi, daftar kones split. Komponen BERSAMA halaman detail HP
+   (Sku.dc.html) dan panel kanan tablet (TabletBeranda.dc.html); yang berbeda
+   hanya tombol aksi, yang dirender halaman pemanggil. *@
+
+<div style="display:flex;gap:14px;align-items:flex-start">
+    <div class="bn-photo-wrap">
+        @if (Detail.Item!.AdaFoto)
+        {
+            <img class="bn-photo" src="@ThreadApi.PhotoUrl(Detail.Item.PhotoPath)" alt="@Detail.Item.ColorName" />
+        }
+        else
+        {
+            <span class="bn-photo-none">no foto</span>
+        }
+
+        @* capture="environment": di HP langsung membuka kamera belakang. *@
+        <label class="bn-photo-btn" title="Ganti foto" style="cursor:pointer">
+            <i class="fe fe-camera"></i>
+            <InputFile OnChange="HandlePhotoSelected" accept="image/*" capture="environment"
+                       style="display:none" disabled="@isUploading" />
+        </label>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:20px;font-weight:700">@Detail.Item.ColorName</div>
+        <div style="font-size:14px;color:var(--bn-mut)">
+            Kode warna <strong style="color:var(--bn-ink)">@Detail.Item.ColorCode</strong>
+        </div>
+        <div style="font-size:14px;color:var(--bn-mut)">@Detail.Item.Keterangan</div>
+        <div class="bn-mono" style="color:var(--bn-mut);margin-top:4px">SKU @Detail.Item.SkuCode</div>
+        @if (!Detail.Item.IsActive)
+        {
+            <span class="bn-chip bn-chip-mut" style="align-self:flex-start;margin-top:4px">Nonaktif</span>
+        }
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(photoError))
+{
+    <div class="alert alert-danger" style="margin:0">@photoError</div>
+}
+@if (isUploading)
+{
+    <div class="bn-note">Mengunggah foto...</div>
+}
+
+<div class="bn-stats">
+    <div class="bn-stat">
+        <div class="bn-stat-k">Whole</div>
+        <div class="bn-stat-v">
+            @Detail.Item.QtyWholeTotal <span class="bn-stat-u">kones</span>
+        </div>
+    </div>
+    <div class="bn-stat">
+        <div class="bn-stat-k">Split</div>
+        <div class="bn-stat-v">
+            @Detail.Item.SplitCountInStock
+            <span class="bn-stat-u">kones · @Detail.Item.SplitGramInStock.ToString("N0") g</span>
+        </div>
+    </div>
+    @if (Detail.Item.SplitCountIssued > 0)
+    {
+        <div class="bn-stat bn-hide-narrow">
+            <div class="bn-stat-k">Dipakai di line</div>
+            <div class="bn-stat-v">
+                @Detail.Item.SplitCountIssued <span class="bn-stat-u">split</span>
+            </div>
+        </div>
+    }
+</div>
+
+<div class="bn-two-col">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="bn-sub">Stok whole per lokasi</div>
+        @if (Detail.Locations.Count == 0)
+        {
+            <div class="bn-card bn-note">Belum ada stok whole di rak mana pun.</div>
+        }
+        else
+        {
+            <div class="bn-rows">
+                @foreach (var loc in Detail.Locations)
+                {
+                    <div class="bn-row">
+                        <span class="bn-b">@loc.Code</span>
+                        <span>@loc.QtyWhole kones</span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="bn-sub">Kones split</div>
+        @if (Detail.SplitCones.Count == 0)
+        {
+            <div class="bn-card bn-note">Belum ada kones split untuk SKU ini.</div>
+        }
+        else
+        {
+            <div class="bn-rows">
+                @foreach (var cone in Detail.SplitCones)
+                {
+                    <div class="bn-row">
+                        <span>
+                            <span class="bn-mono">@cone.ConeCode</span>
+                            <span class="bn-k" style="display:block;color:@(cone.SedangDipakai ? "var(--bn-amber)" : "var(--bn-mut)")">
+                                @cone.TempatLabel
+                            </span>
+                        </span>
+                        <span class="bn-b" style="@(cone.SedangDipakai ? "color:var(--bn-mut)" : "")">
+                            @cone.WeightGram.ToString("N0") g
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ThreadItemDetailDto Detail { get; set; } = default!;
+
+    // Halaman pemanggil memuat ulang detail setelah foto diganti.
+    [Parameter] public EventCallback OnPhotoChanged { get; set; }
+
+    private bool isUploading;
+    private string? photoError;
+
+    private async Task HandlePhotoSelected(InputFileChangeEventArgs e)
+    {
+        if (e.File is null) return;
+
+        isUploading = true;
+        photoError = null;
+
+        var (success, error, _) = await ThreadApi.UploadPhotoAsync(Detail.Item!.ThreadItemId, e.File);
+
+        isUploading = false;
+
+        if (!success)
+        {
+            photoError = error;
+            return;
+        }
+
+        await OnPhotoChanged.InvokeAsync();
+    }
+}

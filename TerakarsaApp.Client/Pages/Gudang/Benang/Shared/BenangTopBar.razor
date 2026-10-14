@@ -1,0 +1,62 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Bar menu atas module Stok Benang, mengikuti TabletBeranda.dc.html.
+   HANYA tampil >= 900px -- di HP kepala halaman ada di masing-masing halaman
+   (lihat benang.css: .bn-topbar { display:none } di bawah 900px).
+
+   Menu Ambil / Kembali / Opname / Riwayat dibuat di prompt berikutnya
+   (72, 74, 75); sampai routenya ada, tombolnya tampil tapi mati dengan
+   tooltip "Prompt berikutnya" -- persis instruksi Prompt 71. *@
+
+<div class="bn-topbar">
+    <div class="bn-head-t">Stok Benang</div>
+
+    <nav class="bn-nav">
+        <a href="/gudang/benang" class="@(IsStok ? "is-on" : "")">Stok</a>
+        <button type="button" disabled title="Prompt berikutnya">Ambil</button>
+        <button type="button" disabled title="Prompt berikutnya">Kembali</button>
+        <button type="button" disabled title="Prompt berikutnya">Opname</button>
+        <button type="button" disabled title="Prompt berikutnya">Riwayat</button>
+        <a href="/gudang/benang/lokasi" class="@(IsPath("gudang/benang/lokasi") ? "is-on" : "")">Lokasi</a>
+        <a href="/gudang/benang/master" class="@(IsPath("gudang/benang/master") ? "is-on" : "")">Master</a>
+    </nav>
+
+    <div class="bn-topbar-sp bn-head-u">Gudang · @namaUser</div>
+
+    @* Jalan keluar ke aplikasi utama untuk user yang punya module lain (owner/admin).
+       Role Admin Gudang hanya punya module ini, jadi tombolnya tidak ditampilkan. *@
+    @if (punyaModuleLain)
+    {
+        <a href="/" class="bn-head-ico" title="Menu utama aplikasi"><i class="fe fe-grid"></i></a>
+    }
+</div>
+
+@code {
+    private string namaUser = string.Empty;
+    private bool punyaModuleLain;
+
+    private bool IsStok => !IsPath("gudang/benang/lokasi") && !IsPath("gudang/benang/master");
+
+    private bool IsPath(string path) =>
+        Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/').StartsWith(path, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += LokasiBerubah;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        namaUser = state.User.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value
+                   ?? state.User.Identity?.Name
+                   ?? string.Empty;
+
+        punyaModuleLain = state.User.FindAll("module").Any(c => c.Value != "INV_THREAD");
+    }
+
+    private void LokasiBerubah(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= LokasiBerubah;
+}
