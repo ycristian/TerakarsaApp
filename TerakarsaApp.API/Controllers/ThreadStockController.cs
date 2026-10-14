@@ -16,10 +16,12 @@ namespace TerakarsaApp.API.Controllers;
 public class ThreadStockController : ControllerBase
 {
     private readonly ThreadStockService _threadService;
+    private readonly ThreadMovementService _movementService;
 
-    public ThreadStockController(ThreadStockService threadService)
+    public ThreadStockController(ThreadStockService threadService, ThreadMovementService movementService)
     {
         _threadService = threadService;
+        _movementService = movementService;
     }
 
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -213,4 +215,83 @@ public class ThreadStockController : ControllerBase
 
     // GET foto: lihat ThreadPhotoController (tanpa [Authorize] -- <img src> tidak bisa
     // mengirim header Authorization).
+
+    // ==================== MOVEMENT (Prompt 72) ====================
+    // Semua validasi (saldo tidak minus, project/keterangan wajib, berat tidak naik)
+    // ada di inv.SIS_ThreadMovement_Manage -- di sini hanya pemetaan HTTP.
+
+    [HttpPost("movements/receive")]
+    public Task<IActionResult> Receive([FromBody] ThreadReceiveRequest request)
+        => HasilMutasi(_movementService.ReceiveAsync(request, CurrentUserId));
+
+    [HttpPost("movements/issue")]
+    public Task<IActionResult> Issue([FromBody] ThreadIssueRequest request)
+        => HasilMutasi(_movementService.IssueAsync(request, CurrentUserId));
+
+    [HttpPost("movements/return")]
+    public Task<IActionResult> Return([FromBody] ThreadReturnRequest request)
+        => HasilMutasi(_movementService.ReturnAsync(request, CurrentUserId));
+
+    [HttpPost("movements/issue-split")]
+    public Task<IActionResult> IssueSplit([FromBody] ThreadIssueSplitRequest request)
+        => HasilMutasi(_movementService.IssueSplitAsync(request, CurrentUserId));
+
+    [HttpPost("movements/return-split")]
+    public Task<IActionResult> ReturnSplit([FromBody] ThreadReturnSplitRequest request)
+        => HasilMutasi(_movementService.ReturnSplitAsync(request, CurrentUserId));
+
+    [HttpPost("movements/move")]
+    public Task<IActionResult> Move([FromBody] ThreadMoveRequest request)
+        => HasilMutasi(_movementService.MoveAsync(request, CurrentUserId));
+
+    [HttpPost("movements/move-split")]
+    public Task<IActionResult> MoveSplit([FromBody] ThreadMoveSplitRequest request)
+        => HasilMutasi(_movementService.MoveSplitAsync(request, CurrentUserId));
+
+    [HttpPost("movements/empty")]
+    public Task<IActionResult> Empty([FromBody] ThreadEmptyRequest request)
+        => HasilMutasi(_movementService.EmptyAsync(request, CurrentUserId));
+
+    private static async Task<IActionResult> HasilMutasi(
+        Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> task)
+    {
+        var (success, error, hasil) = await task;
+        if (!success) return new BadRequestObjectResult(error);
+        return new OkObjectResult(hasil);
+    }
+
+    // Hasil scan: `TB:<sku_code>` -> SKU, `TS:<cone_code>` -> kones split.
+    [HttpGet("scan/{code}")]
+    public async Task<IActionResult> Scan(string code)
+        => Ok(await _movementService.ScanAsync(code));
+
+    [HttpGet("items/{id:int}/stocks")]
+    public async Task<IActionResult> GetStocks(int id, [FromQuery] bool hanyaAda = true)
+        => Ok(await _movementService.GetStocksByItemAsync(id, hanyaAda));
+
+    [HttpGet("items/{id:int}/movements")]
+    public async Task<IActionResult> GetMovements(int id, [FromQuery] int top = 20)
+        => Ok(await _movementService.GetRecentMovementsAsync(id, top));
+
+    [HttpGet("split-cones/{coneCode}")]
+    public async Task<IActionResult> GetSplitCone(string coneCode)
+    {
+        var cone = await _movementService.GetSplitConeByCodeAsync(coneCode);
+        if (cone is null) return NotFound();
+        return Ok(cone);
+    }
+
+    [HttpGet("split-cones/id/{id:int}")]
+    public async Task<IActionResult> GetSplitConeById(int id)
+    {
+        var cone = await _movementService.GetSplitConeByIdAsync(id);
+        if (cone is null) return NotFound();
+        return Ok(cone);
+    }
+
+    [HttpGet("lookup/resources")]
+    public async Task<IActionResult> GetResources() => Ok(await _movementService.GetResourcesAsync());
+
+    [HttpGet("lookup/projects")]
+    public async Task<IActionResult> GetProjects() => Ok(await _movementService.GetProjectsAsync());
 }

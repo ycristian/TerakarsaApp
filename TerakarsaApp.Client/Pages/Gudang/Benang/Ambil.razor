@@ -1,0 +1,222 @@
+@page "/gudang/benang/ambil/{ItemId:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 72 -- Ambil benang whole. Mockup: Ambil.dc.html (urutan field, radio lokasi
+   dengan qty, stepper, teks label, ringkasan di tombol simpan).
+
+   Aturan "project ATAU keterangan" ditegakkan di inv.SIS_ThreadMovement_Manage;
+   di sini divalidasi juga supaya tombol simpan mati sebelum request terkirim. *@
+
+<PageTitle>Ambil Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Ambil Benang</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (item is null)
+    {
+        <div class="bn-card bn-note">SKU tidak ditemukan.</div>
+    }
+    else
+    {
+        <ThreadSkuMini Item="item" ShowScanAgain="true"
+                       OnScanAgain="@(() => Nav.NavigateTo("/gudang/benang/scan"))" />
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger" style="margin:0">@error</div>
+        }
+
+        <div class="bn-field">
+            <div class="bn-label">Ambil dari lokasi</div>
+            @if (stocks.Count == 0)
+            {
+                <div class="bn-card bn-note">
+                    SKU ini belum punya stok whole di rak mana pun. Catat dulu lewat
+                    <a href="/gudang/benang/terima">Terima</a>.
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    @foreach (var s in stocks)
+                    {
+                        <label class="bn-pick @(fromLocationId == s.ThreadLocationId ? "is-on" : "")">
+                            <input type="radio" name="lokasi" checked="@(fromLocationId == s.ThreadLocationId)"
+                                   @onchange="@(() => PilihLokasi(s))" />
+                            <span class="bn-pick-k">@s.Code</span>
+                            <span class="bn-pick-v">@s.QtyWhole kones</span>
+                        </label>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-qty">Jumlah whole</label>
+            <div class="bn-step">
+                <button type="button" aria-label="Kurangi" @onclick="@(() => UbahQty(-1))">−</button>
+                <input id="bn-qty" type="number" min="1" max="@MaxQty" @bind="qty" @bind:event="oninput" />
+                <button type="button" aria-label="Tambah" @onclick="@(() => UbahQty(1))">+</button>
+            </div>
+            <div class="bn-note">Ambil kones split? Scan barcode kones split-nya langsung.</div>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-untuk">Untuk</label>
+            <select id="bn-untuk" class="bn-inp" style="height:48px" value="@resourceId" @onchange="LineDiubah">
+                <option value="0">-- Pilih line --</option>
+                @foreach (var r in resources)
+                {
+                    <option value="@r.ResourceId">@r.Label</option>
+                }
+            </select>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-project">Order / project</label>
+            <select id="bn-project" class="bn-inp" style="height:48px" value="@projectId" @onchange="ProjectDiubah">
+                @foreach (var p in projects)
+                {
+                    <option value="@p.ProjectId">@p.Label</option>
+                }
+                <option value="0">— Tanpa project —</option>
+            </select>
+            <div class="bn-note">Kalau tanpa project, keterangan wajib diisi.</div>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-ket">Keterangan</label>
+            <input id="bn-ket" class="bn-inp" style="height:48px"
+                   placeholder="@(projectId > 0 ? "Opsional kalau ada project" : "Wajib karena tanpa project")"
+                   @bind="note" @bind:event="oninput" />
+        </div>
+    }
+</div>
+
+@if (item is not null)
+{
+    <div class="bn-bot">
+        <button type="button" class="bn-btn bn-btn-p bn-btn-lg" disabled="@(isSaving || !BolehSimpan)" @onclick="Simpan">
+            @(isSaving ? "Menyimpan..." : RingkasanTombol)
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter] public int ItemId { get; set; }
+
+    private ThreadItemDto? item;
+    private List<ThreadItemStockDto> stocks = new();
+    private List<ThreadResourceLookupDto> resources = new();
+    private List<ThreadProjectLookupDto> projects = new();
+
+    private int fromLocationId;
+    private int qty = 1;
+    private int resourceId;
+    private int projectId;
+    private string note = string.Empty;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+
+    private ThreadItemStockDto? LokasiTerpilih => stocks.FirstOrDefault(s => s.ThreadLocationId == fromLocationId);
+    private int MaxQty => LokasiTerpilih?.QtyWhole ?? 1;
+
+    private bool BolehSimpan =>
+        fromLocationId > 0 && qty > 0 && qty <= MaxQty && resourceId > 0
+        && (projectId > 0 || !string.IsNullOrWhiteSpace(note));
+
+    private string RingkasanTombol =>
+        LokasiTerpilih is null ? "Simpan" : $"Simpan · {qty} kones dari {LokasiTerpilih.Code}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+
+        var detail = await ThreadApi.GetItemAsync(ItemId);
+        item = detail?.Item;
+
+        if (item is not null)
+        {
+            stocks = await ThreadApi.GetStocksAsync(ItemId, hanyaAda: true);
+            resources = await ThreadApi.GetResourcesAsync();
+            projects = await ThreadApi.GetProjectsAsync();
+
+            var pertama = stocks.FirstOrDefault();
+            if (pertama is not null)
+            {
+                fromLocationId = pertama.ThreadLocationId;
+                qty = Math.Min(1, pertama.QtyWhole);
+                if (qty < 1) qty = 1;
+            }
+
+            projectId = projects.FirstOrDefault()?.ProjectId ?? 0;
+        }
+
+        isLoading = false;
+    }
+
+    private void PilihLokasi(ThreadItemStockDto s)
+    {
+        fromLocationId = s.ThreadLocationId;
+        if (qty > s.QtyWhole) qty = s.QtyWhole;
+        if (qty < 1) qty = 1;
+    }
+
+    private void UbahQty(int delta)
+    {
+        var baru = qty + delta;
+        if (baru < 1) baru = 1;
+        if (baru > MaxQty) baru = MaxQty;
+        qty = baru;
+    }
+
+    private void LineDiubah(ChangeEventArgs e) =>
+        resourceId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private void ProjectDiubah(ChangeEventArgs e) =>
+        projectId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private async Task Simpan()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.IssueAsync(new ThreadIssueRequest
+        {
+            ThreadItemId = ItemId,
+            FromLocationId = fromLocationId,
+            Qty = qty,
+            ResourceId = resourceId,
+            ProjectId = projectId > 0 ? projectId : null,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        var line = resources.FirstOrDefault(r => r.ResourceId == resourceId)?.ResourceName ?? "line";
+        var pesan = $"{qty} kones {item!.ColorName} diambil dari {LokasiTerpilih?.Code} untuk {line}.";
+        Nav.NavigateTo($"/gudang/benang/scan?pesan={Uri.EscapeDataString(pesan)}");
+    }
+}

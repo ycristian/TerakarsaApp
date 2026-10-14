@@ -1,0 +1,465 @@
+@page "/gudang/benang/scan"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 72 -- scan label benang.
+   Isi QR: `TB:<sku_code>` (label SKU, sama untuk semua kones whole SKU itu) atau
+   `TS:<cone_code>` (label satu kones split).
+
+   Kamera SENGAJA dibiarkan menyala (scan beruntun) -- memakai window.tniScanner
+   dari js/tniScanner.js. Pemindai itu TIDAK ada isi khusus TNI (start/stop/feedback/
+   resetDedupe + dedupe 3 detik + wake lock + bunyi), jadi dipakai ulang di sini
+   daripada menduplikasi ~100 baris JS yang sama. Kalau suatu saat perilakunya harus
+   berbeda untuk benang, baru dipisah.
+
+   Kotak input manual di bawah kamera untuk scanner Bluetooth (keyboard emulation):
+   fokus otomatis, Enter = proses. *@
+
+<PageTitle>Scan Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Scan benang</div>
+</div>
+
+<div class="bn-body">
+    @if (!string.IsNullOrEmpty(pesanSukses))
+    {
+        <div class="bn-toast">
+            <i class="fe fe-check-circle" style="font-size:18px"></i>
+            <span>@pesanSukses</span>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(kameraError))
+    {
+        <div class="bn-banner">
+            @kameraError
+            <div style="margin-top:4px">Pakai kotak input di bawah untuk scanner Bluetooth atau ketik kode manual.</div>
+        </div>
+    }
+
+    <div class="bn-cam" id="bn-cam"></div>
+
+    <div class="bn-field">
+        <label class="bn-label" for="bn-kode">Kode manual / scanner Bluetooth</label>
+        <input id="bn-kode" class="bn-inp" style="height:48px" placeholder="TB:BN-… atau TS:SP-…"
+               @ref="inputKode" @bind="kodeManual" @bind:event="oninput" @onkeydown="KodeKeyDown" />
+        <div class="bn-note">Tekan Enter untuk memproses.</div>
+    </div>
+
+    @if (isProcessing)
+    {
+        <div class="bn-card bn-note">Mencari kode...</div>
+    }
+
+    @if (!string.IsNullOrEmpty(hasilError))
+    {
+        <div class="alert alert-danger" style="margin:0">@hasilError</div>
+    }
+
+    @* ---------------- hasil scan: SKU ---------------- *@
+    @if (hasil?.Kind == "ITEM" && hasil.Item is not null)
+    {
+        <ThreadSkuCard Item="hasil.Item" OnClick="BukaDetail" />
+
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <button type="button" class="bn-btn bn-btn-p"
+                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/ambil/{hasil!.Item!.ThreadItemId}"))">
+                Ambil
+            </button>
+            <button type="button" class="bn-btn bn-btn-a"
+                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/kembali/{hasil!.Item!.ThreadItemId}"))">
+                Kembali (timbang)
+            </button>
+            <button type="button" class="bn-btn bn-btn-soft"
+                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/pindah/{hasil!.Item!.ThreadItemId}"))">
+                Pindah
+            </button>
+            <button type="button" class="bn-btn bn-btn-soft" @onclick="BukaDetailAktif">
+                Detail SKU
+            </button>
+        </div>
+    }
+
+    @* ---------------- hasil scan: kones split ---------------- *@
+    @if (hasil?.Kind == "SPLIT" && hasil.Cone is not null)
+    {
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-row" style="padding:0;border:0">
+                <span class="bn-mono bn-b" style="font-size:16px">@hasil.Cone.ConeCode</span>
+                <span class="bn-chip @(hasil.Cone.SedangDipakai ? "bn-chip-amber" : "")">
+                    @(hasil.Cone.SedangDipakai ? "Dipakai di line" : "Di gudang")
+                </span>
+            </div>
+            <div class="bn-row" style="padding:0;border:0">
+                <span class="bn-k">Berat terakhir</span>
+                <span class="bn-b">@hasil.Cone.WeightGram.ToString("N0") g</span>
+            </div>
+            <div class="bn-row" style="padding:0;border:0">
+                <span class="bn-k">Tempat</span>
+                <span class="bn-b">@hasil.Cone.TempatLabel</span>
+            </div>
+            @if (hasil.Item is not null)
+            {
+                <div class="bn-row" style="padding:0;border:0">
+                    <span class="bn-k">SKU</span>
+                    <span class="bn-b">@hasil.Item.Judul</span>
+                </div>
+            }
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <button type="button" class="bn-btn bn-btn-p"
+                    disabled="@hasil.Cone.SedangDipakai"
+                    title="@(hasil.Cone.SedangDipakai ? "Kones sedang dipakai di line" : null)"
+                    @onclick="@(() => mulaiAmbilSplit = true)">
+                Ambil split
+            </button>
+            <button type="button" class="bn-btn bn-btn-a"
+                    disabled="@(!hasil.Cone.SedangDipakai)"
+                    title="@(hasil.Cone.SedangDipakai ? null : "Kones tidak sedang di line")"
+                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/kembali/split/{hasil!.Cone!.ThreadSplitConeId}"))">
+                Timbang ulang
+            </button>
+            <button type="button" class="bn-btn bn-btn-soft"
+                    disabled="@hasil.Cone.SedangDipakai"
+                    @onclick="@(() => mulaiPindahSplit = true)">
+                Pindah
+            </button>
+            <button type="button" class="bn-btn bn-btn-danger" @onclick="@(() => mulaiHabis = true)">
+                Habis
+            </button>
+        </div>
+
+        @* ---------- Ambil split: pilih line + project/keterangan ---------- *@
+        @if (mulaiAmbilSplit)
+        {
+            <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+                <div class="bn-sub">Ambil kones @hasil.Cone.ConeCode</div>
+
+                <div class="bn-field">
+                    <label class="bn-label" for="bn-line">Untuk</label>
+                    <select id="bn-line" class="bn-inp" style="height:48px" value="@resourceId" @onchange="LineDiubah">
+                        <option value="0">-- Pilih line --</option>
+                        @foreach (var r in resources)
+                        {
+                            <option value="@r.ResourceId">@r.Label</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="bn-field">
+                    <label class="bn-label" for="bn-proj">Order / project</label>
+                    <select id="bn-proj" class="bn-inp" style="height:48px" value="@projectId" @onchange="ProjectDiubah">
+                        @foreach (var p in projects)
+                        {
+                            <option value="@p.ProjectId">@p.Label</option>
+                        }
+                        <option value="0">— Tanpa project —</option>
+                    </select>
+                </div>
+
+                <div class="bn-field">
+                    <label class="bn-label" for="bn-note">Keterangan</label>
+                    <input id="bn-note" class="bn-inp" style="height:48px"
+                           placeholder="@(projectId > 0 ? "Opsional kalau ada project" : "Wajib karena tanpa project")"
+                           @bind="note" @bind:event="oninput" />
+                </div>
+
+                <div style="display:flex;gap:10px">
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                            disabled="@(isSaving || resourceId == 0 || (projectId == 0 && string.IsNullOrWhiteSpace(note)))"
+                            @onclick="SimpanAmbilSplit">
+                        Simpan
+                    </button>
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="TutupAksi">Batal</button>
+                </div>
+            </div>
+        }
+
+        @* ---------- Pindah split ---------- *@
+        @if (mulaiPindahSplit)
+        {
+            <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+                <div class="bn-sub">Pindah kones @hasil.Cone.ConeCode</div>
+
+                <div class="bn-field">
+                    <label class="bn-label" for="bn-rak">Ke rak</label>
+                    <select id="bn-rak" class="bn-inp" style="height:48px" value="@toLocationId" @onchange="RakDiubah">
+                        <option value="0">-- Pilih rak --</option>
+                        @foreach (var l in locations)
+                        {
+                            <option value="@l.ThreadLocationId">@l.Label</option>
+                        }
+                    </select>
+                </div>
+
+                <div style="display:flex;gap:10px">
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                            disabled="@(isSaving || toLocationId == 0)" @onclick="SimpanPindahSplit">
+                        Simpan
+                    </button>
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="TutupAksi">Batal</button>
+                </div>
+            </div>
+        }
+
+        @* ---------- Tandai habis ---------- *@
+        @if (mulaiHabis)
+        {
+            <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+                <div class="bn-sub">Tandai kones @hasil.Cone.ConeCode habis</div>
+                <div class="bn-note">
+                    Kones yang habis keluar dari stok dan labelnya tidak dipakai lagi.
+                    Tindakan ini tidak bisa dibatalkan dari halaman ini.
+                </div>
+
+                <div class="bn-field">
+                    <label class="bn-label" for="bn-habis-note">Keterangan (opsional)</label>
+                    <input id="bn-habis-note" class="bn-inp" style="height:48px"
+                           @bind="note" @bind:event="oninput" />
+                </div>
+
+                <div style="display:flex;gap:10px">
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-danger"
+                            disabled="@isSaving" @onclick="SimpanHabis">
+                        Ya, habis
+                    </button>
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="TutupAksi">Batal</button>
+                </div>
+            </div>
+        }
+    }
+
+    @if (hasil is not null && hasil.Kind == "UNKNOWN")
+    {
+        <div class="bn-banner">
+            Kode <span class="bn-mono">@hasil.RawCode</span> tidak dikenal. Pastikan label
+            benang (QR <span class="bn-mono">TB:</span> atau <span class="bn-mono">TS:</span>)
+            dan SKU-nya sudah terdaftar.
+        </div>
+    }
+</div>
+
+@code {
+    // Pesan hasil simpan yang dikirim halaman Ambil / Timbang ulang.
+    [SupplyParameterFromQuery(Name = "pesan")] public string? QPesan { get; set; }
+
+    private ThreadScanResultDto? hasil;
+    private List<ThreadResourceLookupDto> resources = new();
+    private List<ThreadProjectLookupDto> projects = new();
+    private List<ThreadLocationDto> locations = new();
+
+    private ElementReference inputKode;
+    private string kodeManual = string.Empty;
+    private string? kameraError;
+    private string? hasilError;
+    private string? pesanSukses;
+
+    private bool mulaiAmbilSplit;
+    private bool mulaiPindahSplit;
+    private bool mulaiHabis;
+
+    private int resourceId;
+    private int projectId;
+    private int toLocationId;
+    private string note = string.Empty;
+
+    private bool isProcessing;
+    private bool isSaving;
+    private bool kameraJalan;
+    private DotNetObjectReference<Scan>? selfRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Pesan hasil simpan dari halaman Ambil / Timbang ulang (query ?pesan=).
+        if (!string.IsNullOrWhiteSpace(QPesan)) pesanSukses = QPesan;
+
+        resources = await ThreadApi.GetResourcesAsync();
+        projects = await ThreadApi.GetProjectsAsync();
+        locations = await ThreadApi.GetLocationsAsync(hanyaAktif: true);
+        projectId = projects.FirstOrDefault()?.ProjectId ?? 0;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("tniScanner.start", "bn-cam", selfRef);
+        }
+        catch (Exception ex)
+        {
+            kameraError = "Kamera tidak bisa dipakai: " + ex.Message;
+            StateHasChanged();
+            return;
+        }
+
+        kameraJalan = true;
+
+        try { await inputKode.FocusAsync(); } catch (Exception) { }
+    }
+
+    // ---------- callback dari tniScanner.js ----------
+
+    [JSInvokable]
+    public async Task OnScanned(string decodedText)
+    {
+        await ProsesKodeAsync(decodedText);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnScanError(string message)
+    {
+        kameraError = message;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task KodeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+
+        var kode = kodeManual.Trim();
+        kodeManual = string.Empty;
+        if (kode.Length == 0) return;
+
+        // Scanner Bluetooth mengirim kode yang sama berkali-kali -- lupakan dedupe kamera.
+        try { await JS.InvokeVoidAsync("tniScanner.resetDedupe"); } catch (Exception) { }
+
+        await ProsesKodeAsync(kode);
+    }
+
+    private async Task ProsesKodeAsync(string kode)
+    {
+        isProcessing = true;
+        hasilError = null;
+        pesanSukses = null;
+        TutupAksi();
+
+        hasil = await ThreadApi.ScanAsync(kode);
+
+        isProcessing = false;
+
+        if (hasil.Kind == "SPLIT" && hasil.Cone is not null)
+            toLocationId = hasil.Cone.ThreadLocationId ?? locations.FirstOrDefault()?.ThreadLocationId ?? 0;
+
+        try { await JS.InvokeVoidAsync("tniScanner.feedback", hasil.Kind == "UNKNOWN" ? "gagal" : "ok"); }
+        catch (Exception) { }
+    }
+
+    private void TutupAksi()
+    {
+        mulaiAmbilSplit = false;
+        mulaiPindahSplit = false;
+        mulaiHabis = false;
+        note = string.Empty;
+    }
+
+    private void LineDiubah(ChangeEventArgs e) =>
+        resourceId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private void ProjectDiubah(ChangeEventArgs e) =>
+        projectId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private void RakDiubah(ChangeEventArgs e) =>
+        toLocationId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private void BukaDetail(ThreadItemDto item) => Nav.NavigateTo($"/gudang/benang/sku/{item.ThreadItemId}");
+
+    private void BukaDetailAktif()
+    {
+        if (hasil?.Item is not null) BukaDetail(hasil.Item);
+    }
+
+    private async Task SimpanAmbilSplit()
+    {
+        isSaving = true;
+        hasilError = null;
+
+        var (success, err, _) = await ThreadApi.IssueSplitAsync(new ThreadIssueSplitRequest
+        {
+            ThreadSplitConeId = hasil!.Cone!.ThreadSplitConeId,
+            ResourceId = resourceId,
+            ProjectId = projectId > 0 ? projectId : null,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+        await SelesaiAksi(success, err,
+            $"{hasil!.Cone!.ConeCode} diambil untuk {resources.FirstOrDefault(r => r.ResourceId == resourceId)?.ResourceName}.");
+    }
+
+    private async Task SimpanPindahSplit()
+    {
+        isSaving = true;
+        hasilError = null;
+
+        var (success, err, _) = await ThreadApi.MoveSplitAsync(new ThreadMoveSplitRequest
+        {
+            ThreadSplitConeId = hasil!.Cone!.ThreadSplitConeId,
+            ToLocationId = toLocationId,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+        await SelesaiAksi(success, err,
+            $"{hasil!.Cone!.ConeCode} dipindah ke {locations.FirstOrDefault(l => l.ThreadLocationId == toLocationId)?.Code}.");
+    }
+
+    private async Task SimpanHabis()
+    {
+        isSaving = true;
+        hasilError = null;
+
+        var (success, err, _) = await ThreadApi.EmptyAsync(new ThreadEmptyRequest
+        {
+            ThreadSplitConeId = hasil!.Cone!.ThreadSplitConeId,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+        await SelesaiAksi(success, err, $"{hasil!.Cone!.ConeCode} ditandai habis.");
+    }
+
+    private async Task SelesaiAksi(bool success, string error, string pesan)
+    {
+        if (!success)
+        {
+            hasilError = error;
+            try { await JS.InvokeVoidAsync("tniScanner.feedback", "gagal"); } catch (Exception) { }
+            return;
+        }
+
+        pesanSukses = pesan;
+        TutupAksi();
+
+        // Muat ulang kondisi kones supaya tombol yang tampil ikut berubah.
+        var cone = await ThreadApi.GetSplitConeByIdAsync(hasil!.Cone!.ThreadSplitConeId);
+        if (cone is not null) hasil.Cone = cone;
+
+        try { await JS.InvokeVoidAsync("tniScanner.feedback", "ok"); } catch (Exception) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (kameraJalan)
+        {
+            try { await JS.InvokeVoidAsync("tniScanner.stop"); } catch (Exception) { }
+        }
+
+        selfRef?.Dispose();
+    }
+}

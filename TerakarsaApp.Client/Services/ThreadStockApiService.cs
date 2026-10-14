@@ -168,6 +168,98 @@ public class ThreadStockApiService
         return $"{_http.BaseAddress}api/gudang/benang/photo/{fileName}";
     }
 
+    // ==================== MOVEMENT (Prompt 72) ====================
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> ReceiveAsync(ThreadReceiveRequest request)
+        => PostMovementAsync("receive", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> IssueAsync(ThreadIssueRequest request)
+        => PostMovementAsync("issue", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> ReturnAsync(ThreadReturnRequest request)
+        => PostMovementAsync("return", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> IssueSplitAsync(ThreadIssueSplitRequest request)
+        => PostMovementAsync("issue-split", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> ReturnSplitAsync(ThreadReturnSplitRequest request)
+        => PostMovementAsync("return-split", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> MoveAsync(ThreadMoveRequest request)
+        => PostMovementAsync("move", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> MoveSplitAsync(ThreadMoveSplitRequest request)
+        => PostMovementAsync("move-split", request);
+
+    public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> EmptyAsync(ThreadEmptyRequest request)
+        => PostMovementAsync("empty", request);
+
+    public async Task<ThreadScanResultDto> ScanAsync(string code)
+    {
+        var response = await _http.GetAsync($"api/gudang/benang/scan/{Uri.EscapeDataString(code)}");
+        if (!response.IsSuccessStatusCode) return new ThreadScanResultDto { RawCode = code };
+        return await response.Content.ReadFromJsonAsync<ThreadScanResultDto>()
+               ?? new ThreadScanResultDto { RawCode = code };
+    }
+
+    public async Task<List<ThreadItemStockDto>> GetStocksAsync(int itemId, bool hanyaAda = true)
+    {
+        var response = await _http.GetAsync(
+            $"api/gudang/benang/items/{itemId}/stocks?hanyaAda={hanyaAda.ToString().ToLowerInvariant()}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ThreadItemStockDto>>() ?? new();
+    }
+
+    public async Task<List<ThreadMovementDto>> GetMovementsAsync(int itemId, int top = 20)
+    {
+        var response = await _http.GetAsync($"api/gudang/benang/items/{itemId}/movements?top={top}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ThreadMovementDto>>() ?? new();
+    }
+
+    public async Task<ThreadSplitConeDto?> GetSplitConeAsync(string coneCode)
+    {
+        var response = await _http.GetAsync($"api/gudang/benang/split-cones/{Uri.EscapeDataString(coneCode)}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<ThreadSplitConeDto>();
+    }
+
+    public async Task<ThreadSplitConeDto?> GetSplitConeByIdAsync(int splitConeId)
+    {
+        var response = await _http.GetAsync($"api/gudang/benang/split-cones/id/{splitConeId}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<ThreadSplitConeDto>();
+    }
+
+    public async Task<List<ThreadResourceLookupDto>> GetResourcesAsync()
+    {
+        var response = await _http.GetAsync("api/gudang/benang/lookup/resources");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ThreadResourceLookupDto>>() ?? new();
+    }
+
+    public async Task<List<ThreadProjectLookupDto>> GetProjectsAsync()
+    {
+        var response = await _http.GetAsync("api/gudang/benang/lookup/projects");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ThreadProjectLookupDto>>() ?? new();
+    }
+
+    private async Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> PostMovementAsync<T>(
+        string jalur, T request)
+    {
+        var response = await _http.PostAsJsonAsync($"api/gudang/benang/movements/{jalur}", request);
+
+        if (response.IsSuccessStatusCode)
+        {
+            var hasil = await response.Content.ReadFromJsonAsync<ThreadMovementResultDto>();
+            return (true, string.Empty, hasil);
+        }
+
+        var (_, error) = await ReadResultAsync(response);
+        return (false, error, null);
+    }
+
     // ==================== bantuan ====================
 
     private static async Task<(bool Success, string Error)> ReadResultAsync(HttpResponseMessage response)

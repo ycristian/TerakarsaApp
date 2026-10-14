@@ -28,7 +28,7 @@
         <div class="bn-head-u">Gudang · @namaUser</div>
     </div>
 
-    <button type="button" class="bn-scan" disabled title="Prompt berikutnya">
+    <button type="button" class="bn-scan" @onclick="@(() => Nav.NavigateTo("/gudang/benang/scan"))">
         <i class="fe fe-maximize" style="font-size:24px"></i>
         <span>Scan barcode / QR</span>
     </button>
@@ -37,13 +37,17 @@
            aria-label="Cari SKU" value="@search" @oninput="SearchDiubah" />
 </div>
 
-@* ---------------- tiga tombol aksi (HP) ---------------- *@
+@* ---------------- tiga tombol aksi (HP) ----------------
+   Ambil & Kembali tanpa SKU membuka scan dulu: SKU-nya ditentukan dari label
+   yang di-scan (Prompt 72). Opname aktif di Prompt 74. *@
 <div class="bn-acts bn-hide-wide">
-    <button type="button" class="bn-act bn-act-ambil" disabled title="Prompt berikutnya">
+    <button type="button" class="bn-act bn-act-ambil"
+            @onclick="@(() => Nav.NavigateTo("/gudang/benang/scan"))">
         <span class="bn-act-i"><i class="fe fe-arrow-down"></i></span>
         Ambil
     </button>
-    <button type="button" class="bn-act bn-act-kembali" disabled title="Prompt berikutnya">
+    <button type="button" class="bn-act bn-act-kembali"
+            @onclick="@(() => Nav.NavigateTo("/gudang/benang/scan"))">
         <span class="bn-act-i"><i class="fe fe-arrow-up"></i></span>
         Kembali
     </button>
@@ -51,6 +55,14 @@
         <span class="bn-act-i"><i class="fe fe-check-square"></i></span>
         Opname
     </button>
+</div>
+
+@* Terima benang masuk tidak ada di mockup landing; ditaruh sebagai tautan kecil
+   supaya tiga tombol utama tetap seperti mockup. *@
+<div class="bn-hide-wide" style="padding:10px 16px 0">
+    <a href="/gudang/benang/terima" class="bn-note" style="font-weight:600">
+        <i class="fe fe-download"></i> Terima benang masuk
+    </a>
 </div>
 
 <div class="bn-two">
@@ -156,7 +168,8 @@
                 <button type="button" class="bn-btn bn-btn-sm" disabled title="Prompt berikutnya">
                     Cetak label SKU
                 </button>
-                <button type="button" class="bn-btn bn-btn-sm bn-btn-p" disabled title="Prompt berikutnya">
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                        @onclick="@(() => Nav.NavigateTo($"/gudang/benang/ambil/{detail!.Item!.ThreadItemId}"))">
                     Ambil
                 </button>
             </div>

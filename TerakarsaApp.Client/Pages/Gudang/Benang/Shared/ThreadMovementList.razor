@@ -1,0 +1,37 @@
+@using TerakarsaApp.Shared.Inv
+
+@* Prompt 72: daftar riwayat movement satu SKU. Bentuknya mengikuti blok
+   "Riwayat terakhir" di TabletBeranda.dc.html: tanggal · jenis (berwarna) ·
+   keterangan · pencatat · delta. Di HP jadi kartu bertumpuk, bukan tabel lebar. *@
+
+@if (Movements.Count == 0)
+{
+    <div class="bn-card bn-note">@EmptyText</div>
+}
+else
+{
+    <div class="bn-rows">
+        @foreach (var m in Movements)
+        {
+            <div class="bn-row" style="align-items:flex-start">
+                <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+                    <span style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+                        <span class="bn-k">@m.CreatedAt.ToString("dd MMM HH:mm")</span>
+                        <span style="font-weight:700;font-size:12px;color:@m.TypeColor">@m.TypeLabel</span>
+                    </span>
+                    <span style="font-size:13.5px">@m.Keterangan</span>
+                    @if (!string.IsNullOrWhiteSpace(m.CreatedByName))
+                    {
+                        <span class="bn-k">@m.CreatedByName</span>
+                    }
+                </span>
+                <span class="bn-b" style="flex-shrink:0;text-align:right">@m.Delta</span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public List<ThreadMovementDto> Movements { get; set; } = new();
+    [Parameter] public string EmptyText { get; set; } = "Belum ada riwayat mutasi.";
+}

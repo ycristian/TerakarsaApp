@@ -16,8 +16,8 @@
 
     <nav class="bn-nav">
         <a href="/gudang/benang" class="@(IsStok ? "is-on" : "")">Stok</a>
-        <button type="button" disabled title="Prompt berikutnya">Ambil</button>
-        <button type="button" disabled title="Prompt berikutnya">Kembali</button>
+        <a href="/gudang/benang/scan" class="@(IsPath("gudang/benang/scan") ? "is-on" : "")">Scan</a>
+        <a href="/gudang/benang/terima" class="@(IsPath("gudang/benang/terima") ? "is-on" : "")">Terima</a>
         <button type="button" disabled title="Prompt berikutnya">Opname</button>
         <button type="button" disabled title="Prompt berikutnya">Riwayat</button>
         <a href="/gudang/benang/lokasi" class="@(IsPath("gudang/benang/lokasi") ? "is-on" : "")">Lokasi</a>
@@ -38,7 +38,13 @@
     private string namaUser = string.Empty;
     private bool punyaModuleLain;
 
-    private bool IsStok => !IsPath("gudang/benang/lokasi") && !IsPath("gudang/benang/master");
+    private static readonly string[] HalamanLain =
+    {
+        "gudang/benang/lokasi", "gudang/benang/master",
+        "gudang/benang/scan", "gudang/benang/terima"
+    };
+
+    private bool IsStok => !HalamanLain.Any(IsPath);
 
     private bool IsPath(string path) =>
         Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/').StartsWith(path, StringComparison.OrdinalIgnoreCase);

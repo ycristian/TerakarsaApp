@@ -9,8 +9,9 @@
 @inject NavigationManager Nav
 
 @* Prompt 71 -- detail satu SKU benang. Mockup: Sku.dc.html.
-   Tombol "Cetak label SKU" (Prompt 73) dan "Ambil" (Prompt 72) ditampilkan
-   tapi mati dengan tooltip "Prompt berikutnya". *@
+   Prompt 72: tab "Riwayat" (20 movement terakhir) + tombol Ambil/Pindah per rak
+   (di dalam ThreadSkuDetailPanel) + tombol Ambil di bar bawah aktif.
+   Tombol "Cetak label SKU" (Prompt 73) masih mati. *@
 
 <PageTitle>@(detail?.Item?.ColorName ?? "Detail SKU")</PageTitle>
 
@@ -26,6 +27,14 @@
     }
 </div>
 
+@if (detail?.Item is not null)
+{
+    <div class="bn-tabs" style="padding-top:12px">
+        <button type="button" class="@(tab == "STOK" ? "is-on" : "")" @onclick="@(() => tab = "STOK")">Stok</button>
+        <button type="button" class="@(tab == "RIWAYAT" ? "is-on" : "")" @onclick="PilihRiwayat">Riwayat</button>
+    </div>
+}
+
 <div class="bn-body">
     @if (isLoading)
     {
@@ -37,7 +46,30 @@
     }
     else
     {
-        <ThreadSkuDetailPanel Detail="detail" OnPhotoChanged="MuatUlang" />
+        @if (!string.IsNullOrEmpty(pesanSukses))
+        {
+            <div class="bn-toast">
+                <i class="fe fe-check-circle" style="font-size:18px"></i>
+                <span>@pesanSukses</span>
+            </div>
+        }
+
+        @if (tab == "STOK")
+        {
+            <ThreadSkuDetailPanel Detail="detail" OnPhotoChanged="MuatUlang" />
+        }
+        else
+        {
+            <div class="bn-sub">20 mutasi terakhir</div>
+            @if (isLoadingRiwayat)
+            {
+                <div class="bn-card bn-note">Memuat riwayat...</div>
+            }
+            else
+            {
+                <ThreadMovementList Movements="movements" />
+            }
+        }
     }
 </div>
 
@@ -45,22 +77,53 @@
 {
     <div class="bn-bot bn-bot-2">
         <button type="button" class="bn-btn" disabled title="Prompt berikutnya">Cetak label SKU</button>
-        <button type="button" class="bn-btn bn-btn-p" disabled title="Prompt berikutnya">Ambil</button>
+        <button type="button" class="bn-btn bn-btn-p"
+                @onclick="@(() => Nav.NavigateTo($"/gudang/benang/ambil/{Id}"))">
+            Ambil
+        </button>
     </div>
 }
 
 @code {
     [Parameter] public int Id { get; set; }
 
-    private ThreadItemDetailDto? detail;
-    private bool isLoading = true;
+    // Pesan hasil simpan yang dikirim halaman Pindah.
+    [SupplyParameterFromQuery(Name = "pesan")] public string? QPesan { get; set; }
 
-    protected override Task OnParametersSetAsync() => MuatUlang();
+    private ThreadItemDetailDto? detail;
+    private List<ThreadMovementDto> movements = new();
+    private string tab = "STOK";
+    private string? pesanSukses;
+    private bool isLoading = true;
+    private bool isLoadingRiwayat;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Pesan hasil simpan dari halaman Pindah (query ?pesan=).
+        pesanSukses = string.IsNullOrWhiteSpace(QPesan) ? null : QPesan;
+
+        await MuatUlang();
+    }
 
     private async Task MuatUlang()
     {
         isLoading = true;
         detail = await ThreadApi.GetItemAsync(Id);
         isLoading = false;
+
+        if (tab == "RIWAYAT") await MuatRiwayat();
+    }
+
+    private async Task PilihRiwayat()
+    {
+        tab = "RIWAYAT";
+        await MuatRiwayat();
+    }
+
+    private async Task MuatRiwayat()
+    {
+        isLoadingRiwayat = true;
+        movements = await ThreadApi.GetMovementsAsync(Id, 20);
+        isLoadingRiwayat = false;
     }
 }

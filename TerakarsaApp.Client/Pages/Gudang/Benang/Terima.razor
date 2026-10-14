@@ -1,0 +1,250 @@
+@page "/gudang/benang/terima"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 72 -- Terima benang masuk (RECEIVE). Tidak punya mockup sendiri; gaya
+   mengikuti Ambil.dc.html.
+
+   Boleh menyusun beberapa baris lalu simpan sekaligus: RECEIVE dipanggil per baris
+   (tidak perlu satu transaksi -- tiap baris berdiri sendiri, dan baris yang gagal
+   dilaporkan tanpa membatalkan yang sudah tersimpan). *@
+
+<PageTitle>Terima Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Terima benang</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else
+    {
+        @if (hasilPesan is not null)
+        {
+            <div class="bn-toast">
+                <i class="fe fe-check-circle" style="font-size:18px"></i>
+                <span>@hasilPesan</span>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger" style="margin:0">@error</div>
+        }
+
+        @* ---------- form satu baris ---------- *@
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+            <div class="bn-sub">Tambah baris</div>
+
+            <div class="bn-field">
+                <label class="bn-label">SKU benang</label>
+                <SearchableSelect TItem="ThreadItemDto"
+                                  Items="items"
+                                  Value="itemId"
+                                  ValueChanged="SkuDipilih"
+                                  IdSelector="@(i => i.ThreadItemId)"
+                                  TextSelector="@(i => $"{i.Judul} · {i.BrandName} · {i.ConeSizeLabel}")"
+                                  Placeholder="Cari warna, kode, merk..." />
+                <div class="bn-note">
+                    Bisa juga <a href="/gudang/benang/scan">scan label SKU</a>, atau
+                    <a href="/gudang/benang/sku/baru">buat SKU baru</a> kalau belum terdaftar.
+                </div>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-qty">Jumlah kones (whole)</label>
+                <div class="bn-step">
+                    <button type="button" aria-label="Kurangi" @onclick="@(() => UbahQty(-1))">−</button>
+                    <input id="bn-qty" type="number" min="1" @bind="qty" @bind:event="oninput" />
+                    <button type="button" aria-label="Tambah" @onclick="@(() => UbahQty(1))">+</button>
+                </div>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-rak">Simpan di rak</label>
+                <select id="bn-rak" class="bn-inp" style="height:48px" value="@locationId" @onchange="RakDiubah">
+                    <option value="0">-- Pilih rak --</option>
+                    @foreach (var l in locations)
+                    {
+                        <option value="@l.ThreadLocationId">@l.Label</option>
+                    }
+                </select>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-ket">Keterangan (opsional)</label>
+                <input id="bn-ket" class="bn-inp" style="height:48px" placeholder="mis. nota masuk / supplier"
+                       @bind="note" @bind:event="oninput" />
+            </div>
+
+            <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" style="align-self:flex-start"
+                    disabled="@(!BolehTambah)" @onclick="TambahBaris">
+                + Tambah ke daftar
+            </button>
+        </div>
+
+        @* ---------- daftar baris ---------- *@
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-sub">Akan disimpan (@baris.Count baris · @baris.Sum(b => b.Qty) kones)</div>
+
+            @if (baris.Count == 0)
+            {
+                <div class="bn-card bn-note">Belum ada baris. Tambahkan dari form di atas.</div>
+            }
+            else
+            {
+                <div class="bn-rows">
+                    @foreach (var b in baris)
+                    {
+                        <div class="bn-row">
+                            <span style="min-width:0">
+                                <span class="bn-b">@b.Judul</span>
+                                <span class="bn-k" style="display:block">
+                                    @b.Qty kones → @b.LocationCode
+                                    @if (!string.IsNullOrWhiteSpace(b.Note))
+                                    {
+                                        <span> · @b.Note</span>
+                                    }
+                                </span>
+                            </span>
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-danger" title="Hapus baris"
+                                    @onclick="@(() => baris.Remove(b))">
+                                <i class="fe fe-x"></i>
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<div class="bn-bot">
+    <button type="button" class="bn-btn bn-btn-p bn-btn-lg"
+            disabled="@(isSaving || baris.Count == 0)" @onclick="SimpanSemua">
+        @(isSaving ? "Menyimpan..." : $"Simpan · {baris.Sum(b => b.Qty)} kones")
+    </button>
+</div>
+
+@code {
+    private class BarisTerima
+    {
+        public int ThreadItemId { get; set; }
+        public string Judul { get; set; } = string.Empty;
+        public int Qty { get; set; }
+        public int ThreadLocationId { get; set; }
+        public string LocationCode { get; set; } = string.Empty;
+        public string? Note { get; set; }
+    }
+
+    private List<ThreadItemDto> items = new();
+    private List<ThreadLocationDto> locations = new();
+    private readonly List<BarisTerima> baris = new();
+
+    private int itemId;
+    private int qty = 1;
+    private int locationId;
+    private string note = string.Empty;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+    private string? hasilPesan;
+
+    private bool BolehTambah => itemId > 0 && qty > 0 && locationId > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+
+        // Semua SKU aktif untuk dropdown (daftar SKU gudang benang ratusan, bukan ribuan).
+        var hasil = await ThreadApi.GetItemsAsync(hanyaAktif: true, pageSize: 500);
+        items = hasil.Items;
+        locations = await ThreadApi.GetLocationsAsync(hanyaAktif: true);
+        locationId = locations.FirstOrDefault()?.ThreadLocationId ?? 0;
+
+        isLoading = false;
+    }
+
+    private void SkuDipilih(int id) => itemId = id;
+
+    private void UbahQty(int delta)
+    {
+        var baru = qty + delta;
+        qty = baru < 1 ? 1 : baru;
+    }
+
+    private void RakDiubah(ChangeEventArgs e) =>
+        locationId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private void TambahBaris()
+    {
+        var item = items.FirstOrDefault(i => i.ThreadItemId == itemId);
+        var rak = locations.FirstOrDefault(l => l.ThreadLocationId == locationId);
+        if (item is null || rak is null) return;
+
+        baris.Add(new BarisTerima
+        {
+            ThreadItemId = item.ThreadItemId,
+            Judul = item.Judul,
+            Qty = qty,
+            ThreadLocationId = rak.ThreadLocationId,
+            LocationCode = rak.Code,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        qty = 1;
+        note = string.Empty;
+        hasilPesan = null;
+        error = null;
+    }
+
+    private async Task SimpanSemua()
+    {
+        isSaving = true;
+        error = null;
+        hasilPesan = null;
+
+        var berhasil = 0;
+        var gagal = new List<string>();
+
+        // Satu RECEIVE per baris: tiap baris berdiri sendiri, jadi baris yang gagal
+        // tidak membatalkan yang sudah tersimpan -- yang gagal tetap di daftar.
+        foreach (var b in baris.ToList())
+        {
+            var (success, err, _) = await ThreadApi.ReceiveAsync(new ThreadReceiveRequest
+            {
+                ThreadItemId = b.ThreadItemId,
+                ToLocationId = b.ThreadLocationId,
+                Qty = b.Qty,
+                Note = b.Note
+            });
+
+            if (success)
+            {
+                berhasil++;
+                baris.Remove(b);
+            }
+            else
+            {
+                gagal.Add($"{b.Judul}: {err}");
+            }
+        }
+
+        isSaving = false;
+
+        if (berhasil > 0) hasilPesan = $"{berhasil} baris tersimpan.";
+        if (gagal.Count > 0) error = string.Join(" | ", gagal);
+    }
+}

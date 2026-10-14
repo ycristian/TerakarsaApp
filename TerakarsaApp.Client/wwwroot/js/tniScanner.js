@@ -10,6 +10,10 @@
 //   - minta Wake Lock supaya layar tidak mati selama kamera aktif.
 //
 // qrScanner.js TIDAK disentuh.
+//
+// Prompt 72: halaman /gudang/benang/scan (module Stok Benang) MEMAKAI ULANG pemindai
+// ini apa adanya -- tidak ada isi khusus TNI di dalamnya. Kalau perilakunya harus
+// berbeda untuk salah satu module, pisahkan dulu sebelum mengubah.
 window.tniScanner = (() => {
     let instance = null;
     let wakeLock = null;

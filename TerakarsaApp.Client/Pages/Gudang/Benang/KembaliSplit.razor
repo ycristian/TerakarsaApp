@@ -1,0 +1,168 @@
+@page "/gudang/benang/kembali/split/{SplitId:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 72 -- timbang ulang kones split yang kembali dari line (RETURN_SPLIT).
+   Tidak punya mockup sendiri; gaya mengikuti Kembali.dc.html.
+
+   Kones split TIDAK dapat kode baru -- kode & labelnya tetap, hanya beratnya
+   diperbarui. Berat baru tidak boleh lebih besar dari berat terakhir (ditolak SP). *@
+
+<PageTitle>Timbang Ulang Kones</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Timbang ulang</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (cone is null)
+    {
+        <div class="bn-card bn-note">Kones split tidak ditemukan.</div>
+    }
+    else
+    {
+        @if (item is not null)
+        {
+            <ThreadSkuMini Item="item" Keterangan="@($"{cone.ConeCode} · {cone.TempatLabel}")" />
+        }
+
+        <div class="bn-rows">
+            <div class="bn-row">
+                <span class="bn-k">Kode kones</span>
+                <span class="bn-mono bn-b">@cone.ConeCode</span>
+            </div>
+            <div class="bn-row">
+                <span class="bn-k">Berat terakhir</span>
+                <span class="bn-b">@cone.WeightGram.ToString("N0") g</span>
+            </div>
+            <div class="bn-row">
+                <span class="bn-k">Status</span>
+                <span class="bn-b">@(cone.SedangDipakai ? cone.TempatLabel : "Di gudang")</span>
+            </div>
+        </div>
+
+        @if (!cone.SedangDipakai)
+        {
+            <div class="bn-banner">
+                Kones ini tidak sedang dipakai di line, jadi tidak perlu ditimbang ulang.
+                Untuk memperbaiki berat yang salah catat, pakai stock opname (Prompt 74).
+            </div>
+        }
+        else
+        {
+            <div class="bn-banner">
+                Timbang <strong>tanpa tube</strong>. Berat kembali tidak boleh lebih besar
+                dari berat terakhir (@cone.WeightGram.ToString("N0") g).
+            </div>
+
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <div class="alert alert-danger" style="margin:0">@error</div>
+            }
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-berat">Berat netto sekarang</label>
+                <div class="bn-gram">
+                    <input id="bn-berat" type="number" min="1" max="@cone.WeightGram"
+                           @bind="weightGram" @bind:event="oninput" />
+                    <div class="bn-gram-u">gram</div>
+                </div>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-rak">Simpan di lokasi</label>
+                <select id="bn-rak" class="bn-inp" style="height:48px" value="@toLocationId" @onchange="RakDiubah">
+                    <option value="0">-- Pilih rak --</option>
+                    @foreach (var l in locations)
+                    {
+                        <option value="@l.ThreadLocationId">@l.Label</option>
+                    }
+                </select>
+            </div>
+        }
+    }
+</div>
+
+@if (cone is not null && cone.SedangDipakai)
+{
+    <div class="bn-bot">
+        <button type="button" class="bn-btn bn-btn-a bn-btn-lg" disabled="@(isSaving || !BolehSimpan)" @onclick="Simpan">
+            @(isSaving ? "Menyimpan..." : $"Simpan · {weightGram} g")
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter] public int SplitId { get; set; }
+
+    private ThreadSplitConeDto? cone;
+    private ThreadItemDto? item;
+    private List<ThreadLocationDto> locations = new();
+
+    private int weightGram;
+    private int toLocationId;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+
+    private bool BolehSimpan =>
+        weightGram > 0 && cone is not null && weightGram <= cone.WeightGram && toLocationId > 0;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+
+        cone = await ThreadApi.GetSplitConeByIdAsync(SplitId);
+
+        if (cone is not null)
+        {
+            var detail = await ThreadApi.GetItemAsync(cone.ThreadItemId);
+            item = detail?.Item;
+
+            locations = await ThreadApi.GetLocationsAsync(hanyaAktif: true);
+            toLocationId = cone.ThreadLocationId ?? locations.FirstOrDefault()?.ThreadLocationId ?? 0;
+            weightGram = cone.WeightGram;
+        }
+
+        isLoading = false;
+    }
+
+    private void RakDiubah(ChangeEventArgs e) =>
+        toLocationId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private async Task Simpan()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.ReturnSplitAsync(new ThreadReturnSplitRequest
+        {
+            ThreadSplitConeId = SplitId,
+            WeightGram = weightGram,
+            ToLocationId = toLocationId
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        var pesan = $"{cone!.ConeCode} kembali ke gudang, {weightGram} g.";
+        Nav.NavigateTo($"/gudang/benang/scan?pesan={Uri.EscapeDataString(pesan)}");
+    }
+}

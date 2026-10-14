@@ -126,6 +126,7 @@ builder.Services.AddScoped<GateService>();
 builder.Services.AddScoped<AttendanceService>();
 // Prompt 71-77: module Stok Benang (schema SQL `inv`), module INV_THREAD.
 builder.Services.AddScoped<ThreadStockService>();
+builder.Services.AddScoped<ThreadMovementService>();
 builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
 builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));

@@ -356,6 +356,103 @@
 .bn-chip-amber { background: #fdf0e3; color: var(--bn-amber); }
 .bn-chip-mut { background: #eceeea; color: var(--bn-mut); }
 
+/* ---------- pilihan lokasi bergaya radio (Ambil.dc.html) ---------- */
+.bn-pick {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bn-card);
+    border: 2px solid var(--bn-line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+}
+.bn-pick.is-on { background: var(--bn-teal-bg); border-color: var(--bn-teal); }
+.bn-pick input { width: 20px; height: 20px; accent-color: var(--bn-teal); }
+.bn-pick-k { font-weight: 600; flex: 1; }
+.bn-pick-v { color: var(--bn-mut); }
+
+/* ---------- stepper jumlah (Ambil.dc.html) ---------- */
+.bn-step { display: flex; align-items: center; gap: 10px; }
+.bn-step button {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    border: 1px solid var(--bn-line);
+    background: var(--bn-card);
+    font-size: 22px;
+    font-family: inherit;
+    color: var(--bn-ink);
+    flex-shrink: 0;
+}
+.bn-step input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 48px;
+    border-radius: 12px;
+    border: 1px solid var(--bn-line);
+    background: var(--bn-card);
+    text-align: center;
+    font-family: inherit;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--bn-ink);
+}
+
+/* input berat netto, font besar (Kembali.dc.html) */
+.bn-gram { display: flex; align-items: center; gap: 10px; }
+.bn-gram input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 64px;
+    border-radius: 12px;
+    border: 1px solid var(--bn-line);
+    background: var(--bn-card);
+    text-align: center;
+    font-family: inherit;
+    font-size: 34px;
+    font-weight: 700;
+    color: var(--bn-ink);
+}
+.bn-gram-u { font-size: 18px; font-weight: 600; color: var(--bn-mut); width: 48px; }
+
+/* ---------- banner ---------- */
+.bn-banner {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: #7c2d12;
+    line-height: 1.45;
+}
+.bn-toast {
+    background: var(--bn-teal-bg);
+    border: 1px solid var(--bn-teal);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    color: #0b5a53;
+    line-height: 1.45;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+/* ---------- kotak kamera ---------- */
+.bn-cam {
+    width: 100%;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    min-height: 240px;
+}
+.bn-cam video, .bn-cam img { width: 100% !important; display: block; }
+
+/* ---------- tombol simpan besar (bar bawah form) ---------- */
+.bn-btn-lg { height: 52px; font-size: 16px; }
+
 /* ---------- tab kecil (halaman master) ---------- */
 .bn-tabs { display: flex; gap: 8px; padding: 0 16px; }
 .bn-tabs button {

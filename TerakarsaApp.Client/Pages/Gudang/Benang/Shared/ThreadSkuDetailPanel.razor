@@ -2,6 +2,7 @@
 @using TerakarsaApp.Client.Services
 @using Microsoft.AspNetCore.Components.Forms
 @inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
 
 @* Prompt 71: isi detail SKU -- foto + tombol ganti foto, ringkasan whole/split,
    stok per lokasi, daftar kones split. Komponen BERSAMA halaman detail HP
@@ -88,8 +89,21 @@
                 @foreach (var loc in Detail.Locations)
                 {
                     <div class="bn-row">
-                        <span class="bn-b">@loc.Code</span>
-                        <span>@loc.QtyWhole kones</span>
+                        <span>
+                            <span class="bn-b">@loc.Code</span>
+                            <span class="bn-k" style="display:block">@loc.QtyWhole kones</span>
+                        </span>
+                        @* Prompt 72: aksi per rak -- SKU & rak asalnya sudah pasti dari sini. *@
+                        <span style="display:flex;gap:6px;flex-shrink:0">
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
+                                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/ambil/{Detail.Item!.ThreadItemId}"))">
+                                Ambil
+                            </button>
+                            <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/pindah/{Detail.Item!.ThreadItemId}"))">
+                                Pindah
+                            </button>
+                        </span>
                     </div>
                 }
             </div>
@@ -114,8 +128,18 @@
                                 @cone.TempatLabel
                             </span>
                         </span>
-                        <span class="bn-b" style="@(cone.SedangDipakai ? "color:var(--bn-mut)" : "")">
-                            @cone.WeightGram.ToString("N0") g
+                        <span style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+                            <span class="bn-b" style="@(cone.SedangDipakai ? "color:var(--bn-mut)" : "")">
+                                @cone.WeightGram.ToString("N0") g
+                            </span>
+                            @* Kones yang sedang di line: timbang ulang saat kembali (Prompt 72). *@
+                            @if (cone.SedangDipakai)
+                            {
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-a"
+                                        @onclick="@(() => Nav.NavigateTo($"/gudang/benang/kembali/split/{cone.ThreadSplitConeId}"))">
+                                    Timbang
+                                </button>
+                            }
                         </span>
                     </div>
                 }

@@ -1,0 +1,198 @@
+@page "/gudang/benang/pindah/{ItemId:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 72 -- pindah rak. Tidak punya mockup sendiri; gaya mengikuti Ambil.dc.html
+   (radio rak asal dengan qty + stepper + dropdown rak tujuan). *@
+
+<PageTitle>Pindah Rak</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Pindah rak</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (item is null)
+    {
+        <div class="bn-card bn-note">SKU tidak ditemukan.</div>
+    }
+    else
+    {
+        <ThreadSkuMini Item="item" ShowScanAgain="true"
+                       OnScanAgain="@(() => Nav.NavigateTo("/gudang/benang/scan"))" />
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger" style="margin:0">@error</div>
+        }
+
+        <div class="bn-field">
+            <div class="bn-label">Dari rak</div>
+            @if (stocks.Count == 0)
+            {
+                <div class="bn-card bn-note">SKU ini belum punya stok whole di rak mana pun.</div>
+            }
+            else
+            {
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    @foreach (var s in stocks)
+                    {
+                        <label class="bn-pick @(fromLocationId == s.ThreadLocationId ? "is-on" : "")">
+                            <input type="radio" name="dari" checked="@(fromLocationId == s.ThreadLocationId)"
+                                   @onchange="@(() => PilihAsal(s))" />
+                            <span class="bn-pick-k">@s.Code</span>
+                            <span class="bn-pick-v">@s.QtyWhole kones</span>
+                        </label>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-qty">Jumlah whole</label>
+            <div class="bn-step">
+                <button type="button" aria-label="Kurangi" @onclick="@(() => UbahQty(-1))">−</button>
+                <input id="bn-qty" type="number" min="1" max="@MaxQty" @bind="qty" @bind:event="oninput" />
+                <button type="button" aria-label="Tambah" @onclick="@(() => UbahQty(1))">+</button>
+            </div>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-ke">Ke rak</label>
+            <select id="bn-ke" class="bn-inp" style="height:48px" value="@toLocationId" @onchange="TujuanDiubah">
+                <option value="0">-- Pilih rak --</option>
+                @foreach (var l in locations.Where(l => l.ThreadLocationId != fromLocationId))
+                {
+                    <option value="@l.ThreadLocationId">@l.Label</option>
+                }
+            </select>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-ket">Keterangan (opsional)</label>
+            <input id="bn-ket" class="bn-inp" style="height:48px" @bind="note" @bind:event="oninput" />
+        </div>
+    }
+</div>
+
+@if (item is not null)
+{
+    <div class="bn-bot">
+        <button type="button" class="bn-btn bn-btn-p bn-btn-lg" disabled="@(isSaving || !BolehSimpan)" @onclick="Simpan">
+            @(isSaving ? "Menyimpan..." : RingkasanTombol)
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter] public int ItemId { get; set; }
+
+    private ThreadItemDto? item;
+    private List<ThreadItemStockDto> stocks = new();
+    private List<ThreadLocationDto> locations = new();
+
+    private int fromLocationId;
+    private int toLocationId;
+    private int qty = 1;
+    private string note = string.Empty;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+
+    private ThreadItemStockDto? Asal => stocks.FirstOrDefault(s => s.ThreadLocationId == fromLocationId);
+    private int MaxQty => Asal?.QtyWhole ?? 1;
+
+    private bool BolehSimpan =>
+        fromLocationId > 0 && toLocationId > 0 && fromLocationId != toLocationId
+        && qty > 0 && qty <= MaxQty;
+
+    private string RingkasanTombol
+    {
+        get
+        {
+            var tujuan = locations.FirstOrDefault(l => l.ThreadLocationId == toLocationId)?.Code;
+            return Asal is null || tujuan is null ? "Simpan" : $"Pindahkan · {qty} kones {Asal.Code} → {tujuan}";
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+
+        var detail = await ThreadApi.GetItemAsync(ItemId);
+        item = detail?.Item;
+
+        if (item is not null)
+        {
+            stocks = await ThreadApi.GetStocksAsync(ItemId, hanyaAda: true);
+            locations = await ThreadApi.GetLocationsAsync(hanyaAktif: true);
+
+            var pertama = stocks.FirstOrDefault();
+            if (pertama is not null)
+            {
+                fromLocationId = pertama.ThreadLocationId;
+                qty = 1;
+            }
+        }
+
+        isLoading = false;
+    }
+
+    private void PilihAsal(ThreadItemStockDto s)
+    {
+        fromLocationId = s.ThreadLocationId;
+        if (toLocationId == fromLocationId) toLocationId = 0;
+        if (qty > s.QtyWhole) qty = s.QtyWhole;
+        if (qty < 1) qty = 1;
+    }
+
+    private void UbahQty(int delta)
+    {
+        var baru = qty + delta;
+        if (baru < 1) baru = 1;
+        if (baru > MaxQty) baru = MaxQty;
+        qty = baru;
+    }
+
+    private void TujuanDiubah(ChangeEventArgs e) =>
+        toLocationId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+
+    private async Task Simpan()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.MoveAsync(new ThreadMoveRequest
+        {
+            ThreadItemId = ItemId,
+            FromLocationId = fromLocationId,
+            ToLocationId = toLocationId,
+            Qty = qty,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        var tujuan = locations.FirstOrDefault(l => l.ThreadLocationId == toLocationId)?.Code;
+        var pesan = $"{qty} kones {item!.ColorName} dipindah {Asal?.Code} → {tujuan}.";
+        Nav.NavigateTo($"/gudang/benang/sku/{ItemId}?pesan={Uri.EscapeDataString(pesan)}");
+    }
+}

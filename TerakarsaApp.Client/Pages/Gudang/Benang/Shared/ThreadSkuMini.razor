@@ -1,0 +1,39 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@inject ThreadStockApiService ThreadApi
+
+@* Kartu SKU ringkas di atas form movement (mockup Ambil.dc.html & Kembali.dc.html):
+   thumbnail . nama+kode . jenis/merk/kones, plus tombol "Scan lagi" opsional. *@
+
+<div class="bn-sku" style="cursor:default">
+    @if (Item.AdaFoto)
+    {
+        <img class="bn-thumb" style="width:48px;height:48px" src="@ThreadApi.PhotoUrl(Item.PhotoPath)" alt="@Item.ColorName" />
+    }
+    else
+    {
+        <span class="bn-noimg" style="width:48px;height:48px">no foto</span>
+    }
+
+    <span class="bn-sku-mid">
+        <span class="bn-sku-t">@Item.Judul</span>
+        <span class="bn-sku-s">@(string.IsNullOrWhiteSpace(Keterangan) ? Item.Keterangan : Keterangan)</span>
+    </span>
+
+    @if (ShowScanAgain)
+    {
+        <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="ScanLagi">Scan lagi</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ThreadItemDto Item { get; set; } = default!;
+
+    // Baris kedua bisa diganti, mis. "Hasil scan label SKU · Kones Besar" di Kembali.dc.html.
+    [Parameter] public string? Keterangan { get; set; }
+
+    [Parameter] public bool ShowScanAgain { get; set; }
+    [Parameter] public EventCallback OnScanAgain { get; set; }
+
+    private Task ScanLagi() => OnScanAgain.InvokeAsync();
+}
