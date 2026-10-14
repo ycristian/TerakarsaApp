@@ -2,6 +2,7 @@
   <Project Path="TerakarsaApp.API/TerakarsaApp.API.csproj" />
   <Project Path="TerakarsaApp.Shared/TerakarsaApp.Shared.csproj" />
   <Project Path="TerakarsaApp.Client/TerakarsaApp.Client.csproj" />
+  <Project Path="TerakarsaApp.Printing/TerakarsaApp.Printing.csproj" />
   <Project Path="TerakarsaApp.PrintService/TerakarsaApp.PrintService.csproj" />
   <Project Path="TerakarsaApp.GateApp/TerakarsaApp.GateApp.csproj" />
   <Project Path="tools/PasswordHashTool/PasswordHashTool.csproj" />

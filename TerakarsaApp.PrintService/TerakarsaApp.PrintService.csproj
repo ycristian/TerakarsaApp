@@ -16,5 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TerakarsaApp.Shared\TerakarsaApp.Shared.csproj" />
+    <!-- Prompt 77: TsplBuilder pindah ke library bersama (dipakai juga app Android). -->
+    <ProjectReference Include="..\TerakarsaApp.Printing\TerakarsaApp.Printing.csproj" />
   </ItemGroup>
 </Project>

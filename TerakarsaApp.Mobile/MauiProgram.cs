@@ -18,6 +18,7 @@ public static class MauiProgram
 
         builder.Services.AddSingleton<ServerResolver>();
         builder.Services.AddSingleton<MobileAuthService>();
+        builder.Services.AddSingleton<PrintQueueClient>();
 
 #if DEBUG
         builder.Logging.AddDebug();

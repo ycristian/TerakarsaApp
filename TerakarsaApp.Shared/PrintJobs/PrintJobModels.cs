@@ -14,6 +14,10 @@ public class PrintJobClaimRequest
     // kalau true, klaim dari print_jobs_dryrun (SIS_PrintJobDryRun_Claim), BUKAN print_jobs
     // live, supaya testing tidak pernah menyentuh antrian cetak nyata.
     public bool DryRun { get; set; }
+
+    // Prompt 77: info device yang dicatat ke print_devices.last_seen_info saat app
+    // Android mengklaim (nama printer Bluetooth + versi app). Diabaikan jalur lama.
+    public string? DeviceInfo { get; set; }
 }
 
 public class PrintJobClaimedDto
@@ -447,4 +451,62 @@ public class RekapKaryawanPayload
 
     [JsonPropertyName("wip_rows")]
     public List<RekapKaryawanWipRow> WipRows { get; set; } = new();
+}
+
+// ============ Prompt 77: device cetak lewat app Android (Bluetooth) ============
+
+// Satu baris print_devices (PC maupun HP). Dipakai halaman /admin/printer dan
+// Setting di app Android.
+public class PrintDeviceDto
+{
+    public int PrintDeviceId { get; set; }
+    public string DeviceCode { get; set; } = string.Empty;
+    public string DeviceName { get; set; } = string.Empty;
+    public string PrinterName { get; set; } = string.Empty;
+    public string RenderMode { get; set; } = string.Empty;
+    public string Transport { get; set; } = string.Empty;   // WINDOWS | ANDROID_BT
+    public bool IsActive { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+    public string? LastSeenInfo { get; set; }
+    public bool AdaToken { get; set; }
+    public string? JobTypes { get; set; }                   // "BUNDLE_LABEL, PACK_LABEL"
+
+    public bool IsAndroid => Transport == "ANDROID_BT";
+
+    public string Label => $"{DeviceName} ({DeviceCode})";
+}
+
+public class PrintJobRouteDto
+{
+    public int RouteId { get; set; }
+    public string JobType { get; set; } = string.Empty;
+    public int PrintDeviceId { get; set; }
+    public string DeviceCode { get; set; } = string.Empty;
+    public string DeviceName { get; set; } = string.Empty;
+    public string Transport { get; set; } = string.Empty;
+    public string RenderMode { get; set; } = string.Empty;
+    public bool DeviceAktif { get; set; }
+    public int JobMenunggu { get; set; }
+}
+
+public class PrintDeviceRegisterRequest
+{
+    public string DeviceCode { get; set; } = string.Empty;
+    public string DeviceName { get; set; } = string.Empty;
+    public string? PrinterName { get; set; }
+}
+
+// device_token hanya dikembalikan di sini (sekali, saat registrasi/registrasi ulang).
+public class PrintDeviceRegisterResult
+{
+    public int PrintDeviceId { get; set; }
+    public string DeviceCode { get; set; } = string.Empty;
+    public string DeviceName { get; set; } = string.Empty;
+    public string DeviceToken { get; set; } = string.Empty;
+}
+
+public class PrintJobRouteSetRequest
+{
+    public string JobType { get; set; } = string.Empty;
+    public int PrintDeviceId { get; set; }
 }

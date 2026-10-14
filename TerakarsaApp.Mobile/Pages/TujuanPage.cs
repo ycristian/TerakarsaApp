@@ -39,7 +39,7 @@ public class TujuanPage : ContentPage
             FontSize = 14,
             HorizontalOptions = LayoutOptions.Start
         };
-        setting.Clicked += async (_, _) => await Navigation.PushAsync(new SettingPage(_resolver));
+        setting.Clicked += async (_, _) => await Navigation.PushAsync(new SettingPage(_auth, _resolver));
 
         var gantiAkun = new Button
         {

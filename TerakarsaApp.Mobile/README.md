@@ -108,3 +108,59 @@ app jalan normal. Pemanggilan API (login) tetap memakai pinning fingerprint di s
 Build sudah diverifikasi di mesin dev (`dotnet build TerakarsaApp.Mobile -v q` sukses).
 **Pengujian di perangkat/emulator dilakukan owner** — tidak ada emulator Android yang
 berjalan di mesin ini saat seri 76–77 dikerjakan.
+
+---
+
+# Print Service Bluetooth (Prompt 77)
+
+HP admin gudang bisa mencetak label 30×20 mm ke **Xprinter XP-P323B** lewat Bluetooth
+klasik (SPP), memakai **antrian print job yang sama** dengan PrintService Windows. Admin
+tetap menekan "Cetak label" di web; HP mengambil job yang dirutekan ke HP itu.
+
+Layout label dirakit `TerakarsaApp.Printing.TsplBuilder` — library yang sama dengan
+PrintService Windows, jadi label dari HP identik byte per byte dengan label dari PC.
+
+## Sekali pasang
+
+1. **Pairing printer di Android**: nyalakan printer → Settings → Bluetooth → pair
+   "XP-P323B" (PIN biasanya `0000` atau `1234`). App hanya memakai printer yang sudah
+   di-pairing, tidak melakukan pencarian sendiri.
+2. **Di app**: Pengaturan → **Buka Print Service**.
+   - Izinkan permintaan izin Bluetooth (Android 12+).
+   - **Muat daftar printer** → pilih XP-P323B.
+   - Isi nama device (mis. "HP Gudang Rina") → **Daftarkan HP ini**.
+     App menyimpan `device_token` di SecureStorage; token itu hanya ditampilkan/dibuat
+     di HP ini. Mendaftarkan ulang akan MENGGANTI token (cara mencabut HP yang hilang).
+3. **Di web** (`/admin/printer`, menu Sistem → Printer & Routing, hanya Admin):
+   ubah dropdown `THREAD_SKU_LABEL` dan `THREAD_SPLIT_LABEL` ke device HP tadi.
+   Untuk kembali ke printer PC, ubah lagi ke "Label Bundle (TSC TTP-244 Pro)".
+4. **Di app**: nyalakan switch **Aktif**. Android akan menawarkan pengecualian hemat
+   baterai — terima, supaya label tetap tercetak saat layar mati.
+
+## Uji cetak
+
+- **Test print** di halaman Print Service mengirim satu label contoh LANGSUNG ke printer
+  (tanpa antrian) — untuk memastikan printer, roll 30×20 mm, dan pairing benar.
+- Uji lewat antrian: buka web di app → Stok Benang → Kembali & Timbang → simpan →
+  **Cetak label**. Job masuk antrian, HP mengambilnya dalam ±3 detik, dan statusnya
+  berubah jadi "Tercetak" di halaman web itu.
+
+## Saat bermasalah
+
+- Log 50 baris terakhir ada di halaman Print Service (job, keberhasilan, pesan error).
+- Notifikasi "Terakarsa Print Service aktif · <printer>" harus ada selama switch Aktif.
+- Jika log berbunyi **"Token device ditolak server — daftarkan ulang HP ini"**: device
+  dihapus/di-nonaktifkan di server, atau HP lain memakai `device_code` yang sama.
+  Tekan **Daftarkan HP ini** sekali lagi.
+- Job gagal cetak akan dicoba ulang server maksimal 3 kali (aturan yang sama dengan
+  PrintService Windows), lalu berstatus ERROR.
+- Koneksi Bluetooth ditutup otomatis setelah 60 detik tanpa job; printer portabel
+  mematikan radionya sendiri, jadi itu normal.
+
+## Catatan teknis
+
+- Poll 3 detik; melambat jadi 10 detik kalau layar sudah mati ≥ 5 menit.
+- `JobTypes` dikirim KOSONG saat claim — route di server yang menentukan job mana milik
+  HP ini, sehingga job type label baru tidak butuh update app.
+- Job struk (`render_mode = TOKEN`) tidak bisa diarahkan ke HP: app hanya merakit TSPL.
+  Server menolaknya di `SIS_PrintJobRoute_Manage`, dan dropdown web tidak menawarkannya.

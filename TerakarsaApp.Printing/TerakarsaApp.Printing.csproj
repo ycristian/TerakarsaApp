@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Prompt 77: perakit TSPL dipakai BERSAMA oleh TerakarsaApp.PrintService (Windows)
+       dan TerakarsaApp.Mobile (Android, cetak via Bluetooth SPP).
+
+       TANPA dependensi Windows: net10.0 biasa, hanya QRCoder + DTO payload dari
+       TerakarsaApp.Shared. EscPosRenderer / TniKartuEscPosBuilder TETAP di PrintService
+       (printer thermal 80mm hanya ada di PC, Mobile tidak membutuhkannya). -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Model payload label (BundleLabelPayload, PackLabelPayload, RejectNotePayload,
+         ThreadLabelPayload) SENGAJA tetap di TerakarsaApp.Shared: API & Client juga
+         memakainya, jadi memindahkannya ke sini akan membuat web bergantung pada
+         library printer. -->
+    <ProjectReference Include="..\TerakarsaApp.Shared\TerakarsaApp.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -35,7 +35,7 @@ public class LoginPage : ContentPage
             FontSize = 14
         };
         setting.Clicked += async (_, _) =>
-            await Navigation.PushAsync(new SettingPage(_resolver));
+            await Navigation.PushAsync(new SettingPage(_auth, _resolver));
 
         Content = new ScrollView
         {

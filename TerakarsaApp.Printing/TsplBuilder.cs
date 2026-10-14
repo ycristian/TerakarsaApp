@@ -3,7 +3,7 @@ using System.Text.Json;
 using QRCoder;
 using TerakarsaApp.Shared.PrintJobs;
 
-namespace TerakarsaApp.PrintService;
+namespace TerakarsaApp.Printing;
 
 // Label bundle 6 x 4 cm untuk TSC TTP-244 Pro. Stok fisik terpasang LANDSCAPE
 // (60mm melintang kepala cetak x 40mm searah tarikan -> SIZE 60mm,40mm, kanvas

@@ -40,32 +40,67 @@ public class PrintJobService
     // literal EXEC terpisah (bukan nama SP diinterpolasi) supaya tidak ada string dinamis sama
     // sekali yang masuk ke teks SQL. dryRun efektif = setting instance API (_options.DryRun)
     // ATAU flag dari client -- lihat PrintServiceOptions.DryRun.
-    public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun)
+    //
+    // Prompt 77: deviceId diisi HANYA untuk pencetak HP (header X-Print-Device-Token) --
+    // SP lalu membatasi klaim ke job yang route-nya mengarah ke device itu. Jalur API key
+    // (PrintService Windows) tetap mengirim @DeviceId NULL, jadi perilakunya tidak berubah.
+    // Jalur dryrun TIDAK punya device: dryrun hanya dipakai PrintService Windows.
+    public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun,
+        int? deviceId = null)
     {
         var effectiveDryRun = _options.DryRun || dryRun;
         var batchSizeParam = new SqlParameter("@BatchSize", batchSize);
         var jobTypesCsvParam = new SqlParameter("@JobTypesCsv", (object?)(jobTypes.Count > 0 ? string.Join(',', jobTypes) : null) ?? DBNull.Value);
-        var sql = effectiveDryRun
-            ? "EXEC SIS_PrintJobDryRun_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv"
-            : "EXEC SIS_PrintJob_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv";
+
+        if (effectiveDryRun)
+        {
+            return await _db.Database
+                .SqlQueryRaw<PrintJobClaimedDto>(
+                    "EXEC SIS_PrintJobDryRun_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv",
+                    batchSizeParam, jobTypesCsvParam)
+                .ToListAsync();
+        }
 
         return await _db.Database
-            .SqlQueryRaw<PrintJobClaimedDto>(sql, batchSizeParam, jobTypesCsvParam)
+            .SqlQueryRaw<PrintJobClaimedDto>(
+                "EXEC SIS_PrintJob_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv, @DeviceId = @DeviceId",
+                batchSizeParam, jobTypesCsvParam,
+                new SqlParameter("@DeviceId", deviceId ?? (object)DBNull.Value))
             .ToListAsync();
     }
 
     // Ad hoc (lanjutan Prompt 48): DryRun=true -> SIS_PrintJobDryRun_Report (print_jobs_dryrun).
-    public async Task ReportAsync(PrintJobReportRequest request)
+    // Prompt 77: deviceId (pencetak HP) diteruskan ke SP -- device hanya boleh melapor
+    // job yang memang dirutekan ke dirinya.
+    public async Task<(bool Success, string Error)> ReportAsync(PrintJobReportRequest request, int? deviceId = null)
     {
         var effectiveDryRun = _options.DryRun || request.DryRun;
         var idParam = new SqlParameter("@PrintJobId", request.PrintJobId);
         var successParam = new SqlParameter("@Success", request.Success);
         var errorMessageParam = new SqlParameter("@ErrorMessage", (object?)request.ErrorMessage ?? DBNull.Value);
-        var sql = effectiveDryRun
-            ? "EXEC SIS_PrintJobDryRun_Report @PrintJobId = @PrintJobId, @Success = @Success, @ErrorMessage = @ErrorMessage"
-            : "EXEC SIS_PrintJob_Report @PrintJobId = @PrintJobId, @Success = @Success, @ErrorMessage = @ErrorMessage";
 
-        await _db.Database.ExecuteSqlRawAsync(sql, idParam, successParam, errorMessageParam);
+        try
+        {
+            if (effectiveDryRun)
+            {
+                await _db.Database.ExecuteSqlRawAsync(
+                    "EXEC SIS_PrintJobDryRun_Report @PrintJobId = @PrintJobId, @Success = @Success, @ErrorMessage = @ErrorMessage",
+                    idParam, successParam, errorMessageParam);
+            }
+            else
+            {
+                await _db.Database.ExecuteSqlRawAsync(
+                    "EXEC SIS_PrintJob_Report @PrintJobId = @PrintJobId, @Success = @Success, @ErrorMessage = @ErrorMessage, @DeviceId = @DeviceId",
+                    idParam, successParam, errorMessageParam,
+                    new SqlParameter("@DeviceId", deviceId ?? (object)DBNull.Value));
+            }
+
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
     }
 
     // Prompt 48: render isi cetakan (job_type render_mode = TOKEN) lewat SIS_Print_Dispatch --

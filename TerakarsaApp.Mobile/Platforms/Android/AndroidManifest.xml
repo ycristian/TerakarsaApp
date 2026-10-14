@@ -1,13 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Prompt 76: izin app Terakarsa.
-     CAMERA dibutuhkan web untuk memindai QR (label benang, kartu TNI) lewat
-     getUserMedia; app meneruskan izinnya ke WebView (TerakarsaWebChromeClient). -->
+<!-- Prompt 76 & 77: izin app Terakarsa.
+     CAMERA     : web memindai QR (label benang, kartu TNI) lewat getUserMedia;
+                  izinnya diteruskan app ke WebView.
+     BLUETOOTH* : print service mengirim label TSPL ke printer portabel lewat SPP.
+                  Android 12+ memakai BLUETOOTH_CONNECT/SCAN (runtime), di bawahnya
+                  BLUETOOTH/BLUETOOTH_ADMIN (install-time, dibatasi maxSdkVersion).
+     FOREGROUND_SERVICE_CONNECTED_DEVICE : wajib Android 14+ untuk service tipe
+                  connectedDevice (PrintForegroundService). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 	<application android:allowBackup="true" android:icon="@mipmap/appicon"
 	             android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"
 	             android:label="Terakarsa"></application>
+
 	<uses-permission android:name="android.permission.INTERNET" />
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 	<uses-permission android:name="android.permission.CAMERA" />
+
+	<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+	<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+	<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
 	<uses-feature android:name="android.hardware.camera" android:required="false" />
+	<uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 </manifest>

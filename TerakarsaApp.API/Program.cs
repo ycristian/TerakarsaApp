@@ -88,6 +88,8 @@ builder.Services.AddScoped<WorkflowLockService>();
 builder.Services.AddScoped<BundleService>();
 builder.Services.AddScoped<PackService>();
 builder.Services.AddScoped<PrintJobService>();
+// Prompt 77: device cetak HP (Bluetooth) + routing job_type.
+builder.Services.AddScoped<PrintDeviceService>();
 builder.Services.AddScoped<ReportBundleService>();
 builder.Services.AddScoped<ReportWipService>();
 builder.Services.AddScoped<ReportProduksiService>();

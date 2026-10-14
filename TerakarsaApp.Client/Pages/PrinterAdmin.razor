@@ -1,0 +1,221 @@
+@page "/admin/printer"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.PrintJobs
+@inject PrintAdminApiService PrintAdminApi
+
+@* Prompt 77: routing antrian cetak. Owner memindahkan satu job_type ke device lain
+   lewat dropdown -- termasuk memindahkan THREAD_SKU_LABEL / THREAD_SPLIT_LABEL dari
+   printer PC (TSC) ke HP admin gudang (Xprinter Bluetooth) tanpa SQL.
+
+   Device HP didaftarkan DARI APP (Setting > Print Service), bukan dari halaman ini:
+   token device hanya boleh lahir di HP yang bersangkutan. *@
+
+<PageTitle>Printer &amp; Routing</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Printer &amp; Routing</h1>
+        <p class="text-muted mb-0">
+            Menentukan job cetak mana dikerjakan printer PC dan mana dikerjakan HP (Bluetooth).
+        </p>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+@if (!string.IsNullOrEmpty(pesan))
+{
+    <div class="alert alert-success">@pesan</div>
+}
+
+<div class="row">
+    <div class="col-xl-7 col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Routing job cetak</h3>
+            </div>
+            <div class="card-body">
+                @if (isLoading)
+                {
+                    <p class="text-muted mb-0">Memuat...</p>
+                }
+                else if (routes.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada routing.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-vcenter text-nowrap">
+                            <thead>
+                                <tr>
+                                    <th>Job type</th>
+                                    <th>Device tujuan</th>
+                                    <th class="text-center">Menunggu</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in routes)
+                                {
+                                    <tr>
+                                        <td>
+                                            <strong>@r.JobType</strong>
+                                            <div class="text-muted" style="font-size:12px">@r.RenderMode</div>
+                                        </td>
+                                        <td>
+                                            <select class="form-select" value="@r.PrintDeviceId"
+                                                    disabled="@isSaving"
+                                                    @onchange="@(e => PindahAsync(r, e))">
+                                                @foreach (var d in DevicesUntuk(r))
+                                                {
+                                                    <option value="@d.PrintDeviceId">
+                                                        @d.DeviceName (@(d.IsAndroid ? "HP" : "PC"))
+                                                    </option>
+                                                }
+                                            </select>
+                                            @if (!r.DeviceAktif)
+                                            {
+                                                <div class="text-danger" style="font-size:12px">
+                                                    Device nonaktif — job akan menunggu.
+                                                </div>
+                                            }
+                                        </td>
+                                        <td class="text-center">
+                                            @if (r.JobMenunggu > 0)
+                                            {
+                                                <span class="badge bg-warning">@r.JobMenunggu</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">0</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="text-muted mb-0" style="font-size:12px">
+                        Job struk (render mode TOKEN) hanya bisa diarahkan ke printer PC —
+                        app HP merakit label TSPL saja.
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-5 col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Device cetak</h3>
+            </div>
+            <div class="card-body">
+                @if (devices.Count == 0)
+                {
+                    <p class="text-muted mb-0">Belum ada device.</p>
+                }
+                else
+                {
+                    <div class="list-group">
+                        @foreach (var d in devices)
+                        {
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <strong>@d.DeviceName</strong>
+                                        <span class="badge @(d.IsAndroid ? "bg-primary" : "bg-secondary") ms-1">
+                                            @(d.IsAndroid ? "HP Bluetooth" : "PC Windows")
+                                        </span>
+                                        <div class="text-muted" style="font-size:12px">
+                                            @d.DeviceCode · @d.PrinterName · @d.RenderMode
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(d.JobTypes))
+                                        {
+                                            <div class="text-muted" style="font-size:12px">@d.JobTypes</div>
+                                        }
+                                        @if (d.IsAndroid)
+                                        {
+                                            <div class="text-muted" style="font-size:12px">
+                                                @(d.LastSeenAt.HasValue
+                                                    ? $"Terakhir aktif {d.LastSeenAt.Value:dd MMM HH:mm}"
+                                                    : "Belum pernah mengambil job")
+                                                @if (!string.IsNullOrWhiteSpace(d.LastSeenInfo))
+                                                {
+                                                    <span> · @d.LastSeenInfo</span>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                    <div>
+                                        <span class="badge @(d.IsActive ? "bg-success" : "bg-secondary")">
+                                            @(d.IsActive ? "Aktif" : "Nonaktif")
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <p class="text-muted mt-3 mb-0" style="font-size:12px">
+                        HP didaftarkan dari app Terakarsa: <b>Pengaturan → Print Service →
+                        Daftarkan HP ini</b>. Token device dibuat di sana dan hanya
+                        ditampilkan sekali di HP itu.
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<PrintJobRouteDto> routes = new();
+    private List<PrintDeviceDto> devices = new();
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+    private string? pesan;
+
+    protected override Task OnInitializedAsync() => MuatAsync();
+
+    private async Task MuatAsync()
+    {
+        isLoading = true;
+        routes = await PrintAdminApi.GetRoutesAsync();
+        devices = await PrintAdminApi.GetDevicesAsync();
+        isLoading = false;
+    }
+
+    // Device HP hanya boleh menerima job RAW_TSPL; untuk route TOKEN, dropdown hanya
+    // menampilkan device PC (aturan yang sama ditegakkan ulang di SP).
+    private List<PrintDeviceDto> DevicesUntuk(PrintJobRouteDto route) =>
+        devices.Where(d => route.RenderMode == "RAW_TSPL" || !d.IsAndroid).ToList();
+
+    private async Task PindahAsync(PrintJobRouteDto route, ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var deviceId) || deviceId == route.PrintDeviceId) return;
+
+        isSaving = true;
+        error = null;
+        pesan = null;
+
+        var (success, err) = await PrintAdminApi.SetRouteAsync(route.JobType, deviceId);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            await MuatAsync();
+            return;
+        }
+
+        var device = devices.FirstOrDefault(d => d.PrintDeviceId == deviceId);
+        pesan = $"{route.JobType} sekarang dicetak {device?.DeviceName}.";
+        await MuatAsync();
+    }
+}

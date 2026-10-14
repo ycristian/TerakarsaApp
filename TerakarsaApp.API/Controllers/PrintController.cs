@@ -5,12 +5,14 @@ using TerakarsaApp.Shared.PrintJobs;
 
 namespace TerakarsaApp.API.Controllers;
 
-// Endpoint untuk TerakarsaApp.PrintService (Windows Worker Service di PC printer).
-// TIDAK memakai [Authorize] JWT -- autentikasi murni lewat header X-Print-Api-Key,
-// divalidasi oleh RequirePrintApiKeyAttribute terhadap PrintService:ApiKey.
+// Endpoint untuk pencetak: TerakarsaApp.PrintService (Windows Worker Service di PC
+// printer) DAN app Android (printer Bluetooth, Prompt 77).
+// TIDAK memakai [Authorize] JWT -- autentikasi lewat header X-Print-Api-Key (service PC)
+// atau X-Print-Device-Token (satu HP), divalidasi RequirePrintAuthAttribute.
+// Pengelolaan device & routing ada di PrintAdminController (pakai JWT).
 [ApiController]
 [Route("api/print")]
-[RequirePrintApiKey]
+[RequirePrintAuth]
 public class PrintController : ControllerBase
 {
     private readonly PrintJobService _printJobService;
@@ -34,14 +36,15 @@ public class PrintController : ControllerBase
     public async Task<IActionResult> Claim([FromBody] PrintJobClaimRequest request)
     {
         var batchSize = request.BatchSize <= 0 ? 5 : request.BatchSize;
-        var result = await _printJobService.ClaimAsync(batchSize, request.JobTypes, request.DryRun);
+        var result = await _printJobService.ClaimAsync(batchSize, request.JobTypes, request.DryRun, this.PrintDeviceId());
         return Ok(result);
     }
 
     [HttpPost("report")]
     public async Task<IActionResult> Report([FromBody] PrintJobReportRequest request)
     {
-        await _printJobService.ReportAsync(request);
+        var (success, error) = await _printJobService.ReportAsync(request, this.PrintDeviceId());
+        if (!success) return BadRequest(error);
         return Ok();
     }
 

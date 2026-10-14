@@ -7,6 +7,7 @@ namespace TerakarsaApp.Mobile.Pages;
 // (diisi Prompt 77).
 public class SettingPage : ContentPage
 {
+    private readonly MobileAuthService _auth;
     private readonly ServerResolver _resolver;
 
     private readonly Entry _lokal = Gaya.Isian("https://192.168.8.233");
@@ -23,8 +24,9 @@ public class SettingPage : ContentPage
     private readonly Label _hasilUji = Gaya.Keterangan(string.Empty);
     private readonly Label _badge = new() { TextColor = Colors.White, FontSize = 12, FontAttributes = FontAttributes.Bold };
 
-    public SettingPage(ServerResolver resolver)
+    public SettingPage(MobileAuthService auth, ServerResolver resolver)
     {
+        _auth = auth;
         _resolver = resolver;
 
         Title = "Pengaturan";
@@ -45,6 +47,10 @@ public class SettingPage : ContentPage
 
         var uji = Gaya.Tombol("Uji koneksi", utama: false);
         uji.Clicked += async (_, _) => await UjiAsync();
+
+        var printService = Gaya.Tombol("Buka Print Service", utama: false);
+        printService.Clicked += async (_, _) =>
+            await Navigation.PushAsync(new PrintServicePage(_auth, _resolver));
 
         var simpan = Gaya.Tombol("Simpan");
         simpan.Clicked += async (_, _) => await SimpanAsync();
@@ -85,7 +91,8 @@ public class SettingPage : ContentPage
 
                     new BoxView { HeightRequest = 10, Color = Colors.Transparent },
                     Gaya.Judul("Print Service"),
-                    Gaya.Keterangan("Tersedia di pembaruan berikutnya."),
+                    Gaya.Keterangan("Cetak label 30x20 mm dari HP ini ke printer Bluetooth."),
+                    printService,
 
                     new BoxView { HeightRequest = 10, Color = Colors.Transparent },
                     Gaya.Keterangan($"Terakarsa versi {AppInfo.Current.VersionString} "

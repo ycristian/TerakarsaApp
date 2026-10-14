@@ -55,6 +55,9 @@
 		<!-- DTO login/module dipakai bersama web supaya bentuk request/response tidak
 		     bercabang (LoginRequest/LoginResponse/RefreshTokenRequest, ModuleDto). -->
 		<ProjectReference Include="..\TerakarsaApp.Shared\TerakarsaApp.Shared.csproj" />
+		<!-- Prompt 77: perakit TSPL dipakai bersama PrintService Windows, sehingga label
+		     yang keluar dari HP identik dengan yang keluar dari printer PC. -->
+		<ProjectReference Include="..\TerakarsaApp.Printing\TerakarsaApp.Printing.csproj" />
 	</ItemGroup>
 
 	<!-- Signing release: nilai diambil dari signing.local.json (gitignored).
