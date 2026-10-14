@@ -8,6 +8,7 @@
 @using TerakarsaApp.Shared.Inv
 @inject ThreadStockApiService ThreadApi
 @inject ThreadOpnameApiService OpnameApi
+@inject ThreadReportApiService ReportApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -59,29 +60,24 @@
     </button>
 </div>
 
-@* Prompt 74: kartu kecil kalau ada sesi opname berjalan. *@
-@if (opnameBerjalan is not null)
+@* Prompt 75: ringkasan stok (Whole / Split / Di line + hari ini + opname berjalan).
+   Di HP tampil di atas daftar SKU; di tablet dipindah ke panel kanan saat belum ada
+   SKU dipilih (lihat bagian bn-right di bawah). *@
+@if (summary is not null)
 {
-    <div style="padding:12px 16px 0">
-        <div class="bn-card" style="display:flex;gap:10px;align-items:center;cursor:pointer;border-color:var(--bn-blue)"
-             @onclick="@(() => Nav.NavigateTo("/gudang/benang/opname"))">
-            <i class="fe fe-check-square" style="font-size:20px;color:var(--bn-blue)"></i>
-            <span style="flex:1;min-width:0">
-                <span class="bn-b">Opname berjalan · @opnameBerjalan.ProgresRak</span>
-                <span class="bn-k" style="display:block">
-                    @opnameBerjalan.SessionNo · @opnameBerjalan.ProgresSku
-                </span>
-            </span>
-            <i class="fe fe-chevron-right" style="color:var(--bn-mut)"></i>
-        </div>
+    <div class="bn-hide-wide" style="padding:12px 16px 0">
+        <ThreadSummaryCards Summary="summary" />
     </div>
 }
 
-@* Terima benang masuk tidak ada di mockup landing; ditaruh sebagai tautan kecil
-   supaya tiga tombol utama tetap seperti mockup. *@
-<div class="bn-hide-wide" style="padding:10px 16px 0">
+@* Terima benang masuk & pemakaian tidak ada di mockup landing; ditaruh sebagai
+   tautan kecil supaya tiga tombol utama tetap seperti mockup. *@
+<div class="bn-hide-wide" style="padding:10px 16px 0;display:flex;gap:16px;flex-wrap:wrap">
     <a href="/gudang/benang/terima" class="bn-note" style="font-weight:600">
         <i class="fe fe-download"></i> Terima benang masuk
+    </a>
+    <a href="/gudang/benang/pemakaian" class="bn-note" style="font-weight:600">
+        <i class="fe fe-pie-chart"></i> Pemakaian per project
     </a>
 </div>
 
@@ -172,6 +168,11 @@
     <div class="bn-right">
         @if (detail?.Item is null)
         {
+            @* Prompt 75: panel kanan menampilkan ringkasan selama belum ada SKU dipilih. *@
+            @if (summary is not null)
+            {
+                <ThreadSummaryCards Summary="summary" />
+            }
             <div class="bn-note">Pilih SKU di daftar kiri untuk melihat detailnya.</div>
         }
         else
@@ -204,7 +205,7 @@
     private List<ThreadLocationDto> locations = new();
     private List<ThreadTypeDto> types = new();
     private ThreadItemDetailDto? detail;
-    private ThreadOpnameSessionDto? opnameBerjalan;
+    private ThreadSummaryDto? summary;
 
     private string namaUser = string.Empty;
     private string search = string.Empty;
@@ -230,8 +231,8 @@
         locations = await ThreadApi.GetLocationsAsync();
         types = await ThreadApi.GetTypesAsync();
 
-        // Prompt 74: kartu "opname berjalan" di landing.
-        opnameBerjalan = (await OpnameApi.GetCurrentAsync()).Session;
+        // Prompt 75: ringkasan stok + sesi opname berjalan (nomor sesinya ikut di dalamnya).
+        summary = await ReportApi.GetSummaryAsync();
 
         await MuatDaftar();
     }

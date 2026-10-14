@@ -1,0 +1,424 @@
+@page "/gudang/benang/riwayat"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadReportApiService ReportApi
+@inject ThreadStockApiService ThreadApi
+@inject ThreadOpnameApiService OpnameApi
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@* Prompt 75 -- riwayat & review log movement benang.
+   Bentuk mengikuti blok "Riwayat terakhir" di TabletBeranda.dc.html:
+   tanggal · jenis berwarna · uraian · user · ±qty.
+
+   HP: satu kartu per baris. >= 900px: tabel penuh. *@
+
+<PageTitle>Riwayat Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Riwayat</div>
+    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" style="margin-left:auto"
+            disabled="@isExporting" @onclick="Export">
+        @(isExporting ? "Menyiapkan..." : "Export Excel")
+    </button>
+</div>
+
+<div class="bn-body">
+    @* ---------------- filter ---------------- *@
+    <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+        <div class="bn-sub">Filter</div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+            <div class="bn-field">
+                <label class="bn-label" for="bn-dari">Dari</label>
+                <input id="bn-dari" type="date" class="bn-inp" @bind="dari" />
+            </div>
+            <div class="bn-field">
+                <label class="bn-label" for="bn-sampai">Sampai</label>
+                <input id="bn-sampai" type="date" class="bn-inp" @bind="sampai" />
+            </div>
+        </div>
+
+        <div class="bn-field">
+            <div class="bn-label">Jenis mutasi</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                @foreach (var t in SemuaTipe)
+                {
+                    <button type="button"
+                            class="bn-chip @(tipeDipilih.Contains(t.Key) ? "" : "bn-chip-mut")"
+                            style="border:0;cursor:pointer;font-family:inherit"
+                            @onclick="@(() => ToggleTipe(t.Key))">
+                        @t.Value
+                    </button>
+                }
+                @if (tipeDipilih.Count > 0)
+                {
+                    <button type="button" class="bn-chip bn-chip-mut" style="border:0;cursor:pointer;font-family:inherit"
+                            @onclick="@(() => { tipeDipilih.Clear(); })">
+                        × hapus pilihan
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+            <div class="bn-field">
+                <label class="bn-label" for="bn-alasan">Alasan (penyesuaian)</label>
+                <select id="bn-alasan" class="bn-inp" value="@reasonCode" @onchange="@(e => reasonCode = e.Value?.ToString() ?? string.Empty)">
+                    <option value="">Semua alasan</option>
+                    @foreach (var r in reasons)
+                    {
+                        <option value="@r.Code">@r.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-rak">Rak</label>
+                <select id="bn-rak" class="bn-inp" value="@locationId" @onchange="@(e => locationId = Angka(e))">
+                    <option value="0">Semua rak</option>
+                    @foreach (var l in locations)
+                    {
+                        <option value="@l.ThreadLocationId">@l.Code</option>
+                    }
+                </select>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-line">Line</label>
+                <select id="bn-line" class="bn-inp" value="@resourceId" @onchange="@(e => resourceId = Angka(e))">
+                    <option value="0">Semua line</option>
+                    @foreach (var r in resources)
+                    {
+                        <option value="@r.ResourceId">@r.Label</option>
+                    }
+                </select>
+            </div>
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-proj">Project</label>
+                <select id="bn-proj" class="bn-inp" value="@projectId" @onchange="@(e => projectId = Angka(e))">
+                    <option value="0">Semua project</option>
+                    @foreach (var p in projects)
+                    {
+                        <option value="@p.ProjectId">@p.Label</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        <button type="button" class="bn-btn bn-btn-sm bn-btn-p" style="align-self:flex-start"
+                disabled="@isLoading" @onclick="@(() => Muat(1))">
+            @(isLoading ? "Memuat..." : "Terapkan filter")
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger" style="margin:0">@error</div>
+    }
+
+    <div class="bn-row" style="padding:0;border:0">
+        <div class="bn-sub">@total mutasi</div>
+        @if (total > items.Count)
+        {
+            <div class="bn-note">menampilkan @items.Count teratas</div>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat riwayat...</div>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="bn-card bn-note">Tidak ada mutasi pada rentang & filter itu.</div>
+    }
+    else
+    {
+        @* ---------------- tabel (>= 900px) ---------------- *@
+        <div class="bn-rows bn-hide-narrow">
+            <div class="bn-row" style="background:var(--bn-bg)">
+                <span style="display:grid;grid-template-columns:110px 110px 1fr 130px 110px 90px;gap:10px;width:100%;
+                             font-size:12px;color:var(--bn-mut);font-weight:600">
+                    <span>Tanggal</span><span>Jenis</span><span>Uraian</span>
+                    <span>Line / project</span><span>Pencatat</span>
+                    <span style="text-align:right">Perubahan</span>
+                </span>
+            </div>
+            @foreach (var m in items)
+            {
+                <div class="bn-row" style="cursor:pointer" @onclick="@(() => Pilih(m))">
+                    <span style="display:grid;grid-template-columns:110px 110px 1fr 130px 110px 90px;gap:10px;width:100%;
+                                 font-size:13px;align-items:baseline">
+                        <span class="bn-k">@m.CreatedAt.ToString("dd MMM HH:mm")</span>
+                        <span style="font-weight:700;font-size:12px;color:@m.TypeColor">@m.TypeLabel</span>
+                        <span style="min-width:0">
+                            <span class="bn-b">@m.Judul</span>
+                            <span class="bn-k" style="display:block">
+                                @m.Jumlah · @m.Arah
+                                @if (m.IsAdjust && !string.IsNullOrWhiteSpace(m.ReasonName))
+                                {
+                                    <strong style="color:var(--bn-red)"> · @m.ReasonName</strong>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(m.Note))
+                                {
+                                    <span> · @m.Note</span>
+                                }
+                            </span>
+                        </span>
+                        <span class="bn-k">
+                            @(m.ResourceName ?? "-")
+                            @if (!string.IsNullOrWhiteSpace(m.ProjectName))
+                            {
+                                <span style="display:block">@m.ProjectName</span>
+                            }
+                        </span>
+                        <span class="bn-k">@m.CreatedByName</span>
+                        <span class="bn-b" style="text-align:right">@m.Delta</span>
+                    </span>
+                </div>
+            }
+        </div>
+
+        @* ---------------- kartu (HP) ---------------- *@
+        <div class="bn-hide-wide" style="display:flex;flex-direction:column;gap:8px">
+            @foreach (var m in items)
+            {
+                <div class="bn-card" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"
+                     @onclick="@(() => Pilih(m))">
+                    <div class="bn-row" style="padding:0;border:0">
+                        <span style="display:flex;gap:8px;align-items:baseline">
+                            <span class="bn-k">@m.CreatedAt.ToString("dd MMM HH:mm")</span>
+                            <span style="font-weight:700;font-size:12px;color:@m.TypeColor">@m.TypeLabel</span>
+                        </span>
+                        <span class="bn-b">@m.Delta</span>
+                    </div>
+                    <div class="bn-b">@m.Judul</div>
+                    <div class="bn-k">@m.Jumlah · @m.Arah</div>
+                    @if (m.IsAdjust && !string.IsNullOrWhiteSpace(m.ReasonName))
+                    {
+                        <div style="font-size:12.5px"><strong style="color:var(--bn-red)">@m.ReasonName</strong></div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(m.Note))
+                    {
+                        <div class="bn-k">"@m.Note"</div>
+                    }
+                    <div class="bn-k">
+                        @(m.ResourceName ?? "-")
+                        @if (!string.IsNullOrWhiteSpace(m.ProjectName))
+                        {
+                            <span> · @m.ProjectName</span>
+                        }
+                        · @m.CreatedByName
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (items.Count < total)
+        {
+            <button type="button" class="bn-btn bn-btn-soft" disabled="@isLoadingMore" @onclick="MuatLagi">
+                @(isLoadingMore ? "Memuat..." : $"Muat {Math.Min(PageSize, total - items.Count)} mutasi lagi")
+            </button>
+        }
+    }
+</div>
+
+@* ---------------- detail satu mutasi ---------------- *@
+@if (dipilih is not null)
+{
+    <div class="modal d-block" style="background-color:rgba(0,0,0,.5)" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content benang">
+                <div class="modal-header">
+                    <h5 class="modal-title">@dipilih.TypeLabel · @dipilih.Judul</h5>
+                    <button type="button" class="btn-close" aria-label="Tutup"
+                            @onclick="@(() => dipilih = null)"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="bn-rows">
+                        <div class="bn-row"><span class="bn-k">Waktu</span>
+                            <span class="bn-b">@dipilih.CreatedAt.ToString("dd MMM yyyy HH:mm")</span></div>
+                        <div class="bn-row"><span class="bn-k">SKU</span>
+                            <span class="bn-mono">@dipilih.SkuCode</span></div>
+                        <div class="bn-row"><span class="bn-k">Jenis · merk</span>
+                            <span class="bn-b">@dipilih.TypeName · @dipilih.BrandName</span></div>
+                        <div class="bn-row"><span class="bn-k">Jumlah</span>
+                            <span class="bn-b">@dipilih.Jumlah</span></div>
+                        <div class="bn-row"><span class="bn-k">Rak</span>
+                            <span class="bn-b">@dipilih.Arah</span></div>
+                        @if (!string.IsNullOrWhiteSpace(dipilih.ResourceName))
+                        {
+                            <div class="bn-row"><span class="bn-k">Line</span>
+                                <span class="bn-b">@dipilih.ResourceName</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(dipilih.ProjectName))
+                        {
+                            <div class="bn-row"><span class="bn-k">Project</span>
+                                <span class="bn-b">@dipilih.ProjectName @dipilih.NoPo</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(dipilih.ReasonName))
+                        {
+                            <div class="bn-row"><span class="bn-k">Alasan</span>
+                                <span class="bn-b" style="color:var(--bn-red)">@dipilih.ReasonName</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(dipilih.Note))
+                        {
+                            <div class="bn-row"><span class="bn-k">Keterangan</span>
+                                <span class="bn-b">@dipilih.Note</span></div>
+                        }
+                        <div class="bn-row"><span class="bn-k">Pencatat</span>
+                            <span class="bn-b">@dipilih.CreatedByName</span></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    @if (dipilih.OpnameSessionId.HasValue)
+                    {
+                        <button type="button" class="btn btn-light"
+                                @onclick="@(() => Nav.NavigateTo($"/gudang/benang/opname/riwayat/{dipilih!.OpnameSessionId}"))">
+                            Buka sesi @dipilih.OpnameSessionNo
+                        </button>
+                    }
+                    <button type="button" class="btn btn-light"
+                            @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/{dipilih!.ThreadItemId}"))">
+                        Buka SKU
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="@(() => dipilih = null)">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private static readonly Dictionary<string, string> SemuaTipe = new()
+    {
+        ["RECEIVE"] = "Terima",
+        ["ISSUE"] = "Ambil",
+        ["ISSUE_SPLIT"] = "Ambil split",
+        ["RETURN"] = "Kembali",
+        ["RETURN_SPLIT"] = "Timbang ulang",
+        ["MOVE"] = "Pindah",
+        ["MOVE_SPLIT"] = "Pindah split",
+        ["ADJUST"] = "Penyesuaian",
+        ["ADJUST_SPLIT"] = "Penyesuaian split",
+        ["EMPTY"] = "Habis"
+    };
+
+    private List<ThreadMovementRowDto> items = new();
+    private List<ThreadLocationDto> locations = new();
+    private List<ThreadResourceLookupDto> resources = new();
+    private List<ThreadProjectLookupDto> projects = new();
+    private List<ThreadReasonCodeDto> reasons = new();
+
+    private readonly HashSet<string> tipeDipilih = new();
+    private DateTime? dari = DateTime.Today.AddDays(-7);
+    private DateTime? sampai = DateTime.Today;
+    private string reasonCode = string.Empty;
+    private int locationId;
+    private int resourceId;
+    private int projectId;
+
+    private ThreadMovementRowDto? dipilih;
+    private int total;
+    private int pageNumber = 1;
+    private bool isLoading = true;
+    private bool isLoadingMore;
+    private bool isExporting;
+    private string? error;
+
+    private string? TipeParam => tipeDipilih.Count == 0 ? null : string.Join(",", tipeDipilih);
+
+    private static int Angka(ChangeEventArgs e) =>
+        int.TryParse(e.Value?.ToString(), out var v) ? v : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        locations = await ThreadApi.GetLocationsAsync();
+        resources = await ThreadApi.GetResourcesAsync();
+        projects = await ThreadApi.GetProjectsAsync();
+        reasons = await OpnameApi.GetReasonCodesAsync();
+
+        await Muat(1);
+    }
+
+    private void ToggleTipe(string tipe)
+    {
+        if (!tipeDipilih.Remove(tipe)) tipeDipilih.Add(tipe);
+    }
+
+    private async Task Muat(int halaman)
+    {
+        isLoading = true;
+        error = null;
+        pageNumber = halaman;
+
+        var hasil = await ReportApi.GetMovementsAsync(
+            dari, sampai, TipeParam,
+            string.IsNullOrWhiteSpace(reasonCode) ? null : reasonCode,
+            null,
+            locationId > 0 ? locationId : null,
+            resourceId > 0 ? resourceId : null,
+            projectId > 0 ? projectId : null,
+            null, pageNumber, PageSize);
+
+        items = hasil.Items;
+        total = hasil.TotalCount;
+        isLoading = false;
+    }
+
+    private async Task MuatLagi()
+    {
+        isLoadingMore = true;
+        pageNumber++;
+
+        var hasil = await ReportApi.GetMovementsAsync(
+            dari, sampai, TipeParam,
+            string.IsNullOrWhiteSpace(reasonCode) ? null : reasonCode,
+            null,
+            locationId > 0 ? locationId : null,
+            resourceId > 0 ? resourceId : null,
+            projectId > 0 ? projectId : null,
+            null, pageNumber, PageSize);
+
+        items.AddRange(hasil.Items);
+        total = hasil.TotalCount;
+        isLoadingMore = false;
+    }
+
+    private void Pilih(ThreadMovementRowDto m) => dipilih = m;
+
+    private async Task Export()
+    {
+        isExporting = true;
+        error = null;
+
+        var (success, err, bytes, nama) = await ReportApi.ExportMovementsAsync(
+            dari, sampai, TipeParam,
+            string.IsNullOrWhiteSpace(reasonCode) ? null : reasonCode,
+            null,
+            locationId > 0 ? locationId : null,
+            resourceId > 0 ? resourceId : null,
+            projectId > 0 ? projectId : null);
+
+        isExporting = false;
+
+        if (!success || bytes is null)
+        {
+            error = err;
+            return;
+        }
+
+        await JS.InvokeVoidAsync("downloadFileFromBytes", nama,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Convert.ToBase64String(bytes));
+    }
+}

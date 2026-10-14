@@ -1,0 +1,171 @@
+@page "/gudang/benang/pemakaian"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadReportApiService ReportApi
+@inject ThreadStockApiService ThreadApi
+@inject IJSRuntime JS
+
+@* Prompt 75 -- pemakaian benang per project.
+
+   Angka gram split TIDAK dikonversi jadi ekuivalen kones whole (keputusan desain):
+   kolom whole dan kolom gram berdiri sendiri. *@
+
+<PageTitle>Pemakaian Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Pemakaian per project</div>
+    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" style="margin-left:auto"
+            disabled="@(isExporting || rows.Count == 0)" @onclick="Export">
+        @(isExporting ? "Menyiapkan..." : "Export Excel")
+    </button>
+</div>
+
+<div class="bn-body">
+    <div class="bn-card" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+            <div class="bn-field">
+                <label class="bn-label" for="bn-dari">Dari</label>
+                <input id="bn-dari" type="date" class="bn-inp" @bind="dari" />
+            </div>
+            <div class="bn-field">
+                <label class="bn-label" for="bn-sampai">Sampai</label>
+                <input id="bn-sampai" type="date" class="bn-inp" @bind="sampai" />
+            </div>
+        </div>
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-proj">Project</label>
+            <select id="bn-proj" class="bn-inp" value="@projectId"
+                    @onchange="@(e => projectId = int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
+                <option value="0">Semua project</option>
+                @foreach (var p in projects)
+                {
+                    <option value="@p.ProjectId">@p.Label</option>
+                }
+            </select>
+        </div>
+
+        <button type="button" class="bn-btn bn-btn-sm bn-btn-p" style="align-self:flex-start"
+                disabled="@isLoading" @onclick="Muat">
+            @(isLoading ? "Memuat..." : "Tampilkan")
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger" style="margin:0">@error</div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="bn-card bn-note">
+            Belum ada pemakaian benang yang tercatat untuk project & rentang itu.
+        </div>
+    }
+    else
+    {
+        @foreach (var grup in rows.GroupBy(r => r.ProjectLabel))
+        {
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="bn-sub">@grup.Key</div>
+                <div class="bn-rows">
+                    <div class="bn-row" style="background:var(--bn-bg)">
+                        <span style="display:grid;grid-template-columns:1fr 90px 110px;gap:10px;width:100%;
+                                     font-size:12px;color:var(--bn-mut);font-weight:600">
+                            <span>SKU</span>
+                            <span style="text-align:right">Whole</span>
+                            <span style="text-align:right">Split netto</span>
+                        </span>
+                    </div>
+                    @foreach (var u in grup)
+                    {
+                        <div class="bn-row">
+                            <span style="display:grid;grid-template-columns:1fr 90px 110px;gap:10px;width:100%;
+                                         font-size:13px;align-items:baseline">
+                                <span style="min-width:0">
+                                    <span class="bn-b">@u.Judul</span>
+                                    <span class="bn-k" style="display:block">@u.TypeName · @u.BrandName</span>
+                                </span>
+                                <span style="text-align:right" class="bn-b">@u.WholeIssued</span>
+                                <span style="text-align:right">
+                                    <span class="bn-b">@u.SplitGramNet.ToString("N0") g</span>
+                                    @if (u.SplitGramReturned > 0)
+                                    {
+                                        <span class="bn-k" style="display:block">
+                                            ambil @u.SplitGramIssued.ToString("N0") · kembali @u.SplitGramReturned.ToString("N0")
+                                        </span>
+                                    }
+                                </span>
+                            </span>
+                        </div>
+                    }
+                    <div class="bn-row" style="background:var(--bn-bg)">
+                        <span style="display:grid;grid-template-columns:1fr 90px 110px;gap:10px;width:100%;
+                                     font-size:13px;font-weight:700">
+                            <span>Total</span>
+                            <span style="text-align:right">@grup.Sum(x => x.WholeIssued)</span>
+                            <span style="text-align:right">@grup.Sum(x => x.SplitGramNet).ToString("N0") g</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<ThreadUsageDto> rows = new();
+    private List<ThreadProjectLookupDto> projects = new();
+
+    private DateTime? dari = DateTime.Today.AddDays(-30);
+    private DateTime? sampai = DateTime.Today;
+    private int projectId;
+
+    private bool isLoading = true;
+    private bool isExporting;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        projects = await ThreadApi.GetProjectsAsync();
+        await Muat();
+    }
+
+    private async Task Muat()
+    {
+        isLoading = true;
+        error = null;
+        rows = await ReportApi.GetUsageAsync(projectId > 0 ? projectId : null, dari, sampai);
+        isLoading = false;
+    }
+
+    private async Task Export()
+    {
+        isExporting = true;
+        error = null;
+
+        var (success, err, bytes, nama) = await ReportApi.ExportUsageAsync(
+            projectId > 0 ? projectId : null, dari, sampai);
+
+        isExporting = false;
+
+        if (!success || bytes is null)
+        {
+            error = err;
+            return;
+        }
+
+        await JS.InvokeVoidAsync("downloadFileFromBytes", nama,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Convert.ToBase64String(bytes));
+    }
+}

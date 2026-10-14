@@ -6,6 +6,7 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Inv
 @inject ThreadStockApiService ThreadApi
+@inject ThreadReportApiService ReportApi
 
 @* Prompt 71 -- master lokasi (rak) benang. Tidak punya mockup sendiri; gaya
    mengikuti Sku.dc.html (kepala putih + kartu putih + baris daftar).
@@ -59,6 +60,49 @@
             }
         </div>
     </div>
+
+    @* ---------------- isi rak (Prompt 75) ---------------- *@
+    @if (matriks.Count > 0)
+    {
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-sub">Isi rak sekarang</div>
+            <div class="bn-rows">
+                <div class="bn-row" style="background:var(--bn-bg)">
+                    <span style="display:grid;grid-template-columns:1fr 70px 70px 90px;gap:10px;width:100%;
+                                 font-size:12px;color:var(--bn-mut);font-weight:600">
+                        <span>Rak</span>
+                        <span style="text-align:right">SKU</span>
+                        <span style="text-align:right">Whole</span>
+                        <span style="text-align:right">Split</span>
+                    </span>
+                </div>
+                @foreach (var m in matriks)
+                {
+                    <div class="bn-row">
+                        <span style="display:grid;grid-template-columns:1fr 70px 70px 90px;gap:10px;width:100%;
+                                     font-size:13px;align-items:baseline">
+                            <span class="bn-b">
+                                @m.Code
+                                @if (!m.IsActive)
+                                {
+                                    <span class="bn-k"> (nonaktif)</span>
+                                }
+                            </span>
+                            <span style="text-align:right">@m.SkuCount</span>
+                            <span style="text-align:right">@m.QtyWhole</span>
+                            <span style="text-align:right">
+                                @m.SplitCount
+                                @if (m.SplitGram > 0)
+                                {
+                                    <span class="bn-k" style="display:block">@m.SplitGram.ToString("N0") g</span>
+                                }
+                            </span>
+                        </span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
 
     @* ---------------- daftar ---------------- *@
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -130,6 +174,7 @@
 
 @code {
     private List<ThreadLocationDto> locations = new();
+    private List<ThreadLocationStockDto> matriks = new();
     private ThreadLocationSaveRequest form = new();
     private ThreadLocationDto? hapusTarget;
 
@@ -144,6 +189,7 @@
     {
         isLoading = true;
         locations = await ThreadApi.GetLocationsAsync();
+        matriks = await ReportApi.GetByLocationAsync();   // Prompt 75: isi rak + gram split
         isLoading = false;
     }
 

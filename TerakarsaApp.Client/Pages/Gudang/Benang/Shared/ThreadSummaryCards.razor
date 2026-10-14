@@ -1,0 +1,103 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 75: ringkasan stok benang untuk landing.
+   Tiga kartu Whole / Split / Dipakai di line mengikuti TabletBeranda.dc.html,
+   plus kartu "hari ini" dan kartu sesi opname berjalan. *@
+
+<div style="display:flex;flex-direction:column;gap:10px">
+    <div class="bn-stats">
+        <div class="bn-stat">
+            <div class="bn-stat-k">Whole</div>
+            <div class="bn-stat-v">
+                @Summary.Total.WholeTotal <span class="bn-stat-u">kones</span>
+            </div>
+        </div>
+        <div class="bn-stat">
+            <div class="bn-stat-k">Split</div>
+            <div class="bn-stat-v">
+                @Summary.Total.SplitKones
+                <span class="bn-stat-u">kones · @Summary.Total.SplitGram.ToString("N0") g</span>
+            </div>
+        </div>
+        <div class="bn-stat">
+            <div class="bn-stat-k">Dipakai di line</div>
+            <div class="bn-stat-v">
+                @Summary.Total.SplitDiLine
+                <span class="bn-stat-u">split · @Summary.Total.SplitDiLineGram.ToString("N0") g</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="bn-card" style="display:flex;gap:10px;align-items:center">
+        <i class="fe fe-activity" style="font-size:18px;color:var(--bn-teal)"></i>
+        <span style="flex:1;min-width:0">
+            <span class="bn-b">
+                Hari ini: @Summary.AmbilHariIni ambil · @Summary.KembaliHariIni kembali
+            </span>
+            <span class="bn-k" style="display:block">
+                @Summary.TerimaHariIni terima · @Summary.Total.SkuAktif SKU aktif ·
+                @Summary.Total.LokasiAktif rak
+            </span>
+        </span>
+        <a href="/gudang/benang/riwayat" class="bn-btn bn-btn-sm bn-btn-soft">Riwayat</a>
+    </div>
+
+    @if (Summary.Total.OpnameSessionId.HasValue)
+    {
+        <div class="bn-card" style="display:flex;gap:10px;align-items:center;cursor:pointer;border-color:var(--bn-blue)"
+             @onclick="@(() => Nav.NavigateTo("/gudang/benang/opname"))">
+            <i class="fe fe-check-square" style="font-size:18px;color:var(--bn-blue)"></i>
+            <span style="flex:1;min-width:0">
+                <span class="bn-b">Opname berjalan</span>
+                <span class="bn-k" style="display:block">@Summary.Total.OpnameSessionNo</span>
+            </span>
+            <i class="fe fe-chevron-right" style="color:var(--bn-mut)"></i>
+        </div>
+    }
+
+    @if (Summary.Perhatian.Count > 0)
+    {
+        <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="bn-sub">Perlu diperhatikan</div>
+            <div class="bn-note">
+                SKU yang masih dipakai 30 hari terakhir dengan stok whole paling sedikit.
+                Module ini sengaja tidak punya stok minimum — ini hanya pengingat.
+            </div>
+            <div class="bn-rows">
+                @foreach (var p in Summary.Perhatian)
+                {
+                    <div class="bn-row" style="cursor:pointer"
+                         @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/{p.ThreadItemId}"))">
+                        <span style="display:flex;gap:10px;align-items:center;min-width:0">
+                            @if (!string.IsNullOrWhiteSpace(p.PhotoPath))
+                            {
+                                <img class="bn-thumb" style="width:36px;height:36px"
+                                     src="@ThreadApi.PhotoUrl(p.PhotoPath)" alt="@p.ColorName" />
+                            }
+                            else
+                            {
+                                <span class="bn-noimg" style="width:36px;height:36px;font-size:9px">no foto</span>
+                            }
+                            <span style="min-width:0">
+                                <span class="bn-b">@p.Judul</span>
+                                <span class="bn-k" style="display:block">
+                                    @p.BrandName · dipakai @p.Dipakai30Hari kones / 30 hari
+                                </span>
+                            </span>
+                        </span>
+                        <span class="bn-b" style="color:@(p.QtyWholeTotal == 0 ? "var(--bn-red)" : "var(--bn-amber)")">
+                            @p.QtyWholeTotal
+                        </span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ThreadSummaryDto Summary { get; set; } = default!;
+}
