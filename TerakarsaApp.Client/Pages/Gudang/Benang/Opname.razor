@@ -1,0 +1,249 @@
+@page "/gudang/benang/opname"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadOpnameApiService OpnameApi
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 74 -- beranda stock opname.
+   Mockup: Opname.dc.html (HP) & TabletOpname.dc.html (daftar rak di panel kiri).
+
+   Tanpa sesi OPEN: pilih rak lalu "Mulai opname".
+   Dengan sesi OPEN: daftar rak + progres, tombol lanjut per rak, tombol tutup sesi. *@
+
+<PageTitle>Stock Opname Benang</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton />
+    <div class="bn-phead-t">Stock opname</div>
+    <a href="/gudang/benang/opname/riwayat" class="bn-btn bn-btn-sm bn-btn-soft" style="margin-left:auto">
+        Riwayat
+    </a>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger" style="margin:0">@error</div>
+    }
+
+    @if (!isLoading && current?.Session is null)
+    {
+        @* ---------------- belum ada sesi: pilih rak ---------------- *@
+        <div class="bn-card bn-note">
+            Opname mencatat <b>fakta fisik</b> dan tidak langsung mengubah stok. Selisih baru
+            diposting jadi mutasi (pindah rak / penyesuaian dengan alasan) saat sesi ditutup.
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="bn-row" style="padding:0;border:0">
+                <div class="bn-sub">Rak yang diopname (@dipilih.Count / @locations.Count)</div>
+                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" @onclick="ToggleSemua">
+                    @(dipilih.Count == locations.Count ? "Kosongkan" : "Pilih semua")
+                </button>
+            </div>
+
+            @if (locations.Count == 0)
+            {
+                <div class="bn-card bn-note">
+                    Belum ada rak aktif. Buat dulu di <a href="/gudang/benang/lokasi">kelola rak</a>.
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    @foreach (var loc in locations)
+                    {
+                        <label class="bn-pick @(dipilih.Contains(loc.ThreadLocationId) ? "is-on" : "")">
+                            <input type="checkbox" checked="@dipilih.Contains(loc.ThreadLocationId)"
+                                   @onchange="@(() => TogglePilih(loc.ThreadLocationId))" />
+                            <span class="bn-pick-k">@loc.Label</span>
+                            <span class="bn-pick-v">@loc.ItemCount SKU · @loc.QtyWholeTotal whole</span>
+                        </label>
+                    }
+                </div>
+            }
+
+            <div class="bn-field">
+                <label class="bn-label" for="bn-note">Catatan sesi (opsional)</label>
+                <input id="bn-note" class="bn-inp" @bind="note" @bind:event="oninput" />
+            </div>
+        </div>
+    }
+    else if (!isLoading && current?.Session is not null)
+    {
+        @* ---------------- sesi berjalan ---------------- *@
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:6px">
+            <div class="bn-row" style="padding:0;border:0">
+                <span class="bn-b" style="font-size:16px">@current.Session.SessionNo</span>
+                <span class="bn-chip">berjalan</span>
+            </div>
+            <div class="bn-note">
+                Dimulai @current.Session.StartedAt.ToString("dd MMM HH:mm")
+                @if (!string.IsNullOrWhiteSpace(current.Session.StartedByName))
+                {
+                    <span> · @current.Session.StartedByName</span>
+                }
+            </div>
+            <div class="bn-note">
+                @current.Session.ProgresSku · @current.Session.ProgresRak
+                @if (current.Session.SkuSelisih > 0)
+                {
+                    <span style="color:var(--bn-amber);font-weight:600"> · @current.Session.SkuSelisih selisih</span>
+                }
+            </div>
+        </div>
+
+        <div class="bn-sub">Rak dalam sesi ini</div>
+        <div class="bn-rows">
+            @foreach (var rak in current.Locations)
+            {
+                <div class="bn-row">
+                    <span style="min-width:0">
+                        <span class="bn-b">@rak.Code</span>
+                        @if (!string.IsNullOrWhiteSpace(rak.Name))
+                        {
+                            <span class="bn-k" style="display:block">@rak.Name</span>
+                        }
+                        <span class="bn-k" style="display:block;color:@rak.ProgresColor">@rak.ProgresLabel</span>
+                    </span>
+                    <button type="button" class="bn-btn bn-btn-sm @(rak.Selesai ? "bn-btn-soft" : "bn-btn-p")"
+                            @onclick="@(() => BukaRak(rak))">
+                        @(rak.Selesai ? "Lihat" : rak.SkuDihitung > 0 ? "Lanjut" : "Hitung")
+                    </button>
+                </div>
+            }
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button type="button" class="bn-btn bn-btn-sm bn-btn-danger"
+                    @onclick="@(() => konfirmasiBatal = true)">
+                Batalkan sesi
+            </button>
+        </div>
+    }
+</div>
+
+<ConfirmDeleteModal Show="konfirmasiBatal" IsBusy="isSaving"
+                    Title="Batalkan sesi opname" ConfirmText="Ya, batalkan"
+                    BusyText="Membatalkan..." OnConfirm="BatalkanSesi"
+                    OnCancel="@(() => konfirmasiBatal = false)">
+    <Message>
+        Batalkan sesi <strong>@current?.Session?.SessionNo</strong>? Seluruh hitungan yang
+        sudah dimasukkan akan hilang. Stok tidak berubah karena sesi ini belum diposting.
+    </Message>
+</ConfirmDeleteModal>
+
+@if (!isLoading)
+{
+    <div class="bn-bot">
+        @if (current?.Session is null)
+        {
+            <button type="button" class="bn-btn bn-btn-lg" style="background:var(--bn-blue);border-color:var(--bn-blue);color:#fff"
+                    disabled="@(isSaving || dipilih.Count == 0)" @onclick="MulaiOpname">
+                @(isSaving ? "Membuka..." : $"Mulai opname · {dipilih.Count} rak")
+            </button>
+        }
+        else
+        {
+            <button type="button" class="bn-btn bn-btn-lg" style="background:var(--bn-blue);border-color:var(--bn-blue);color:#fff"
+                    @onclick="@(() => Nav.NavigateTo($"/gudang/benang/opname/{current!.Session!.SessionId}/tutup"))">
+                Tutup sesi &amp; posting selisih
+            </button>
+        }
+    </div>
+}
+
+@code {
+    private ThreadOpnameCurrentDto? current;
+    private List<ThreadLocationDto> locations = new();
+    private readonly HashSet<int> dipilih = new();
+    private string note = string.Empty;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool konfirmasiBatal;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => Muat();
+
+    private async Task Muat()
+    {
+        isLoading = true;
+        error = null;
+
+        current = await OpnameApi.GetCurrentAsync();
+
+        if (current.Session is null)
+        {
+            locations = await ThreadApi.GetLocationsAsync(hanyaAktif: true);
+            dipilih.Clear();
+            foreach (var l in locations) dipilih.Add(l.ThreadLocationId);   // default semua
+        }
+
+        isLoading = false;
+    }
+
+    private void TogglePilih(int id)
+    {
+        if (!dipilih.Remove(id)) dipilih.Add(id);
+    }
+
+    private void ToggleSemua()
+    {
+        if (dipilih.Count == locations.Count) dipilih.Clear();
+        else foreach (var l in locations) dipilih.Add(l.ThreadLocationId);
+    }
+
+    private void BukaRak(ThreadOpnameLocationDto rak) =>
+        Nav.NavigateTo($"/gudang/benang/opname/{rak.SessionId}/rak/{rak.ThreadLocationId}");
+
+    private async Task MulaiOpname()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await OpnameApi.OpenAsync(new ThreadOpnameOpenRequest
+        {
+            // Kirim kosong kalau semua rak dipilih -- SP memakai "semua rak aktif".
+            LocationIds = dipilih.Count == locations.Count ? new() : dipilih.ToList(),
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await Muat();
+    }
+
+    private async Task BatalkanSesi()
+    {
+        if (current?.Session is null) return;
+
+        isSaving = true;
+        var (success, err, _) = await OpnameApi.CancelAsync(current.Session.SessionId);
+        isSaving = false;
+        konfirmasiBatal = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await Muat();
+    }
+}

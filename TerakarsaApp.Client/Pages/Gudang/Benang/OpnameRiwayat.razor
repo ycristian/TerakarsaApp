@@ -1,0 +1,76 @@
+@page "/gudang/benang/opname/riwayat"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadOpnameApiService OpnameApi
+@inject NavigationManager Nav
+
+@* Prompt 74 -- riwayat sesi opname. *@
+
+<PageTitle>Riwayat Opname</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton To="/gudang/benang/opname" />
+    <div class="bn-phead-t">Riwayat opname</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (sesi.Count == 0)
+    {
+        <div class="bn-card bn-note">Belum ada sesi opname.</div>
+    }
+    else
+    {
+        <div class="bn-rows">
+            @foreach (var s in sesi)
+            {
+                <div class="bn-row" style="cursor:pointer"
+                     @onclick="@(() => Nav.NavigateTo($"/gudang/benang/opname/riwayat/{s.SessionId}"))">
+                    <span style="min-width:0">
+                        <span class="bn-b">@s.SessionNo</span>
+                        <span class="bn-k" style="display:block">
+                            @s.StartedAt.ToString("dd MMM yyyy HH:mm")
+                            @if (s.ClosedAt.HasValue)
+                            {
+                                <span> → @s.ClosedAt.Value.ToString("dd MMM HH:mm")</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(s.StartedByName))
+                            {
+                                <span> · @s.StartedByName</span>
+                            }
+                        </span>
+                        <span class="bn-k" style="display:block">
+                            @s.TotalRak rak · @s.TotalSku SKU
+                            @if (s.SkuSelisih > 0)
+                            {
+                                <span style="color:var(--bn-amber)"> · @s.SkuSelisih selisih</span>
+                            }
+                        </span>
+                    </span>
+                    <span class="bn-chip @(s.IsOpen ? "bn-chip-amber" : "")">
+                        @(s.IsOpen ? "berjalan" : "selesai")
+                    </span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ThreadOpnameSessionDto> sesi = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        sesi = await OpnameApi.GetRiwayatAsync();
+        isLoading = false;
+    }
+}

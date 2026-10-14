@@ -1,0 +1,110 @@
+@page "/gudang/benang/opname/riwayat/{SessionId:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadOpnameApiService OpnameApi
+
+@* Prompt 74 -- detail satu sesi opname: baris, selisih, resolusi, alasan, siapa. *@
+
+<PageTitle>@(detail?.Session?.SessionNo ?? "Sesi opname")</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton To="/gudang/benang/opname/riwayat" />
+    <div class="bn-phead-t">@(detail?.Session?.SessionNo ?? "Sesi opname")</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else if (detail?.Session is null)
+    {
+        <div class="bn-card bn-note">Sesi tidak ditemukan.</div>
+    }
+    else
+    {
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:4px">
+            <div class="bn-row" style="padding:0;border:0">
+                <span class="bn-b">@detail.Session.SessionNo</span>
+                <span class="bn-chip @(detail.Session.IsOpen ? "bn-chip-amber" : "")">
+                    @(detail.Session.IsOpen ? "berjalan" : "selesai")
+                </span>
+            </div>
+            <div class="bn-note">
+                Dimulai @detail.Session.StartedAt.ToString("dd MMM yyyy HH:mm")
+                @if (detail.Session.ClosedAt.HasValue)
+                {
+                    <span> · ditutup @detail.Session.ClosedAt.Value.ToString("dd MMM yyyy HH:mm")</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(detail.Session.StartedByName))
+                {
+                    <span> · @detail.Session.StartedByName</span>
+                }
+            </div>
+            <div class="bn-note">
+                @detail.Session.TotalRak rak · @detail.Session.TotalSku SKU ·
+                @detail.Session.SkuSelisih selisih
+            </div>
+            @if (!string.IsNullOrWhiteSpace(detail.Session.Note))
+            {
+                <div class="bn-note">Catatan: @detail.Session.Note</div>
+            }
+        </div>
+
+        @foreach (var grup in detail.Results.GroupBy(r => r.LocationCode))
+        {
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="bn-sub">Rak @grup.Key</div>
+                <div class="bn-rows">
+                    @foreach (var r in grup)
+                    {
+                        <div class="bn-row" style="align-items:flex-start">
+                            <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+                                <span class="bn-b">
+                                    @(string.IsNullOrWhiteSpace(r.ColorCode) ? r.ColorName : $"{r.ColorName} · {r.ColorCode}")
+                                </span>
+                                <span class="bn-k">
+                                    Sistem @r.SystemQty · fisik @(r.CountedQty?.ToString() ?? "-")
+                                    @if (r.SplitExpected > 0 || (r.SplitFound ?? 0) > 0)
+                                    {
+                                        <span> · split @r.SplitExpected / ada @(r.SplitFound ?? 0)</span>
+                                    }
+                                </span>
+                                <span class="bn-k">@r.ResolusiLabel</span>
+                                @if (!string.IsNullOrWhiteSpace(r.Note))
+                                {
+                                    <span class="bn-k">"@r.Note"</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(r.CountedByName))
+                                {
+                                    <span class="bn-k">Dihitung @r.CountedByName</span>
+                                }
+                            </span>
+                            <span class="bn-b" style="flex-shrink:0;color:@(r.Diff == 0 ? "var(--bn-teal)" : "var(--bn-amber)")">
+                                @r.DiffLabel
+                            </span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int SessionId { get; set; }
+
+    private ThreadOpnameDetailDto? detail;
+    private bool isLoading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        detail = await OpnameApi.GetByIdAsync(SessionId);
+        isLoading = false;
+    }
+}

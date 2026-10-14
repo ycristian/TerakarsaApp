@@ -18,7 +18,7 @@
         <a href="/gudang/benang" class="@(IsStok ? "is-on" : "")">Stok</a>
         <a href="/gudang/benang/scan" class="@(IsPath("gudang/benang/scan") ? "is-on" : "")">Scan</a>
         <a href="/gudang/benang/terima" class="@(IsPath("gudang/benang/terima") ? "is-on" : "")">Terima</a>
-        <button type="button" disabled title="Prompt berikutnya">Opname</button>
+        <a href="/gudang/benang/opname" class="@(IsPath("gudang/benang/opname") ? "is-on" : "")">Opname</a>
         <button type="button" disabled title="Prompt berikutnya">Riwayat</button>
         <a href="/gudang/benang/lokasi" class="@(IsPath("gudang/benang/lokasi") ? "is-on" : "")">Lokasi</a>
         <a href="/gudang/benang/master" class="@(IsPath("gudang/benang/master") ? "is-on" : "")">Master</a>
@@ -41,7 +41,7 @@
     private static readonly string[] HalamanLain =
     {
         "gudang/benang/lokasi", "gudang/benang/master",
-        "gudang/benang/scan", "gudang/benang/terima"
+        "gudang/benang/scan", "gudang/benang/terima", "gudang/benang/opname"
     };
 
     private bool IsStok => !HalamanLain.Any(IsPath);

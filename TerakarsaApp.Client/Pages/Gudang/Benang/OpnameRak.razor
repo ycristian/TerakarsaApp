@@ -1,0 +1,351 @@
+@page "/gudang/benang/opname/{SessionId:int}/rak/{LocationId:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Shared.Inv
+@inject ThreadOpnameApiService OpnameApi
+@inject ThreadStockApiService ThreadApi
+@inject NavigationManager Nav
+
+@* Prompt 74 -- hitung satu rak. Mockup: Opname.dc.html (HP) & TabletOpname.dc.html.
+
+   Input fisik berwarna: cocok = hijau, selisih = oranye, belum dihitung = pudar
+   bergaris putus. Kolom split "n kones · ada m" + checklist per kones.
+
+   Hitungan disimpan per baris (COUNT) begitu angkanya diisi -- "Simpan draft" hanya
+   memaksa simpan baris yang masih tertunda, jadi tidak ada data hilang kalau HP
+   mati di tengah opname. *@
+
+<PageTitle>Opname rak</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton To="/gudang/benang/opname" />
+    <div style="display:flex;flex-direction:column;min-width:0">
+        <div class="bn-phead-t">Opname · Rak @(rak?.Code ?? "-")</div>
+        @if (session is not null)
+        {
+            <div class="bn-note">
+                @session.SessionNo · dimulai @session.StartedAt.ToString("dd MMM HH:mm")
+                @if (!string.IsNullOrWhiteSpace(session.StartedByName))
+                {
+                    <span> · @session.StartedByName</span>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Memuat...</div>
+    }
+    else
+    {
+        <button type="button" class="bn-btn" style="background:var(--bn-ink);border-color:var(--bn-ink);color:#fff"
+                @onclick="@(() => scanBuka = !scanBuka)">
+            <i class="fe fe-maximize"></i> Scan SKU berikutnya
+        </button>
+
+        @if (scanBuka)
+        {
+            <div class="bn-card" style="display:flex;flex-direction:column;gap:10px">
+                <div class="bn-note">
+                    Scan label SKU (<span class="bn-mono">TB:</span>) dengan scanner Bluetooth
+                    atau ketik kodenya, lalu Enter. Kalau SKU belum ada di rak ini, barisnya
+                    ditambahkan dengan sistem 0.
+                </div>
+                <input class="bn-inp" style="height:48px" placeholder="TB:BN-…"
+                       @bind="kodeScan" @bind:event="oninput" @onkeydown="ScanKeyDown" />
+                @if (!string.IsNullOrEmpty(scanError))
+                {
+                    <div class="alert alert-danger" style="margin:0">@scanError</div>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger" style="margin:0">@error</div>
+        }
+
+        <div class="bn-row" style="padding:0;border:0">
+            <div class="bn-sub">Sudah dihitung @Dihitung dari @lines.Count SKU</div>
+            @if (Selisih > 0)
+            {
+                <div style="font-size:13px;color:var(--bn-amber);font-weight:600">@Selisih selisih</div>
+            }
+        </div>
+
+        @if (lines.Count == 0)
+        {
+            <div class="bn-card bn-note">
+                Rak ini kosong menurut sistem. Scan SKU yang ada fisiknya untuk menambah baris
+                — ini juga cara memasukkan stok awal.
+            </div>
+        }
+
+        @foreach (var line in lines)
+        {
+            var sorot = line.LineId == lineSorot;
+            <div class="bn-card @(line.SudahDihitung ? "" : "bn-opname-belum")"
+                 style="@(sorot ? "border-color:var(--bn-blue);border-width:2px;" : "")display:flex;flex-direction:column;gap:10px">
+
+                <div style="display:flex;gap:10px;align-items:center">
+                    @if (line.AdaFoto)
+                    {
+                        <img class="bn-thumb" style="width:40px;height:40px"
+                             src="@ThreadApi.PhotoUrl(line.PhotoPath)" alt="@line.ColorName" />
+                    }
+                    else
+                    {
+                        <span class="bn-noimg" style="width:40px;height:40px;font-size:9px">no foto</span>
+                    }
+
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+                        <div style="font-size:14px;font-weight:600">@line.Judul</div>
+                        <div class="bn-k">Sistem: @line.SystemQty whole</div>
+                    </div>
+
+                    <label class="bn-k" for="@($"fisik-{line.LineId}")">Fisik</label>
+                    <input id="@($"fisik-{line.LineId}")" type="number" min="0"
+                           class="bn-opname-inp @KelasInput(line)"
+                           value="@(line.CountedQty?.ToString() ?? string.Empty)"
+                           @onchange="@(e => FisikDiubah(line, e))" />
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;gap:8px">
+                    <span style="font-weight:600;color:@line.DiffColor">@line.DiffLabel</span>
+                    <span class="bn-k">
+                        Split di sini:
+                        <strong style="color:@(line.SplitSelisih ? "var(--bn-amber)" : "var(--bn-ink)")">
+                            @line.SplitLabel
+                        </strong>
+                    </span>
+                </div>
+
+                @if (SplitsOf(line).Count > 0)
+                {
+                    <button type="button" class="bn-btn bn-btn-sm bn-btn-soft" style="align-self:flex-start"
+                            @onclick="@(() => ToggleSplit(line.LineId))">
+                        @(splitTerbuka.Contains(line.LineId) ? "Sembunyikan kones" : "Cek kones split")
+                    </button>
+
+                    @if (splitTerbuka.Contains(line.LineId))
+                    {
+                        <div class="bn-rows">
+                            @foreach (var cone in SplitsOf(line))
+                            {
+                                <label class="bn-row" style="cursor:pointer">
+                                    <span style="display:flex;gap:10px;align-items:center;min-width:0">
+                                        <input type="checkbox" style="width:20px;height:20px;accent-color:var(--bn-teal)"
+                                               checked="@(cone.IsFound == true)"
+                                               @onchange="@(e => ConeDiubah(line, cone, e))" />
+                                        <span>
+                                            <span class="bn-mono">@cone.ConeCode</span>
+                                            <span class="bn-k" style="display:block">
+                                                @cone.WeightGram g
+                                                @if (!string.IsNullOrWhiteSpace(cone.SystemLocationCode)
+                                                     && cone.SystemLocationCode != rak?.Code)
+                                                {
+                                                    <span style="color:var(--bn-amber)">
+                                                        · menurut sistem di @cone.SystemLocationCode
+                                                    </span>
+                                                }
+                                            </span>
+                                        </span>
+                                    </span>
+                                    <span class="bn-k">@(cone.IsFound == true ? "ada" : cone.IsFound == false ? "tidak ada" : "belum dicek")</span>
+                                </label>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (!isLoading)
+{
+    <div class="bn-bot bn-bot-2">
+        <button type="button" class="bn-btn bn-btn-soft" disabled="@isSaving" @onclick="Muat">
+            Muat ulang
+        </button>
+        <button type="button" class="bn-btn"
+                style="background:var(--bn-blue);border-color:var(--bn-blue);color:#fff"
+                disabled="@(isSaving || Dihitung < lines.Count || lines.Count == 0)"
+                title="@(Dihitung < lines.Count ? "Masih ada SKU belum dihitung" : null)"
+                @onclick="SelesaikanRak">
+            @(isSaving ? "Menyimpan..." : "Selesaikan rak")
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter] public int SessionId { get; set; }
+    [Parameter] public int LocationId { get; set; }
+
+    private ThreadOpnameSessionDto? session;
+    private ThreadOpnameLocationDto? rak;
+    private List<ThreadOpnameLineDto> lines = new();
+    private List<ThreadOpnameSplitDto> splits = new();
+
+    private readonly HashSet<int> splitTerbuka = new();
+    private int? lineSorot;
+
+    private bool scanBuka;
+    private string kodeScan = string.Empty;
+    private string? scanError;
+
+    private bool isLoading = true;
+    private bool isSaving;
+    private string? error;
+
+    private int Dihitung => lines.Count(l => l.SudahDihitung);
+    private int Selisih => lines.Count(l => l.SudahDihitung && l.Diff != 0);
+
+    private List<ThreadOpnameSplitDto> SplitsOf(ThreadOpnameLineDto line) =>
+        splits.Where(s => s.LineId == line.LineId).ToList();
+
+    // Warna input mengikuti mockup: hijau kalau cocok, oranye kalau selisih,
+    // netral kalau belum dihitung.
+    private static string KelasInput(ThreadOpnameLineDto line) =>
+        !line.SudahDihitung ? "bn-opname-kosong" : line.Diff == 0 ? "bn-opname-cocok" : "bn-opname-selisih";
+
+    protected override Task OnParametersSetAsync() => Muat();
+
+    private async Task Muat()
+    {
+        isLoading = true;
+        error = null;
+
+        var current = await OpnameApi.GetCurrentAsync();
+        session = current.Session;
+        rak = current.Locations.FirstOrDefault(l => l.ThreadLocationId == LocationId);
+
+        var hasil = await OpnameApi.GetLinesAsync(SessionId, LocationId);
+        lines = hasil.Lines;
+        splits = hasil.Splits;
+
+        isLoading = false;
+    }
+
+    private async Task FisikDiubah(ThreadOpnameLineDto line, ChangeEventArgs e)
+    {
+        var teks = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(teks) || !int.TryParse(teks, out var qty) || qty < 0) return;
+
+        await SimpanBaris(line, qty);
+    }
+
+    private async Task ConeDiubah(ThreadOpnameLineDto line, ThreadOpnameSplitDto cone, ChangeEventArgs e)
+    {
+        cone.IsFound = e.Value is bool b && b;
+
+        // Checklist kones ikut tersimpan lewat COUNT, jadi butuh angka fisik dulu.
+        await SimpanBaris(line, line.CountedQty ?? line.SystemQty);
+    }
+
+    // Satu panggilan COUNT membawa angka fisik + seluruh checklist kones baris itu.
+    private async Task SimpanBaris(ThreadOpnameLineDto line, int qty)
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await OpnameApi.CountAsync(new ThreadOpnameCountRequest
+        {
+            LineId = line.LineId,
+            CountedQty = qty,
+            Splits = SplitsOf(line)
+                .Where(s => s.IsFound.HasValue)
+                .Select(s => new ThreadOpnameSplitFoundDto
+                {
+                    SplitConeId = s.ThreadSplitConeId,
+                    IsFound = s.IsFound!.Value
+                })
+                .ToList()
+        });
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        // Ambil ulang supaya split_found & status rak ikut benar.
+        var hasil = await OpnameApi.GetLinesAsync(SessionId, LocationId);
+        lines = hasil.Lines;
+        splits = hasil.Splits;
+    }
+
+    private void ToggleSplit(int lineId)
+    {
+        if (!splitTerbuka.Remove(lineId)) splitTerbuka.Add(lineId);
+    }
+
+    private async Task ScanKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+
+        var kode = kodeScan.Trim();
+        kodeScan = string.Empty;
+        scanError = null;
+        if (kode.Length == 0) return;
+
+        var hasil = await ThreadApi.ScanAsync(kode);
+
+        if (hasil.Kind != "ITEM" || hasil.Item is null)
+        {
+            scanError = $"Kode \"{kode}\" bukan label SKU benang yang dikenal.";
+            return;
+        }
+
+        var ada = lines.FirstOrDefault(l => l.ThreadItemId == hasil.Item.ThreadItemId);
+        if (ada is not null)
+        {
+            lineSorot = ada.LineId;
+            return;
+        }
+
+        // SKU ada fisik tapi belum tercatat di rak ini -> ADD_LINE (sistem 0).
+        var (success, err, lineId) = await OpnameApi.AddLineAsync(new ThreadOpnameAddLineRequest
+        {
+            SessionId = SessionId,
+            LocationId = LocationId,
+            ThreadItemId = hasil.Item.ThreadItemId
+        });
+
+        if (!success)
+        {
+            scanError = err;
+            return;
+        }
+
+        lineSorot = lineId;
+        await Muat();
+    }
+
+    private async Task SelesaikanRak()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await OpnameApi.LocationDoneAsync(SessionId, LocationId);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        Nav.NavigateTo("/gudang/benang/opname");
+    }
+}

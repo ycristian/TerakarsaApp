@@ -1,0 +1,340 @@
+@page "/gudang/benang/opname/{SessionId:int}/tutup"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.BenangLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Gudang.Benang.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Inv
+@inject ThreadOpnameApiService OpnameApi
+@inject NavigationManager Nav
+
+@* Prompt 74 -- preview rekonsiliasi + posting. Tidak punya mockup sendiri.
+
+   Usulan dihitung SP (PREVIEW_CLOSE): plus di satu rak + minus di rak lain untuk SKU
+   yang sama dipasangkan jadi MOVE (stok total tidak berubah); sisanya jadi ADJUST
+   dengan alasan WAJIB.
+
+   Admin boleh MENOLAK usulan MOVE -- pasangan itu lalu dipecah jadi dua ADJUST
+   (masing-masing wajib alasan). Semuanya divalidasi ULANG di SP saat CLOSE. *@
+
+<PageTitle>Tutup sesi opname</PageTitle>
+
+<div class="bn-phead">
+    <BenangBackButton To="/gudang/benang/opname" />
+    <div class="bn-phead-t">Tutup sesi &amp; posting</div>
+</div>
+
+<div class="bn-body">
+    @if (isLoading)
+    {
+        <div class="bn-card bn-note">Menghitung usulan...</div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger" style="margin:0">@error</div>
+        }
+
+        <div class="bn-card" style="display:flex;flex-direction:column;gap:4px">
+            <div class="bn-sub">Ringkasan</div>
+            <div class="bn-note">
+                @JumlahMove pindah rak · @JumlahAdjustPlus penyesuaian + · @JumlahAdjustMinus penyesuaian −
+                · @JumlahSplitHabis kones split habis · @JumlahSplitPindah kones split pindah
+            </div>
+            @if (usulan.Count == 0)
+            {
+                <div class="bn-note">
+                    Tidak ada selisih sama sekali — sesi bisa langsung ditutup tanpa mutasi.
+                </div>
+            }
+        </div>
+
+        @foreach (var grup in usulan.GroupBy(u => u.ThreadItemId))
+        {
+            var pertama = grup.First();
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="bn-sub">@pertama.Judul <span class="bn-k">· @pertama.BrandName · @pertama.TypeName</span></div>
+
+                @foreach (var u in grup)
+                {
+                    var tolak = ditolak.Contains(u.ProposalId);
+                    <div class="bn-card" style="display:flex;flex-direction:column;gap:8px;@(tolak ? "opacity:.6" : "")">
+                        <div class="bn-row" style="padding:0;border:0">
+                            <span>
+                                <span class="bn-b" style="color:@WarnaAction(u.ActionUsulan)">@u.ActionLabel</span>
+                                <span class="bn-k" style="display:block">@u.Rincian</span>
+                            </span>
+                            @if (u.ActionUsulan == "MOVE")
+                            {
+                                <button type="button" class="bn-btn bn-btn-sm bn-btn-soft"
+                                        @onclick="@(() => TogglePindah(u))">
+                                    @(tolak ? "Pakai lagi" : "Tolak")
+                                </button>
+                            }
+                        </div>
+
+                        @if (u.ActionUsulan == "MOVE" && tolak)
+                        {
+                            <div class="bn-note">
+                                Usulan pindah ditolak — selisih di @u.FromCode dan @u.ToCode akan
+                                diposting sebagai dua penyesuaian terpisah, masing-masing butuh alasan.
+                            </div>
+                        }
+
+                        @if (ButuhAlasan(u))
+                        {
+                            <div class="bn-field">
+                                <label class="bn-label">Alasan</label>
+                                <select class="bn-inp" value="@AlasanDari(u)" @onchange="@(e => AlasanDiubah(u, e))">
+                                    <option value="">-- Pilih alasan --</option>
+                                    @foreach (var r in reasons)
+                                    {
+                                        <option value="@r.Code">@r.Name</option>
+                                    }
+                                </select>
+
+                                <input class="bn-inp" style="margin-top:6px"
+                                       placeholder="@(AlasanWajibNote(u) ? "Keterangan wajib untuk alasan ini" : "Keterangan (opsional)")"
+                                       value="@NoteDari(u)" @onchange="@(e => NoteDiubah(u, e))" />
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="bn-field">
+            <label class="bn-label" for="bn-note">Catatan penutupan (opsional)</label>
+            <input id="bn-note" class="bn-inp" @bind="note" @bind:event="oninput" />
+        </div>
+    }
+</div>
+
+@if (!isLoading)
+{
+    <div class="bn-bot">
+        <button type="button" class="bn-btn bn-btn-lg"
+                style="background:var(--bn-blue);border-color:var(--bn-blue);color:#fff"
+                disabled="@(isSaving || !BolehPosting)" @onclick="@(() => konfirmasi = true)">
+            @(isSaving ? "Memposting..." : "Posting & tutup sesi")
+        </button>
+        @if (!BolehPosting)
+        {
+            <div class="bn-note" style="text-align:center">Semua penyesuaian harus punya alasan dulu.</div>
+        }
+    </div>
+}
+
+@if (konfirmasi)
+{
+    <div class="modal d-block" style="background-color:rgba(0,0,0,.5)" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content benang">
+                <div class="modal-header">
+                    <h5 class="modal-title">Posting hasil opname</h5>
+                    <button type="button" class="btn-close" aria-label="Tutup"
+                            @onclick="@(() => konfirmasi = false)" disabled="@isSaving"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        @JumlahMove pindah rak dan @(JumlahAdjustPlus + JumlahAdjustMinus) penyesuaian stok
+                        akan dicatat sebagai mutasi, lalu sesi ditutup.
+                    </p>
+                    <p class="bn-note" style="margin:0">
+                        Setelah ditutup, angka sesi ini tidak bisa diubah lagi. Penyesuaian yang
+                        salah harus diperbaiki lewat opname berikutnya.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" @onclick="@(() => konfirmasi = false)"
+                            disabled="@isSaving">Batal</button>
+                    <button type="button" class="btn btn-primary" @onclick="Posting" disabled="@isSaving">
+                        @(isSaving ? "Memposting..." : "Ya, posting")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int SessionId { get; set; }
+
+    private List<ThreadOpnameProposalDto> usulan = new();
+    private List<ThreadReasonCodeDto> reasons = new();
+
+    // Usulan MOVE yang ditolak admin -> dipecah jadi dua ADJUST saat posting.
+    private readonly HashSet<int> ditolak = new();
+
+    // reason_code & note per proposal (kunci: ProposalId, plus "P<id>" / "M<id>"
+    // untuk dua ADJUST hasil pecahan MOVE yang ditolak).
+    private readonly Dictionary<string, string> alasan = new();
+    private readonly Dictionary<string, string> catatan = new();
+
+    private string note = string.Empty;
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool konfirmasi;
+    private string? error;
+
+    private int JumlahMove => usulan.Count(u => u.ActionUsulan == "MOVE" && !ditolak.Contains(u.ProposalId));
+    private int JumlahAdjustPlus =>
+        usulan.Count(u => u.ActionUsulan == "ADJUST" && u.Qty > 0)
+        + usulan.Count(u => u.ActionUsulan == "MOVE" && ditolak.Contains(u.ProposalId));
+    private int JumlahAdjustMinus =>
+        usulan.Count(u => u.ActionUsulan == "ADJUST" && u.Qty < 0)
+        + usulan.Count(u => u.ActionUsulan == "MOVE" && ditolak.Contains(u.ProposalId));
+    private int JumlahSplitHabis => usulan.Count(u => u.ActionUsulan == "ADJUST_SPLIT");
+    private int JumlahSplitPindah => usulan.Count(u => u.ActionUsulan == "MOVE_SPLIT");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        reasons = await OpnameApi.GetReasonCodesAsync();
+        usulan = await OpnameApi.PreviewCloseAsync(SessionId);
+        isLoading = false;
+    }
+
+    private static string WarnaAction(string action) => action switch
+    {
+        "MOVE" or "MOVE_SPLIT" => "var(--bn-blue)",
+        "ADJUST_SPLIT" => "var(--bn-red)",
+        _ => "var(--bn-amber)"
+    };
+
+    // MOVE yang dipakai tidak butuh alasan; MOVE yang ditolak butuh DUA alasan.
+    private bool ButuhAlasan(ThreadOpnameProposalDto u) =>
+        u.ReasonRequired || (u.ActionUsulan == "MOVE" && ditolak.Contains(u.ProposalId));
+
+    private string KunciUtama(ThreadOpnameProposalDto u) => $"A{u.ProposalId}";
+
+    private string AlasanDari(ThreadOpnameProposalDto u) =>
+        alasan.TryGetValue(KunciUtama(u), out var v) ? v : string.Empty;
+
+    private string NoteDari(ThreadOpnameProposalDto u) =>
+        catatan.TryGetValue(KunciUtama(u), out var v) ? v : string.Empty;
+
+    private bool AlasanWajibNote(ThreadOpnameProposalDto u)
+    {
+        var kode = AlasanDari(u);
+        return !string.IsNullOrEmpty(kode) && reasons.Any(r => r.Code == kode && r.RequiresNote);
+    }
+
+    private void AlasanDiubah(ThreadOpnameProposalDto u, ChangeEventArgs e) =>
+        alasan[KunciUtama(u)] = e.Value?.ToString() ?? string.Empty;
+
+    private void NoteDiubah(ThreadOpnameProposalDto u, ChangeEventArgs e) =>
+        catatan[KunciUtama(u)] = e.Value?.ToString() ?? string.Empty;
+
+    private void TogglePindah(ThreadOpnameProposalDto u)
+    {
+        if (!ditolak.Remove(u.ProposalId)) ditolak.Add(u.ProposalId);
+    }
+
+    private bool BolehPosting => usulan
+        .Where(ButuhAlasan)
+        .All(u =>
+        {
+            var kode = AlasanDari(u);
+            if (string.IsNullOrEmpty(kode)) return false;
+            var wajibNote = reasons.Any(r => r.Code == kode && r.RequiresNote);
+            return !wajibNote || !string.IsNullOrWhiteSpace(NoteDari(u));
+        });
+
+    private async Task Posting()
+    {
+        isSaving = true;
+        error = null;
+
+        var resolusi = new List<ThreadOpnameResolutionDto>();
+
+        foreach (var u in usulan)
+        {
+            var kode = AlasanDari(u);
+            var ket = NoteDari(u);
+            var nullKet = string.IsNullOrWhiteSpace(ket) ? null : ket.Trim();
+
+            if (u.ActionUsulan == "MOVE" && !ditolak.Contains(u.ProposalId))
+            {
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    LineId = u.LineId,
+                    Action = "MOVE",
+                    Qty = u.Qty,
+                    FromLocationId = u.FromLocationId,
+                    ToLocationId = u.ToLocationId,
+                    Note = nullKet
+                });
+            }
+            else if (u.ActionUsulan == "MOVE")
+            {
+                // Ditolak: rak asal kurang (−qty), rak tujuan lebih (+qty) -- dua ADJUST.
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    LineId = u.LineId, Action = "ADJUST", Qty = -(u.Qty ?? 0),
+                    ReasonCode = kode, Note = nullKet
+                });
+
+                var lineTujuan = usulan.FirstOrDefault(x => x.ThreadItemId == u.ThreadItemId
+                                                            && x.ActionUsulan == "ADJUST"
+                                                            && x.ToLocationId == u.ToLocationId)?.LineId;
+
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    // Kalau baris rak tujuan tidak punya usulan ADJUST sendiri, pakai LineId
+                    // dari usulan MOVE-nya: SP memakai lokasi baris itu, jadi harus baris
+                    // rak TUJUAN -- dicari lewat ToLocationId di daftar usulan.
+                    LineId = lineTujuan ?? u.LineId,
+                    Action = "ADJUST", Qty = u.Qty,
+                    ReasonCode = kode, Note = nullKet
+                });
+            }
+            else if (u.ActionUsulan == "ADJUST")
+            {
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    LineId = u.LineId, Action = "ADJUST", Qty = u.Qty,
+                    ReasonCode = kode, Note = nullKet
+                });
+            }
+            else if (u.ActionUsulan == "ADJUST_SPLIT")
+            {
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    LineId = u.LineId, Action = "ADJUST_SPLIT",
+                    SplitConeId = u.ThreadSplitConeId,
+                    ReasonCode = kode, Note = nullKet
+                });
+            }
+            else if (u.ActionUsulan == "MOVE_SPLIT")
+            {
+                resolusi.Add(new ThreadOpnameResolutionDto
+                {
+                    LineId = u.LineId, Action = "MOVE_SPLIT",
+                    SplitConeId = u.ThreadSplitConeId,
+                    ToLocationId = u.ToLocationId,
+                    Note = nullKet
+                });
+            }
+        }
+
+        var (success, err, _) = await OpnameApi.CloseAsync(new ThreadOpnameCloseRequest
+        {
+            SessionId = SessionId,
+            Resolutions = resolusi,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()
+        });
+
+        isSaving = false;
+        konfirmasi = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        Nav.NavigateTo($"/gudang/benang/opname/riwayat/{SessionId}");
+    }
+}

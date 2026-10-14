@@ -417,6 +417,31 @@
 }
 .bn-gram-u { font-size: 18px; font-weight: 600; color: var(--bn-mut); width: 48px; }
 
+/* ---------- opname (Opname.dc.html / TabletOpname.dc.html) ---------- */
+/* Baris belum dihitung: pudar + garis putus-putus. */
+.bn-card.bn-opname-belum {
+    border-style: dashed;
+    border-color: #c9ccc7;
+    color: var(--bn-mut);
+}
+
+/* Input fisik: kosong netral, cocok hijau, selisih oranye. */
+.bn-opname-inp {
+    width: 68px;
+    box-sizing: border-box;
+    height: 44px;
+    border-radius: 10px;
+    text-align: center;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: 700;
+    flex-shrink: 0;
+    color: var(--bn-ink);
+}
+.bn-opname-kosong { border: 1px solid var(--bn-line); background: var(--bn-card); }
+.bn-opname-cocok { border: 2px solid var(--bn-teal); background: var(--bn-teal-bg); }
+.bn-opname-selisih { border: 2px solid var(--bn-amber); background: #fff7ed; }
+
 /* ---------- banner ---------- */
 .bn-banner {
     background: #fff7ed;

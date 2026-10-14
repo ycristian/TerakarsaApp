@@ -22,15 +22,19 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE inv.SIS_ThreadMovement_Manage
-    @Action         VARCHAR(20),       -- RECEIVE | ISSUE | RETURN | ISSUE_SPLIT | RETURN_SPLIT | MOVE | MOVE_SPLIT | EMPTY
+    @Action         VARCHAR(20),       -- RECEIVE | ISSUE | RETURN | ISSUE_SPLIT | RETURN_SPLIT
+                                       -- | MOVE | MOVE_SPLIT | EMPTY | ADJUST | ADJUST_SPLIT
     @ItemId         INT = NULL,
     @SplitConeId    INT = NULL,
     @FromLocationId INT = NULL,
     @ToLocationId   INT = NULL,
+    @LocationId     INT = NULL,        -- Prompt 74: rak yang disesuaikan (ADJUST)
     @Qty            INT = NULL,
     @WeightGram     INT = NULL,
     @ResourceId     INT = NULL,
     @ProjectId      INT = NULL,
+    @ReasonCode     VARCHAR(30) = NULL,-- Prompt 74: WAJIB untuk ADJUST*
+    @OpnameLineId   INT = NULL,        -- Prompt 74: WAJIB untuk ADJUST*; baris opname asalnya
     @Note           VARCHAR(500) = NULL,
     @UserId         INT = NULL
 AS
@@ -38,10 +42,40 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @Action NOT IN ('RECEIVE','ISSUE','RETURN','ISSUE_SPLIT','RETURN_SPLIT','MOVE','MOVE_SPLIT','EMPTY')
+    IF @Action NOT IN ('RECEIVE','ISSUE','RETURN','ISSUE_SPLIT','RETURN_SPLIT','MOVE','MOVE_SPLIT',
+                       'EMPTY','ADJUST','ADJUST_SPLIT')
     BEGIN
         RAISERROR('Jenis mutasi "%s" tidak dikenal.', 16, 1, @Action);
         RETURN;
+    END
+
+    -- Prompt 74: ADJUST HANYA boleh lahir dari stock opname -- tidak ada halaman
+    -- penyesuaian stok manual. Tanpa baris opname & alasan, ditolak di sini.
+    IF @Action IN ('ADJUST','ADJUST_SPLIT')
+    BEGIN
+        IF @OpnameLineId IS NULL
+           OR NOT EXISTS (SELECT 1 FROM inv.thread_opname_lines
+                           WHERE thread_opname_line_id = @OpnameLineId AND deleted_at IS NULL)
+        BEGIN
+            RAISERROR('Penyesuaian stok hanya boleh dibuat dari stock opname.', 16, 1);
+            RETURN;
+        END
+
+        IF @ReasonCode IS NULL
+           OR NOT EXISTS (SELECT 1 FROM inv.thread_reason_codes
+                           WHERE code = @ReasonCode AND deleted_at IS NULL)
+        BEGIN
+            RAISERROR('Alasan penyesuaian wajib diisi dan harus dikenal.', 16, 1);
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM inv.thread_reason_codes
+                    WHERE code = @ReasonCode AND requires_note = 1 AND deleted_at IS NULL)
+           AND NULLIF(LTRIM(RTRIM(ISNULL(@Note,''))), '') IS NULL
+        BEGIN
+            RAISERROR('Alasan "%s" wajib diisi keterangannya.', 16, 1, @ReasonCode);
+            RETURN;
+        END
     END
 
     SET @Note = NULLIF(LTRIM(RTRIM(ISNULL(@Note,''))), '');
@@ -54,7 +88,7 @@ BEGIN
     -- ---------------- validasi yang dipakai beberapa action ----------------
 
     -- Action yang bekerja pada SATU kones split: ambil dulu baris & SKU-nya.
-    IF @Action IN ('ISSUE_SPLIT','RETURN_SPLIT','MOVE_SPLIT','EMPTY')
+    IF @Action IN ('ISSUE_SPLIT','RETURN_SPLIT','MOVE_SPLIT','EMPTY','ADJUST_SPLIT')
     BEGIN
         DECLARE @ConeStatus VARCHAR(10), @ConeWeight INT;
 
@@ -346,8 +380,10 @@ BEGIN
                 VALUES (@ItemId, @ToLocationId, @Qty, @UserId);
 
             INSERT INTO inv.thread_movements
-                (movement_type, thread_item_id, from_location_id, to_location_id, qty_whole, note, created_by)
-            VALUES ('MOVE', @ItemId, @FromLocationId, @ToLocationId, @Qty, @Note, @UserId);
+                (movement_type, thread_item_id, from_location_id, to_location_id, qty_whole, note,
+                 opname_line_id, created_by)
+            VALUES ('MOVE', @ItemId, @FromLocationId, @ToLocationId, @Qty, @Note,
+                    @OpnameLineId, @UserId);
 
             SET @MovementId = CAST(SCOPE_IDENTITY() AS INT);
         END
@@ -370,9 +406,81 @@ BEGIN
 
             INSERT INTO inv.thread_movements
                 (movement_type, thread_item_id, thread_split_cone_id,
-                 from_location_id, to_location_id, weight_gram, note, created_by)
+                 from_location_id, to_location_id, weight_gram, note, opname_line_id, created_by)
             VALUES ('MOVE_SPLIT', @ItemId, @SplitConeId,
-                    @ConeFrom, @ToLocationId, @ConeWeight, @Note, @UserId);
+                    @ConeFrom, @ToLocationId, @ConeWeight, @Note, @OpnameLineId, @UserId);
+
+            SET @MovementId = CAST(SCOPE_IDENTITY() AS INT);
+            SET @WeightGram = @ConeWeight;
+        END
+
+        -- ======================= ADJUST (penyesuaian whole dari opname) =======================
+        -- @Qty bertanda: + menambah, - mengurangi. Hasil tidak boleh minus.
+        ELSE IF @Action = 'ADJUST'
+        BEGIN
+            DECLARE @AdjCode VARCHAR(20) = (SELECT code FROM inv.thread_locations
+                                             WHERE thread_location_id = @LocationId AND deleted_at IS NULL);
+
+            IF @AdjCode IS NULL
+            BEGIN
+                RAISERROR('Rak yang disesuaikan tidak dikenal.', 16, 1);
+            END
+
+            IF ISNULL(@Qty, 0) = 0
+            BEGIN
+                RAISERROR('Penyesuaian dengan jumlah 0 tidak perlu dicatat.', 16, 1);
+            END
+
+            SELECT @Saldo = qty_whole FROM inv.thread_stocks
+            WHERE thread_item_id = @ItemId AND thread_location_id = @LocationId AND deleted_at IS NULL;
+
+            SET @Saldo = ISNULL(@Saldo, 0);
+
+            IF @Qty < 0 AND @Saldo < -@Qty
+            BEGIN
+                RAISERROR('Stok di rak %s hanya %d kones.', 16, 1, @AdjCode, @Saldo);
+            END
+
+            UPDATE inv.thread_stocks
+            SET qty_whole = qty_whole + @Qty,
+                updated_at = SYSDATETIME(), updated_by = @UserId
+            WHERE thread_item_id = @ItemId AND thread_location_id = @LocationId AND deleted_at IS NULL;
+
+            IF @@ROWCOUNT = 0
+                INSERT INTO inv.thread_stocks (thread_item_id, thread_location_id, qty_whole, created_by)
+                VALUES (@ItemId, @LocationId, @Qty, @UserId);
+
+            -- Arah disimpan lewat from/to supaya riwayat terbaca seperti mutasi lain.
+            INSERT INTO inv.thread_movements
+                (movement_type, thread_item_id, from_location_id, to_location_id, qty_whole,
+                 reason_code, note, opname_line_id, created_by)
+            VALUES ('ADJUST', @ItemId,
+                    CASE WHEN @Qty < 0 THEN @LocationId END,
+                    CASE WHEN @Qty > 0 THEN @LocationId END,
+                    @Qty, @ReasonCode, @Note, @OpnameLineId, @UserId);
+
+            SET @MovementId = CAST(SCOPE_IDENTITY() AS INT);
+        END
+
+        -- ======================= ADJUST_SPLIT (kones split hilang saat opname) =======================
+        ELSE IF @Action = 'ADJUST_SPLIT'
+        BEGIN
+            DECLARE @AdjFrom INT = (SELECT thread_location_id FROM inv.thread_split_cones
+                                     WHERE thread_split_cone_id = @SplitConeId);
+
+            UPDATE inv.thread_split_cones
+            SET [status] = 'EMPTY',
+                thread_location_id = NULL,
+                issued_to_resource_id = NULL,
+                issued_project_id = NULL,
+                updated_at = SYSDATETIME(), updated_by = @UserId
+            WHERE thread_split_cone_id = @SplitConeId;
+
+            INSERT INTO inv.thread_movements
+                (movement_type, thread_item_id, thread_split_cone_id, from_location_id,
+                 weight_gram, reason_code, note, opname_line_id, created_by)
+            VALUES ('ADJUST_SPLIT', @ItemId, @SplitConeId, @AdjFrom,
+                    @ConeWeight, @ReasonCode, @Note, @OpnameLineId, @UserId);
 
             SET @MovementId = CAST(SCOPE_IDENTITY() AS INT);
             SET @WeightGram = @ConeWeight;
