@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Ambil Benang</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1f2937;text-decoration:none}a:hover{color:#0f766e}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #f4f5f3; font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #1b1f24; display: flex; flex-direction: column">
+
+  <div style="background: #ffffff; padding: 16px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e3e5e1">
+    <a href="Main.dc.html" aria-label="Kembali ke beranda" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #f4f5f3">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </a>
+    <div style="font-size: 17px; font-weight: 600">Ambil Benang</div>
+  </div>
+
+  <div style="padding: 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto">
+
+    <div style="display: flex; gap: 12px; align-items: center; background: #ffffff; border: 1px solid #e3e5e1; border-radius: 12px; padding: 12px">
+      <div style="width: 48px; height: 48px; border-radius: 10px; background: #c62828; flex-shrink: 0"></div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+        <div style="font-size: 15px; font-weight: 600">Merah Cabe · 2041</div>
+        <div style="font-size: 13px; color: #5b6168">Poly · Astra · Kones Besar</div>
+      </div>
+      <button type="button" style="height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #e3e5e1; background: #ffffff; font-family: inherit; font-size: 13px; font-weight: 600">Scan lagi</button>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 14px; font-weight: 600">Ambil dari lokasi</div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <label style="display: flex; align-items: center; gap: 12px; background: #e6f4f2; border: 2px solid #0f766e; border-radius: 12px; padding: 12px 14px; cursor: pointer">
+          <input type="radio" name="lokasi" checked style="width: 20px; height: 20px; accent-color: #0f766e">
+          <span style="font-weight: 600; flex: 1">A1</span>
+          <span style="color: #5b6168">20 kones</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 12px; background: #ffffff; border: 2px solid #e3e5e1; border-radius: 12px; padding: 12px 14px; cursor: pointer">
+          <input type="radio" name="lokasi" style="width: 20px; height: 20px; accent-color: #0f766e">
+          <span style="font-weight: 600; flex: 1">B5</span>
+          <span style="color: #5b6168">8 kones</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 12px; background: #ffffff; border: 2px solid #e3e5e1; border-radius: 12px; padding: 12px 14px; cursor: pointer">
+          <input type="radio" name="lokasi" style="width: 20px; height: 20px; accent-color: #0f766e">
+          <span style="font-weight: 600; flex: 1">X12</span>
+          <span style="color: #5b6168">5 kones</span>
+        </label>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="qty" style="font-size: 14px; font-weight: 600">Jumlah whole</label>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <button type="button" aria-label="Kurangi" style="width: 48px; height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; font-size: 22px; font-family: inherit">−</button>
+        <input id="qty" type="number" value="6" style="flex: 1; box-sizing: border-box; height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; text-align: center; font-family: inherit; font-size: 22px; font-weight: 700">
+        <button type="button" aria-label="Tambah" style="width: 48px; height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; font-size: 22px; font-family: inherit">+</button>
+      </div>
+      <div style="font-size: 12px; color: #5b6168">Ambil kones split? Scan barcode kones split-nya langsung.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="tujuan" style="font-size: 14px; font-weight: 600">Untuk</label>
+      <select id="tujuan" style="height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; padding: 0 12px; font-family: inherit; font-size: 15px">
+        <option>Line 2 · Sewing</option>
+        <option>Line 1 · Sewing</option>
+        <option>Line 3 · Sewing</option>
+        <option>Buang Benang</option>
+      </select>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="project" style="font-size: 14px; font-weight: 600">Order / project</label>
+      <select id="project" style="height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; padding: 0 12px; font-family: inherit; font-size: 15px">
+        <option>PO TNI AD · Kemeja</option>
+        <option>PO-0931 · Unotter Hoodie</option>
+        <option>— Tanpa project —</option>
+      </select>
+      <div style="font-size: 12px; color: #5b6168">Kalau tanpa project, keterangan wajib diisi.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="ket" style="font-size: 14px; font-weight: 600">Keterangan</label>
+      <input id="ket" type="text" placeholder="Opsional kalau ada project" style="box-sizing: border-box; height: 48px; border-radius: 12px; border: 1px solid #e3e5e1; background: #ffffff; padding: 0 12px; font-family: inherit; font-size: 15px">
+    </div>
+
+  </div>
+
+  <div style="margin-top: auto; padding: 12px 20px 24px; border-top: 1px solid #e3e5e1; background: #ffffff">
+    <a href="Main.dc.html" style="height: 52px; border-radius: 12px; background: #0f766e; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600">Simpan · 6 kones dari A1</a>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
