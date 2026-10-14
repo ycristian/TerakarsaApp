@@ -51,7 +51,13 @@ public class Worker : BackgroundService
     // Job_type label (TSC TTP-244 Pro, TSPL) TETAP hardcode -- TsplBuilder.cs punya layout
     // spesifik per jenis label di C#, jadi job_type baru di sini SELALU butuh kode baru juga
     // (tidak ada untungnya dipindah ke DB).
-    private static readonly string[] LabelJobTypes = { "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE" };
+    // Prompt 73: THREAD_SKU_LABEL & THREAD_SPLIT_LABEL = label benang 30x20 mm
+    // (TsplBuilder.BuildThreadLabel).
+    private static readonly string[] LabelJobTypes =
+    {
+        "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE",
+        "THREAD_SKU_LABEL", "THREAD_SPLIT_LABEL"
+    };
 
     // Prompt 65: job_type yang dirakit di C# sebagai ESC/POS (printer thermal 80mm),
     // BUKAN lewat token SP seperti job_type kupon -- jadi tidak didaftarkan di
@@ -153,7 +159,7 @@ public class Worker : BackgroundService
     // (hasil resolusi print_devices saat klaim), bukan _options.PrinterName di appsettings.
     private async Task ProcessTsplJobAsync(PrintJobClaimedDto job, CancellationToken ct)
     {
-        if (job.JobType != "BUNDLE_LABEL" && job.JobType != "PACK_LABEL" && job.JobType != "REJECT_NOTE")
+        if (!LabelJobTypes.Contains(job.JobType))
         {
             Log(LogLevel.Warning, $"Job #{job.PrintJobId}: job_type '{job.JobType}' belum didukung di jalur RAW_TSPL.");
             await ReportSafeAsync(job.PrintJobId, false, "Job type belum didukung.", ct);
@@ -175,6 +181,13 @@ public class Worker : BackgroundService
                 var rejectPayload = TsplBuilder.ParseRejectNotePayload(job.Payload);
                 serial = rejectPayload.BundleSerial ?? $"WL#{rejectPayload.WorkflowLogId}";
                 tspl = TsplBuilder.BuildRejectNote(rejectPayload);
+            }
+            // Prompt 73: label benang 30x20 mm -- satu payload untuk label SKU & split.
+            else if (job.JobType is "THREAD_SKU_LABEL" or "THREAD_SPLIT_LABEL")
+            {
+                var threadPayload = TsplBuilder.ParseThreadLabelPayload(job.Payload);
+                serial = threadPayload.ConeCode ?? threadPayload.SkuCode ?? threadPayload.Qr;
+                tspl = TsplBuilder.BuildThreadLabel(threadPayload);
             }
             else
             {

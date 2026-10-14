@@ -138,7 +138,25 @@
             <button type="button" class="bn-btn bn-btn-danger" @onclick="@(() => mulaiHabis = true)">
                 Habis
             </button>
+            @* Prompt 73: label kones bisa dicetak ulang kalau rusak/terlepas. *@
+            <button type="button" class="bn-btn bn-btn-soft" style="grid-column:1/-1"
+                    disabled="@isPrinting" @onclick="CetakUlangLabel">
+                @(isPrinting ? "Mengirim..." : "Cetak ulang label")
+            </button>
         </div>
+
+        @if (labelJobs.Count > 0)
+        {
+            <div class="bn-rows">
+                @foreach (var j in labelJobs)
+                {
+                    <div class="bn-row">
+                        <span class="bn-k">Cetak #@j.PrintJobId · @j.CreatedAt.ToString("HH:mm")</span>
+                        <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
+                    </div>
+                }
+            </div>
+        }
 
         @* ---------- Ambil split: pilih line + project/keterangan ---------- *@
         @if (mulaiAmbilSplit)
@@ -276,6 +294,8 @@
 
     private bool isProcessing;
     private bool isSaving;
+    private bool isPrinting;
+    private List<ThreadLabelJobDto> labelJobs = new();
     private bool kameraJalan;
     private DotNetObjectReference<Scan>? selfRef;
 
@@ -347,6 +367,7 @@
         isProcessing = true;
         hasilError = null;
         pesanSukses = null;
+        labelJobs = new();
         TutupAksi();
 
         hasil = await ThreadApi.ScanAsync(kode);
@@ -432,6 +453,26 @@
 
         isSaving = false;
         await SelesaiAksi(success, err, $"{hasil!.Cone!.ConeCode} ditandai habis.");
+    }
+
+    private async Task CetakUlangLabel()
+    {
+        if (hasil?.Cone is null) return;
+
+        isPrinting = true;
+        hasilError = null;
+
+        var (success, err, _) = await ThreadApi.CetakLabelSplitAsync(hasil.Cone.ThreadSplitConeId);
+
+        isPrinting = false;
+
+        if (!success)
+        {
+            hasilError = err;
+            return;
+        }
+
+        labelJobs = await ThreadApi.GetLabelStatusAsync("SPLIT", hasil.Cone.ThreadSplitConeId, 3);
     }
 
     private async Task SelesaiAksi(bool success, string error, string pesan)

@@ -165,9 +165,7 @@
                         @onclick="@(() => Nav.NavigateTo($"/gudang/benang/sku/edit/{detail!.Item!.ThreadItemId}"))">
                     Edit
                 </button>
-                <button type="button" class="bn-btn bn-btn-sm" disabled title="Prompt berikutnya">
-                    Cetak label SKU
-                </button>
+                <ThreadLabelSkuButton Item="detail.Item" CssClass="bn-btn-sm" />
                 <button type="button" class="bn-btn bn-btn-sm bn-btn-p"
                         @onclick="@(() => Nav.NavigateTo($"/gudang/benang/ambil/{detail!.Item!.ThreadItemId}"))">
                     Ambil

@@ -216,6 +216,32 @@ public class ThreadStockController : ControllerBase
     // GET foto: lihat ThreadPhotoController (tanpa [Authorize] -- <img src> tidak bisa
     // mengirim header Authorization).
 
+    // ==================== LABEL 30x20 mm (Prompt 73) ====================
+
+    [HttpPost("labels/sku/{itemId:int}")]
+    public async Task<IActionResult> CetakLabelSku(int itemId, [FromQuery] int copies = 1)
+    {
+        var (success, error, printJobId) = await _threadService.EnqueueLabelAsync("SKU", itemId, copies, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(printJobId);
+    }
+
+    [HttpPost("labels/split/{splitId:int}")]
+    public async Task<IActionResult> CetakLabelSplit(int splitId)
+    {
+        var (success, error, printJobId) = await _threadService.EnqueueLabelAsync("SPLIT", splitId, 1, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(printJobId);
+    }
+
+    // Status cetak diambil dari print_jobs, sama seperti label bundle.
+    [HttpGet("labels/{kind}/{refId:int}/status")]
+    public async Task<IActionResult> StatusLabel(string kind, int refId, [FromQuery] int top = 5)
+    {
+        if (kind is not ("SKU" or "SPLIT")) return BadRequest("Jenis label harus SKU atau SPLIT.");
+        return Ok(await _threadService.GetLabelStatusAsync(kind, refId, top));
+    }
+
     // ==================== MOVEMENT (Prompt 72) ====================
     // Semua validasi (saldo tidak minus, project/keterangan wajib, berat tidak naik)
     // ada di inv.SIS_ThreadMovement_Manage -- di sini hanya pemetaan HTTP.

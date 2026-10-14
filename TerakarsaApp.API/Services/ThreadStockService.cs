@@ -351,6 +351,30 @@ public class ThreadStockService
         return (_fileStorage.OpenRead(relativePath), contentType);
     }
 
+    // ==================== LABEL (Prompt 73) ====================
+
+    // Label TIDAK pernah dibuat otomatis setelah RETURN -- selalu lewat tombol,
+    // supaya admin gudang menempel label setelah yakin kones & beratnya benar.
+    public async Task<(bool Success, string Error, int PrintJobId)> EnqueueLabelAsync(
+        string kind, int refId, int copies, int userId)
+    {
+        return await ManageAsync(
+            "EXEC inv.SIS_ThreadLabel_Enqueue @Kind = @Kind, @RefId = @RefId, @Copies = @Copies, @UserId = @UserId",
+            true,
+            new SqlParameter("@Kind", kind),
+            new SqlParameter("@RefId", refId),
+            new SqlParameter("@Copies", copies),
+            new SqlParameter("@UserId", userId));
+    }
+
+    public Task<List<ThreadLabelJobDto>> GetLabelStatusAsync(string kind, int refId, int top) =>
+        _db.Database.SqlQueryRaw<ThreadLabelJobDto>(
+                "EXEC inv.SIS_ThreadLabel_Status @Kind = @Kind, @RefId = @RefId, @Top = @Top",
+                new SqlParameter("@Kind", kind),
+                new SqlParameter("@RefId", refId),
+                new SqlParameter("@Top", top))
+            .ToListAsync();
+
     // ==================== bantuan ====================
 
     // returnsId = true untuk Action CREATE: SP mengembalikan id baru di kolom Value.

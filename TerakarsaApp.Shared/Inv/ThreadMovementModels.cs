@@ -103,6 +103,34 @@ public class ThreadMovementDto
             : string.Empty;
 }
 
+// Prompt 73: satu baris print_jobs label benang (status cetak di UI).
+public class ThreadLabelJobDto
+{
+    public int PrintJobId { get; set; }
+    public string JobType { get; set; } = string.Empty;
+    public int RefId { get; set; }
+    public string Status { get; set; } = string.Empty;   // PENDING | PRINTING | DONE | ERROR
+    public string? ErrorMessage { get; set; }
+    public DateTime? PrintedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+
+    public string StatusLabel => Status switch
+    {
+        "PENDING" => "Menunggu printer",
+        "PRINTING" => "Sedang dicetak",
+        "DONE" => "Tercetak",
+        "ERROR" => "Gagal",
+        _ => Status
+    };
+
+    public string StatusColor => Status switch
+    {
+        "DONE" => "var(--bn-teal)",
+        "ERROR" => "var(--bn-red)",
+        _ => "var(--bn-amber)"
+    };
+}
+
 public class ThreadResourceLookupDto
 {
     public int ResourceId { get; set; }

@@ -168,6 +168,27 @@ public class ThreadStockApiService
         return $"{_http.BaseAddress}api/gudang/benang/photo/{fileName}";
     }
 
+    // ==================== LABEL 30x20 mm (Prompt 73) ====================
+
+    public async Task<(bool Success, string Error, int PrintJobId)> CetakLabelSkuAsync(int itemId, int copies)
+    {
+        var response = await _http.PostAsync($"api/gudang/benang/labels/sku/{itemId}?copies={copies}", null);
+        return await ReadIdResultAsync(response);
+    }
+
+    public async Task<(bool Success, string Error, int PrintJobId)> CetakLabelSplitAsync(int splitId)
+    {
+        var response = await _http.PostAsync($"api/gudang/benang/labels/split/{splitId}", null);
+        return await ReadIdResultAsync(response);
+    }
+
+    public async Task<List<ThreadLabelJobDto>> GetLabelStatusAsync(string kind, int refId, int top = 5)
+    {
+        var response = await _http.GetAsync($"api/gudang/benang/labels/{kind}/{refId}/status?top={top}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ThreadLabelJobDto>>() ?? new();
+    }
+
     // ==================== MOVEMENT (Prompt 72) ====================
 
     public Task<(bool Success, string Error, ThreadMovementResultDto? Hasil)> ReceiveAsync(ThreadReceiveRequest request)

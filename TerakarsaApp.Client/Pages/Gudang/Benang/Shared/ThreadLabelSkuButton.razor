@@ -1,0 +1,118 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@inject ThreadStockApiService ThreadApi
+
+@* Prompt 73: tombol "Cetak label SKU" + modal jumlah copy (default 1).
+   Komponen BERSAMA -- dipakai halaman detail SKU (HP) dan panel kanan tablet,
+   supaya teks & aturan copy-nya tidak bercabang.
+
+   Jumlah copy dibawa di payload print job (satu baris print_jobs, PRINT 1,<copies>),
+   bukan satu job per copy seperti label bundle. *@
+
+<button type="button" class="bn-btn @CssClass" @onclick="@(() => buka = true)">
+    @Label
+</button>
+
+@if (buka)
+{
+    <div class="modal d-block" style="background-color:rgba(0,0,0,.5)" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content benang">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cetak label SKU</h5>
+                    <button type="button" class="btn-close" aria-label="Tutup"
+                            @onclick="Tutup" disabled="@isSaving"></button>
+                </div>
+                <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+                    <ThreadLabelPreview QrContent="@($"TB:{Item.SkuCode}")"
+                                        ColorCode="@Item.ColorCode"
+                                        ColorName="@Item.ColorName"
+                                        Brand="@Item.BrandName"
+                                        ThreadType="@Item.TypeName"
+                                        ConeSize="@Item.ConeSize" />
+
+                    <div class="bn-field">
+                        <label class="bn-label" for="bn-copies">Jumlah label</label>
+                        <div class="bn-step">
+                            <button type="button" aria-label="Kurangi" @onclick="@(() => UbahCopies(-1))">−</button>
+                            <input id="bn-copies" type="number" min="1" max="50" @bind="copies" @bind:event="oninput" />
+                            <button type="button" aria-label="Tambah" @onclick="@(() => UbahCopies(1))">+</button>
+                        </div>
+                        <div class="bn-note">Maksimal 50 label per permintaan cetak.</div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(error))
+                    {
+                        <div class="alert alert-danger" style="margin:0">@error</div>
+                    }
+
+                    @if (statusJobs.Count > 0)
+                    {
+                        <div style="display:flex;flex-direction:column;gap:6px">
+                            <div class="bn-sub">Permintaan cetak terakhir</div>
+                            <div class="bn-rows">
+                                @foreach (var j in statusJobs)
+                                {
+                                    <div class="bn-row">
+                                        <span class="bn-k">#@j.PrintJobId · @j.CreatedAt.ToString("dd MMM HH:mm")</span>
+                                        <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" @onclick="Tutup" disabled="@isSaving">Tutup</button>
+                    <button type="button" class="btn btn-primary" @onclick="Cetak"
+                            disabled="@(isSaving || copies < 1 || copies > 50)">
+                        @(isSaving ? "Mengirim..." : "Cetak")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ThreadItemDto Item { get; set; } = default!;
+    [Parameter] public string Label { get; set; } = "Cetak label SKU";
+    [Parameter] public string CssClass { get; set; } = string.Empty;
+
+    private bool buka;
+    private int copies = 1;
+    private bool isSaving;
+    private string? error;
+    private List<ThreadLabelJobDto> statusJobs = new();
+
+    private void UbahCopies(int delta)
+    {
+        var baru = copies + delta;
+        copies = baru < 1 ? 1 : baru > 50 ? 50 : baru;
+    }
+
+    private void Tutup()
+    {
+        buka = false;
+        error = null;
+        statusJobs = new();
+    }
+
+    private async Task Cetak()
+    {
+        isSaving = true;
+        error = null;
+
+        var (success, err, _) = await ThreadApi.CetakLabelSkuAsync(Item.ThreadItemId, copies);
+
+        isSaving = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        statusJobs = await ThreadApi.GetLabelStatusAsync("SKU", Item.ThreadItemId, 3);
+    }
+}

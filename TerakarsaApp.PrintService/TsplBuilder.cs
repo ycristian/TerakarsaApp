@@ -43,6 +43,105 @@ public static class TsplBuilder
             ?? throw new InvalidDataException("Payload REJECT_NOTE kosong atau tidak valid.");
     }
 
+    public static ThreadLabelPayload ParseThreadLabelPayload(string payloadJson)
+    {
+        return JsonSerializer.Deserialize<ThreadLabelPayload>(payloadJson)
+            ?? throw new InvalidDataException("Payload label benang kosong atau tidak valid.");
+    }
+
+    // Prompt 73: label benang 30 x 20 mm (kanvas 240 x 160 dot @ 8 dot/mm) untuk
+    // paper tube bawah kones. Dipakai dua job type:
+    //   THREAD_SKU_LABEL   -> QR `TB:<sku_code>`, baris 4 = KECIL/BESAR
+    //   THREAD_SPLIT_LABEL -> QR `TS:<cone_code>`, baris 4 = cone_code, baris 5 = berat
+    //
+    // PENYIMPANGAN SENGAJA dari teks prompt: prompt menyebut command QRCODE bawaan
+    // printer, tapi label lain di file ini sudah meninggalkan command itu karena
+    // firmware TSC TTP-244 Pro di lapangan salah merendernya (lihat komentar panjang
+    // di BuildBundleLabel). QR di sini dirender sendiri lewat QRCoder jadi BITMAP,
+    // sama seperti BUNDLE_LABEL/PACK_LABEL -- label benang WAJIB bisa discan karena
+    // seluruh alur ambil/kembali bergantung padanya.
+    //
+    // BuildBundleLabel / BuildPackLabel / BuildRejectNote TIDAK disentuh.
+    public static byte[] BuildThreadLabel(ThreadLabelPayload data)
+    {
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        Write("SIZE 30 mm, 20 mm\r\n");
+        Write("GAP 2 mm, 0\r\n");
+        Write("DIRECTION 1\r\n");
+        Write("CLS\r\n");
+
+        const int qrX = 8;
+        const int qrY = 26;
+        const int qrMaxHeightDots = 112;        // 14 mm, batas dari prompt
+        const int qrQuietModules = 1;
+
+        var qrGenerator = new QRCodeGenerator();
+        var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.Qr), QRCodeGenerator.ECCLevel.M);
+        var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
+
+        // Cell 4 untuk isi pendek; turun ke 3 kalau QR-nya jadi lebih tinggi dari 14 mm
+        // (sku_code panjang / bersuffix -2 menaikkan versi QR).
+        var moduleCount = modules.GetLength(0);
+        var qrCell = moduleCount * 4 <= qrMaxHeightDots ? 4 : 3;
+
+        var qrBitmap = BuildQrBitmap(modules, qrCell, out var qrWidthDots, out var qrHeightDots, out var qrWidthBytes);
+
+        Write($"BITMAP {qrX},{qrY},{qrWidthBytes},{qrHeightDots},0,");
+        stream.Write(qrBitmap, 0, qrBitmap.Length);
+        Write("\r\n");
+
+        // Kolom teks mulai tepat setelah QR. Prompt menyebut x = 125, tapi QR isi
+        // `TB:...`/`TS:...` ternyata hanya 92 dot (23 modul x cell 4) sehingga x = 108
+        // memberi satu karakter font "2" lebih banyak untuk nama warna -- 30 mm sempit.
+        var textX = qrX + qrWidthDots + 8;
+        const int rightEdge = 234;
+        var textWidth = rightEdge - textX;
+
+        // Baris 1: kode warna, elemen terbesar -- yang dicari mata saat memilih kones.
+        var colorCode = TruncateToFit(Sanitize(data.ColorCode).ToUpperInvariant(), 12, "3", 1, textWidth);
+        Write(Text(textX, 14, "3", 1, 1, colorCode));
+
+        // Baris 2: nama warna. Turun ke font "1" kalau tidak muat di font "2" --
+        // lebih baik kecil tapi lengkap daripada "MERAH ..." (nama warna dipakai
+        // admin gudang untuk mencocokkan kones di rak).
+        var colorNameRaw = Sanitize(data.ColorName).ToUpperInvariant();
+        var colorNameFont = colorNameRaw.Length * CharWidth("2", 1) <= textWidth ? "2" : "1";
+        var colorName = TruncateToFit(colorNameRaw, 24, colorNameFont, 1, textWidth);
+        Write(Text(textX, 44, colorNameFont, 1, 1, colorName));
+
+        // Baris 3: merk + jenis benang (font kecil supaya muat di 30 mm).
+        var brandType = TruncateToFit(Join(" ", data.Brand, data.ThreadType).ToUpperInvariant(), 24, "1", 1, textWidth);
+        Write(Text(textX, 70, "1", 1, 1, brandType));
+
+        if (data.IsSplit)
+        {
+            // Baris 4: kode kones split (yang dipakai scan ulang).
+            var coneCode = TruncateToFit(Sanitize(data.ConeCode).ToUpperInvariant(), 20, "1", 1, textWidth);
+            Write(Text(textX, 88, "1", 1, 1, coneCode));
+
+            // Baris 5: berat netto, tebal (double-strike -- TSPL tidak punya bold).
+            var weightText = $"{data.WeightGram ?? 0} g";
+            Write(Text(textX, 106, "2", 1, 1, weightText));
+            Write(Text(textX + 1, 106, "2", 1, 1, weightText));
+        }
+        else
+        {
+            // Baris 4 label SKU: jenis kones, supaya kones kecil & besar tidak tertukar.
+            var coneSize = Sanitize(data.ConeSize).ToUpperInvariant();
+            Write(Text(textX, 88, "1", 1, 1, TruncateToFit(coneSize, 10, "1", 1, textWidth)));
+        }
+
+        var copies = data.Copies < 1 ? 1 : data.Copies > 50 ? 50 : data.Copies;
+        Write($"PRINT 1,{copies}\r\n");
+        return stream.ToArray();
+    }
+
     public static byte[] BuildBundleLabel(BundleLabelPayload data)
     {
         using var stream = new MemoryStream();

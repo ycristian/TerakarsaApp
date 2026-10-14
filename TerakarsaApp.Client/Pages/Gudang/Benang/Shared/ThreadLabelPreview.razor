@@ -1,0 +1,69 @@
+@using TerakarsaApp.Shared.Inv
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Prompt 73: preview label 30x20 mm di layar, mengikuti mockup Kembali.dc.html
+   (kotak 240x160 px: QR di kiri, teks di kanan -- urutannya sama dengan yang
+   dirakit TsplBuilder.BuildThreadLabel).
+
+   QR di sini HANYA preview (qrcodejs lewat window.benangQr); yang dicetak dirender
+   ulang di PrintService lewat QRCoder, jadi preview ini tidak dipakai printer. *@
+
+<div style="display:flex;flex-direction:column;gap:8px">
+    <div class="bn-sub">Label yang akan dicetak · 30×20 mm</div>
+    <div style="display:flex;justify-content:center;background:var(--bn-card);
+                border:1px solid var(--bn-line);border-radius:12px;padding:20px">
+        <div style="width:240px;height:160px;border:1px solid var(--bn-ink);background:#fff;
+                    display:flex;gap:10px;padding:10px;box-sizing:border-box;align-items:center">
+            <div id="@qrElementId" style="width:110px;height:110px;flex-shrink:0"></div>
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.3;
+                        color:#1b1f24;min-width:0">
+                <div style="font-weight:700;font-size:16px">@ColorCode</div>
+                <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@ColorName</div>
+                <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@BrandType</div>
+                @if (!string.IsNullOrWhiteSpace(ConeCode))
+                {
+                    <div style="font-family:ui-monospace,monospace;font-size:11px">@ConeCode</div>
+                    <div style="font-weight:700">@WeightGram g</div>
+                }
+                else
+                {
+                    <div style="font-size:11px">@ConeSizeLabel</div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Isi QR: TB:<sku_code> atau TS:<cone_code>.
+    [Parameter, EditorRequired] public string QrContent { get; set; } = string.Empty;
+
+    [Parameter] public string? ColorCode { get; set; }
+    [Parameter] public string? ColorName { get; set; }
+    [Parameter] public string? Brand { get; set; }
+    [Parameter] public string? ThreadType { get; set; }
+    [Parameter] public string? ConeSize { get; set; }      // KECIL | BESAR (label SKU)
+    [Parameter] public string? ConeCode { get; set; }      // label split saja
+    [Parameter] public int? WeightGram { get; set; }       // label split saja
+
+    private readonly string qrElementId = $"bn-qr-{Guid.NewGuid():N}";
+    private string? qrTerakhir;
+
+    private string BrandType => string.Join(" · ",
+        new[] { Brand, ThreadType }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+    private string ConeSizeLabel => ConeSize == "KECIL" ? "Kones Kecil" : "Kones Besar";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Render ulang hanya kalau isi QR-nya berubah (mis. kones berikutnya).
+        if (qrTerakhir == QrContent) return;
+        qrTerakhir = QrContent;
+
+        try { await JS.InvokeVoidAsync("benangQr.render", qrElementId, QrContent, 110); }
+        catch (JSException) { }
+    }
+
+    public void Dispose() { }
+}
