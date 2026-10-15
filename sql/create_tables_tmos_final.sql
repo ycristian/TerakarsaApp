@@ -30,6 +30,7 @@
 -- Catatan schema lain (file ini HANYA canonical untuk schema dbo):
 --   schema `tni` (module PDH TNI AD, Prompt 60-69)  -> sql/tni/create_schema_tni.sql
 --   schema `inv` (module Stok Benang, Prompt 71-77) -> sql/inv/create_71_inv_thread.sql
+--     + sql/inv/create_74_inv_thread_opname.sql (tabel stock opname)
 -- Keduanya hanya MEMBACA tabel dbo (projects, resources, users) dan menyentuh dbo
 -- sebatas seed Modules/UserModules + kolom Users.home_route di atas.
 
@@ -584,6 +585,13 @@ CREATE TABLE print_devices(
  chars_per_line int not null default 48,    -- lebar font A
  chars_per_line_small int not null default 64, -- lebar font B
  is_active bit not null default 1,
+ -- Prompt 77 (sql/inv/alter_77_print_devices_mobile.sql): pencetak bisa berupa HP
+ -- Android (printer Bluetooth) selain PC Windows.
+ transport varchar(20) not null default 'WINDOWS'   -- WINDOWS | ANDROID_BT
+   constraint CK_print_devices_transport check (transport in ('WINDOWS','ANDROID_BT')),
+ device_token varchar(64) null,             -- ANDROID_BT saja; header X-Print-Device-Token
+ last_seen_at datetime2 null,               -- terakhir HP mengklaim/melapor job
+ last_seen_info varchar(200) null,          -- nama printer BT + versi app
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
