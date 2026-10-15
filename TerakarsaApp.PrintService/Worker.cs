@@ -57,6 +57,8 @@ public class Worker : BackgroundService
     private static readonly string[] LabelJobTypes =
     {
         "BUNDLE_LABEL", "PACK_LABEL", "REJECT_NOTE",
+        // Prompt 79: stiker bundle cutting (TsplBuilder.BuildCuttingBundleLabel).
+        "CUTTING_BUNDLE_LABEL",
         "THREAD_SKU_LABEL", "THREAD_SPLIT_LABEL"
     };
 
@@ -182,6 +184,13 @@ public class Worker : BackgroundService
                 var rejectPayload = TsplBuilder.ParseRejectNotePayload(job.Payload);
                 serial = rejectPayload.BundleSerial ?? $"WL#{rejectPayload.WorkflowLogId}";
                 tspl = TsplBuilder.BuildRejectNote(rejectPayload);
+            }
+            // Prompt 79: stiker bundle hasil cutting (hamparan) -- varian baru, bukan BUNDLE_LABEL.
+            else if (job.JobType == "CUTTING_BUNDLE_LABEL")
+            {
+                var cuttingPayload = TsplBuilder.ParseCuttingBundleLabelPayload(job.Payload);
+                serial = cuttingPayload.CuttingCode;
+                tspl = TsplBuilder.BuildCuttingBundleLabel(cuttingPayload);
             }
             // Prompt 73: label benang 30x20 mm -- satu payload untuk label SKU & split.
             else if (job.JobType is "THREAD_SKU_LABEL" or "THREAD_SPLIT_LABEL")

@@ -2,12 +2,129 @@
 @attribute [Authorize]
 @layout TerakarsaApp.Client.Layout.CuttingLayout
 @using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Shared.Cutting
+@inject CuttingApiService CuttingApi
 
-@* Prompt 78: route placeholder -- halaman penuh dibuat di Prompt 79. *@
+@* Prompt 79 §2 -- daftar hamparan. Filter artikel + status, lalu baris per hamparan:
+   kode, PO · artikel, tanggal, set × lembar, bundle, STOCK/TAKEN, status DRAFT/PRINTED. *@
 
 <PageTitle>Hamparan</PageTitle>
 
 <div class="ct-body">
-    <div class="ct-pagehead"><h1>Hamparan</h1></div>
-    <div class="ct-panel"><div class="ct-empty">Daftar hamparan dibuat di Prompt 79.</div></div>
+    <div class="ct-pagehead">
+        <h1>Hamparan</h1>
+        <span class="ct-sub">@daftar.Count hamparan</span>
+        <a href="/cutting/hamparan/baru" class="ct-btn ct-btn-pri ct-btn-lg ct-spacer">+ Buat Hamparan</a>
+    </div>
+
+    <div class="ct-panel ct-panel-pad">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div class="ct-field" style="min-width:260px;flex:1">
+                <label>Artikel / PO</label>
+                <SearchableSelect TItem="CuttingArticleDto" Items="artikel" Value="articleId"
+                                  ValueChanged="ArtikelDiganti" AllowNone="true" NoneLabel="- Semua artikel -"
+                                  IdSelector="@(a => a.ArticleId)" TextSelector="@(a => a.Label)"
+                                  Placeholder="Cari PO / artikel..." />
+            </div>
+            <div class="ct-filters">
+                <button type="button" class="ct-fchip @(status is null ? "is-on" : "")"
+                        @onclick="() => StatusDiganti(null)">Semua</button>
+                <button type="button" class="ct-fchip @(status == "DRAFT" ? "is-on" : "")"
+                        @onclick="@(() => StatusDiganti("DRAFT"))">Draft</button>
+                <button type="button" class="ct-fchip @(status == "PRINTED" ? "is-on" : "")"
+                        @onclick="@(() => StatusDiganti("PRINTED"))">Sudah dicetak</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="ct-panel">
+        @if (sedangMuat)
+        {
+            <div class="ct-empty">Memuat hamparan…</div>
+        }
+        else if (daftar.Count == 0)
+        {
+            <div class="ct-empty">
+                Belum ada hamparan untuk filter ini.
+                <a href="/cutting/hamparan/baru" class="ct-link">Buat Hamparan</a>.
+            </div>
+        }
+        else
+        {
+            <div class="ct-row ct-row-h ct-g-spread">
+                <div>Kode</div><div>PO · Artikel</div><div>Tanggal</div>
+                <div>Hampar</div><div>Bundle</div><div>Status</div>
+            </div>
+
+            @foreach (var h in daftar)
+            {
+                <div class="ct-row ct-g-spread">
+                    <div class="ct-k" data-l="Kode">
+                        <a href="/cutting/hamparan/@h.SpreadId" class="ct-link">@h.SpreadCode</a>
+                    </div>
+                    <div data-l="Artikel">@Judul(h.NoPo, h.ArticleName)</div>
+                    <div data-l="Tanggal" class="ct-meta">@h.SpreadDate.ToString("dd MMM yyyy")</div>
+                    <div data-l="Hampar" class="ct-meta">@h.SetCount set × @h.SheetsPerSet</div>
+                    <div data-l="Bundle">
+                        @h.TotalBundles bundle
+                        <span class="ct-meta">
+                            · <span class="ct-ok">@h.StockBundles stok</span> · @h.TakenBundles diambil
+                        </span>
+                    </div>
+                    <div data-l="Status">
+                        @if (h.Status == "PRINTED")
+                        {
+                            <span class="ct-chip ct-chip-printed">Sudah dicetak</span>
+                        }
+                        else
+                        {
+                            <span class="ct-chip ct-chip-draft">Draft</span>
+                        }
+                        @if (h.NeedsReprintBundles > 0)
+                        {
+                            <span class="ct-chip ct-chip-reprint">@h.NeedsReprintBundles perlu cetak ulang</span>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </div>
 </div>
+
+@code {
+    private List<CuttingArticleDto> artikel = new();
+    private List<SpreadListItemDto> daftar = new();
+    private int articleId;
+    private string? status;
+    private bool sedangMuat = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        artikel = await CuttingApi.GetArticlesAsync();
+        await MuatAsync();
+    }
+
+    private async Task MuatAsync()
+    {
+        sedangMuat = true;
+        daftar = await CuttingApi.GetSpreadsAsync(articleId > 0 ? articleId : null, status);
+        sedangMuat = false;
+    }
+
+    private async Task ArtikelDiganti(int id)
+    {
+        articleId = id;
+        await MuatAsync();
+    }
+
+    private async Task StatusDiganti(string? nilai)
+    {
+        status = nilai;
+        await MuatAsync();
+    }
+
+    private static string Judul(string? noPo, string articleName)
+        => string.IsNullOrWhiteSpace(noPo) ? articleName : $"{noPo} · {articleName}";
+}

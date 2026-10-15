@@ -233,6 +233,97 @@ public static class TsplBuilder
         return stream.ToArray();
     }
 
+    public static CuttingBundleLabelPayload ParseCuttingBundleLabelPayload(string payloadJson)
+    {
+        return JsonSerializer.Deserialize<CuttingBundleLabelPayload>(payloadJson)
+            ?? throw new InvalidDataException("Payload CUTTING_BUNDLE_LABEL kosong atau tidak valid.");
+    }
+
+    // Prompt 79: stiker bundle CUTTING (job_type CUTTING_BUNDLE_LABEL), mockup
+    // claude prompt/mockup/Stiker.dc.html. Kanvas & printer SAMA dengan BUNDLE_LABEL
+    // (60 x 40 mm, 480 x 320 dot @ 8 dot/mm) -- ini VARIAN BARU, BuildBundleLabel
+    // (stiker penyerahan bundle) tidak disentuh sama sekali.
+    //
+    // Kiri: kode bundle besar (H06-M-03), PO + artikel, Size/Qty/Set, rentang nomor pcs,
+    // baris kaki "Hamparan H06 . <tanggal> . Cutting". Kanan: QR + serial kecil.
+    //
+    // PENYIMPANGAN SENGAJA dari mockup: teks kecil di bawah QR adalah SERIAL
+    // (B26-005692), bukan kode bundle -- yang discan/diketik ulang operator saat QR
+    // tidak terbaca harus sama dengan isi QR itu sendiri ({PublicBaseUrl}/b/<serial>),
+    // sedangkan kode bundle sengaja tidak unik lintas artikel. Kode bundle sudah jadi
+    // elemen terbesar di kolom kiri, jadi tidak ada informasi yang hilang.
+    public static byte[] BuildCuttingBundleLabel(CuttingBundleLabelPayload data)
+    {
+        using var stream = new MemoryStream();
+        void Write(string s)
+        {
+            var bytes = Encoding.ASCII.GetBytes(s);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        Write("SIZE 60 mm, 40 mm\r\n");
+        Write("GAP 3 mm, 0\r\n");
+        Write("DIRECTION 1\r\n");
+        Write("CLS\r\n");
+
+        // QR dirender sendiri jadi BITMAP lewat QRCoder, alasannya persis sama dengan
+        // BuildBundleLabel -- lihat komentar panjang di sana (firmware TSC TTP-244 Pro
+        // salah merender command QRCODE bawaan, dan margin harus masuk ke bitmap).
+        const int qrX = 312, qrY = 40, qrCell = 5, qrQuietModules = 1;
+        var qrGenerator = new QRCodeGenerator();
+        var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.QrContent), QRCodeGenerator.ECCLevel.M);
+        var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
+        var qrBitmap = BuildQrBitmap(modules, qrCell, out var qrWidthDots, out var qrHeightDots, out var qrWidthBytes);
+
+        Write($"BITMAP {qrX},{qrY},{qrWidthBytes},{qrHeightDots},0,");
+        stream.Write(qrBitmap, 0, qrBitmap.Length);
+        Write("\r\n");
+
+        var serial = Sanitize(data.Serial);
+        var qrCenterX = qrX + qrWidthDots / 2;
+        Write(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrHeightDots + 6, "1", 1, 1, serial));
+
+        // ---- kolom kiri ----
+        const int leftX = 12;
+        const int leftWidth = 290;   // sampai sebelum kolom QR
+
+        // Kode bundle = elemen terbesar di label (font 5 = 32 x 48 dot/karakter).
+        var code = TruncateToFit(Sanitize(data.CuttingCode).ToUpperInvariant(), 20, "5", 1, leftWidth);
+        Write(Text(leftX, 18, "5", 1, 1, code));
+
+        // PO . artikel, dipecah maks 2 baris di batas spasi.
+        var judul = Join(" . ", data.NoPo, data.ArticleName).ToUpperInvariant();
+        var (judul1, judul2) = WrapTwoLines(judul, leftWidth / CharWidth("1", 1));
+        Write(Text(leftX, 78, "1", 1, 1, judul1));
+        if (judul2.Length > 0) Write(Text(leftX, 94, "1", 1, 1, judul2));
+
+        Write($"BAR {leftX},114,{leftWidth},3\r\n");
+
+        // Size / Qty / Set -- label kecil di atas, angkanya besar (font 4 = 24 x 32).
+        Write(Text(leftX, 122, "1", 1, 1, "SIZE"));
+        Write(Text(leftX, 138, "4", 1, 1, TruncateToFit(Sanitize(data.SizeName).ToUpperInvariant(), 4, "4", 1, 100)));
+
+        Write(Text(leftX + 110, 122, "1", 1, 1, "QTY"));
+        Write(Text(leftX + 110, 138, "4", 1, 1, data.Qty.ToString()));
+
+        Write(Text(leftX + 215, 122, "1", 1, 1, "SET"));
+        Write(Text(leftX + 215, 138, "4", 1, 1, data.SetNo.ToString()));
+
+        Write($"BAR {leftX},180,{leftWidth},3\r\n");
+
+        // Rentang nomor pcs -- diisi manual dengan mesin numbering sesuai ini.
+        Write(Text(leftX, 188, "1", 1, 1, "NOMOR"));
+        var nomor = $"{Sanitize(data.NumberFromText)} s/d {Sanitize(data.NumberToText)}".ToUpperInvariant();
+        Write(Text(leftX, 204, "2", 1, 1, TruncateToFit(nomor, 30, "2", 1, leftWidth)));
+
+        // Baris kaki: asal bundle ini.
+        var kaki = $"HAMPARAN {Sanitize(data.SpreadCode).ToUpperInvariant()} . {data.SpreadDate:dd MMM yyyy} . CUTTING";
+        Write(Text(leftX, 292, "1", 1, 1, TruncateToFit(kaki, 60, "1", 1, 460)));
+
+        Write("PRINT 1,1\r\n");
+        return stream.ToArray();
+    }
+
     // Label karung (pack) 6 x 4 cm, kanvas sama dengan BUNDLE_LABEL. Kiri: QR + serial.
     // Kanan: project_name, "KARUNG NO." + nomor besar (elemen terbesar di label), total
     // qty/jumlah artikel, tanggal cetak + badge PLAN/AKTUAL.

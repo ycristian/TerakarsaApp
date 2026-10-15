@@ -176,6 +176,10 @@ public class PrintForegroundService : Service
             TsplBuilder.BuildPackLabel(TsplBuilder.ParsePackLabelPayload(job.Payload)),
         "REJECT_NOTE" =>
             TsplBuilder.BuildRejectNote(TsplBuilder.ParseRejectNotePayload(job.Payload)),
+        // Prompt 79: stiker bundle cutting -- Admin Cutting pakai tablet, jadi label-nya
+        // bisa keluar dari printer Bluetooth yang terpasang di app HP/tablet ini juga.
+        "CUTTING_BUNDLE_LABEL" =>
+            TsplBuilder.BuildCuttingBundleLabel(TsplBuilder.ParseCuttingBundleLabelPayload(job.Payload)),
         _ => throw new NotSupportedException($"job_type {job.JobType} tidak didukung app HP.")
     };
 

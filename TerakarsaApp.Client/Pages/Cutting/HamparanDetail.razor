@@ -2,16 +2,493 @@
 @attribute [Authorize]
 @layout TerakarsaApp.Client.Layout.CuttingLayout
 @using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Pages.Cutting.Shared
+@using TerakarsaApp.Shared.Cutting
+@inject CuttingApiService CuttingApi
+@inject NavigationManager Nav
 
-@* Prompt 78: route placeholder -- detail penuh dibuat di Prompt 79. *@
+@* Prompt 79 §2 -- Detail Hamparan. Mockup: claude prompt/mockup/DetailHamparan.dc.html (layar 3).
 
-<PageTitle>Detail Hamparan</PageTitle>
+   Bundle yang sudah diambil Bundling (stock_status = TAKEN) tidak bisa diedit/dihapus dari
+   sini: tombol Edit-nya mati dan SP (SIS_SpreadBundle_Manage) menolaknya juga. Edit qty
+   selalu dikerjakan PER SET -- total qty satu set harus tetap = lembar per set, jadi modal
+   di bawah menampilkan SELURUH bundle di set itu, bukan satu bundle lepas. *@
+
+<PageTitle>@(detail?.Header.SpreadCode ?? "Hamparan")</PageTitle>
 
 <div class="ct-body">
-    <div class="ct-pagehead"><h1>Hamparan #@Id</h1></div>
-    <div class="ct-panel"><div class="ct-empty">Detail hamparan dibuat di Prompt 79.</div></div>
+    @if (sedangMuat)
+    {
+        <div class="ct-panel"><div class="ct-empty">Memuat hamparan…</div></div>
+    }
+    else if (detail is null)
+    {
+        <div class="ct-panel"><div class="ct-empty">Hamparan tidak ditemukan.</div></div>
+    }
+    else
+    {
+        var h = detail.Header;
+
+        <div class="ct-pagehead">
+            <CuttingBackButton />
+            <h1>@h.SpreadCode · @Judul(h.NoPo, h.ArticleName)</h1>
+            @if (h.Status == "PRINTED")
+            {
+                <span class="ct-chip ct-chip-printed">Sudah dicetak</span>
+            }
+            else
+            {
+                <span class="ct-chip ct-chip-draft">Draft</span>
+            }
+
+            <div class="ct-spacer ct-acts">
+                <button type="button" class="ct-btn" disabled="@sedangProses" @onclick="CetakSemuaAsync">
+                    @(h.Status == "PRINTED" ? "Cetak ulang semua" : "Cetak semua")
+                </button>
+                <button type="button" class="ct-btn ct-btn-danger"
+                        disabled="@(sedangProses || h.TakenBundles > 0)"
+                        title="@(h.TakenBundles > 0 ? "Ada bundle yang sudah diambil Bundling" : "Hapus hamparan")"
+                        @onclick="() => konfirmasiHapus = true">
+                    Hapus hamparan
+                </button>
+            </div>
+        </div>
+
+        @if (pesanError.Length > 0)
+        {
+            <div class="ct-msg ct-msg-err">@pesanError</div>
+        }
+        @if (pesanSukses.Length > 0)
+        {
+            <div class="ct-msg ct-msg-ok">@pesanSukses</div>
+        }
+
+        <div class="ct-cards ct-cards-5">
+            <div class="ct-card">
+                <div class="ct-card-l">Hampar</div>
+                <div class="ct-card-v sm">@h.SetCount set × @h.SheetsPerSet</div>
+            </div>
+            <div class="ct-card">
+                <div class="ct-card-l">Total</div>
+                <div class="ct-card-v sm">@h.TotalBundles bundle · @Angka(h.TotalPcs) pcs</div>
+            </div>
+            <div class="ct-card">
+                <div class="ct-card-l">Di stok cutting</div>
+                <div class="ct-card-v sm teal">@h.StockBundles bundle</div>
+            </div>
+            <div class="ct-card">
+                <div class="ct-card-l">Diambil Bundling</div>
+                <div class="ct-card-v sm">@h.TakenBundles bundle</div>
+            </div>
+            <div class="ct-card">
+                <div class="ct-card-l">Dibuat</div>
+                <div class="ct-card-v sm">@h.CreatedAt.ToString("dd MMM") · @(h.CreatedByName ?? "–")</div>
+            </div>
+        </div>
+
+        @* ---------- filter chip ---------- *@
+        <div class="ct-filters">
+            <button type="button" class="ct-fchip @(filterSizeId is null && !hanyaStok ? "is-on" : "")"
+                    @onclick="() => { filterSizeId = null; hanyaStok = false; }">Semua</button>
+            @foreach (var s in detail.Sizes)
+            {
+                var sizeId = s.SpreadSizeId;
+                <button type="button" class="ct-fchip @(filterSizeId == sizeId ? "is-on" : "")"
+                        @onclick="() => { filterSizeId = sizeId; hanyaStok = false; }">Size @s.SizeName</button>
+            }
+            <button type="button" class="ct-fchip @(hanyaStok ? "is-on" : "")"
+                    @onclick="() => { hanyaStok = true; filterSizeId = null; }">Masih di stok</button>
+        </div>
+
+        @* ---------- tabel bundle ---------- *@
+        <div class="ct-panel">
+            <div class="ct-row ct-row-h ct-g-bundle">
+                <div>Kode bundle</div><div>Set</div><div>Nomor</div><div>Qty</div><div>Status</div><div></div>
+            </div>
+
+            @if (BundleTampil.Count == 0)
+            {
+                <div class="ct-empty">Tidak ada bundle untuk filter ini.</div>
+            }
+            else
+            {
+                @foreach (var b in BundleTampil)
+                {
+                    <div class="ct-row ct-g-bundle">
+                        <div class="ct-k" data-l="Kode">@b.CuttingCode</div>
+                        <div data-l="Set">@b.SetNo</div>
+                        <div data-l="Nomor" class="ct-meta">@b.NumberRange</div>
+                        <div data-l="Qty">@b.Qty</div>
+                        <div data-l="Status">
+                            @if (b.IsTaken)
+                            {
+                                <span class="ct-chip ct-chip-taken">Diambil</span>
+                                <span class="ct-meta">
+                                    @(b.TakenByResourceName ?? "–")@(b.TakenAt is null ? "" : " · " + b.TakenAt.Value.ToString("dd MMM HH:mm"))
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="ct-chip ct-chip-stock">Stok cutting</span>
+                            }
+                            @if (b.NeedsReprint)
+                            {
+                                <span class="ct-chip ct-chip-reprint">perlu cetak ulang</span>
+                            }
+                        </div>
+                        <div class="ct-acts">
+                            <button type="button" class="ct-btn ct-btn-sm"
+                                    disabled="@(b.IsTaken || sedangProses)"
+                                    title="@(b.IsTaken ? "Bundle sudah diambil Bundling" : "Edit qty set ini")"
+                                    @onclick="() => BukaEdit(b)">Edit</button>
+                            <button type="button" class="ct-btn ct-btn-sm" disabled="@sedangProses"
+                                    @onclick="() => CetakSatuAsync(b)">Cetak</button>
+                        </div>
+                    </div>
+                }
+            }
+
+            <div class="ct-panel-note">
+                <span>
+                    Bundle yang sudah diambil Bundling tidak bisa diedit atau dihapus oleh cutting.
+                    Edit qty mengubah rentang nomor bundle setelahnya di set yang sama.
+                </span>
+                <span>
+                    Menambah/menghapus bundle ikut menggeser kode bundle set sesudahnya di size yang
+                    sama, jadi hanya bisa selama set-set itu belum ada yang diambil.
+                </span>
+            </div>
+        </div>
+    }
 </div>
+
+@* ==================== modal edit set ==================== *@
+@if (editSet is not null && detail is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content cutting" style="border-radius:12px">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Edit set @editSet.SetNo · size @editSet.SizeName
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="TutupEdit"></button>
+                </div>
+                <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+                    <div class="ct-msg ct-msg-info">
+                        Total qty set ini harus tetap <strong>@detail.Header.SheetsPerSet</strong> (lembar per set).
+                    </div>
+
+                    @foreach (var item in editSet.Items)
+                    {
+                        var it = item;
+                        <div style="display:flex;align-items:center;gap:10px">
+                            <span class="ct-k" style="width:120px">@it.CuttingCode</span>
+                            <input type="number" min="1" class="ct-inp-qty" style="width:90px"
+                                   disabled="@it.IsTaken"
+                                   aria-label="Qty @it.CuttingCode"
+                                   value="@it.Qty" @onchange="e => EditQtyDiganti(it, e.Value)" />
+                            @if (it.IsTaken)
+                            {
+                                <span class="ct-chip ct-chip-taken">Diambil</span>
+                            }
+                            else if (it.IsNew)
+                            {
+                                <span class="ct-chip ct-chip-stock">Bundle baru</span>
+                            }
+                        </div>
+                    }
+
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span class="@(EditTotal == detail.Header.SheetsPerSet ? "ct-ok" : "ct-bad")">
+                            Total @EditTotal
+                            @(EditTotal == detail.Header.SheetsPerSet ? "✓" : $"≠ {detail.Header.SheetsPerSet}")
+                        </span>
+                        <span class="ct-spacer"></span>
+                        <button type="button" class="ct-btn ct-btn-sm" @onclick="TambahBundleEdit">+ Bundle</button>
+                        <button type="button" class="ct-btn ct-btn-sm"
+                                disabled="@(!BolehHapusBundleEdit)"
+                                title="@(BolehHapusBundleEdit ? "Hapus bundle terakhir di set ini" : "Bundle terakhir tidak bisa dihapus")"
+                                @onclick="HapusBundleEdit">− Bundle</button>
+                    </div>
+
+                    @if (pesanEdit.Length > 0)
+                    {
+                        <div class="ct-msg ct-msg-err">@pesanEdit</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="ct-btn" @onclick="TutupEdit">Batal</button>
+                    <button type="button" class="ct-btn ct-btn-pri"
+                            disabled="@(sedangProses || EditTotal != detail.Header.SheetsPerSet)"
+                            @onclick="SimpanEditAsync">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==================== konfirmasi hapus hamparan ==================== *@
+@if (konfirmasiHapus && detail is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content cutting" style="border-radius:12px">
+                <div class="modal-header">
+                    <h5 class="modal-title">Hapus hamparan @detail.Header.SpreadCode?</h5>
+                    <button type="button" class="btn-close" @onclick="() => konfirmasiHapus = false"></button>
+                </div>
+                <div class="modal-body">
+                    Seluruh @detail.Header.TotalBundles bundle hamparan ini ikut dihapus dari stok cutting.
+                    Tindakan ini tidak bisa dibatalkan dari halaman ini.
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="ct-btn" @onclick="() => konfirmasiHapus = false">Batal</button>
+                    <button type="button" class="ct-btn ct-btn-danger" disabled="@sedangProses"
+                            @onclick="HapusAsync">Hapus hamparan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
     [Parameter] public int Id { get; set; }
+
+    private SpreadDetailDto? detail;
+    private bool sedangMuat = true;
+    private bool sedangProses;
+    private string pesanError = string.Empty;
+    private string pesanSukses = string.Empty;
+
+    private int? filterSizeId;
+    private bool hanyaStok;
+    private bool konfirmasiHapus;
+
+    // ---------- modal edit ----------
+    private EditSetState? editSet;
+    private string pesanEdit = string.Empty;
+
+    private class EditItem
+    {
+        public int BundleId { get; set; }          // 0 = bundle baru (belum ada di DB)
+        public string CuttingCode { get; set; } = string.Empty;
+        public int Qty { get; set; }
+        public bool IsTaken { get; set; }
+        public bool IsNew => BundleId == 0;
+    }
+
+    private class EditSetState
+    {
+        public int SpreadSizeId { get; set; }
+        public int SetNo { get; set; }
+        public string SizeName { get; set; } = string.Empty;
+        public List<EditItem> Items { get; set; } = new();
+    }
+
+    private int EditTotal => editSet?.Items.Sum(i => i.Qty) ?? 0;
+
+    // Hanya bundle TERAKHIR di set yang bisa dihapus, dan harus masih STOCK.
+    private bool BolehHapusBundleEdit
+        => editSet is not null && editSet.Items.Count > 1 && !editSet.Items[^1].IsTaken;
+
+    private List<SpreadDetailBundleDto> BundleTampil
+    {
+        get
+        {
+            if (detail is null) return new();
+            var q = detail.Bundles.AsEnumerable();
+            if (filterSizeId is not null) q = q.Where(b => b.SpreadSizeId == filterSizeId);
+            if (hanyaStok) q = q.Where(b => !b.IsTaken);
+            return q.ToList();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync() => await MuatAsync();
+
+    private async Task MuatAsync()
+    {
+        sedangMuat = true;
+        detail = await CuttingApi.GetSpreadAsync(Id);
+        sedangMuat = false;
+    }
+
+    // ---------- cetak ----------
+
+    private async Task CetakSemuaAsync()
+    {
+        sedangProses = true;
+        Bersihkan();
+
+        var (success, error, jobs) = await CuttingApi.PrintAsync(Id);
+        sedangProses = false;
+
+        if (!success) { pesanError = error; return; }
+
+        pesanSukses = $"{jobs} stiker masuk antrian cetak.";
+        await MuatAsync();
+    }
+
+    private async Task CetakSatuAsync(SpreadDetailBundleDto b)
+    {
+        sedangProses = true;
+        Bersihkan();
+
+        var (success, error, jobs) = await CuttingApi.PrintAsync(Id, new List<int> { b.BundleId });
+        sedangProses = false;
+
+        if (!success) { pesanError = error; return; }
+
+        pesanSukses = $"Stiker {b.CuttingCode} masuk antrian cetak ({jobs} label).";
+        await MuatAsync();
+    }
+
+    // ---------- edit set ----------
+
+    private void BukaEdit(SpreadDetailBundleDto b)
+    {
+        if (detail is null) return;
+
+        pesanEdit = string.Empty;
+        editSet = new EditSetState
+        {
+            SpreadSizeId = b.SpreadSizeId,
+            SetNo = b.SetNo,
+            SizeName = b.SizeName,
+            Items = detail.Bundles
+                .Where(x => x.SpreadSizeId == b.SpreadSizeId && x.SetNo == b.SetNo)
+                .OrderBy(x => x.BundleSeq)
+                .Select(x => new EditItem
+                {
+                    BundleId = x.BundleId,
+                    CuttingCode = x.CuttingCode,
+                    Qty = x.Qty,
+                    IsTaken = x.IsTaken
+                })
+                .ToList()
+        };
+    }
+
+    private void TutupEdit()
+    {
+        editSet = null;
+        pesanEdit = string.Empty;
+    }
+
+    private void EditQtyDiganti(EditItem item, object? nilai)
+        => item.Qty = Math.Max(0, Angka0(nilai));
+
+    private void TambahBundleEdit()
+    {
+        editSet?.Items.Add(new EditItem { BundleId = 0, CuttingCode = "(bundle baru)", Qty = 0 });
+    }
+
+    private void HapusBundleEdit()
+    {
+        if (BolehHapusBundleEdit) editSet!.Items.RemoveAt(editSet.Items.Count - 1);
+    }
+
+    // Satu klik Simpan dipetakan ke SATU action SP, sesuai apa yang berubah:
+    //   bundle baru ditambahkan  -> ADD    (+ qty bundle lain sebagai penyeimbang)
+    //   bundle dihilangkan       -> REMOVE (+ qty bundle lain sebagai penyeimbang)
+    //   hanya qty yang berubah   -> UPDATE_QTY
+    private async Task SimpanEditAsync()
+    {
+        if (editSet is null || detail is null) return;
+
+        sedangProses = true;
+        pesanEdit = string.Empty;
+
+        var asli = detail.Bundles
+            .Where(x => x.SpreadSizeId == editSet.SpreadSizeId && x.SetNo == editSet.SetNo)
+            .OrderBy(x => x.BundleSeq)
+            .ToList();
+
+        var baru = editSet.Items.Where(i => i.IsNew).ToList();
+        var tetap = editSet.Items.Where(i => !i.IsNew).ToList();
+        var dihapus = asli.Where(a => tetap.All(t => t.BundleId != a.BundleId)).ToList();
+
+        var penyeimbang = tetap
+            .Select(i => new SpreadBundleQtyInput { BundleId = i.BundleId, Qty = i.Qty })
+            .ToList();
+
+        (bool Success, string Error) hasil;
+
+        if (baru.Count > 0)
+        {
+            // SP menambah satu bundle di akhir set per panggilan.
+            if (baru.Count > 1)
+            {
+                sedangProses = false;
+                pesanEdit = "Tambah bundle satu per satu (simpan dulu yang ini).";
+                return;
+            }
+
+            hasil = await CuttingApi.AddBundleAsync(Id, new SpreadBundleAddRequest
+            {
+                SpreadSizeId = editSet.SpreadSizeId,
+                SetNo = editSet.SetNo,
+                Qty = baru[0].Qty,
+                Bundles = penyeimbang
+            });
+        }
+        else if (dihapus.Count > 0)
+        {
+            if (dihapus.Count > 1)
+            {
+                sedangProses = false;
+                pesanEdit = "Hapus bundle satu per satu (simpan dulu yang ini).";
+                return;
+            }
+
+            hasil = await CuttingApi.RemoveBundleAsync(Id, dihapus[0].BundleId, penyeimbang);
+        }
+        else
+        {
+            hasil = await CuttingApi.UpdateBundleQtyAsync(Id, penyeimbang);
+        }
+
+        sedangProses = false;
+
+        if (!hasil.Success) { pesanEdit = hasil.Error; return; }
+
+        TutupEdit();
+        Bersihkan();
+        pesanSukses = "Perubahan set tersimpan. Bundle yang bergeser ditandai perlu cetak ulang.";
+        await MuatAsync();
+    }
+
+    // ---------- hapus hamparan ----------
+
+    private async Task HapusAsync()
+    {
+        sedangProses = true;
+        Bersihkan();
+
+        var (success, error) = await CuttingApi.DeleteSpreadAsync(Id);
+        sedangProses = false;
+        konfirmasiHapus = false;
+
+        if (!success) { pesanError = error; return; }
+
+        Nav.NavigateTo("/cutting/hamparan");
+    }
+
+    // ---------- helper ----------
+
+    private void Bersihkan()
+    {
+        pesanError = string.Empty;
+        pesanSukses = string.Empty;
+    }
+
+    private static string Judul(string? noPo, string articleName)
+        => string.IsNullOrWhiteSpace(noPo) ? articleName : $"{noPo} · {articleName}";
+
+    private static int Angka0(object? nilai)
+        => int.TryParse(nilai?.ToString(), out var n) ? n : 0;
+
+    private static string Angka(int nilai)
+        => nilai.ToString("N0", new System.Globalization.CultureInfo("id-ID"));
 }

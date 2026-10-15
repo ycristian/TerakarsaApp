@@ -1,0 +1,19 @@
+@inject NavigationManager Nav
+
+@* Tombol kembali halaman anak /cutting/* (mockup DetailHamparan.dc.html: "← Hamparan").
+
+   SENGAJA TIDAK memakai CloseButton.razor: komponen itu memanggil window.close() yang
+   hanya bekerja untuk halaman yang dibuka target="_blank". Module ini dipakai di tablet
+   dan berpindah halaman dengan Nav.NavigateTo dalam satu tab, jadi window.close() tidak
+   berefek dan halaman anak jadi jalan buntu -- alasan yang sama dengan BenangBackButton
+   (Prompt 71) dan TniBackButton (Prompt 63).
+
+   Satu komponen bersama, bukan tombol "Kembali ke X" hardcode di tiap halaman. *@
+
+<a href="@To" class="ct-link" style="font-size:14px" title="@Label">← @Label</a>
+
+@code {
+    // Default ke daftar hamparan; halaman yang punya induk lain boleh mengisi To.
+    [Parameter] public string To { get; set; } = "/cutting/hamparan";
+    [Parameter] public string Label { get; set; } = "Hamparan";
+}

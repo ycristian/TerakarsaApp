@@ -510,3 +510,59 @@ public class PrintJobRouteSetRequest
     public string JobType { get; set; } = string.Empty;
     public int PrintDeviceId { get; set; }
 }
+
+// Prompt 79: payload job_type CUTTING_BUNDLE_LABEL -- stiker bundle yang dibentuk
+// module Cutting dari hamparan (lihat sql/cutting/sp_78_Cutting.sql,
+// SIS_CuttingBundle_Print, dirakit FOR JSON PATH dengan nama kolom snake_case).
+//
+// SENGAJA payload TERPISAH dari BundleLabelPayload di atas, bukan menambah kolom
+// di sana: isi stikernya beda (kode hamparan + set + rentang nomor pcs, tanpa
+// nomor/huruf bundle, line, penjahit, bahan dan size pack), dan stiker penyerahan
+// bundle yang lama TIDAK boleh berubah sama sekali.
+//
+// qr_content tetap {PublicBaseUrl}/b/<serial> -- format QR bundle yang sudah ada,
+// supaya scanner station langsung mengenalinya. cutting_code (H06-M-03) hanya
+// dicetak sebagai teks.
+public class CuttingBundleLabelPayload
+{
+    [JsonPropertyName("cutting_code")]
+    public string CuttingCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("serial")]
+    public string Serial { get; set; } = string.Empty;
+
+    [JsonPropertyName("qr_content")]
+    public string QrContent { get; set; } = string.Empty;
+
+    [JsonPropertyName("no_po")]
+    public string? NoPo { get; set; }
+
+    [JsonPropertyName("project_name")]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [JsonPropertyName("article_name")]
+    public string ArticleName { get; set; } = string.Empty;
+
+    [JsonPropertyName("size_name")]
+    public string SizeName { get; set; } = string.Empty;
+
+    [JsonPropertyName("qty")]
+    public int Qty { get; set; }
+
+    [JsonPropertyName("set_no")]
+    public int SetNo { get; set; }
+
+    // Sudah berupa teks siap cetak ("M-111" / "M-165") -- dirakit di SP supaya
+    // nama size tidak perlu digabung ulang di dua tempat.
+    [JsonPropertyName("number_from_text")]
+    public string NumberFromText { get; set; } = string.Empty;
+
+    [JsonPropertyName("number_to_text")]
+    public string NumberToText { get; set; } = string.Empty;
+
+    [JsonPropertyName("spread_code")]
+    public string SpreadCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("spread_date")]
+    public DateTime SpreadDate { get; set; }
+}

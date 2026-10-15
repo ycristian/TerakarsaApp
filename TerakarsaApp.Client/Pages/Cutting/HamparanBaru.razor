@@ -2,12 +2,470 @@
 @attribute [Authorize]
 @layout TerakarsaApp.Client.Layout.CuttingLayout
 @using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
+@using TerakarsaApp.Client.Pages.Cutting.Shared
+@using TerakarsaApp.Shared.Cutting
+@inject CuttingApiService CuttingApi
+@inject NavigationManager Nav
 
-@* Prompt 78: route placeholder -- form penuh dibuat di Prompt 79. *@
+@* Prompt 79 -- Buat Hamparan. Mockup: claude prompt/mockup/BuatHamparan.dc.html (layar 2).
+
+   Kolom kiri  : artikel/PO, kode hamparan, tanggal, jumlah set, lembar per set,
+                 rincian set per size (+ rentang numbering live).
+   Kolom kanan : pembagian bundle per SET (saran sistem, boleh diedit per set).
+
+   Tombol simpan terkunci selama (a) rincian size belum pas dengan jumlah set, atau
+   (b) ada set yang total qty bundle-nya tidak sama dengan lembar per set. Aturan yang
+   sama ditegakkan ulang di SIS_Spread_Manage CREATE -- UI hanya mendahuluinya. *@
 
 <PageTitle>Buat Hamparan</PageTitle>
 
 <div class="ct-body">
-    <div class="ct-pagehead"><h1>Buat Hamparan</h1></div>
-    <div class="ct-panel"><div class="ct-empty">Form Buat Hamparan dibuat di Prompt 79.</div></div>
+    <div class="ct-split">
+
+        @* ==================== kolom kiri ==================== *@
+        <div class="ct-split-l">
+            <div class="ct-pagehead">
+                <h1>Buat Hamparan</h1>
+                <span class="ct-spacer"><CuttingBackButton /></span>
+            </div>
+
+            @if (pesanError.Length > 0)
+            {
+                <div class="ct-msg ct-msg-err">@pesanError</div>
+            }
+
+            <div class="ct-panel ct-panel-pad">
+                <div class="ct-field">
+                    <label for="ct-artikel">Artikel / PO</label>
+                    <SearchableSelect TItem="CuttingArticleDto" Items="artikel" Value="articleId"
+                                      ValueChanged="ArtikelDiganti"
+                                      IdSelector="@(a => a.ArticleId)" TextSelector="@(a => a.Label)"
+                                      Placeholder="Cari PO / artikel..." />
+                </div>
+
+                <div class="ct-2col">
+                    <div class="ct-field">
+                        <label for="ct-kode">Kode hamparan</label>
+                        <input id="ct-kode" class="ct-inp code" value="@spreadCode"
+                               @onchange="e => spreadCode = (e.Value?.ToString() ?? string.Empty).Trim()" />
+                        <span class="ct-hint">Otomatis urut per artikel, boleh diganti</span>
+                    </div>
+                    <div class="ct-field">
+                        <label for="ct-tgl">Tanggal hampar</label>
+                        <input id="ct-tgl" type="date" class="ct-inp"
+                               value="@spreadDate.ToString("yyyy-MM-dd")"
+                               @onchange="TanggalDiganti" />
+                    </div>
+                </div>
+
+                <div class="ct-2col">
+                    <div class="ct-field">
+                        <label for="ct-set">Jumlah set</label>
+                        <input id="ct-set" type="number" min="1" class="ct-inp big"
+                               value="@setCount" @onchange="SetCountDiganti" />
+                    </div>
+                    <div class="ct-field">
+                        <label for="ct-lembar">Lembar per set</label>
+                        <input id="ct-lembar" type="number" min="1" class="ct-inp big"
+                               value="@sheetsPerSet" @onchange="LembarDiganti" />
+                    </div>
+                </div>
+
+                <div class="ct-total">
+                    <span>Total hamparan</span>
+                    <span style="font-weight:700">@setCount × @sheetsPerSet = @Angka(setCount * sheetsPerSet) pcs</span>
+                </div>
+            </div>
+
+            @* ---------- rincian set per size ---------- *@
+            <div class="ct-panel ct-panel-pad">
+                <div style="display:flex;align-items:center">
+                    <div class="ct-panel-t">Rincian set per size</div>
+                    <span class="ct-spacer @(SetTerisi == setCount ? "ct-ok" : "ct-bad")" style="font-size:13px">
+                        @SetTerisi / @setCount set terisi
+                    </span>
+                </div>
+
+                @if (sizes.Count == 0)
+                {
+                    <div class="ct-msg ct-msg-info">Pilih artikel dulu untuk melihat daftar size.</div>
+                }
+                else
+                {
+                    <div class="ct-row ct-row-h ct-g-size" style="border-bottom:0;padding-left:0;padding-right:0">
+                        <div>Size</div><div>Set</div><div>Pcs</div><div>Numbering</div>
+                    </div>
+
+                    @foreach (var s in sizes)
+                    {
+                        <div class="ct-row ct-g-size @(s.SetCount > 0 ? "" : "ct-dim")"
+                             style="border-top:0;padding-left:0;padding-right:0">
+                            <div class="ct-k" data-l="Size">@s.SizeName</div>
+                            <div data-l="Set">
+                                <input type="number" min="0" class="ct-inp-sm" aria-label="Set size @s.SizeName"
+                                       value="@s.SetCount" @onchange="e => SizeSetDiganti(s, e.Value)" />
+                            </div>
+                            <div data-l="Pcs">@(s.SetCount > 0 ? Angka(s.SetCount * sheetsPerSet) : "–")</div>
+                            <div data-l="Numbering" style="font-size:13px">
+                                @if (s.SetCount > 0)
+                                {
+                                    <text>@s.SizeName-@s.NextFrom s/d @s.SizeName-@(s.NextFrom + s.SetCount * sheetsPerSet - 1)</text>
+                                }
+                                else
+                                {
+                                    <text>lanjut dari @s.SizeName-@(s.NextFrom - 1)</text>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <span class="ct-hint">
+                        Numbering lanjut dari hamparan terakhir artikel ini. Nomor diisi manual
+                        dengan mesin numbering sesuai rentang.
+                    </span>
+                }
+            </div>
+        </div>
+
+        @* ==================== kolom kanan ==================== *@
+        <div class="ct-split-r">
+            <div class="ct-pagehead" style="height:32px">
+                <div class="ct-panel-t" style="font-size:18px">Pembagian bundle</div>
+                <span class="ct-sub">Saran sistem · target @target pcs/bundle (dari artikel)</span>
+                @if (saran.Count > 0)
+                {
+                    <span class="ct-spacer" style="font-size:13px;background:#fff;border:1px solid var(--ct-inp);border-radius:8px;padding:6px 10px">
+                        @sheetsPerSet lembar → @RingkasSaran()
+                    </span>
+                }
+            </div>
+
+            <div class="ct-panel" style="flex:1">
+                @if (setRows.Count == 0)
+                {
+                    <div class="ct-empty">Isi rincian set per size dulu.</div>
+                }
+                else
+                {
+                    <div class="ct-row ct-row-h ct-g-split">
+                        <div>Size</div><div>Set</div><div>Qty per bundle (bisa diedit)</div><div>Total</div><div></div>
+                    </div>
+
+                    @foreach (var row in setRows)
+                    {
+                        <div class="ct-row ct-g-split @(row.Pas(sheetsPerSet) ? "" : "is-bad")">
+                            <div class="ct-k" data-l="Size">@row.SizeName</div>
+                            <div data-l="Set">Set @row.SetNo</div>
+                            <div data-l="Qty per bundle">
+                                <div class="ct-qtys">
+                                    @for (var i = 0; i < row.Qtys.Count; i++)
+                                    {
+                                        var idx = i;
+                                        <input type="number" min="1" class="ct-inp-qty @(row.Pas(sheetsPerSet) ? "" : "bad")"
+                                               aria-label="Bundle @(idx + 1) size @row.SizeName set @row.SetNo"
+                                               value="@row.Qtys[idx]" @onchange="e => QtyDiganti(row, idx, e.Value)" />
+                                    }
+                                </div>
+                            </div>
+                            <div data-l="Total" class="@(row.Pas(sheetsPerSet) ? "ct-ok" : "ct-bad")">
+                                @(row.Pas(sheetsPerSet) ? $"{row.Total} ✓" : $"{row.Total} ≠ {sheetsPerSet}")
+                            </div>
+                            <div class="ct-acts">
+                                <button type="button" class="ct-btn ct-btn-ico" aria-label="Tambah bundle"
+                                        @onclick="() => TambahBundle(row)">+</button>
+                                @if (row.Qtys.Count > 1)
+                                {
+                                    <button type="button" class="ct-btn ct-btn-ico" aria-label="Kurangi bundle"
+                                            @onclick="() => KurangiBundle(row)">−</button>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <div class="ct-panel-note">
+                        <span>
+                            Aturan saran: jumlah bundle = pembulatan(lembar ÷ target), lalu dibagi rata,
+                            sisa ke bundle pertama. Maks @(target + 10) pcs/bundle.
+                        </span>
+                        <span>Contoh target 50: 249 → 50·50·50·50·49 · 230 → 46×5 · 260 → 52×5</span>
+                    </div>
+                }
+            </div>
+
+            @* ---------- bar aksi bawah ---------- *@
+            <div class="ct-bot">
+                <div class="ct-bot-sum">
+                    <span class="l">Akan dibuat</span>
+                    <span class="v">@Angka(TotalBundle) bundle · @Angka(TotalPcs) pcs</span>
+                    <span class="m">@PreviewKode()</span>
+                </div>
+                <button type="button" class="ct-btn ct-btn-lg ct-spacer"
+                        disabled="@(!BolehSimpan || sedangSimpan)"
+                        @onclick="() => SimpanAsync(false)">
+                    @(sedangSimpan && !cetakSetelahSimpan ? "Menyimpan…" : "Simpan draft")
+                </button>
+                <button type="button" class="ct-btn ct-btn-pri ct-btn-lg"
+                        disabled="@(!BolehSimpan || sedangSimpan)"
+                        @onclick="() => SimpanAsync(true)">
+                    @(sedangSimpan && cetakSetelahSimpan ? "Menyimpan…" : $"Simpan & cetak {TotalBundle} stiker")
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
+
+@code {
+    // ---------- state form ----------
+    private List<CuttingArticleDto> artikel = new();
+    private int articleId;
+    private int target = 50;
+
+    private string spreadCode = string.Empty;
+    private DateTime spreadDate = DateTime.Today;
+    private int setCount = 12;
+    private int sheetsPerSet = 220;
+
+    private List<SizeRow> sizes = new();
+    private List<SetRow> setRows = new();
+    private List<CuttingSuggestItemDto> saran = new();
+
+    private bool sedangSimpan;
+    private bool cetakSetelahSimpan;
+    private string pesanError = string.Empty;
+
+    // Satu baris size di "Rincian set per size".
+    private class SizeRow
+    {
+        public int ArticleSizeId { get; set; }
+        public string SizeName { get; set; } = string.Empty;
+        public int SizeSortOrder { get; set; }
+        public int NextFrom { get; set; }
+        public int SetCount { get; set; }
+    }
+
+    // Satu SET (tumpukan pola) dengan pembagian bundle-nya.
+    private class SetRow
+    {
+        public int ArticleSizeId { get; set; }
+        public string SizeName { get; set; } = string.Empty;
+        public int SizeSortOrder { get; set; }
+        public int SetNo { get; set; }
+        public List<int> Qtys { get; set; } = new();
+
+        public int Total => Qtys.Sum();
+        public bool Pas(int sheets) => Total == sheets;
+    }
+
+    private int SetTerisi => sizes.Sum(s => s.SetCount);
+    private int TotalBundle => setRows.Sum(r => r.Qtys.Count);
+    private int TotalPcs => setRows.Sum(r => r.Total);
+
+    private bool BolehSimpan =>
+        articleId > 0
+        && spreadCode.Length > 0
+        && setCount > 0 && sheetsPerSet > 0
+        && SetTerisi == setCount
+        && setRows.Count > 0
+        && setRows.All(r => r.Pas(sheetsPerSet) && r.Qtys.All(q => q > 0));
+
+    protected override async Task OnInitializedAsync()
+    {
+        artikel = await CuttingApi.GetArticlesAsync();
+    }
+
+    // ---------- perubahan input ----------
+
+    private async Task ArtikelDiganti(int id)
+    {
+        articleId = id;
+        pesanError = string.Empty;
+
+        target = artikel.FirstOrDefault(a => a.ArticleId == id)?.BundleTargetQty ?? 50;
+        spreadCode = await CuttingApi.GetNextSpreadCodeAsync(id);
+
+        var daftar = await CuttingApi.GetArticleSizesAsync(id);
+        sizes = daftar.Select(s => new SizeRow
+        {
+            ArticleSizeId = s.ArticleSizeId,
+            SizeName = s.SizeName,
+            SizeSortOrder = s.SizeSortOrder,
+            NextFrom = s.NextFrom,
+            SetCount = 0
+        }).ToList();
+
+        await MuatSaranAsync();
+    }
+
+    private void TanggalDiganti(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var tgl)) spreadDate = tgl;
+    }
+
+    private void SetCountDiganti(ChangeEventArgs e)
+    {
+        setCount = Angka0(e.Value);
+        SusunSetRows();
+    }
+
+    private async Task LembarDiganti(ChangeEventArgs e)
+    {
+        sheetsPerSet = Angka0(e.Value);
+        await MuatSaranAsync();
+    }
+
+    private void SizeSetDiganti(SizeRow s, object? nilai)
+    {
+        s.SetCount = Math.Max(0, Angka0(nilai));
+        SusunSetRows();
+    }
+
+    private void QtyDiganti(SetRow row, int idx, object? nilai)
+    {
+        row.Qtys[idx] = Math.Max(0, Angka0(nilai));
+    }
+
+    private void TambahBundle(SetRow row)
+    {
+        // Bundle baru diisi 0 -- user yang menentukan; total langsung ditandai
+        // tidak pas sampai diseimbangkan.
+        row.Qtys.Add(0);
+    }
+
+    private void KurangiBundle(SetRow row)
+    {
+        if (row.Qtys.Count > 1) row.Qtys.RemoveAt(row.Qtys.Count - 1);
+    }
+
+    // ---------- saran & susunan set ----------
+
+    private async Task MuatSaranAsync()
+    {
+        saran = sheetsPerSet > 0 && target > 0
+            ? await CuttingApi.SuggestAsync(sheetsPerSet, target)
+            : new();
+
+        SusunSetRows();
+    }
+
+    // Susun ulang daftar SET dari rincian size. Qty yang sudah diedit user untuk
+    // set yang masih ada DIPERTAHANKAN; set baru diisi saran sistem.
+    private void SusunSetRows()
+    {
+        var lama = setRows.ToDictionary(r => (r.ArticleSizeId, r.SetNo), r => r.Qtys);
+        var baru = new List<SetRow>();
+
+        foreach (var s in sizes.Where(s => s.SetCount > 0).OrderBy(s => s.SizeSortOrder))
+        {
+            for (var setNo = 1; setNo <= s.SetCount; setNo++)
+            {
+                baru.Add(new SetRow
+                {
+                    ArticleSizeId = s.ArticleSizeId,
+                    SizeName = s.SizeName,
+                    SizeSortOrder = s.SizeSortOrder,
+                    SetNo = setNo,
+                    Qtys = lama.TryGetValue((s.ArticleSizeId, setNo), out var q)
+                        ? q
+                        : saran.Select(x => x.Qty).ToList()
+                });
+            }
+        }
+
+        setRows = baru;
+    }
+
+    private string RingkasSaran()
+    {
+        if (saran.Count == 0) return "–";
+
+        var qtys = saran.Select(s => s.Qty).Distinct().ToList();
+        return qtys.Count == 1
+            ? $"{saran.Count} bundle × {qtys[0]}"
+            : $"{saran.Count} bundle: {string.Join("·", saran.Select(s => s.Qty))}";
+    }
+
+    // Preview rentang kode per size: "H07-M-01 … H07-M-24, H07-L-01 … H07-L-24".
+    private string PreviewKode()
+    {
+        if (setRows.Count == 0 || spreadCode.Length == 0) return string.Empty;
+
+        var bagian = setRows
+            .GroupBy(r => new { r.ArticleSizeId, r.SizeName, r.SizeSortOrder })
+            .OrderBy(g => g.Key.SizeSortOrder)
+            .Select(g =>
+            {
+                var n = g.Sum(r => r.Qtys.Count);
+                return n <= 1
+                    ? $"{spreadCode}-{g.Key.SizeName}-01"
+                    : $"{spreadCode}-{g.Key.SizeName}-01 … {spreadCode}-{g.Key.SizeName}-{n:00}";
+            });
+
+        return "Kode " + string.Join(", ", bagian);
+    }
+
+    // ---------- simpan ----------
+
+    private async Task SimpanAsync(bool cetak)
+    {
+        if (!BolehSimpan || sedangSimpan) return;
+
+        sedangSimpan = true;
+        cetakSetelahSimpan = cetak;
+        pesanError = string.Empty;
+
+        var request = new SpreadCreateRequest
+        {
+            ArticleId = articleId,
+            SpreadCode = spreadCode,
+            SpreadDate = spreadDate,
+            SetCount = setCount,
+            SheetsPerSet = sheetsPerSet,
+            Sizes = sizes.Where(s => s.SetCount > 0)
+                         .OrderBy(s => s.SizeSortOrder)
+                         .Select(s => new SpreadSizeInput { ArticleSizeId = s.ArticleSizeId, SetCount = s.SetCount })
+                         .ToList(),
+            // Urutan array = urutan bundle di dalam set (dipakai SP untuk bundle_seq
+            // dan rentang nomor), jadi diurutkan size -> set -> posisi.
+            Bundles = setRows
+                .OrderBy(r => r.SizeSortOrder).ThenBy(r => r.SetNo)
+                .SelectMany(r => r.Qtys.Select(q => new SpreadBundleInput
+                {
+                    ArticleSizeId = r.ArticleSizeId,
+                    SetNo = r.SetNo,
+                    Qty = q
+                }))
+                .ToList(),
+            Print = cetak
+        };
+
+        var (success, error, hasil) = await CuttingApi.CreateSpreadAsync(request);
+
+        sedangSimpan = false;
+
+        if (success && hasil is not null)
+        {
+            Nav.NavigateTo($"/cutting/hamparan/{hasil.SpreadId}");
+            return;
+        }
+
+        // Hamparan bisa tersimpan tapi antrian cetaknya gagal -- kalau SpreadId sudah
+        // ada, tetap arahkan ke detail supaya user tidak menyimpan dua kali.
+        if (hasil is not null && hasil.SpreadId > 0)
+        {
+            Nav.NavigateTo($"/cutting/hamparan/{hasil.SpreadId}");
+            return;
+        }
+
+        pesanError = error;
+    }
+
+    // ---------- helper ----------
+
+    private static int Angka0(object? nilai)
+        => int.TryParse(nilai?.ToString(), out var n) ? n : 0;
+
+    private static string Angka(int nilai)
+        => nilai.ToString("N0", new System.Globalization.CultureInfo("id-ID"));
+}
