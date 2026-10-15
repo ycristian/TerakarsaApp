@@ -1,0 +1,17 @@
+@page "/cutting/hamparan/{Id:int}"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.CuttingLayout
+@using Microsoft.AspNetCore.Authorization
+
+@* Prompt 78: route placeholder -- detail penuh dibuat di Prompt 79. *@
+
+<PageTitle>Detail Hamparan</PageTitle>
+
+<div class="ct-body">
+    <div class="ct-pagehead"><h1>Hamparan #@Id</h1></div>
+    <div class="ct-panel"><div class="ct-empty">Detail hamparan dibuat di Prompt 79.</div></div>
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+}

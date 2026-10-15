@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Detail Hamparan</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0F766E}a:hover{color:#115E59}
+</style>
+</helmet>
+<div style="width: 1024px; height: 768px; box-sizing: border-box; background: #F3F4F6; font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #1A1D21; display: flex; flex-direction: column">
+  <div style="height: 64px; background: #1F2937; color: #FFFFFF; display: flex; align-items: center; padding: 0 24px; gap: 24px; box-sizing: border-box">
+    <div style="font-weight: 700; font-size: 18px">Terakarsa · Admin Cutting</div>
+    <div style="display: flex; gap: 4px; margin-left: 16px">
+      <a href="Main.dc.html" style="padding: 8px 16px; border-radius: 8px; color: #D1D5DB; text-decoration: none; font-weight: 600; font-size: 15px">Stok Bundle</a>
+      <a href="BuatHamparan.dc.html" style="padding: 8px 16px; border-radius: 8px; background: #0F766E; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 15px">Hamparan</a>
+    </div>
+    <div style="margin-left: auto; font-size: 14px; color: #D1D5DB">Dedi · Admin Cutting</div>
+  </div>
+
+  <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; flex: 1; overflow: auto">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="BuatHamparan.dc.html" style="font-size: 14px; text-decoration: none; font-weight: 600">← Hamparan</a>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 700">H06 · PO Garuda Apparel · Kaos Polo Navy</h1>
+      <span style="font-size: 13px; background: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 999px; font-weight: 600">Sudah dicetak</span>
+      <button type="button" style="margin-left: auto; height: 44px; padding: 0 16px; border: 1px solid #D1D5DB; border-radius: 10px; background: #FFFFFF; font-size: 14px; font-weight: 600; font-family: inherit">Cetak ulang semua</button>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px">
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px 14px"><div style="font-size: 12px; color: #4B5563">Hampar</div><div style="font-size: 16px; font-weight: 700">12 set × 220</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px 14px"><div style="font-size: 12px; color: #4B5563">Total</div><div style="font-size: 16px; font-weight: 700">48 bundle · 2.640 pcs</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px 14px"><div style="font-size: 12px; color: #4B5563">Di stok cutting</div><div style="font-size: 16px; font-weight: 700; color: #0F766E">31 bundle</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px 14px"><div style="font-size: 12px; color: #4B5563">Diambil Bundling</div><div style="font-size: 16px; font-weight: 700">17 bundle</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px 14px"><div style="font-size: 12px; color: #4B5563">Dibuat</div><div style="font-size: 16px; font-weight: 700">14 Okt · Dedi</div></div>
+    </div>
+
+    <div style="display: flex; gap: 8px">
+      <button type="button" style="height: 40px; padding: 0 14px; border: 0; border-radius: 8px; background: #1F2937; color: #FFFFFF; font-size: 14px; font-weight: 600; font-family: inherit">Semua</button>
+      <button type="button" style="height: 40px; padding: 0 14px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 14px; font-weight: 600; font-family: inherit">Size M</button>
+      <button type="button" style="height: 40px; padding: 0 14px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 14px; font-weight: 600; font-family: inherit">Size L</button>
+      <button type="button" style="height: 40px; padding: 0 14px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 14px; font-weight: 600; font-family: inherit">Masih di stok</button>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden">
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; font-size: 12px; font-weight: 600; color: #4B5563; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #E5E7EB">
+        <div>Kode bundle</div><div>Set</div><div>Nomor</div><div>Qty</div><div>Status</div><div></div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; align-items: center; font-size: 15px; border-bottom: 1px solid #F3F4F6">
+        <div style="font-weight: 700">H06-M-01</div><div>1</div><div>M-1 – M-55</div><div>55</div>
+        <div><span style="font-size: 13px; background: #F3F4F6; color: #374151; padding: 4px 10px; border-radius: 999px; font-weight: 600">Diambil</span> <span style="font-size: 13px; color: #6B7280">Line 3 · 14 Okt 15:10</span></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end">
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #E5E7EB; border-radius: 8px; background: #F9FAFB; color: #9CA3AF; font-size: 13px; font-family: inherit">Edit</button>
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Cetak</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; align-items: center; font-size: 15px; border-bottom: 1px solid #F3F4F6">
+        <div style="font-weight: 700">H06-M-02</div><div>1</div><div>M-56 – M-110</div><div>55</div>
+        <div><span style="font-size: 13px; background: #F3F4F6; color: #374151; padding: 4px 10px; border-radius: 999px; font-weight: 600">Diambil</span> <span style="font-size: 13px; color: #6B7280">Line 3 · 14 Okt 15:10</span></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end">
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #E5E7EB; border-radius: 8px; background: #F9FAFB; color: #9CA3AF; font-size: 13px; font-family: inherit">Edit</button>
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Cetak</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; align-items: center; font-size: 15px; border-bottom: 1px solid #F3F4F6">
+        <div style="font-weight: 700">H06-M-03</div><div>1</div><div>M-111 – M-165</div><div>55</div>
+        <div><span style="font-size: 13px; background: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 999px; font-weight: 600">Stok cutting</span></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end">
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Edit</button>
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Cetak</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; align-items: center; font-size: 15px; border-bottom: 1px solid #F3F4F6">
+        <div style="font-weight: 700">H06-M-04</div><div>1</div><div>M-166 – M-220</div><div>55</div>
+        <div><span style="font-size: 13px; background: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 999px; font-weight: 600">Stok cutting</span></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end">
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Edit</button>
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Cetak</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 130px 60px 150px 70px 1fr 150px; padding: 10px 16px; align-items: center; font-size: 15px; border-bottom: 1px solid #F3F4F6">
+        <div style="font-weight: 700">H06-M-05</div><div>2</div><div>M-221 – M-275</div><div>55</div>
+        <div><span style="font-size: 13px; background: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 999px; font-weight: 600">Stok cutting</span></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end">
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Edit</button>
+          <button type="button" style="height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 13px; font-weight: 600; font-family: inherit">Cetak</button>
+        </div>
+      </div>
+
+      <div style="padding: 10px 16px; font-size: 13px; color: #6B7280">… 43 bundle lainnya</div>
+    </div>
+
+    <div style="font-size: 13px; color: #4B5563">Bundle yang sudah diambil Bundling tidak bisa diedit atau dihapus oleh cutting. Edit qty mengubah rentang nomor bundle setelahnya di set yang sama.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1024,"height":768}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

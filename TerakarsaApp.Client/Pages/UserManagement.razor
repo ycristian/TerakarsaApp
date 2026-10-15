@@ -80,7 +80,7 @@ else
                                 <td>@u.FullName</td>
                                 <td>
                                     <span class="badge @(u.Role == "Admin" ? "bg-danger" : "bg-secondary")">
-                                        @(u.Role == "WAREHOUSE" ? "Admin Gudang" : u.Role)
+                                        @NamaRole(u.Role)
                                     </span>
                                 </td>
                                 <td>
@@ -146,6 +146,9 @@ else
                                 @* Prompt 71: role Admin Gudang -- hanya module Stok Benang,
                                    setelah login langsung ke /gudang/benang. *@
                                 <option value="WAREHOUSE">Admin Gudang</option>
+                                @* Prompt 78: role Admin Cutting -- hanya module Cutting,
+                                   setelah login langsung ke /cutting. *@
+                                <option value="CUTTING">Admin Cutting</option>
                             </InputSelect>
                             <ValidationMessage For="@(() => formModel.Role)" class="text-danger" />
                         </div>
@@ -209,6 +212,15 @@ else
 }
 
 @code {
+    // Role di TMOS cuma varchar di dbo.Users (bukan tabel), jadi label tampilannya
+    // dipetakan di sini: WAREHOUSE = Prompt 71, CUTTING = Prompt 78.
+    private static string NamaRole(string? role) => role switch
+    {
+        "WAREHOUSE" => "Admin Gudang",
+        "CUTTING" => "Admin Cutting",
+        _ => role ?? string.Empty
+    };
+
     private UserPagedResult pagedResult = new();
     private bool isLoading = true;
     private bool isSaving = false;

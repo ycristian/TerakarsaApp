@@ -131,6 +131,8 @@ builder.Services.AddScoped<ThreadStockService>();
 builder.Services.AddScoped<ThreadMovementService>();
 builder.Services.AddScoped<ThreadOpnameService>();
 builder.Services.AddScoped<ThreadReportService>();
+// Prompt 78-80: module Cutting (stok bundle dari hamparan), module CUTTING.
+builder.Services.AddScoped<CuttingService>();
 builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
 builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));

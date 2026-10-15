@@ -1,0 +1,155 @@
+@page "/cutting"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.CuttingLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cutting
+@inject CuttingApiService CuttingApi
+@inject NavigationManager Nav
+
+@* Prompt 78 -- landing module Cutting: Stok Bundle.
+   Mockup: claude prompt/mockup/Main.dc.html (layar 1).
+
+   Tampilan GLOBAL per artikel per size (bukan per hamparan, keputusan desain §7):
+   total bundle, tersedia (STOCK), diambil (TAKEN), pcs tersedia.
+   Panel "Diambil hari ini" = Prompt 80 §4. *@
+
+<PageTitle>Stok Bundle Cutting</PageTitle>
+
+<div class="ct-body">
+    <div class="ct-pagehead">
+        <h1>Stok Bundle</h1>
+        <span class="ct-sub">
+            Semua artikel aktif
+            @if (dimuatPada is not null)
+            {
+                <text> · diperbarui @dimuatPada.Value.ToString("dd MMM HH:mm")</text>
+            }
+        </span>
+        <a href="/cutting/hamparan/baru" class="ct-btn ct-btn-pri ct-btn-lg ct-spacer">+ Buat Hamparan</a>
+    </div>
+
+    @if (pesanError.Length > 0)
+    {
+        <div class="ct-msg ct-msg-err">@pesanError</div>
+    }
+
+    <div class="ct-cards ct-cards-4">
+        <div class="ct-card">
+            <div class="ct-card-l">Bundle di stok cutting</div>
+            <div class="ct-card-v">@Angka(stok.Totals.StockBundles)</div>
+        </div>
+        <div class="ct-card">
+            <div class="ct-card-l">Pcs di stok cutting</div>
+            <div class="ct-card-v">@Angka(stok.Totals.StockPcs)</div>
+        </div>
+        <div class="ct-card">
+            <div class="ct-card-l">Diambil Bundling hari ini</div>
+            <div class="ct-card-v">@Angka(stok.Totals.TakenToday)</div>
+        </div>
+        <div class="ct-card">
+            <div class="ct-card-l">Hamparan belum dicetak</div>
+            <div class="ct-card-v @(stok.Totals.DraftSpreads > 0 ? "amber" : "")">@Angka(stok.Totals.DraftSpreads)</div>
+        </div>
+    </div>
+
+    @if (sedangMuat)
+    {
+        <div class="ct-panel"><div class="ct-empty">Memuat stok bundle…</div></div>
+    }
+    else if (stok.Sizes.Count == 0)
+    {
+        <div class="ct-panel">
+            <div class="ct-empty">
+                Belum ada bundle cutting. Mulai dari <a href="/cutting/hamparan/baru" class="ct-link">Buat Hamparan</a>.
+            </div>
+        </div>
+    }
+    else
+    {
+        @foreach (var grup in stok.Sizes
+                      .GroupBy(s => new { s.ArticleId, s.NoPo, s.ArticleName, s.BundleTargetQty, s.SpreadCount })
+                      .OrderBy(g => g.Key.NoPo).ThenBy(g => g.Key.ArticleName))
+        {
+            <div class="ct-panel">
+                <div class="ct-panel-head">
+                    <div class="ct-panel-t">@Judul(grup.Key.NoPo, grup.Key.ArticleName)</div>
+                    <span class="ct-panel-sub">target @grup.Key.BundleTargetQty pcs/bundle</span>
+                    <span class="ct-panel-sub ct-spacer">@grup.Key.SpreadCount hamparan</span>
+                </div>
+
+                <div class="ct-row ct-row-h ct-g-stock">
+                    <div>Size</div><div>Total bundle</div><div>Tersedia</div><div>Diambil</div><div>Pcs tersedia</div>
+                </div>
+
+                @foreach (var baris in grup.OrderBy(s => s.SizeSortOrder))
+                {
+                    <div class="ct-row ct-g-stock">
+                        <div class="ct-k" data-l="Size">@baris.SizeName</div>
+                        <div data-l="Total bundle">@Angka(baris.TotalBundles)</div>
+                        <div data-l="Tersedia" class="@(baris.StockBundles > 0 ? "ct-ok" : "ct-bad")">@Angka(baris.StockBundles)</div>
+                        <div data-l="Diambil">@Angka(baris.TakenBundles)</div>
+                        <div data-l="Pcs tersedia">@Angka(baris.StockPcs)</div>
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    @* Prompt 80 §4 -- pengambilan hari ini (kode bundle · line · jam). *@
+    @if (diambilHariIni.Count > 0)
+    {
+        <div class="ct-panel">
+            <div class="ct-panel-head">
+                <div class="ct-panel-t">Diambil hari ini</div>
+                <span class="ct-panel-sub ct-spacer">@diambilHariIni.Count bundle</span>
+            </div>
+
+            @foreach (var b in diambilHariIni)
+            {
+                <div class="ct-row" style="grid-template-columns:140px 1fr 150px 90px">
+                    <div class="ct-k" data-l="Kode">@b.CuttingCode</div>
+                    <div data-l="Artikel">@Judul(b.NoPo, b.ArticleName) · @b.SizeName · @b.Qty pcs</div>
+                    <div data-l="Diambil" class="ct-meta">@(b.TakenByResourceName ?? "–")</div>
+                    <div data-l="Jam" class="ct-meta">@b.TakenAt.ToString("HH:mm")</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private CuttingStockSummaryDto stok = new();
+    private List<CuttingTakenTodayDto> diambilHariIni = new();
+    private bool sedangMuat = true;
+    private string pesanError = string.Empty;
+    private DateTime? dimuatPada;
+
+    protected override async Task OnInitializedAsync() => await MuatAsync();
+
+    private async Task MuatAsync()
+    {
+        sedangMuat = true;
+        pesanError = string.Empty;
+
+        try
+        {
+            stok = await CuttingApi.GetStockAsync();
+            diambilHariIni = await CuttingApi.GetTakenTodayAsync();
+            dimuatPada = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            pesanError = $"Gagal memuat stok bundle: {ex.Message}";
+        }
+        finally
+        {
+            sedangMuat = false;
+        }
+    }
+
+    private static string Judul(string? noPo, string articleName)
+        => string.IsNullOrWhiteSpace(noPo) ? articleName : $"{noPo} · {articleName}";
+
+    private static string Angka(int nilai) => nilai.ToString("N0", new System.Globalization.CultureInfo("id-ID"));
+}

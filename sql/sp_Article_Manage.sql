@@ -29,6 +29,9 @@ CREATE OR ALTER PROCEDURE SIS_Article_Manage
     @ArticleName VARCHAR(150) = NULL,
     @Style       VARCHAR(100) = NULL,
     @Color       VARCHAR(100) = NULL,
+    -- Prompt 78 (module Cutting): target pcs per bundle, dipakai SIS_Cutting_SuggestBundles.
+    -- NULL = pakai default kolom (50) di CREATE, dan tidak diubah di UPDATE.
+    @BundleTargetQty INT = NULL,
     @Sizes       NVARCHAR(MAX) = NULL,  -- JSON array: [{"SizePackDetailId":1,"Qty":0,"BundleQty":0}, ...]
     @UserId      INT = NULL
 AS
@@ -39,8 +42,10 @@ BEGIN
     BEGIN
         BEGIN TRAN;
         BEGIN TRY
-            INSERT INTO articles (project_id, size_pack_id, article_name, style, color, created_at, created_by)
-            VALUES (@ProjectId, @SizePackId, @ArticleName, @Style, @Color, SYSDATETIME(), @UserId);
+            INSERT INTO articles (project_id, size_pack_id, article_name, style, color, bundle_target_qty, created_at, created_by)
+            VALUES (@ProjectId, @SizePackId, @ArticleName, @Style, @Color,
+                    CASE WHEN ISNULL(@BundleTargetQty, 0) > 0 THEN @BundleTargetQty ELSE 50 END,
+                    SYSDATETIME(), @UserId);
 
             DECLARE @NewArticleId INT = CAST(SCOPE_IDENTITY() AS INT);
 
@@ -94,6 +99,7 @@ BEGIN
                 article_name = @ArticleName,
                 style = @Style,
                 color = @Color,
+                bundle_target_qty = CASE WHEN ISNULL(@BundleTargetQty, 0) > 0 THEN @BundleTargetQty ELSE bundle_target_qty END,
                 updated_at = SYSDATETIME(),
                 updated_by = @UserId
             WHERE article_id = @Id AND deleted_at IS NULL;

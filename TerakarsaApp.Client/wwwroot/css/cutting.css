@@ -1,0 +1,395 @@
+/* =============================================================
+   Module Cutting (Prompt 78-80) -- design system halaman /cutting/...
+   Diambil dari mockup owner: claude prompt/mockup/*.dc.html
+   (Main = Stok Bundle, BuatHamparan, DetailHamparan, Stiker).
+
+   RESPONSIF, utama TABLET LANDSCAPE (~1024px):
+     >= 900px  bar menu atas gelap, Buat Hamparan dua kolom
+     <= 899px  satu kolom, tabel jadi kartu, bar aksi menempel di bawah
+
+   JANGAN memakai class Bootstrap `rounded` atau `border` di halaman ini --
+   tema app meng-override keduanya (radius jadi elips + padding siluman
+   0.75rem yang merusak kolom sticky). Border & radius selalu dari file ini
+   atau inline.
+   ============================================================= */
+
+.cutting {
+    --ct-ink: #1a1d21;
+    --ct-mut: #4b5563;
+    --ct-mut2: #6b7280;
+    --ct-bg: #f3f4f6;
+    --ct-card: #ffffff;
+    --ct-line: #e5e7eb;
+    --ct-div: #f3f4f6;
+    --ct-inp: #d1d5db;
+    --ct-head: #1f2937;
+    --ct-head-mut: #d1d5db;
+    --ct-teal: #0f766e;         /* aksi utama */
+    --ct-teal-bg: #f0fdfa;
+    --ct-teal-line: #99f6e4;
+    --ct-green-bg: #dcfce7;
+    --ct-green-ink: #166534;
+    --ct-amber: #b45309;
+    --ct-amber-bg: #fffbeb;
+    --ct-amber-line: #f59e0b;
+    --ct-red: #c0392b;
+
+    background: var(--ct-bg);
+    color: var(--ct-ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.cutting a { color: inherit; text-decoration: none; }
+.cutting a.ct-link { color: var(--ct-teal); font-weight: 600; }
+.cutting a.ct-link:hover { color: #115e59; }
+
+/* ---------- bar menu atas (tablet) ---------- */
+.ct-topbar {
+    height: 64px;
+    background: var(--ct-head);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 24px;
+    flex-shrink: 0;
+}
+.ct-brand { font-weight: 700; font-size: 18px; white-space: nowrap; }
+.ct-nav { display: flex; gap: 4px; margin-left: 16px; }
+.ct-nav a {
+    padding: 8px 16px;
+    border-radius: 8px;
+    color: var(--ct-head-mut);
+    font-weight: 600;
+    font-size: 15px;
+}
+.ct-nav a.is-on { background: var(--ct-teal); color: #fff; }
+.ct-user { margin-left: auto; font-size: 14px; color: var(--ct-head-mut); }
+.ct-head-ico {
+    width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    background: #2a313b;
+    color: var(--ct-head-mut);
+    flex-shrink: 0;
+}
+
+/* HP: brand dipendekkan, nav jadi scroll horizontal */
+@media (max-width: 899px) {
+    .ct-topbar {
+        height: auto;
+        padding: 12px 14px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .ct-brand { font-size: 16px; }
+    .ct-nav {
+        margin-left: 0;
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+    }
+    .ct-nav a { padding: 7px 12px; font-size: 14px; white-space: nowrap; }
+    .ct-user { font-size: 12px; }
+}
+
+/* ---------- badan halaman ---------- */
+.ct-body {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1;
+    overflow: auto;
+}
+@media (max-width: 899px) {
+    .ct-body { padding: 14px; gap: 12px; }
+}
+
+.ct-pagehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ct-pagehead h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.ct-pagehead .ct-sub { font-size: 14px; color: var(--ct-mut); }
+.ct-pagehead .ct-spacer { margin-left: auto; }
+@media (max-width: 899px) {
+    .ct-pagehead h1 { font-size: 19px; }
+}
+
+/* ---------- kartu angka ringkas ---------- */
+.ct-cards { display: grid; gap: 12px; }
+.ct-cards-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ct-cards-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 899px) {
+    .ct-cards-4, .ct-cards-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.ct-card {
+    background: var(--ct-card);
+    border: 1px solid var(--ct-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.ct-card-l { font-size: 13px; color: var(--ct-mut); }
+.ct-card-v { font-size: 28px; font-weight: 700; line-height: 1.15; }
+.ct-card-v.sm { font-size: 16px; }
+.ct-card-v.teal { color: var(--ct-teal); }
+.ct-card-v.amber { color: var(--ct-amber); }
+
+/* ---------- panel putih ---------- */
+.ct-panel {
+    background: var(--ct-card);
+    border: 1px solid var(--ct-line);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.ct-panel-pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.ct-panel-head {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--ct-line);
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.ct-panel-t { font-weight: 700; font-size: 16px; }
+.ct-panel-sub { font-size: 13px; color: var(--ct-mut); }
+.ct-panel-note {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--ct-mut);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* ---------- grid tabel (bukan <table>: kolom tetap sejajar di tablet) ---------- */
+.ct-row { display: grid; align-items: center; padding: 12px 16px; font-size: 15px; }
+.ct-row + .ct-row { border-top: 1px solid var(--ct-div); }
+.ct-row-h {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ct-mut);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 1px solid var(--ct-line);
+}
+.ct-row-h + .ct-row { border-top: 0; }
+.ct-row .ct-k { font-weight: 700; }
+
+/* Stok Bundle: Size | Total | Tersedia | Diambil | Pcs tersedia */
+.ct-g-stock { grid-template-columns: 100px 1fr 1fr 1fr 1fr; }
+/* Detail Hamparan: Kode | Set | Nomor | Qty | Status | aksi */
+.ct-g-bundle { grid-template-columns: 130px 60px 160px 70px 1fr 160px; }
+/* Buat Hamparan, rincian size: Size | Set | Pcs | Numbering */
+.ct-g-size { grid-template-columns: 70px 90px 1fr 1fr; gap: 8px; }
+/* Buat Hamparan, pembagian: Size | Set | qty | Total | + */
+.ct-g-split { grid-template-columns: 90px 70px 1fr 100px 60px; }
+/* Daftar Hamparan: Kode | PO/artikel | Tgl | Hampar | Bundle | Stok | Status */
+.ct-g-spread { grid-template-columns: 90px 1fr 110px 120px 150px 120px; }
+
+@media (max-width: 899px) {
+    /* Tabel lebar jadi kartu bertumpuk -- label kolom dibawa lewat data-l. */
+    .ct-row-h { display: none; }
+    .ct-g-stock, .ct-g-bundle, .ct-g-size, .ct-g-split, .ct-g-spread {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    .ct-row { padding: 12px 14px; }
+    .ct-row > [data-l]::before {
+        content: attr(data-l) " ";
+        color: var(--ct-mut2);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-right: 6px;
+    }
+}
+
+/* ---------- chip / badge ---------- */
+.ct-chip {
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    display: inline-block;
+}
+.ct-chip-stock { background: var(--ct-green-bg); color: var(--ct-green-ink); }
+.ct-chip-taken { background: #f3f4f6; color: #374151; }
+.ct-chip-draft { background: #f3f4f6; color: #374151; }
+.ct-chip-printed { background: var(--ct-green-bg); color: var(--ct-green-ink); }
+.ct-chip-reprint {
+    background: var(--ct-amber-bg);
+    color: var(--ct-amber);
+    border: 1px solid var(--ct-amber-line);
+    font-size: 11px;
+    padding: 2px 7px;
+}
+.ct-meta { font-size: 13px; color: var(--ct-mut2); }
+
+/* ---------- filter chip ---------- */
+.ct-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.ct-fchip {
+    height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--ct-inp);
+    border-radius: 8px;
+    background: var(--ct-card);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--ct-ink);
+}
+.ct-fchip.is-on { background: var(--ct-head); border-color: var(--ct-head); color: #fff; }
+
+/* ---------- form ---------- */
+.ct-field { display: flex; flex-direction: column; gap: 6px; }
+.ct-field label { font-size: 13px; font-weight: 600; color: var(--ct-mut); }
+.ct-field .ct-hint { font-size: 12px; color: var(--ct-mut2); }
+.ct-inp, .cutting select.ct-inp {
+    height: 46px;
+    border: 1px solid var(--ct-inp);
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--ct-card);
+    color: var(--ct-ink);
+    width: 100%;
+    box-sizing: border-box;
+}
+.ct-inp.big { font-size: 18px; font-weight: 600; }
+.ct-inp.code { font-weight: 600; }
+.ct-inp-sm {
+    height: 42px;
+    border: 1px solid var(--ct-inp);
+    border-radius: 8px;
+    padding: 0 10px;
+    font-size: 16px;
+    font-family: inherit;
+    font-weight: 600;
+    width: 100%;
+    box-sizing: border-box;
+    color: var(--ct-ink);
+}
+.ct-inp-qty {
+    width: 62px;
+    height: 40px;
+    border: 1px solid var(--ct-inp);
+    border-radius: 8px;
+    text-align: center;
+    font-size: 15px;
+    font-family: inherit;
+    font-weight: 600;
+    color: var(--ct-ink);
+    flex-shrink: 0;
+}
+.ct-inp-qty.bad { border-color: var(--ct-amber-line); }
+.ct-qtys { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.ct-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+.ct-total {
+    background: var(--ct-teal-bg);
+    border: 1px solid var(--ct-teal-line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+/* baris set yang totalnya belum pas */
+.ct-row.is-bad { background: var(--ct-amber-bg); }
+.ct-ok { color: var(--ct-teal); font-weight: 600; }
+.ct-bad { color: var(--ct-amber); font-weight: 600; }
+.ct-dim { color: #9ca3af; }
+
+/* ---------- tombol ---------- */
+.ct-btn {
+    height: 44px;
+    padding: 0 16px;
+    border: 1px solid var(--ct-inp);
+    border-radius: 10px;
+    background: var(--ct-card);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--ct-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.ct-btn:disabled { background: #f9fafb; color: #9ca3af; border-color: var(--ct-line); }
+.ct-btn-pri {
+    border: 0;
+    background: var(--ct-teal);
+    color: #fff;
+    font-weight: 700;
+}
+.ct-btn-pri:disabled { background: #9ca3af; color: #f3f4f6; }
+.ct-btn-lg { height: 50px; padding: 0 22px; font-size: 15px; }
+.ct-btn-sm { height: 40px; padding: 0 12px; font-size: 13px; }
+.ct-btn-ico {
+    width: 44px; height: 44px; padding: 0;
+    font-size: 18px;
+}
+.ct-btn-danger { color: var(--ct-red); border-color: #e7b9b3; }
+.ct-acts { display: flex; gap: 6px; justify-content: flex-end; }
+@media (max-width: 899px) {
+    .ct-acts { justify-content: flex-start; }
+}
+
+/* ---------- bar aksi bawah ---------- */
+.ct-bot {
+    background: var(--ct-card);
+    border: 1px solid var(--ct-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.ct-bot-sum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ct-bot-sum .l { font-size: 13px; color: var(--ct-mut); }
+.ct-bot-sum .v { font-size: 18px; font-weight: 700; }
+.ct-bot-sum .m { font-size: 12px; color: var(--ct-mut2); }
+.ct-bot .ct-spacer { margin-left: auto; }
+@media (max-width: 899px) {
+    /* Aksi utama menempel di bawah layar (pola module Benang). */
+    .ct-bot {
+        position: sticky;
+        bottom: 0;
+        border-radius: 12px 12px 0 0;
+        box-shadow: 0 -4px 16px rgba(0, 0, 0, .08);
+        z-index: 5;
+    }
+    .ct-bot .ct-spacer { margin-left: 0; }
+    .ct-bot .ct-btn { flex: 1; }
+}
+
+/* ---------- dua kolom Buat Hamparan ---------- */
+.ct-split { display: flex; gap: 20px; flex: 1; min-height: 0; }
+.ct-split-l { width: 380px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
+.ct-split-r { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (max-width: 899px) {
+    .ct-split { flex-direction: column; gap: 14px; }
+    .ct-split-l { width: auto; }
+}
+
+/* ---------- pesan ---------- */
+.ct-msg {
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    border: 1px solid transparent;
+}
+.ct-msg-err { background: #fdf2f1; border-color: #e7b9b3; color: #8e2b20; }
+.ct-msg-ok { background: var(--ct-teal-bg); border-color: var(--ct-teal-line); color: #115e59; }
+.ct-msg-info { background: #f9fafb; border-color: var(--ct-line); color: var(--ct-mut); }
+
+.ct-empty { padding: 28px 16px; text-align: center; color: var(--ct-mut2); font-size: 14px; }

@@ -50,6 +50,7 @@ public class ArticleDto
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
+    public int BundleTargetQty { get; set; } = 50;   // Prompt 78: target pcs per bundle (module Cutting)
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -71,6 +72,7 @@ public class ArticleCreateRequest
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
+    public int BundleTargetQty { get; set; } = 50;   // Prompt 78: target pcs per bundle (module Cutting)
     public List<ArticleSizeRequest> Sizes { get; set; } = new();
 }
 
@@ -81,6 +83,7 @@ public class ArticleUpdateRequest
     public string ArticleName { get; set; } = string.Empty;
     public string? Style { get; set; }
     public string? Color { get; set; }
+    public int BundleTargetQty { get; set; } = 50;   // Prompt 78: target pcs per bundle (module Cutting)
     public List<ArticleSizeRequest> Sizes { get; set; } = new();
 }
 

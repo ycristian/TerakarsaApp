@@ -1,0 +1,53 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Bar menu atas module Cutting, mengikuti kepala gelap di keempat mockup.
+   Dua tab saja: Stok Bundle (landing /cutting) dan Hamparan (/cutting/hamparan).
+   Di HP nav-nya turun ke baris sendiri dan bisa digeser (lihat cutting.css). *@
+
+<div class="ct-topbar">
+    <div class="ct-brand">Terakarsa · Admin Cutting</div>
+
+    <nav class="ct-nav">
+        <a href="/cutting" class="@(IsStok ? "is-on" : "")">Stok Bundle</a>
+        <a href="/cutting/hamparan" class="@(IsHamparan ? "is-on" : "")">Hamparan</a>
+    </nav>
+
+    <div class="ct-user">@namaUser · Admin Cutting</div>
+
+    @* Jalan keluar ke aplikasi utama untuk user yang punya module lain (owner/admin).
+       Role Admin Cutting hanya punya module ini, jadi tombolnya tidak ditampilkan. *@
+    @if (punyaModuleLain)
+    {
+        <a href="/" class="ct-head-ico" title="Menu utama aplikasi"><i class="fe fe-grid"></i></a>
+    }
+</div>
+
+@code {
+    private string namaUser = string.Empty;
+    private bool punyaModuleLain;
+
+    private string Path => Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/');
+
+    private bool IsHamparan => Path.StartsWith("cutting/hamparan", StringComparison.OrdinalIgnoreCase);
+    private bool IsStok => !IsHamparan;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += LokasiBerubah;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        namaUser = state.User.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value
+                   ?? state.User.Identity?.Name
+                   ?? string.Empty;
+
+        punyaModuleLain = state.User.FindAll("module").Any(c => c.Value != "CUTTING");
+    }
+
+    private void LokasiBerubah(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= LokasiBerubah;
+}

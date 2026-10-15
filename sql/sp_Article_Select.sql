@@ -61,6 +61,7 @@ BEGIN
     SELECT a.article_id AS Id, a.project_id AS ProjectId,
            a.size_pack_id AS SizePackId, sp.size_pack_name AS SizePackName,
            a.article_name AS ArticleName, a.style AS Style, a.color AS Color,
+           a.bundle_target_qty AS BundleTargetQty,   -- Prompt 78 (module Cutting)
            a.created_at AS CreatedAt, a.created_by AS CreatedBy,
            a.updated_at AS UpdatedAt, a.updated_by AS UpdatedBy
     FROM articles a

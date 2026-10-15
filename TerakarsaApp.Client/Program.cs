@@ -103,6 +103,8 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ThreadOpnameApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ThreadReportApiService>();
 // Prompt 77: halaman /admin/printer (routing job cetak PC vs HP Bluetooth).
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PrintAdminApiService>();
+// Prompt 78-80: module Cutting (stok bundle dari hamparan).
+builder.Services.AddScoped<TerakarsaApp.Client.Services.CuttingApiService>();
 // Module PDH TNI AD -- dipakai SEPERTI STASIUN, TANPA LOGIN: tiap service di
 // bawah ini memakai HttpClient sendiri yang menyisipkan header X-Tni-Token
 // (TniDeviceTokenHandler), BUKAN JWT. Petugas dikenali server dari perangkat.

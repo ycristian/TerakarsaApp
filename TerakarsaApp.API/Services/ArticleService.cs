@@ -103,14 +103,16 @@ public class ArticleService
         var styleParam = new SqlParameter("@Style", (object?)request.Style ?? DBNull.Value);
         var colorParam = new SqlParameter("@Color", (object?)request.Color ?? DBNull.Value);
         var sizesParam = new SqlParameter("@Sizes", JsonSerializer.Serialize(request.Sizes));
+        // Prompt 78 (module Cutting): target pcs per bundle.
+        var bundleTargetParam = new SqlParameter("@BundleTargetQty", request.BundleTargetQty);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Article_Manage @Action = @Action, @ProjectId = @ProjectId, @SizePackId = @SizePackId, @ArticleName = @ArticleName, @Style = @Style, @Color = @Color, @Sizes = @Sizes, @UserId = @UserId",
-                    actionParam, projectIdParam, sizePackIdParam, nameParam, styleParam, colorParam, sizesParam, userIdParam)
+                    "EXEC SIS_Article_Manage @Action = @Action, @ProjectId = @ProjectId, @SizePackId = @SizePackId, @ArticleName = @ArticleName, @Style = @Style, @Color = @Color, @Sizes = @Sizes, @BundleTargetQty = @BundleTargetQty, @UserId = @UserId",
+                    actionParam, projectIdParam, sizePackIdParam, nameParam, styleParam, colorParam, sizesParam, bundleTargetParam, userIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }
@@ -129,13 +131,15 @@ public class ArticleService
         var styleParam = new SqlParameter("@Style", (object?)request.Style ?? DBNull.Value);
         var colorParam = new SqlParameter("@Color", (object?)request.Color ?? DBNull.Value);
         var sizesParam = new SqlParameter("@Sizes", JsonSerializer.Serialize(request.Sizes));
+        // Prompt 78 (module Cutting): target pcs per bundle.
+        var bundleTargetParam = new SqlParameter("@BundleTargetQty", request.BundleTargetQty);
         var userIdParam = new SqlParameter("@UserId", userId);
 
         try
         {
             await _db.Database.ExecuteSqlRawAsync(
-                "EXEC SIS_Article_Manage @Action = @Action, @Id = @Id, @SizePackId = @SizePackId, @ArticleName = @ArticleName, @Style = @Style, @Color = @Color, @Sizes = @Sizes, @UserId = @UserId",
-                actionParam, idParam, sizePackIdParam, nameParam, styleParam, colorParam, sizesParam, userIdParam);
+                "EXEC SIS_Article_Manage @Action = @Action, @Id = @Id, @SizePackId = @SizePackId, @ArticleName = @ArticleName, @Style = @Style, @Color = @Color, @Sizes = @Sizes, @BundleTargetQty = @BundleTargetQty, @UserId = @UserId",
+                actionParam, idParam, sizePackIdParam, nameParam, styleParam, colorParam, sizesParam, bundleTargetParam, userIdParam);
             return (true, string.Empty);
         }
         catch (SqlException ex)

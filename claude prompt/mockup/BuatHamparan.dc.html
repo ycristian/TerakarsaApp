@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Buat Hamparan</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0F766E}a:hover{color:#115E59}
+</style>
+</helmet>
+<div style="width: 1024px; height: 900px; box-sizing: border-box; background: #F3F4F6; font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #1A1D21; display: flex; flex-direction: column">
+  <div style="height: 64px; background: #1F2937; color: #FFFFFF; display: flex; align-items: center; padding: 0 24px; gap: 24px; box-sizing: border-box">
+    <div style="font-weight: 700; font-size: 18px">Terakarsa · Admin Cutting</div>
+    <div style="display: flex; gap: 4px; margin-left: 16px">
+      <a href="Main.dc.html" style="padding: 8px 16px; border-radius: 8px; color: #D1D5DB; text-decoration: none; font-weight: 600; font-size: 15px">Stok Bundle</a>
+      <a href="BuatHamparan.dc.html" style="padding: 8px 16px; border-radius: 8px; background: #0F766E; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 15px">Hamparan</a>
+    </div>
+    <div style="margin-left: auto; font-size: 14px; color: #D1D5DB">Dedi · Admin Cutting</div>
+  </div>
+
+  <div style="padding: 20px 24px; display: flex; gap: 20px; flex: 1; box-sizing: border-box">
+
+    <div style="width: 380px; display: flex; flex-direction: column; gap: 14px">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 700">Buat Hamparan</h1>
+
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <label for="artikel" style="font-size: 13px; font-weight: 600; color: #4B5563">Artikel / PO</label>
+          <select id="artikel" style="height: 46px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; background: #FFFFFF"><option>PO Garuda Apparel · Kaos Polo Navy</option></select>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="kode" style="font-size: 13px; font-weight: 600; color: #4B5563">Kode hamparan</label>
+            <input id="kode" value="H07" style="height: 46px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; font-weight: 600">
+            <span style="font-size: 12px; color: #6B7280">Otomatis urut per artikel, boleh diganti</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="tgl" style="font-size: 13px; font-weight: 600; color: #4B5563">Tanggal hampar</label>
+            <input id="tgl" value="15 Okt 2026" style="height: 46px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="set" style="font-size: 13px; font-weight: 600; color: #4B5563">Jumlah set</label>
+            <input id="set" value="12" style="height: 46px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; font-size: 18px; font-family: inherit; font-weight: 600">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="lembar" style="font-size: 13px; font-weight: 600; color: #4B5563">Lembar per set</label>
+            <input id="lembar" value="220" style="height: 46px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; font-size: 18px; font-family: inherit; font-weight: 600">
+          </div>
+        </div>
+        <div style="background: #F0FDFA; border: 1px solid #99F6E4; border-radius: 8px; padding: 10px 12px; font-size: 14px; display: flex; justify-content: space-between">
+          <span>Total hamparan</span><span style="font-weight: 700">12 × 220 = 2.640 pcs</span>
+        </div>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: center">
+          <div style="font-weight: 700; font-size: 15px">Rincian set per size</div>
+          <span style="margin-left: auto; font-size: 13px; color: #0F766E; font-weight: 600">12 / 12 set terisi</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 70px 80px 1fr 1fr; gap: 8px; font-size: 12px; font-weight: 600; color: #4B5563; text-transform: uppercase; letter-spacing: .04em">
+          <div>Size</div><div>Set</div><div>Pcs</div><div>Numbering</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 70px 80px 1fr 1fr; gap: 8px; align-items: center; font-size: 15px">
+          <div style="font-weight: 700">M</div>
+          <input aria-label="Set size M" value="6" style="height: 42px; width: 100%; box-sizing: border-box; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 10px; font-size: 16px; font-family: inherit; font-weight: 600">
+          <div>1.320</div><div style="font-size: 13px">M-1321 s/d M-2640</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 70px 80px 1fr 1fr; gap: 8px; align-items: center; font-size: 15px">
+          <div style="font-weight: 700">L</div>
+          <input aria-label="Set size L" value="6" style="height: 42px; width: 100%; box-sizing: border-box; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 10px; font-size: 16px; font-family: inherit; font-weight: 600">
+          <div>1.320</div><div style="font-size: 13px">L-1321 s/d L-2640</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 70px 80px 1fr 1fr; gap: 8px; align-items: center; font-size: 15px; color: #9CA3AF">
+          <div style="font-weight: 700">XL</div>
+          <input aria-label="Set size XL" value="0" style="height: 42px; width: 100%; box-sizing: border-box; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 10px; font-size: 16px; font-family: inherit">
+          <div>–</div><div style="font-size: 13px">lanjut dari XL-1320</div>
+        </div>
+        <span style="font-size: 12px; color: #6B7280">Numbering lanjut dari hamparan terakhir artikel ini (H06). Nomor diisi manual dengan mesin numbering sesuai rentang.</span>
+      </div>
+    </div>
+
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 12px; height: 32px">
+        <div style="font-weight: 700; font-size: 18px">Pembagian bundle</div>
+        <span style="font-size: 13px; color: #4B5563">Saran sistem · target 50 pcs/bundle (dari artikel)</span>
+        <span style="margin-left: auto; font-size: 13px; background: #FFFFFF; border: 1px solid #D1D5DB; border-radius: 8px; padding: 6px 10px">220 lembar → 4 bundle × 55</span>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden; flex: 1">
+        <div style="display: grid; grid-template-columns: 90px 70px 1fr 90px 60px; padding: 10px 16px; font-size: 12px; font-weight: 600; color: #4B5563; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #E5E7EB">
+          <div>Size</div><div>Set</div><div>Qty per bundle (bisa diedit)</div><div>Total</div><div></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 90px 70px 1fr 90px 60px; padding: 10px 16px; align-items: center; border-bottom: 1px solid #F3F4F6; font-size: 15px">
+          <div style="font-weight: 700">M</div><div>Set 1</div>
+          <div style="display: flex; gap: 6px">
+            <input aria-label="Bundle 1" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 2" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 3" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 4" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+          </div>
+          <div style="color: #0F766E; font-weight: 600">220 ✓</div>
+          <div><button type="button" aria-label="Tambah bundle" style="width: 40px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 18px; font-family: inherit">+</button></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 90px 70px 1fr 90px 60px; padding: 10px 16px; align-items: center; border-bottom: 1px solid #F3F4F6; font-size: 15px; background: #FFFBEB">
+          <div style="font-weight: 700">M</div><div>Set 2</div>
+          <div style="display: flex; gap: 6px">
+            <input aria-label="Bundle 1" value="60" style="width: 60px; height: 40px; border: 1px solid #F59E0B; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 2" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 3" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 4" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+          </div>
+          <div style="color: #B45309; font-weight: 600">225 ≠ 220</div>
+          <div><button type="button" aria-label="Tambah bundle" style="width: 40px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 18px; font-family: inherit">+</button></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 90px 70px 1fr 90px 60px; padding: 10px 16px; align-items: center; border-bottom: 1px solid #F3F4F6; font-size: 15px">
+          <div style="font-weight: 700">M</div><div>Set 3</div>
+          <div style="display: flex; gap: 6px">
+            <input aria-label="Bundle 1" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 2" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 3" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+            <input aria-label="Bundle 4" value="55" style="width: 60px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; text-align: center; font-size: 15px; font-family: inherit; font-weight: 600">
+          </div>
+          <div style="color: #0F766E; font-weight: 600">220 ✓</div>
+          <div><button type="button" aria-label="Tambah bundle" style="width: 40px; height: 40px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 18px; font-family: inherit">+</button></div>
+        </div>
+
+        <div style="padding: 10px 16px; font-size: 13px; color: #6B7280; border-bottom: 1px solid #F3F4F6">… Set 4–6 size M, Set 1–6 size L (sama: 4 × 55)</div>
+
+        <div style="padding: 12px 16px; font-size: 13px; color: #4B5563; display: flex; flex-direction: column; gap: 4px">
+          <span>Aturan saran: jumlah bundle = pembulatan(lembar ÷ target), lalu dibagi rata, sisa ke bundle pertama. Maks 60 pcs/bundle.</span>
+          <span>Contoh: 249 → 50·50·50·50·49 · 230 → 46×5 · 260 → 52×5</span>
+        </div>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font-size: 13px; color: #4B5563">Akan dibuat</span>
+          <span style="font-size: 18px; font-weight: 700">48 bundle · 2.640 pcs</span>
+          <span style="font-size: 12px; color: #6B7280">Kode H07-M-01 … H07-M-24, H07-L-01 … H07-L-24</span>
+        </div>
+        <button type="button" style="margin-left: auto; height: 50px; padding: 0 20px; border: 1px solid #D1D5DB; border-radius: 10px; background: #FFFFFF; font-size: 15px; font-weight: 600; font-family: inherit">Simpan draft</button>
+        <button type="button" style="height: 50px; padding: 0 22px; border: 0; border-radius: 10px; background: #0F766E; color: #FFFFFF; font-size: 15px; font-weight: 700; font-family: inherit">Simpan &amp; cetak 48 stiker</button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1024,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

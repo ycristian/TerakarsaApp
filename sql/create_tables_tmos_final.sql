@@ -333,6 +333,8 @@ CREATE TABLE articles(
  article_name varchar(150) not null,
  style varchar(100) null,
  color varchar(100) null,
+ bundle_target_qty int not null default 50,   -- Prompt 78: target pcs per bundle, dipakai
+                                              -- SIS_Cutting_SuggestBundles (module Cutting)
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -466,6 +468,45 @@ CREATE TABLE article_workflows(
 
 -- ============ 5. PRODUKSI ============
 
+-- Prompt 78: hamparan cutting. Bundle dibentuk sejak kain dihampar (bukan lagi manual
+-- per baris oleh supervisor) dan masuk STOK CUTTING sampai Bundling mengambilnya lewat
+-- scan QR. Didefinisikan SEBELUM bundles karena bundles menunjuk keduanya.
+--   hamparan = satu kali hampar kain, set = satu tumpukan pola, lembar = tinggi tumpukan.
+CREATE TABLE spreads(
+ spread_id int primary key identity(1,1),
+ article_id int not null
+   constraint FK_spreads_articles foreign key references articles(article_id),
+ spread_code varchar(20) not null,      -- H01, H02, ... urut per artikel, boleh diganti manual
+ spread_date date not null,
+ set_count int not null,
+ sheets_per_set int not null,
+ [status] varchar(10) not null default 'DRAFT',   -- DRAFT | PRINTED
+ printed_at datetime2 null,
+ note varchar(500) null,
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
+-- Rincian set per size. TIDAK ada soft delete: baris mati bersama header-nya, jadi
+-- semua query numbering memfilter lewat spreads.deleted_at IS NULL.
+-- number_from lanjut dari MAX(number_to) artikel+size yang sama (nomor pcs diisi manual
+-- dengan mesin numbering sesuai rentang ini).
+CREATE TABLE spread_sizes(
+ spread_size_id int primary key identity(1,1),
+ spread_id int not null
+   constraint FK_spread_sizes_spreads foreign key references spreads(spread_id),
+ article_size_id int not null
+   constraint FK_spread_sizes_article_sizes foreign key references article_sizes(article_size_id),
+ set_count int not null,
+ number_from int not null,
+ number_to int not null,
+ created_at datetime2 not null default sysdatetime()
+);
+
 CREATE TABLE bundles(
  bundle_id int primary key identity(1,1),
  article_id int not null
@@ -489,7 +530,29 @@ CREATE TABLE bundles(
  updated_by int null,
  deleted_at datetime2 null,
  deleted_by int null,
- delete_reason varchar(255) null    -- Prompt 29: alasan hapus lewat SIS_SuperAdmin_Manage BUNDLE_DELETE
+ delete_reason varchar(255) null,    -- Prompt 29: alasan hapus lewat SIS_SuperAdmin_Manage BUNDLE_DELETE
+ -- ---- Prompt 78: bundle yang dibentuk module Cutting dari hamparan ----
+ -- source = 'MANUAL' (default, semua bundle lama & alur admin /bundles yang tidak diubah)
+ -- atau 'CUTTING'. Kolom di bawah HANYA terisi untuk source = 'CUTTING'.
+ spread_id int null
+   constraint FK_bundles_spreads foreign key references spreads(spread_id),
+ spread_size_id int null
+   constraint FK_bundles_spread_sizes foreign key references spread_sizes(spread_size_id),
+ cutting_code varchar(30) null,     -- kode lapangan <spread_code>-<size>-<seq>, mis. H06-M-03.
+                                    -- SENGAJA bukan `serial`: serial unik GLOBAL dan jadi isi
+                                    -- QR {PublicBaseUrl}/b/<serial> yang dikenali scanner
+                                    -- station, sedangkan kode hamparan sengaja boleh sama
+                                    -- lintas artikel (keputusan desain §4) -> unik per artikel saja.
+ set_no int null,                   -- tumpukan pola ke-berapa di hamparan
+ bundle_seq int null,               -- urut per spread per size, lintas set (01..NN)
+ number_from int null,              -- rentang nomor pcs yang dicetak di stiker
+ number_to int null,
+ source varchar(10) not null default 'MANUAL',
+ stock_status varchar(10) null,     -- STOCK (di stok cutting) | TAKEN (diambil Bundling)
+ taken_at datetime2 null,
+ taken_by_resource_id int null      -- Line/penjahit yang mengambil (SIS_CuttingBundle_Take)
+   constraint FK_bundles_taken_resources foreign key references resources(resource_id),
+ needs_reprint bit not null default 0
 );
 
 -- LOG MURNI, MODEL 1-BARIS-PER-SERAH-TERIMA (Prompt 12b): tidak boleh di-update
@@ -1413,6 +1476,16 @@ CREATE INDEX IX_as_employee_date     ON attendance_sessions(employee_id, work_da
 -- Cooldown 30 detik SIS_Gate_Tap dibaca dari index ini.
 CREATE INDEX IX_gate_taps_card_time  ON gate_taps(card_uid, tapped_at DESC);
 CREATE INDEX IX_ecl_employee         ON employee_change_log(employee_id, created_at DESC);
+-- Prompt 78: module Cutting. Kode hamparan unik per artikel; kode bundle cutting unik
+-- per artikel saja (lintas artikel sengaja boleh sama -- lihat komentar di tabel bundles).
+CREATE UNIQUE INDEX UX_spreads_article_code  ON spreads(article_id, spread_code) WHERE deleted_at IS NULL;
+CREATE INDEX IX_spreads_article_date         ON spreads(article_id, spread_date DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IX_spread_sizes_spread          ON spread_sizes(spread_id);
+CREATE INDEX IX_spread_sizes_article_size    ON spread_sizes(article_size_id, number_to DESC);
+CREATE UNIQUE INDEX UX_bundles_cutting_code  ON bundles(article_id, cutting_code)
+    WHERE deleted_at IS NULL AND cutting_code IS NOT NULL;
+CREATE INDEX IX_bundles_cutting_stock        ON bundles(source, stock_status, article_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_bundles_spread               ON bundles(spread_id, bundle_seq) WHERE deleted_at IS NULL;
 GO
 
 -- ============ 12. FK YANG BARU BISA DIPASANG SETELAH SEMUA TABEL ADA ============

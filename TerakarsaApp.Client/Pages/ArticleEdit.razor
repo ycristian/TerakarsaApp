@@ -85,6 +85,14 @@ else
                             <label class="form-label">Color</label>
                             <InputText class="form-control" @bind-Value="formModel.Color" />
                         </div>
+                        @* Prompt 78: dipakai module Cutting untuk menyarankan pembagian
+                           bundle per set saat hamparan dibuat. *@
+                        <div class="mb-3">
+                            <label class="form-label">Target pcs per bundle</label>
+                            <InputNumber class="form-control" @bind-Value="formModel.BundleTargetQty" />
+                            <div class="form-text">Dipakai saran pembagian bundle di module Cutting (default 50).</div>
+                            <ValidationMessage For="@(() => formModel.BundleTargetQty)" class="text-danger" />
+                        </div>
                         <div class="mb-3">
                             <label class="form-label">Size Pack</label>
                             <SearchableSelect TItem="SizePackDto" Items="sizePackOptions" Value="formModel.SizePackId"
@@ -790,6 +798,7 @@ else
                         ArticleName = article.ArticleName,
                         Style = article.Style,
                         Color = article.Color,
+                        BundleTargetQty = article.BundleTargetQty,
                         SizePackId = article.SizePackId
                     };
                     loadedSizePackId = article.SizePackId;
@@ -928,6 +937,7 @@ else
                 ArticleName = formModel.ArticleName,
                 Style = string.IsNullOrWhiteSpace(formModel.Style) ? null : formModel.Style,
                 Color = string.IsNullOrWhiteSpace(formModel.Color) ? null : formModel.Color,
+                BundleTargetQty = formModel.BundleTargetQty,
                 Sizes = sizes
             });
 
@@ -951,6 +961,7 @@ else
                 ArticleName = formModel.ArticleName,
                 Style = string.IsNullOrWhiteSpace(formModel.Style) ? null : formModel.Style,
                 Color = string.IsNullOrWhiteSpace(formModel.Color) ? null : formModel.Color,
+                BundleTargetQty = formModel.BundleTargetQty,
                 Sizes = sizes
             });
 
@@ -1381,6 +1392,10 @@ else
 
         [StringLength(100, ErrorMessage = "Color maksimal 100 karakter.")]
         public string? Color { get; set; }
+
+        // Prompt 78 (module Cutting): dipakai saran pembagian bundle saat hamparan dibuat.
+        [Range(1, 1000, ErrorMessage = "Target pcs per bundle harus 1-1000.")]
+        public int BundleTargetQty { get; set; } = 50;
 
         [Range(1, int.MaxValue, ErrorMessage = "Size pack wajib dipilih.")]
         public int SizePackId { get; set; }
