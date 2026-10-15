@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Cutting;
 using TerakarsaApp.Shared.Divisions;
 using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.Packs;
@@ -638,5 +639,36 @@ public class StationDeviceApiService
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus output non-PO." : error.Trim('"'));
+    }
+
+    // ==================== Prompt 80: Scan Stok Bundle ====================
+    // Bundling MENGAMBIL bundle yang sudah dibentuk Cutting dari hamparan. Kode boleh
+    // URL QR penuh, serial, atau kode cutting (H06-M-03) -- normalisasinya di SP.
+    public async Task<(bool Success, string Error, CuttingBundleScanDto? Bundle)> LookupCuttingBundleAsync(
+        string code, int? articleId = null)
+    {
+        var url = $"api/station/cutting-stock/lookup?code={Uri.EscapeDataString(code)}";
+        if (articleId.HasValue) url += $"&articleId={articleId.Value}";
+
+        var response = await _http.GetAsync(url);
+
+        if (response.IsSuccessStatusCode)
+            return (true, string.Empty, await response.Content.ReadFromJsonAsync<CuttingBundleScanDto>());
+
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Bundle tidak ditemukan." : error.Trim('"'), null);
+    }
+
+    public async Task<(bool Success, string Error, CuttingBundleTakeResultDto? Hasil)> TakeCuttingBundlesAsync(
+        List<int> bundleIds, int? resourceId)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/cutting-stock/take",
+            new CuttingBundleTakeRequest { BundleIds = bundleIds, ResourceId = resourceId ?? 0 });
+
+        if (response.IsSuccessStatusCode)
+            return (true, string.Empty, await response.Content.ReadFromJsonAsync<CuttingBundleTakeResultDto>());
+
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengambil bundle." : error.Trim('"'), null);
     }
 }

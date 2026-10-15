@@ -1,0 +1,182 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cutting
+@inject StationDeviceApiService StationApi
+
+@* Prompt 80 §1 -- "Scan Stok Bundle" di station Bundling.
+
+   Bundling MENGAMBIL bundle yang sudah dibentuk Cutting dari hamparan; tidak membuat
+   bundle lagi. Boleh scan beberapa bundle dulu (daftar di bawah), lalu "Ambil N bundle"
+   sekali jalan -- satu transaksi di SIS_CuttingBundle_Take.
+
+   Setelah diambil, bundle masuk alur station seperti bundle lain (log Bundling pending,
+   Line tujuan ditentukan di tab IN divisi berikutnya). Tab IN/OUT tidak berubah.
+
+   Kamera memakai QrScannerModal yang sudah dipakai halaman station lain; QR bundle
+   berisi URL {PublicBaseUrl}/b/<serial> dan normalisasinya dikerjakan SP, jadi isi QR
+   apa pun (URL / serial / kode cutting) dikirim apa adanya ke server. *@
+
+<div class="d-flex flex-column gap-2">
+    <div class="alert alert-light border mb-0 py-2 small">
+        Scan QR stiker bundle dari Cutting, atau ketik kodenya. Bundle yang sudah diambil
+        atau bundle buatan manual akan ditolak.
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-primary" disabled="@sedangProses" @onclick="() => showScanner = true">
+            <i class="fe fe-maximize"></i> Scan QR
+        </button>
+        <div class="input-group" style="max-width: 360px;">
+            <input class="form-control" placeholder="Kode bundle / serial"
+                   value="@kodeManual"
+                   @oninput="e => kodeManual = e.Value?.ToString() ?? string.Empty"
+                   @onkeydown="KodeKeyDown" />
+            <button type="button" class="btn btn-outline-secondary"
+                    disabled="@(sedangProses || kodeManual.Trim().Length == 0)"
+                    @onclick="() => CariAsync(kodeManual)">Cari</button>
+        </div>
+    </div>
+
+    @if (pesanError.Length > 0)
+    {
+        <div class="alert alert-danger mb-0 py-2 small">@pesanError</div>
+    }
+    @if (pesanSukses.Length > 0)
+    {
+        <div class="alert alert-success mb-0 py-2 small">@pesanSukses</div>
+    }
+
+    @if (daftar.Count == 0)
+    {
+        <div class="text-muted small py-3 text-center">Belum ada bundle yang discan.</div>
+    }
+    else
+    {
+        @foreach (var b in daftar)
+        {
+            <div class="card mb-0">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div style="font-size: 0.85rem;">
+                            <div class="fw-bold">@b.CuttingCode <span class="text-muted">· @b.Serial</span></div>
+                            <div class="text-muted">@(b.NoPo ?? "-") &middot; @b.ArticleName</div>
+                            <div>
+                                Size <strong>@b.SizeName</strong> &middot;
+                                <strong>@b.Qty</strong> pcs &middot;
+                                Set @b.SetNo
+                            </div>
+                            <div class="text-muted">
+                                Nomor @b.NumberRange &middot; Hamparan @b.SpreadCode (@b.SpreadDate.ToString("dd MMM"))
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@sedangProses"
+                                title="Buang dari daftar" @onclick="() => Buang(b)">
+                            <i class="fe fe-x"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="d-flex justify-content-between align-items-center gap-2 border-top pt-2">
+            <div class="small text-muted">
+                @daftar.Count bundle &middot; @daftar.Sum(b => b.Qty) pcs
+            </div>
+            <button type="button" class="btn btn-success"
+                    disabled="@(sedangProses || ResourceId <= 0)"
+                    title="@(ResourceId <= 0 ? "Pilih operator dulu" : "Ambil bundle ke Bundling")"
+                    @onclick="AmbilAsync">
+                @(sedangProses ? "Memproses…" : $"Ambil {daftar.Count} bundle")
+            </button>
+        </div>
+    }
+</div>
+
+<QrScannerModal Show="showScanner" OnScanned="HasilScanAsync" OnClose="() => showScanner = false" />
+
+@code {
+    // Operator sesi station (resource divisi Bundling) -- dipakai sebagai pengambil.
+    [Parameter] public int ResourceId { get; set; }
+
+    // Dipanggil setelah pengambilan sukses supaya halaman station memuat ulang
+    // WIP/IN/OUT-nya (bundle yang diambil langsung jadi baris handover baru).
+    [Parameter] public EventCallback OnTaken { get; set; }
+
+    private readonly List<CuttingBundleScanDto> daftar = new();
+    private string kodeManual = string.Empty;
+    private bool showScanner;
+    private bool sedangProses;
+    private string pesanError = string.Empty;
+    private string pesanSukses = string.Empty;
+
+    private async Task HasilScanAsync(string nilai)
+    {
+        showScanner = false;
+        await CariAsync(nilai);
+    }
+
+    private async Task KodeKeyDown(KeyboardEventArgs e)
+    {
+        // Pemindai barcode genggam mengirim Enter di akhir -- diperlakukan sama dengan Cari.
+        if (e.Key == "Enter" && kodeManual.Trim().Length > 0) await CariAsync(kodeManual);
+    }
+
+    private async Task CariAsync(string kode)
+    {
+        kode = (kode ?? string.Empty).Trim();
+        if (kode.Length == 0) return;
+
+        sedangProses = true;
+        pesanError = string.Empty;
+        pesanSukses = string.Empty;
+
+        var (success, error, bundle) = await StationApi.LookupCuttingBundleAsync(kode);
+
+        sedangProses = false;
+
+        if (!success || bundle is null)
+        {
+            pesanError = error;
+            return;
+        }
+
+        if (daftar.Any(b => b.BundleId == bundle.BundleId))
+        {
+            pesanError = $"Bundle {bundle.CuttingCode} sudah ada di daftar scan.";
+            return;
+        }
+
+        daftar.Add(bundle);
+        kodeManual = string.Empty;
+    }
+
+    private void Buang(CuttingBundleScanDto b)
+    {
+        daftar.Remove(b);
+        pesanError = string.Empty;
+    }
+
+    private async Task AmbilAsync()
+    {
+        if (daftar.Count == 0 || ResourceId <= 0) return;
+
+        sedangProses = true;
+        pesanError = string.Empty;
+        pesanSukses = string.Empty;
+
+        var (success, error, hasil) = await StationApi.TakeCuttingBundlesAsync(
+            daftar.Select(b => b.BundleId).ToList(), ResourceId);
+
+        sedangProses = false;
+
+        if (!success)
+        {
+            pesanError = error;
+            return;
+        }
+
+        pesanSukses = $"{hasil?.TakenCount ?? daftar.Count} bundle ({hasil?.TotalPcs ?? daftar.Sum(b => b.Qty)} pcs) diambil ke Bundling.";
+        daftar.Clear();
+
+        if (OnTaken.HasDelegate) await OnTaken.InvokeAsync();
+    }
+}

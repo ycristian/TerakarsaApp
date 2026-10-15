@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using TerakarsaApp.API.Authorization;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Bundles;
+using TerakarsaApp.Shared.Cutting;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
@@ -34,6 +35,8 @@ public class StationDeviceController : ControllerBase
     private readonly StationAttendanceService _attendanceService;
     private readonly StationRekapProduksiService _stationRekapService;
     private readonly PositionService _positionService;
+    // Prompt 80: Scan Stok Bundle -- pengambilan bundle hasil cutting oleh Bundling.
+    private readonly CuttingService _cuttingService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
@@ -50,6 +53,7 @@ public class StationDeviceController : ControllerBase
         StationAttendanceService attendanceService,
         StationRekapProduksiService stationRekapService,
         PositionService positionService,
+        CuttingService cuttingService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
@@ -65,6 +69,7 @@ public class StationDeviceController : ControllerBase
         _attendanceService = attendanceService;
         _stationRekapService = stationRekapService;
         _positionService = positionService;
+        _cuttingService = cuttingService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -243,6 +248,40 @@ public class StationDeviceController : ControllerBase
         var (success, error) = await _bundleService.DeleteAsync(id, reason, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok();
+    }
+
+    // ==================== Prompt 80: Scan Stok Bundle ====================
+    // Bundling MENGAMBIL bundle yang sudah dibentuk Cutting dari hamparan (tidak membuat
+    // bundle lagi). Hanya untuk perangkat yang divisinya punya step Bundling -- dijaga di
+    // sini (divisi perangkat) dan sekali lagi di SP (resource harus milik divisi Bundling
+    // artikel ybs). Bundle manual (source = MANUAL) ditolak SP.
+
+    // Cari bundle dari hasil scan QR atau kode yang diketik manual. Tidak mengubah apa pun.
+    [HttpGet("cutting-stock/lookup")]
+    public async Task<IActionResult> LookupCuttingBundle([FromQuery] string code, [FromQuery] int? articleId)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return BadRequest("Kode bundle kosong.");
+
+        var (success, error, bundle) = await _cuttingService.LookupBundleAsync(code, articleId);
+        if (!success) return BadRequest(error);
+        return Ok(bundle);
+    }
+
+    // Ambil N bundle sekaligus -> stock_status = TAKEN + log workflow Bundling (pending,
+    // Line tujuan ditentukan di tab IN divisi berikutnya seperti handover lain).
+    [HttpPost("cutting-stock/take")]
+    public async Task<IActionResult> TakeCuttingBundles([FromBody] CuttingBundleTakeRequest request)
+    {
+        var operatorResourceId = EffectiveResourceId(request.ResourceId);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+        if (request.BundleIds.Count == 0) return BadRequest("Belum ada bundle yang discan.");
+
+        var (success, error, hasil) = await _cuttingService.TakeBundlesAsync(
+            new CuttingBundleTakeRequest { BundleIds = request.BundleIds, ResourceId = operatorResourceId },
+            _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok(hasil);
     }
 
     // Prompt 24: cetak ulang label bundle -- semua station boleh, tanpa batasan divisi, cukup

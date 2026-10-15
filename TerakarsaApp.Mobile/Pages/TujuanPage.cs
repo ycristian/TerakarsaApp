@@ -6,6 +6,7 @@ namespace TerakarsaApp.Mobile.Pages;
 //
 //   Dashboard Utama : user punya module apa pun SELAIN INV_THREAD / TNI_PDH*  -> /
 //   Admin Gudang    : module INV_THREAD                                       -> /gudang/benang
+//   Admin Cutting   : module CUTTING                                          -> /cutting
 //   PO TNI          : module TNI_PDH                                          -> /tni
 //
 // Kalau cuma ada satu tujuan, layar ini dilewati dan WebView langsung dibuka.
@@ -13,6 +14,8 @@ public class TujuanPage : ContentPage
 {
     private const string ModuleGudang = "INV_THREAD";
     private const string ModuleTni = "TNI_PDH";
+    // Prompt 80: module Cutting (stok bundle dari hamparan).
+    private const string ModuleCutting = "CUTTING";
 
     private readonly MobileAuthService _auth;
     private readonly ServerResolver _resolver;
@@ -100,6 +103,7 @@ public class TujuanPage : ContentPage
 
         var punyaLain = _auth.Modules.Any(m =>
             !m.Code.Equals(ModuleGudang, StringComparison.OrdinalIgnoreCase) &&
+            !m.Code.Equals(ModuleCutting, StringComparison.OrdinalIgnoreCase) &&
             !m.Code.StartsWith(ModuleTni, StringComparison.OrdinalIgnoreCase));
 
         if (punyaLain)
@@ -107,6 +111,9 @@ public class TujuanPage : ContentPage
 
         if (_auth.PunyaModule(ModuleGudang))
             hasil.Add(new Sasaran("Admin Gudang", "Stok benang: scan, ambil, kembali, opname", "/gudang/benang"));
+
+        if (_auth.PunyaModule(ModuleCutting))
+            hasil.Add(new Sasaran("Admin Cutting", "Stok bundle cutting: hamparan, stiker", "/cutting"));
 
         if (_auth.PunyaModule(ModuleTni))
             hasil.Add(new Sasaran("PO TNI", "Module PDH TNI AD", "/tni"));

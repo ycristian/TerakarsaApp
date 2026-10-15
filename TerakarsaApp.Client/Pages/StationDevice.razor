@@ -186,6 +186,19 @@ else
                         </a>
                     </li>
                 }
+                @* Prompt 80: hanya perangkat yang divisinya memegang step Bundling -- gate-nya
+                   SAMA dengan yang memunculkan kartu "Buat Bundle" di tab WIP (activeWork
+                   ber-IsBundling), jadi tidak ada sumber kebenaran baru soal "divisi Bundling".
+                   Pengambilan bundle cutting juga ditolak SP kalau operatornya bukan resource
+                   divisi Bundling artikel ybs. *@
+                @if (IsStationBundling)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link small py-1 px-2 @(activeTab == "stokcutting" ? "active" : "")" href="javascript:void(0)" @onclick='() => SetTab("stokcutting")'>
+                            Stok Cutting
+                        </a>
+                    </li>
+                }
                 @* Prompt 59: rekap ini milik SATU line, jadi tanpa operator sesi tidak ada yang
                    bisa ditampilkan -- tab dimatikan, bukan dibuka lalu kosong. Saat ini halaman
                    sudah menggantikan SELURUH isinya dengan layar "Pilih Operator" ketika
@@ -904,6 +917,15 @@ else
                 {
                     <div class="alert alert-success mt-3 mb-0">@packingFeedback</div>
                 }
+            }
+            else if (activeTab == "stokcutting")
+            {
+                @* Prompt 80: Scan Stok Bundle -- Bundling MENGAMBIL bundle yang sudah dibentuk
+                   Cutting dari hamparan (tidak membuat bundle lagi). Isinya di
+                   StationCuttingStockTab supaya halaman ini tidak makin besar (pola sama
+                   dengan tab Absen & Report). Setelah pengambilan, daftar WIP/IN/OUT dimuat
+                   ulang: bundle yang diambil langsung jadi baris handover Bundling baru. *@
+                <StationCuttingStockTab ResourceId="currentOperatorId ?? 0" OnTaken="RefreshLists" />
             }
             else if (activeTab == "rekapproduksi")
             {
@@ -2553,6 +2575,11 @@ else
         ClearOutSelection();
         await RefreshLists();
     }
+
+    // Prompt 80: perangkat ini milik divisi yang memegang step Bundling? Dipakai gate tab
+    // "Stok Cutting". Sengaja TIDAK memakai nama divisi atau id hardcode -- sumbernya sama
+    // dengan kartu "Buat Bundle" di tab WIP.
+    private bool IsStationBundling => activeWork.Any(a => a.IsBundling);
 
     private async Task RefreshLists()
     {

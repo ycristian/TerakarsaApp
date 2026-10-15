@@ -26,8 +26,9 @@
 		<ApplicationTitle>Terakarsa</ApplicationTitle>
 		<ApplicationId>id.terakarsa.app</ApplicationId>
 
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<!-- Prompt 80: tambah tujuan "Admin Cutting" di layar pilih tujuan. -->
+		<ApplicationDisplayVersion>1.1</ApplicationDisplayVersion>
+		<ApplicationVersion>2</ApplicationVersion>
 
 		<!-- Minimum Android 8.0 (API 26) sesuai prompt. -->
 		<SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
