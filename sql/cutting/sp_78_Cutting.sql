@@ -119,9 +119,16 @@ END;
 GO
 
 /* ============================================================
-   SIS_Cutting_NextSpreadCode -- kode hamparan berikutnya (H01, H02, ...).
-   Urut per artikel, dihitung dari kode berpola H<angka> yang sudah ada;
-   kode manual di luar pola itu diabaikan dalam perhitungan.
+   SIS_Cutting_NextSpreadCode -- kode hamparan berikutnya.
+
+   Format: <huruf bundle project>-H<nn>, mis. A-H01, B-H02 (huruf dari
+   projects.bundle_letter, Prompt 27 -- A-Z berputar per project). Project lama
+   yang bundle_letter-nya NULL jatuh ke format lama tanpa awalan: H01.
+   Huruf dibawa supaya kode bundle (A-H01-M-03) membedakan project, bukan cuma
+   artikel -- lihat komentar cutting_code di alter_78_cutting_schema.sql.
+
+   Nomor urut per ARTIKEL, dihitung dari angka SESUDAH 'H' TERAKHIR pada kode
+   yang sudah ada; kode manual di luar pola itu diabaikan dalam perhitungan.
    ============================================================ */
 CREATE OR ALTER PROCEDURE SIS_Cutting_NextSpreadCode
     @ArticleId INT
@@ -129,17 +136,29 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Angka hamparan = bagian setelah 'H' terakhir ('A-H07' -> 7, 'H07' -> 7).
     DECLARE @Next INT;
-    SELECT @Next = ISNULL(MAX(TRY_CAST(SUBSTRING(spread_code, 2, 18) AS INT)), 0) + 1
-    FROM spreads
-    WHERE article_id = @ArticleId
-      AND deleted_at IS NULL
-      AND spread_code LIKE 'H%'
-      AND TRY_CAST(SUBSTRING(spread_code, 2, 18) AS INT) IS NOT NULL;
+    SELECT @Next = ISNULL(MAX(TRY_CAST(
+               SUBSTRING(s.spread_code,
+                         LEN(s.spread_code) - CHARINDEX('H', REVERSE(s.spread_code)) + 2,
+                         18) AS INT)), 0) + 1
+    FROM spreads s
+    WHERE s.article_id = @ArticleId
+      AND s.deleted_at IS NULL
+      AND CHARINDEX('H', s.spread_code) > 0;
 
     IF @Next IS NULL SET @Next = 1;
 
-    SELECT 'H' + RIGHT('00' + CAST(@Next AS VARCHAR(10)), CASE WHEN @Next > 99 THEN LEN(CAST(@Next AS VARCHAR(10))) ELSE 2 END) AS NextCode;
+    DECLARE @Letter CHAR(1);
+    SELECT @Letter = p.bundle_letter
+    FROM articles a
+    INNER JOIN projects p ON p.project_id = a.project_id
+    WHERE a.article_id = @ArticleId;
+
+    DECLARE @Nomor VARCHAR(10) = RIGHT('00' + CAST(@Next AS VARCHAR(10)),
+        CASE WHEN @Next > 99 THEN LEN(CAST(@Next AS VARCHAR(10))) ELSE 2 END);
+
+    SELECT CASE WHEN @Letter IS NULL THEN '' ELSE @Letter + '-' END + 'H' + @Nomor AS NextCode;
 END;
 GO
 
@@ -949,6 +968,10 @@ BEGIN
                 b.cutting_code                                   AS cutting_code,
                 b.serial                                         AS serial,
                 ISNULL(@PublicBaseUrl, '') + '/b/' + b.serial     AS qr_content,
+                -- Nomor bundle pendek per project + huruf project (Prompt 27), dicetak
+                -- di kiri Size seperti "No. J-27" di stiker penyerahan bundle manual.
+                b.bundle_no                                      AS bundle_no,
+                p.bundle_letter                                  AS bundle_letter,
                 p.no_po                                          AS no_po,
                 p.project_name                                   AS project_name,
                 a.article_name                                   AS article_name,

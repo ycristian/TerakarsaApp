@@ -534,6 +534,15 @@ public class CuttingBundleLabelPayload
     [JsonPropertyName("qr_content")]
     public string QrContent { get; set; } = string.Empty;
 
+    // Nomor bundle pendek per project + huruf project (Prompt 27) -- dicetak di kiri
+    // Size, format sama dengan stiker penyerahan bundle manual ("J-27"; nomor saja
+    // kalau project-nya belum punya huruf).
+    [JsonPropertyName("bundle_no")]
+    public int BundleNo { get; set; }
+
+    [JsonPropertyName("bundle_letter")]
+    public string? BundleLetter { get; set; }
+
     [JsonPropertyName("no_po")]
     public string? NoPo { get; set; }
 

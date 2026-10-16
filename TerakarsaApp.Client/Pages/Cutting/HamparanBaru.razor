@@ -83,7 +83,9 @@
             <div class="ct-panel ct-panel-pad">
                 <div style="display:flex;align-items:center">
                     <div class="ct-panel-t">Rincian set per size</div>
-                    <span class="ct-spacer @(SetTerisi == setCount ? "ct-ok" : "ct-bad")" style="font-size:13px">
+                    @* setCount masih 0 (default) tidak boleh tampil hijau "0 / 0" -- itu
+                       belum terisi, bukan sudah pas. *@
+                    <span class="ct-spacer @(setCount > 0 && SetTerisi == setCount ? "ct-ok" : "ct-bad")" style="font-size:13px">
                         @SetTerisi / @setCount set terisi
                     </span>
                 </div>
@@ -109,13 +111,17 @@
                             </div>
                             <div data-l="Pcs">@(s.SetCount > 0 ? Angka(s.SetCount * sheetsPerSet) : "–")</div>
                             <div data-l="Numbering" style="font-size:13px">
-                                @if (s.SetCount > 0)
+                                @if (s.SetCount > 0 && sheetsPerSet > 0)
                                 {
                                     <text>@s.SizeName-@s.NextFrom s/d @s.SizeName-@(s.NextFrom + s.SetCount * sheetsPerSet - 1)</text>
                                 }
-                                else
+                                else if (s.NextFrom > 1)
                                 {
                                     <text>lanjut dari @s.SizeName-@(s.NextFrom - 1)</text>
+                                }
+                                else
+                                {
+                                    <text>mulai dari @s.SizeName-1</text>
                                 }
                             </div>
                         </div>
@@ -224,8 +230,11 @@
 
     private string spreadCode = string.Empty;
     private DateTime spreadDate = DateTime.Today;
-    private int setCount = 12;
-    private int sheetsPerSet = 220;
+    // Default 0 (bukan contoh angka dari mockup): jumlah set & lembar per set beda
+    // tiap hamparan, jadi harus diisi sadar oleh Admin Cutting. Selama masih 0,
+    // tidak ada baris set yang terbentuk dan tombol simpan tetap terkunci.
+    private int setCount;
+    private int sheetsPerSet;
 
     private List<SizeRow> sizes = new();
     private List<SetRow> setRows = new();

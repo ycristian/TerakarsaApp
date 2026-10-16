@@ -287,9 +287,15 @@ public static class TsplBuilder
         const int leftX = 12;
         const int leftWidth = 290;   // sampai sebelum kolom QR
 
-        // Kode bundle = elemen terbesar di label (font 5 = 32 x 48 dot/karakter).
-        var code = TruncateToFit(Sanitize(data.CuttingCode).ToUpperInvariant(), 20, "5", 1, leftWidth);
-        Write(Text(leftX, 18, "5", 1, 1, code));
+        // Kode bundle = elemen terbesar di label. Fontnya ADAPTIF, bukan selalu "5":
+        // sejak kode hamparan membawa huruf bundle project (A-H01-M-03 = 10 karakter),
+        // font 5 (32 dot/karakter) hanya memuat 9 karakter di kolom kiri dan sisanya
+        // kepotong -- justru informasi yang paling dibutuhkan di lapangan. Turun ke
+        // font 4 (24 dot) lalu 3 (16 dot) hanya kalau perlu, jadi kode pendek
+        // (H01-M-03) tetap tercetak sebesar sebelumnya.
+        var code = Sanitize(data.CuttingCode).ToUpperInvariant();
+        var codeFont = new[] { "5", "4", "3" }.FirstOrDefault(f => CharWidth(f, 1) * code.Length <= leftWidth) ?? "3";
+        Write(Text(leftX, 18, codeFont, 1, 1, TruncateToFit(code, 30, codeFont, 1, leftWidth)));
 
         // PO . artikel, dipecah maks 2 baris di batas spasi.
         var judul = Join(" . ", data.NoPo, data.ArticleName).ToUpperInvariant();
@@ -299,15 +305,31 @@ public static class TsplBuilder
 
         Write($"BAR {leftX},114,{leftWidth},3\r\n");
 
-        // Size / Qty / Set -- label kecil di atas, angkanya besar (font 4 = 24 x 32).
-        Write(Text(leftX, 122, "1", 1, 1, "SIZE"));
-        Write(Text(leftX, 138, "4", 1, 1, TruncateToFit(Sanitize(data.SizeName).ToUpperInvariant(), 4, "4", 1, 100)));
+        // No / Size / Qty / Set -- label kecil di atas, angkanya besar.
+        // "No" = nomor bundle pendek per project (bundle_no) dengan huruf project di
+        // depannya, format SAMA dengan stiker penyerahan bundle manual ("J-27") supaya
+        // operator membaca nomor yang sama di kedua stiker. Project lama tanpa huruf
+        // mencetak nomornya saja.
+        //
+        // Empat kolom memakai font 3 (16 x 24), bukan font 4 (24 x 32) seperti saat
+        // hanya ada tiga kolom: "J-27" + size + qty 3 digit + set tidak muat di 290 dot
+        // dengan font 4, dan kolom yang saling tumpang-tindih lebih buruk daripada
+        // angka yang sedikit lebih kecil.
+        var bundleNoText = string.IsNullOrWhiteSpace(data.BundleLetter)
+            ? data.BundleNo.ToString()
+            : $"{data.BundleLetter}-{data.BundleNo}";
 
-        Write(Text(leftX + 110, 122, "1", 1, 1, "QTY"));
-        Write(Text(leftX + 110, 138, "4", 1, 1, data.Qty.ToString()));
+        Write(Text(leftX, 122, "1", 1, 1, "NO"));
+        Write(Text(leftX, 138, "3", 1, 1, TruncateToFit(bundleNoText.ToUpperInvariant(), 5, "3", 1, 80)));
 
-        Write(Text(leftX + 215, 122, "1", 1, 1, "SET"));
-        Write(Text(leftX + 215, 138, "4", 1, 1, data.SetNo.ToString()));
+        Write(Text(leftX + 84, 122, "1", 1, 1, "SIZE"));
+        Write(Text(leftX + 84, 138, "3", 1, 1, TruncateToFit(Sanitize(data.SizeName).ToUpperInvariant(), 4, "3", 1, 64)));
+
+        Write(Text(leftX + 152, 122, "1", 1, 1, "QTY"));
+        Write(Text(leftX + 152, 138, "3", 1, 1, data.Qty.ToString()));
+
+        Write(Text(leftX + 220, 122, "1", 1, 1, "SET"));
+        Write(Text(leftX + 220, 138, "3", 1, 1, data.SetNo.ToString()));
 
         Write($"BAR {leftX},180,{leftWidth},3\r\n");
 
@@ -316,8 +338,11 @@ public static class TsplBuilder
         var nomor = $"{Sanitize(data.NumberFromText)} s/d {Sanitize(data.NumberToText)}".ToUpperInvariant();
         Write(Text(leftX, 204, "2", 1, 1, TruncateToFit(nomor, 30, "2", 1, leftWidth)));
 
-        // Baris kaki: asal bundle ini.
-        var kaki = $"HAMPARAN {Sanitize(data.SpreadCode).ToUpperInvariant()} . {data.SpreadDate:dd MMM yyyy} . CUTTING";
+        // Baris kaki: asal bundle ini. Tanggal SENGAJA numerik (dd-MM-yyyy), bukan
+        // "dd MMM yyyy": nama bulan ikut culture mesin yang menjalankan print service
+        // (en-US di lapangan -> "16 Oct 2026" di label yang seluruhnya Bahasa Indonesia).
+        // Label lain di file ini juga memakai format numerik.
+        var kaki = $"HAMPARAN {Sanitize(data.SpreadCode).ToUpperInvariant()} . {data.SpreadDate:dd-MM-yyyy} . CUTTING";
         Write(Text(leftX, 292, "1", 1, 1, TruncateToFit(kaki, 60, "1", 1, 460)));
 
         Write("PRINT 1,1\r\n");
