@@ -50,6 +50,10 @@ public class SpreadSizeInput
 {
     public int ArticleSizeId { get; set; }
     public int SetCount { get; set; }
+
+    // Nomor pcs awal pilihan user (Prompt 82). 0 = biarkan SP melanjutkan dari
+    // hamparan terakhir artikel + size ini.
+    public int NumberFrom { get; set; }
 }
 
 public class SpreadBundleInput
@@ -271,17 +275,43 @@ public class CuttingBundleScanDto
     public string SpreadCode { get; set; } = string.Empty;
     public DateTime SpreadDate { get; set; }
 
+    // Prompt 81: dipakai client untuk memuat pilihan Line tujuan lewat
+    // resources/{divisionId}. NULL = tidak ada step sesudah Bundling, jadi claim tidak
+    // mungkin dan UI jatuh ke "ambil tanpa claim".
+    public int ArticleId { get; set; }
+    public int? BundlingTargetDivisionId { get; set; }
+
     public string NumberRange => $"{SizeName}-{NumberFrom} s/d {SizeName}-{NumberTo}";
 }
 
 public class CuttingBundleTakeRequest
 {
     public List<int> BundleIds { get; set; } = new();
-    public int ResourceId { get; set; }          // Line/penjahit tujuan (pelaksana sesi station)
+    public int ResourceId { get; set; }          // operator sesi station (resource divisi Bundling)
+
+    // Prompt 81 -- sistem claim. TargetResourceId WAJIB (> 0): SP menolak pengambilan
+    // bundle cutting tanpa Line tujuan. UI mengirim satu bundle per permintaan.
+    public int TargetResourceId { get; set; }    // Line/penjahit tujuan
+    public int EmployeeId { get; set; }          // penjahit dari master (opsional)
+    public int PrintCopies { get; set; } = 1;    // 0 = tidak cetak label
 }
 
+// Hasil mentah dari SIS_CuttingBundle_Take -- dipetakan EF, jadi setiap properti HARUS
+// ada sebagai kolom di result set SP. Jangan tambah properti di sini.
 public class CuttingBundleTakeResultDto
 {
     public int TakenCount { get; set; }
     public int TotalPcs { get; set; }
+}
+
+// Prompt 81: respons endpoint take/claim -- hasil SP + hasil enqueue label.
+public class CuttingBundleClaimResultDto
+{
+    public int TakenCount { get; set; }
+    public int TotalPcs { get; set; }
+    public int LabelsQueued { get; set; }
+
+    // Claim TIDAK di-rollback kalau label gagal masuk antrean cetak -- pesannya
+    // ditampilkan sebagai peringatan, bundle tetap sudah diklaim.
+    public string? LabelError { get; set; }
 }

@@ -22,6 +22,9 @@ public class ArticlePhotoService
 {
     private static readonly string[] AllowedExtensions = { "jpg", "jpeg", "png" };
     private const long MaxFileSizeBytes = 10 * 1024 * 1024;
+    // Kualitas JPEG thumbnail kartu WIP -- lebih rendah dari foto asli (80) karena hanya
+    // dilihat 64x64 di tablet.
+    private const int ThumbnailQuality = 70;
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
 
     private readonly AppDbContext _db;
@@ -190,6 +193,76 @@ public class ArticlePhotoService
 
         var stream = _fileStorage.OpenRead(row.FilePath);
         return (stream, contentType, row.FileName);
+    }
+
+    // Thumbnail kartu WIP /station: foto asli 1920px (rata-rata ~80 KB) jauh terlalu besar
+    // untuk kotak 64x64. Versi kecil dibuat SEKALI lalu disimpan di subfolder "thumbs" di
+    // samping file aslinya, jadi permintaan berikutnya cuma baca file -- tanpa decode ulang.
+    // ETag dikembalikan supaya pemanggil bisa menyuruh browser menyimpan hasilnya; itu yang
+    // membuat reload /station tidak mengunduh ulang foto sama sekali.
+    public async Task<(Stream Stream, string ContentType, string ETag)?> GetPrimaryThumbnailAsync(int articleId, int maxWidth)
+    {
+        var row = await GetPrimaryRowAsync(articleId);
+        if (row is null || !_fileStorage.FileExists(row.FilePath)) return null;
+
+        // Foto utama yang diganti selalu baris baru = Id baru = ETag baru, jadi tidak perlu
+        // ada pembersihan thumbnail lama -- yang basi cukup berhenti dirujuk.
+        var etag = $"\"ap{row.Id}-w{maxWidth}\"";
+        var thumbPath = BuildThumbPath(row.FilePath, maxWidth);
+
+        if (_fileStorage.FileExists(thumbPath))
+            return (_fileStorage.OpenRead(thumbPath), "image/jpeg", etag);
+
+        CompressResult compressed;
+        using (var source = _fileStorage.OpenRead(row.FilePath))
+        {
+            compressed = await _imageCompression.CompressAsync(
+                source, Path.GetExtension(row.FilePath), maxWidth, ThumbnailQuality);
+        }
+
+        // Simpan untuk permintaan berikutnya. Kalau gagal (share jaringan terkunci, atau
+        // request lain sedang menulis file yang sama) thumbnail tetap dikirim dari memori --
+        // yang rugi cuma request ini, bukan operator.
+        try
+        {
+            await _fileStorage.SaveAtAsync(compressed.Stream, thumbPath);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        compressed.Stream.Position = 0;
+        return (compressed.Stream, "image/jpeg", etag);
+    }
+
+    // Foto utama ukuran penuh + ETag -- dipakai pratinjau layar penuh, yang hanya terambil
+    // kalau operator mengetuk thumbnail.
+    public async Task<(Stream Stream, string ContentType, string ETag)?> GetPrimaryOriginalAsync(int articleId)
+    {
+        var row = await GetPrimaryRowAsync(articleId);
+        if (row is null || !_fileStorage.FileExists(row.FilePath)) return null;
+
+        if (!ContentTypeProvider.TryGetContentType(row.FileName, out var contentType))
+            contentType = "application/octet-stream";
+
+        return (_fileStorage.OpenRead(row.FilePath), contentType, $"\"ap{row.Id}-full\"");
+    }
+
+    private async Task<ArticlePhotoRow?> GetPrimaryRowAsync(int articleId)
+    {
+        var rows = await GetRowsByArticleAsync(articleId);
+        return rows.FirstOrDefault(r => r.IsPrimary) ?? rows.FirstOrDefault();
+    }
+
+    private static string BuildThumbPath(string filePath, int maxWidth)
+    {
+        var normalized = filePath.Replace('\\', '/');
+        var dir = Path.GetDirectoryName(normalized)?.Replace('\\', '/') ?? string.Empty;
+        var thumbName = $"{Path.GetFileNameWithoutExtension(normalized)}_w{maxWidth}.jpg";
+        return string.IsNullOrEmpty(dir) ? $"thumbs/{thumbName}" : $"{dir}/thumbs/{thumbName}";
     }
 
     public async Task SetPrimaryAsync(int photoId)

@@ -73,9 +73,14 @@
     display: flex; align-items: center; justify-content: center;
     border-radius: 8px;
     background: #2a313b;
+    border: 0;
+    padding: 0;
+    font-size: 15px;
     color: var(--ct-head-mut);
     flex-shrink: 0;
 }
+.ct-user + .ct-head-ico { margin-left: 10px; }
+.ct-head-ico + .ct-head-ico { margin-left: 6px; }
 
 /* HP: brand dipendekkan, nav jadi scroll horizontal */
 @media (max-width: 899px) {
@@ -112,6 +117,8 @@
 .ct-pagehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .ct-pagehead h1 { margin: 0; font-size: 22px; font-weight: 700; }
 .ct-pagehead .ct-sub { font-size: 14px; color: var(--ct-mut); }
+/* dorong elemen ke kanan di baris flex mana pun (judul panel, pagehead, bar bawah) */
+.ct-spacer { margin-left: auto; }
 .ct-pagehead .ct-spacer { margin-left: auto; }
 @media (max-width: 899px) {
     .ct-pagehead h1 { font-size: 19px; }
@@ -182,10 +189,13 @@
 .ct-g-stock { grid-template-columns: 100px 1fr 1fr 1fr 1fr; }
 /* Detail Hamparan: Kode | Set | Nomor | Qty | Status | aksi */
 .ct-g-bundle { grid-template-columns: 130px 60px 160px 70px 1fr 160px; }
-/* Buat Hamparan, rincian size: Size | Set | Pcs | Numbering */
-.ct-g-size { grid-template-columns: 70px 90px 1fr 1fr; gap: 8px; }
-/* Buat Hamparan, pembagian: Size | Set | qty | Total | + */
-.ct-g-split { grid-template-columns: 90px 70px 1fr 100px 60px; }
+/* Buat Hamparan, rincian size: Size | Set | Mulai no | Pcs; numbering pindah ke
+   baris sendiri di bawahnya (ct-row-sub) supaya rentangnya tidak patah-patah. */
+.ct-g-size { grid-template-columns: 56px 1fr 1fr 1fr; column-gap: 8px; row-gap: 0; }
+/* Buat Hamparan, pembagian: urut | Size | No | Set | qty | Total | edit */
+.ct-g-split { grid-template-columns: 26px 44px 58px 40px minmax(0, 1fr) 80px 62px; }
+/* kolom qty boleh menyusut supaya deretan kotak qty tidak terdorong turun */
+.ct-g-split > * { min-width: 0; }
 /* Daftar Hamparan: Kode | PO/artikel | Tgl | Hampar | Bundle | Stok | Status */
 .ct-g-spread { grid-template-columns: 90px 1fr 110px 120px 150px 120px; }
 
@@ -205,6 +215,48 @@
         letter-spacing: .04em;
         margin-right: 6px;
     }
+}
+
+/* HP potrait -- rincian set per size dirapatkan: Set & Mulai no berdampingan,
+   lalu Pcs (kiri) sebaris dengan rentang numbering (kanan). Kalau semuanya
+   ditumpuk satu kolom, satu size saja makan hampir setengah layar. */
+@media (max-width: 899px) {
+    .ct-g-size {
+        grid-template-columns: 1fr 1fr;
+        column-gap: 10px;
+        row-gap: 4px;
+    }
+    .ct-g-size > [data-l="Size"] { grid-column: 1 / -1; }
+    .ct-g-size > [data-l="Set"] { grid-column: 1; }
+    .ct-g-size > [data-l="Mulai no"] { grid-column: 2; }
+    .ct-g-size > [data-l="Pcs"] { grid-column: 1; align-self: center; }
+    .ct-g-size > .ct-row-sub { grid-column: 2; margin-top: 0; }
+    /* label kolom (SET / MULAI NO) jadi baris sendiri di atas kotaknya */
+    .ct-g-size > [data-l="Set"]::before,
+    .ct-g-size > [data-l="Mulai no"]::before { display: block; margin: 0 0 2px; }
+}
+
+/* HP potrait -- kartu pembagian bundle dipadatkan jadi 3 baris:
+   [urut | size | set] / [no | total] / [qty per bundle | tombol Edit].
+   Kolom & baris dipasang eksplisit karena urutan DOM-nya beda dengan urutan
+   tampil di HP (No ditulis sebelum Set, tapi di HP Set naik ke baris pertama). */
+@media (max-width: 899px) {
+    .ct-g-split {
+        grid-template-columns: auto 1fr auto;
+        column-gap: 10px;
+        row-gap: 4px;
+    }
+    .ct-g-split > .ct-urut { grid-area: 1 / 1; }
+    .ct-g-split > [data-l="Size"] { grid-area: 1 / 2; }
+    .ct-g-split > [data-l="Set"] { grid-area: 1 / 3; }
+    .ct-g-split > [data-l="No"] { grid-area: 2 / 1 / auto / 3; }
+    .ct-g-split > [data-l="Total"] { grid-area: 2 / 3; text-align: right; }
+    .ct-g-split > .ct-qty-lbl { grid-area: 3 / 1 / auto / 3; white-space: normal; }
+    .ct-g-split > .ct-acts { grid-area: 3 / 3; justify-content: flex-end; }
+    .ct-g-split > .ct-qty-edit { grid-area: 4 / 1 / auto / -1; }
+    /* rentang nomor jadi satu baris "2545 – 2800" (di layar lebar ditumpuk) */
+    .ct-g-split > [data-l="No"] { display: flex; gap: 4px; }
+    .ct-g-split > [data-l="No"] > div + div::before { content: "– "; }
 }
 
 /* ---------- chip / badge ---------- */
@@ -246,6 +298,7 @@
 /* ---------- form ---------- */
 .ct-field { display: flex; flex-direction: column; gap: 6px; }
 .ct-field label { font-size: 13px; font-weight: 600; color: var(--ct-mut); }
+.ct-hint { font-size: 12px; color: var(--ct-mut2); }
 .ct-field .ct-hint { font-size: 12px; color: var(--ct-mut2); }
 .ct-inp, .cutting select.ct-inp {
     height: 46px;
@@ -262,11 +315,11 @@
 .ct-inp.big { font-size: 18px; font-weight: 600; }
 .ct-inp.code { font-weight: 600; }
 .ct-inp-sm {
-    height: 42px;
+    height: 32px;
     border: 1px solid var(--ct-inp);
     border-radius: 8px;
-    padding: 0 10px;
-    font-size: 16px;
+    padding: 0 8px;
+    font-size: 14px;
     font-family: inherit;
     font-weight: 600;
     width: 100%;
@@ -275,6 +328,7 @@
 }
 .ct-inp-qty {
     width: 62px;
+    padding: 0 4px;
     height: 40px;
     border: 1px solid var(--ct-inp);
     border-radius: 8px;
@@ -286,9 +340,54 @@
     flex-shrink: 0;
 }
 .ct-inp-qty.bad { border-color: var(--ct-amber-line); }
-.ct-qtys { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Di tabel pembagian bundle kotaknya dibuat seukuran input biasa -- angkanya
+   pendek dan deretannya banyak, kotak besar cuma makan tempat. */
+.ct-g-split .ct-inp-qty {
+    width: 46px;
+    height: 30px;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+}
+/* Kotak qty per bundle dijaga tetap satu baris; kalau bundle-nya banyak,
+   deretannya digeser mendatar, bukan dibungkus ke baris kedua. */
+.ct-qtys { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+/* Kolom qty saat TIDAK diedit: cuma teks "50, 50, 50, 55" -- satu baris, dipotong
+   kalau kepanjangan (angka lengkapnya tetap ada begitu tombol Edit ditekan). */
+.ct-qty-lbl { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Kotak input qty dibuka di baris sendiri selebar tabel -- di sini boleh membungkus. */
+.ct-qty-edit { grid-column: 1 / -1; margin-top: 8px; }
+.ct-qty-edit .ct-qtys { flex-wrap: wrap; overflow: visible; }
 
 .ct-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+/* baris tombol saran nomor awal di rincian set per size */
+.ct-num-saran { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
+/* baris target qty per bundle + tombol reset perhitungan */
+.ct-target-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ct-target-row label { font-size: 13px; font-weight: 600; color: var(--ct-mut); }
+/* baris kedua di dalam satu .ct-row grid -- mis. rentang numbering per size.
+   Rata kanan supaya sejajar dengan kolom angka di atasnya, bukan menggantung
+   di bawah kolom Size. */
+.ct-row-sub { grid-column: 1 / -1; font-size: 13px; margin-top: 2px; text-align: right; }
+
+/* baris rincian size dirapatkan -- tiap baris sudah dua tingkat (input + numbering) */
+.ct-g-size.ct-row { padding-top: 4px; padding-bottom: 4px; font-size: 14px; }
+.ct-g-size.ct-row-h { padding-top: 4px; padding-bottom: 4px; }
+
+/* Isi kotak input tetap rata KIRI (angka diketik dari kiri, lebih enak dibaca
+   sambil mengetik); yang rata kanan hanya kolom teks angka: Pcs + rentang numbering.
+   Hanya di layar lebar -- di HP baris ini jadi kartu berlabel, rata kiri semua. */
+@media (min-width: 900px) {
+    .ct-g-size > [data-l="Pcs"] { text-align: right; }
+    .ct-g-size.ct-row-h > :nth-child(4) { text-align: right; }
+}
+/* nomor urut baris tanpa header di tabel pembagian bundle */
+.ct-urut { color: var(--ct-mut2); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* rentang nomor pcs per set di tabel pembagian bundle */
+.ct-num { color: var(--ct-mut); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Di tabel pembagian bundle nomor awal & akhir ditumpuk dua baris, huruf kecil. */
+.ct-g-split [data-l="No"] { font-size: 12px; line-height: 1.3; }
 
 .ct-total {
     background: var(--ct-teal-bg);
@@ -333,6 +432,7 @@
 .ct-btn-pri:disabled { background: #9ca3af; color: #f3f4f6; }
 .ct-btn-lg { height: 50px; padding: 0 22px; font-size: 15px; }
 .ct-btn-sm { height: 40px; padding: 0 12px; font-size: 13px; }
+.ct-btn-xs { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
 .ct-btn-ico {
     width: 44px; height: 44px; padding: 0;
     font-size: 18px;
@@ -374,7 +474,7 @@
 
 /* ---------- dua kolom Buat Hamparan ---------- */
 .ct-split { display: flex; gap: 20px; flex: 1; min-height: 0; }
-.ct-split-l { width: 380px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
+.ct-split-l { width: 420px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
 .ct-split-r { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 @media (max-width: 899px) {
     .ct-split { flex-direction: column; gap: 14px; }

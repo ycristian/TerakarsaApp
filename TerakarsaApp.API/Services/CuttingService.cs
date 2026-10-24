@@ -464,10 +464,15 @@ public class CuttingService
             var rows = await _db.Database
                 .SqlQueryRaw<CuttingBundleTakeResultDto>(
                     "EXEC SIS_CuttingBundle_Take @BundleIdsJson = @BundleIdsJson, " +
-                    "@ResourceId = @ResourceId, @UserId = @UserId",
+                    "@ResourceId = @ResourceId, @UserId = @UserId, " +
+                    "@TargetResourceId = @TargetResourceId, @EmployeeId = @EmployeeId",
                     new SqlParameter("@BundleIdsJson", idsJson),
                     new SqlParameter("@ResourceId", request.ResourceId),
-                    new SqlParameter("@UserId", userId))
+                    new SqlParameter("@UserId", userId),
+                    // Prompt 81: 0 = tanpa claim -- SP menormalkan <= 0 jadi NULL dan
+                    // memakai cabang Prompt 80 (log pending).
+                    new SqlParameter("@TargetResourceId", request.TargetResourceId),
+                    new SqlParameter("@EmployeeId", request.EmployeeId))
                 .ToListAsync();
 
             return (true, string.Empty, rows.FirstOrDefault());

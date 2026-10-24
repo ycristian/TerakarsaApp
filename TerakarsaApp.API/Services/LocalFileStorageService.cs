@@ -28,6 +28,16 @@ public class LocalFileStorageService : IFileStorageService
         return Path.Combine(subfolder, diskFileName).Replace('\\', '/');
     }
 
+    public async Task SaveAtAsync(Stream content, string relativePath)
+    {
+        var fullPath = Path.Combine(_basePath, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+
+        content.Position = 0;
+        using var stream = new FileStream(fullPath, FileMode.Create);
+        await content.CopyToAsync(stream);
+    }
+
     public Stream OpenRead(string relativePath)
     {
         var fullPath = Path.Combine(_basePath, relativePath);

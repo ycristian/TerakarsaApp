@@ -244,14 +244,22 @@ public static class TsplBuilder
     // (60 x 40 mm, 480 x 320 dot @ 8 dot/mm) -- ini VARIAN BARU, BuildBundleLabel
     // (stiker penyerahan bundle) tidak disentuh sama sekali.
     //
-    // Kiri: kode bundle besar (H06-M-03), PO + artikel, Size/Qty/Set, rentang nomor pcs,
-    // baris kaki "Hamparan H06 . <tanggal> . Cutting". Kanan: QR + serial kecil.
+    // Kepala: nama PO di kiri (elemen terbesar di kiri), KODE HAMPARAN di kanan atas
+    // (elemen terbesar di label). Di bawahnya: artikel, Size/Qty/Set, rentang nomor pcs,
+    // baris kaki "<kode bundle> . <tanggal> . Cutting". Kanan: QR + serial kecil, QR
+    // mulai sejajar garis melintang pertama.
+    //
+    // Ad hoc lanjutan Prompt 80: dulu kode bundle lengkap (R-H01-XL-01) yang jadi teks
+    // raksasa di kiri atas dan PO cuma baris kecil. Yang dicocokkan operator dari jauh
+    // adalah HAMPARAN-nya (tumpukan per hamparan) dan PO-nya, sedangkan pembeda antar
+    // bundle (No/Size/Qty/Set) sudah tercetak besar di tengah label. Kode bundle lengkap
+    // tetap ada, pindah ke baris kaki -- menggantikan "Hamparan H06" yang sekarang
+    // mubazir karena kode hamparan sudah jadi elemen terbesar.
     //
     // PENYIMPANGAN SENGAJA dari mockup: teks kecil di bawah QR adalah SERIAL
     // (B26-005692), bukan kode bundle -- yang discan/diketik ulang operator saat QR
     // tidak terbaca harus sama dengan isi QR itu sendiri ({PublicBaseUrl}/b/<serial>),
-    // sedangkan kode bundle sengaja tidak unik lintas artikel. Kode bundle sudah jadi
-    // elemen terbesar di kolom kiri, jadi tidak ada informasi yang hilang.
+    // sedangkan kode bundle sengaja tidak unik lintas artikel.
     public static byte[] BuildCuttingBundleLabel(CuttingBundleLabelPayload data)
     {
         using var stream = new MemoryStream();
@@ -266,10 +274,15 @@ public static class TsplBuilder
         Write("DIRECTION 1\r\n");
         Write("CLS\r\n");
 
+        // Garis melintang pertama; dipakai juga sebagai y atas QR supaya keduanya
+        // sejajar (dulu QR mulai di y 40, menggantung sendirian di pojok kanan atas --
+        // sekarang pojok itu dipakai kode hamparan).
+        const int firstBarY = 114;
+
         // QR dirender sendiri jadi BITMAP lewat QRCoder, alasannya persis sama dengan
         // BuildBundleLabel -- lihat komentar panjang di sana (firmware TSC TTP-244 Pro
         // salah merender command QRCODE bawaan, dan margin harus masuk ke bitmap).
-        const int qrX = 312, qrY = 40, qrCell = 5, qrQuietModules = 1;
+        const int qrX = 312, qrY = firstBarY, qrCell = 5, qrQuietModules = 1;
         var qrGenerator = new QRCodeGenerator();
         var qrCodeData = qrGenerator.CreateQrCode(Sanitize(data.QrContent), QRCodeGenerator.ECCLevel.M);
         var modules = ToModuleArray(qrCodeData.ModuleMatrix, qrQuietModules);
@@ -286,24 +299,49 @@ public static class TsplBuilder
         // ---- kolom kiri ----
         const int leftX = 12;
         const int leftWidth = 290;   // sampai sebelum kolom QR
+        const int rightEdge = 468;   // margin kanan = margin kiri (12 dot)
 
-        // Kode bundle = elemen terbesar di label. Fontnya ADAPTIF, bukan selalu "5":
-        // sejak kode hamparan membawa huruf bundle project (A-H01-M-03 = 10 karakter),
-        // font 5 (32 dot/karakter) hanya memuat 9 karakter di kolom kiri dan sisanya
-        // kepotong -- justru informasi yang paling dibutuhkan di lapangan. Turun ke
-        // font 4 (24 dot) lalu 3 (16 dot) hanya kalau perlu, jadi kode pendek
-        // (H01-M-03) tetap tercetak sebesar sebelumnya.
-        var code = Sanitize(data.CuttingCode).ToUpperInvariant();
-        var codeFont = new[] { "5", "4", "3" }.FirstOrDefault(f => CharWidth(f, 1) * code.Length <= leftWidth) ?? "3";
-        Write(Text(leftX, 18, codeFont, 1, 1, TruncateToFit(code, 30, codeFont, 1, leftWidth)));
+        // Kode hamparan di kanan atas = elemen terbesar di label, rata kanan. Font
+        // ADAPTIF, bukan selalu "5": kode membawa huruf bundle project (A-H01) dan
+        // nomor hamparan bisa 3 digit (A-H100), dan kode yang kepotong justru informasi
+        // yang paling dibutuhkan di lapangan.
+        var spreadCode = Sanitize(data.SpreadCode).ToUpperInvariant();
+        const int spreadMaxWidth = 200;
+        var spreadFont = new[] { "5", "4", "3" }.FirstOrDefault(f => CharWidth(f, 1) * spreadCode.Length <= spreadMaxWidth) ?? "3";
+        var spreadText = TruncateToFit(spreadCode, 20, spreadFont, 1, spreadMaxWidth);
+        var spreadX = RightAlignX(rightEdge, spreadFont, 1, spreadText);
+        Write(Text(spreadX, 14, spreadFont, 1, 1, spreadText));
 
-        // PO . artikel, dipecah maks 2 baris di batas spasi.
-        var judul = Join(" . ", data.NoPo, data.ArticleName).ToUpperInvariant();
+        // Nama PO di kiri atas, font "2" -- SENGAJA ukuran tetap, sama dengan baris
+        // project di stiker penyerahan bundle (BuildBundleLabel), supaya dua stiker yang
+        // dipegang operator bersamaan tidak terasa beda skala. Bukan font adaptif:
+        // ukurannya tidak boleh ikut berubah hanya karena nama PO-nya pendek.
+        // Project lama tanpa no_po jatuh ke nama project supaya kepala stiker tidak kosong.
+        //
+        // PO panjang ("PO-2026-014 KEMENHAN RI BATCH 2") dipecah 2 baris di batas spasi,
+        // bukan dipotong "...": nama PO yang terputus di tengah tidak bisa dicocokkan
+        // operator dengan surat jalan / papan tulis line. Jarak aman ke kode hamparan
+        // 16 dot.
+        var poText = Sanitize(string.IsNullOrWhiteSpace(data.NoPo) ? data.ProjectName : data.NoPo!).ToUpperInvariant();
+        var poWidth = spreadX - 16 - leftX;
+        var (po1, po2) = WrapTwoLines(poText, poWidth / CharWidth("2", 1));
+        if (po2.Length == 0)
+        {
+            Write(Text(leftX, 26, "2", 1, 1, po1));
+        }
+        else
+        {
+            Write(Text(leftX, 14, "2", 1, 1, po1));
+            Write(Text(leftX, 38, "2", 1, 1, po2));
+        }
+
+        // Artikel, dipecah maks 2 baris di batas spasi (PO sudah jadi judul di atas).
+        var judul = Sanitize(data.ArticleName).ToUpperInvariant();
         var (judul1, judul2) = WrapTwoLines(judul, leftWidth / CharWidth("1", 1));
         Write(Text(leftX, 78, "1", 1, 1, judul1));
         if (judul2.Length > 0) Write(Text(leftX, 94, "1", 1, 1, judul2));
 
-        Write($"BAR {leftX},114,{leftWidth},3\r\n");
+        Write($"BAR {leftX},{firstBarY},{leftWidth},3\r\n");
 
         // No / Size / Qty / Set -- label kecil di atas, angkanya besar.
         // "No" = nomor bundle pendek per project (bundle_no) dengan huruf project di
@@ -338,12 +376,16 @@ public static class TsplBuilder
         var nomor = $"{Sanitize(data.NumberFromText)} s/d {Sanitize(data.NumberToText)}".ToUpperInvariant();
         Write(Text(leftX, 204, "2", 1, 1, TruncateToFit(nomor, 30, "2", 1, leftWidth)));
 
-        // Baris kaki: asal bundle ini. Tanggal SENGAJA numerik (dd-MM-yyyy), bukan
-        // "dd MMM yyyy": nama bulan ikut culture mesin yang menjalankan print service
-        // (en-US di lapangan -> "16 Oct 2026" di label yang seluruhnya Bahasa Indonesia).
-        // Label lain di file ini juga memakai format numerik.
-        var kaki = $"HAMPARAN {Sanitize(data.SpreadCode).ToUpperInvariant()} . {data.SpreadDate:dd-MM-yyyy} . CUTTING";
-        Write(Text(leftX, 292, "1", 1, 1, TruncateToFit(kaki, 60, "1", 1, 460)));
+        // Baris kaki: kode bundle lengkap (R-H01-XL-01) + asal bundle ini. Tanggal
+        // SENGAJA numerik (dd-MM-yyyy), bukan "dd MMM yyyy": nama bulan ikut culture
+        // mesin yang menjalankan print service (en-US di lapangan -> "16 Oct 2026" di
+        // label yang seluruhnya Bahasa Indonesia). Label lain di file ini juga numerik.
+        //
+        // Lebarnya dibatasi kolom kiri (dulu 460, selebar label): QR yang turun ke
+        // firstBarY membuat serial di bawahnya berakhir sejajar baris kaki ini, jadi
+        // teks yang melar ke kanan akan menabraknya.
+        var kaki = $"{Sanitize(data.CuttingCode).ToUpperInvariant()} . {data.SpreadDate:dd-MM-yyyy} . CUTTING";
+        Write(Text(leftX, 292, "1", 1, 1, TruncateToFit(kaki, 60, "1", 1, leftWidth)));
 
         Write("PRINT 1,1\r\n");
         return stream.ToArray();

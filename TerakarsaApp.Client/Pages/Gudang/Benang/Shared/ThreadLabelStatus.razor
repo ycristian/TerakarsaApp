@@ -1,0 +1,121 @@
+@using TerakarsaApp.Shared.Inv
+@using TerakarsaApp.Client.Services
+@implements IDisposable
+@inject ThreadStockApiService ThreadApi
+
+@* Status permintaan cetak label benang (print_jobs) + pembacaan ulang berkala.
+
+   Sebelumnya status dibaca SEKALI persis setelah tombol Cetak ditekan -- saat itu
+   job pasti masih PENDING, jadi UI selamanya menulis "Menunggu printer" walau
+   satu-dua detik kemudian sudah DONE. Komponen ini membaca ulang tiap
+   IntervalMs sampai semua job selesai (DONE/ERROR) atau BatasDetik terlampaui.
+
+   Parent memanggil Mulai() lewat @@ref dan TIDAK perlu await: polling jalan di
+   latar supaya tombol parent tidak tertahan sampai polling habis. *@
+
+@if (jobs.Count > 0)
+{
+    @if (!string.IsNullOrWhiteSpace(Judul))
+    {
+        <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="bn-sub">@Judul</div>
+            @Baris
+        </div>
+    }
+    else
+    {
+        @Baris
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = "SKU";   // SKU | SPLIT
+    [Parameter, EditorRequired] public int RefId { get; set; }
+
+    [Parameter] public int Top { get; set; } = 3;
+
+    // Judul kecil di atas daftar (modal label SKU memakainya, dua halaman lain tidak).
+    [Parameter] public string? Judul { get; set; }
+
+    [Parameter] public string Prefix { get; set; } = "Cetak #";
+    [Parameter] public string FormatWaktu { get; set; } = "HH:mm";
+
+    [Parameter] public int IntervalMs { get; set; } = 2000;
+    [Parameter] public int BatasDetik { get; set; } = 30;
+
+    private List<ThreadLabelJobDto> jobs = new();
+    private CancellationTokenSource? cts;
+    private int refIdTerakhir = -1;
+
+    private bool AdaYangBelumSelesai =>
+        jobs.Any(j => j.Status is not ("DONE" or "ERROR"));
+
+    private RenderFragment Baris => __builder =>
+    {
+        <div class="bn-rows">
+            @foreach (var j in jobs)
+            {
+                <div class="bn-row">
+                    <span class="bn-k">@Prefix@j.PrintJobId · @j.CreatedAt.ToString(FormatWaktu)</span>
+                    <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
+                </div>
+            }
+        </div>
+    };
+
+    // Pindah ke SKU/kones lain: daftar lama tidak relevan lagi.
+    protected override void OnParametersSet()
+    {
+        if (RefId != refIdTerakhir)
+        {
+            refIdTerakhir = RefId;
+            Kosongkan();
+        }
+    }
+
+    public void Mulai()
+    {
+        Batal();
+        cts = new CancellationTokenSource();
+        _ = PollAsync(cts.Token);
+    }
+
+    public void Kosongkan()
+    {
+        Batal();
+        jobs = new();
+    }
+
+    private async Task PollAsync(CancellationToken token)
+    {
+        var batas = DateTime.UtcNow.AddSeconds(BatasDetik);
+
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                jobs = await ThreadApi.GetLabelStatusAsync(Kind, RefId, Top);
+
+                if (token.IsCancellationRequested) return;
+                await InvokeAsync(StateHasChanged);
+
+                if (!AdaYangBelumSelesai || DateTime.UtcNow >= batas) return;
+
+                await Task.Delay(IntervalMs, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Modal ditutup / pindah halaman -- bukan error.
+        }
+    }
+
+    private void Batal()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = null;
+    }
+
+    public void Dispose() => Batal();
+}

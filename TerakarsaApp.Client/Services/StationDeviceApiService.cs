@@ -204,23 +204,19 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<List<StationActiveWorkDto>>() ?? new();
     }
 
-    // Fix: foto utama artikel untuk kartu "Buat Bundle" di tab WIP.
-    public async Task<(byte[] Bytes, string ContentType)?> GetArticlePhotoAsync(int articleId)
-    {
-        try
-        {
-            var response = await _http.GetAsync($"api/station/articles/{articleId}/photo");
-            if (!response.IsSuccessStatusCode) return null;
+    // Foto utama artikel untuk kartu "Buat Bundle" di tab WIP -- URL saja, bukan byte.
+    //
+    // Sebelumnya foto diunduh lewat HttpClient lalu ditanam sebagai data: URI base64; itu
+    // membuat browser tidak bisa men-cache apa pun, sehingga tiap reload /station mengunduh
+    // ulang seluruh foto. Sekarang <img src> yang mengambilnya langsung: browser yang
+    // meng-cache (ETag + max-age) dan hanya memuat kartu yang terlihat (loading="lazy").
+    //
+    // Endpoint-nya anonim (api/article-photo, bukan api/station/...) justru karena <img>
+    // tidak bisa mengirim header X-Station-Token.
+    public string ArticleThumbUrl(int articleId) => $"{_http.BaseAddress}api/article-photo/{articleId}/thumb";
 
-            var bytes = await response.Content.ReadAsByteArrayAsync();
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-            return (bytes, contentType);
-        }
-        catch (HttpRequestException)
-        {
-            return null;
-        }
-    }
+    // Ukuran penuh untuk pratinjau layar penuh -- hanya terambil saat thumbnail diketuk.
+    public string ArticlePhotoUrl(int articleId) => $"{_http.BaseAddress}api/article-photo/{articleId}";
 
     // Prompt 23: grid "Kirim Hasil" non-bundle -- pindahan dari WorkflowInputApiService.
     public async Task<(bool Success, string Error, int? ArticleSizeId)> CreateNonBundleLogBatchAsync(StationNonBundleBatchCreateRequest request)
@@ -659,14 +655,23 @@ public class StationDeviceApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Bundle tidak ditemukan." : error.Trim('"'), null);
     }
 
-    public async Task<(bool Success, string Error, CuttingBundleTakeResultDto? Hasil)> TakeCuttingBundlesAsync(
-        List<int> bundleIds, int? resourceId)
+    // Prompt 81: targetResourceId WAJIB (> 0) -- SP menolak pengambilan tanpa Line.
+    // Tab Stok Cutting memanggil ini satu bundle sekali proses.
+    public async Task<(bool Success, string Error, CuttingBundleClaimResultDto? Hasil)> TakeCuttingBundlesAsync(
+        List<int> bundleIds, int? resourceId, int targetResourceId = 0, int employeeId = 0, int printCopies = 1)
     {
         var response = await _http.PostAsJsonAsync("api/station/cutting-stock/take",
-            new CuttingBundleTakeRequest { BundleIds = bundleIds, ResourceId = resourceId ?? 0 });
+            new CuttingBundleTakeRequest
+            {
+                BundleIds = bundleIds,
+                ResourceId = resourceId ?? 0,
+                TargetResourceId = targetResourceId,
+                EmployeeId = employeeId,
+                PrintCopies = printCopies
+            });
 
         if (response.IsSuccessStatusCode)
-            return (true, string.Empty, await response.Content.ReadFromJsonAsync<CuttingBundleTakeResultDto>());
+            return (true, string.Empty, await response.Content.ReadFromJsonAsync<CuttingBundleClaimResultDto>());
 
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengambil bundle." : error.Trim('"'), null);

@@ -17,6 +17,12 @@
 
     <div class="ct-user">@namaUser · Admin Cutting</div>
 
+    @* Muat ulang halaman. Aplikasi Android (WebView) tidak punya tombol refresh
+       browser, jadi harus disediakan sendiri di bar atas. *@
+    <button type="button" class="ct-head-ico" title="Muat ulang halaman" @onclick="MuatUlang">
+        <i class="fe fe-refresh-cw"></i>
+    </button>
+
     @* Jalan keluar ke aplikasi utama untuk user yang punya module lain (owner/admin).
        Role Admin Cutting hanya punya module ini, jadi tombolnya tidak ditampilkan. *@
     @if (punyaModuleLain)
@@ -45,6 +51,9 @@
 
         punyaModuleLain = state.User.FindAll("module").Any(c => c.Value != "CUTTING");
     }
+
+    // forceLoad: benar-benar reload dokumen, bukan sekadar re-render Blazor.
+    private void MuatUlang() => Nav.NavigateTo(Nav.Uri, forceLoad: true);
 
     private void LokasiBerubah(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
         => InvokeAsync(StateHasChanged);

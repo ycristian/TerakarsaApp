@@ -344,19 +344,36 @@ else
                                 <div class="card-body">
                                     <div style="cursor: pointer;" @onclick="() => ToggleWipCard(card.Key)">
                                         <div class="d-flex align-items-start gap-2 @(wipExpanded ? "mb-2" : "mb-0")">
-                                            @{ articlePhotoCache.TryGetValue(bl.ArticleId, out var blPhotoSrc); }
-                                            @if (blPhotoSrc is not null)
-                                            {
-                                                @* stopPropagation: klik foto membuka pratinjau, bukan menutup kartu. *@
-                                                <img src="@blPhotoSrc" alt="@bl.ArticleName" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;"
-                                                     @onclick:stopPropagation="true" @onclick="() => OpenPhotoModal(blPhotoSrc)" />
-                                            }
+                                            @* THUMBNAIL DIMATIKAN SENGAJA, JANGAN DIHAPUS.
+                                               Memuat foto tiap kartu membuat /station lambat dibuka, jadi sekarang foto
+                                               hanya diambil kalau operator menekan tombol kamera di kanan. Endpoint
+                                               thumbnail (api/article-photo/{id}/thumb) tetap ada dan siap dipakai.
+
+                                               Kalau nanti dihidupkan lagi, dua atribut ini wajib ikut:
+                                               - loading="lazy"  : kartu yang belum di-scroll tidak menembak request.
+                                               - onload + onerror BERPASANGAN: @foreach kartu WIP tidak pakai @@key, jadi
+                                                 Blazor bisa memakai ulang elemen <img> ini untuk artikel lain. Tanpa
+                                                 onload, "display:none" milik artikel tanpa foto ikut terbawa dan
+                                                 menyembunyikan foto artikel berikutnya yang sebenarnya ada.
+                                               - @@onclick:stopPropagation: klik foto membuka pratinjau, bukan menutup kartu.
+
+                                            <img src="@StationApi.ArticleThumbUrl(bl.ArticleId)" alt="@bl.ArticleName" loading="lazy"
+                                                 onload="this.style.display=''" onerror="this.style.display='none'"
+                                                 style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;"
+                                                 @onclick:stopPropagation="true" @onclick="() => OpenPhotoModal(StationApi.ArticlePhotoUrl(bl.ArticleId))" />
+                                            *@
                                             <div class="d-flex justify-content-between align-items-start flex-grow-1" style="font-size: 0.85rem;">
                                                 <div>
                                                     <div class="fw-bold">@bl.ProjectName</div>
                                                     <div class="text-muted">@(bl.NoPo ?? "-") &middot; @bl.ArticleName</div>
                                                 </div>
                                                 <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                                    @* Pengganti thumbnail: foto baru diunduh saat tombol ini ditekan.
+                                                       stopPropagation supaya kartu tidak ikut membuka/menutup. *@
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" title="Lihat foto artikel"
+                                                            @onclick:stopPropagation="true" @onclick="() => OpenPhotoModal(StationApi.ArticlePhotoUrl(bl.ArticleId))">
+                                                        <i class="fe fe-camera"></i>
+                                                    </button>
                                                     <span class="badge bg-primary text-light">Bundling</span>
                                                     <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted"></i>
                                                 </div>
@@ -1305,7 +1322,14 @@ else
                     <button type="button" class="btn-close btn-close-white" @onclick="ClosePhotoModal"></button>
                 </div>
                 <div class="modal-body text-center">
-                    <img src="@photoModalSrc" alt="Foto artikel" style="max-width: 100%; max-height: 80vh; object-fit: contain;" />
+                    @* Tombol kamera di kartu WIP selalu tampil -- halaman tidak tahu artikel
+                       mana yang punya foto tanpa menembak servernya duluan, dan itu justru
+                       yang bikin /station lambat. Jadi artikel tanpa foto ditangani di sini:
+                       endpoint balas 404, gambarnya disembunyikan, keterangannya dimunculkan. *@
+                    <img src="@photoModalSrc" alt="Foto artikel" style="max-width: 100%; max-height: 80vh; object-fit: contain;"
+                         onload="this.style.display=''; this.nextElementSibling.style.display='none';"
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='';" />
+                    <div class="text-light" style="display: none;">Artikel ini belum punya foto.</div>
                 </div>
             </div>
         </div>
@@ -2056,9 +2080,10 @@ else
     // Tanggal kirim yang masih punya baris belum lock (chip merah di atas daftar).
     private List<StationUnlockedDateDto> outUnlockedDates = new();
     private string outToast = string.Empty;
-    // Fix: cache foto utama per ArticleId untuk kartu "Buat Bundle" -- null berarti sudah
-    // dicoba tapi artikel tidak punya foto, supaya tidak fetch ulang tiap refresh.
-    private Dictionary<int, string?> articlePhotoCache = new();
+    // Foto kartu "Buat Bundle" tidak lagi di-cache di sini: <img src> menunjuk langsung ke
+    // api/article-photo/{id}/thumb, jadi browser yang meng-cache-nya (ETag + max-age) dan
+    // cache itu bertahan melewati reload halaman -- yang dulu tidak bisa, karena base64
+    // data: URI hanya hidup selama instance komponen.
     private bool showPhotoModal = false;
     private string? photoModalSrc;
     private bool isLoadingLists = false;
@@ -2613,7 +2638,6 @@ else
         StateHasChanged();
 
         await LoadOutboundDatePeriodAsync();
-        await LoadMissingArticlePhotos();
     }
 
     // Keterangan periode gajian di samping label "Tanggal Kirim". Memakai ULANG
@@ -2643,29 +2667,6 @@ else
 
         outboundDatePeriodCode = overlapping.Count == 0 ? null : string.Join(" / ", overlapping);
         outboundDatePeriodLoadedFor = outboundDate.Date;
-        StateHasChanged();
-    }
-
-    // Fix: foto kartu "Buat Bundle" -- fetch lazy per ArticleId yang belum ada di cache,
-    // supaya tidak refetch ulang setiap RefreshLists (polling) selama daftar kartu sama.
-    // Fetch paralel (bukan satu-satu) supaya banyak foto tidak menumpuk jadi latensi berurutan.
-    private async Task LoadMissingArticlePhotos()
-    {
-        var articleIds = activeWork.Where(a => a.IsBundling).Select(a => a.ArticleId).Distinct()
-            .Where(id => !articlePhotoCache.ContainsKey(id)).ToList();
-        if (articleIds.Count == 0) return;
-
-        var photoTasks = articleIds.ToDictionary(id => id, id => StationApi.GetArticlePhotoAsync(id));
-        await Task.WhenAll(photoTasks.Values);
-
-        foreach (var (articleId, task) in photoTasks)
-        {
-            var result = task.Result;
-            articlePhotoCache[articleId] = result is null
-                ? null
-                : $"data:{result.Value.ContentType};base64,{Convert.ToBase64String(result.Value.Bytes)}";
-        }
-
         StateHasChanged();
     }
 

@@ -29,7 +29,6 @@ public class StationDeviceController : ControllerBase
     private readonly EmployeeService _employeeService;
     private readonly PackService _packService;
     private readonly ProjectService _projectService;
-    private readonly ArticlePhotoService _articlePhotoService;
     private readonly RekapProduksiService _rekapProduksiService;
     private readonly DivisionService _divisionService;
     private readonly StationAttendanceService _attendanceService;
@@ -47,7 +46,6 @@ public class StationDeviceController : ControllerBase
         EmployeeService employeeService,
         PackService packService,
         ProjectService projectService,
-        ArticlePhotoService articlePhotoService,
         RekapProduksiService rekapProduksiService,
         DivisionService divisionService,
         StationAttendanceService attendanceService,
@@ -63,7 +61,6 @@ public class StationDeviceController : ControllerBase
         _employeeService = employeeService;
         _packService = packService;
         _projectService = projectService;
-        _articlePhotoService = articlePhotoService;
         _rekapProduksiService = rekapProduksiService;
         _divisionService = divisionService;
         _attendanceService = attendanceService;
@@ -267,8 +264,14 @@ public class StationDeviceController : ControllerBase
         return Ok(bundle);
     }
 
-    // Ambil N bundle sekaligus -> stock_status = TAKEN + log workflow Bundling (pending,
-    // Line tujuan ditentukan di tab IN divisi berikutnya seperti handover lain).
+    // Ambil bundle -> stock_status = TAKEN + log workflow Bundling.
+    // Prompt 81: TargetResourceId WAJIB (ditegakkan SP) dan UI mengirim satu bundle per
+    // permintaan; endpoint tetap menerima daftar karena transaksi/applock SP-nya memang
+    // per batch. Bundle langsung jadi milik Line itu
+    // (log Bundling diterima di SP), lalu label BUNDLE_LABEL -- yang memuat nama Line &
+    // penjahit -- dienqueue di sini lewat SIS_Bundle_ReprintLabel, SP label yang sudah
+    // ada, satu kali per bundle. Payload-nya dirakit dari data terkini, jadi hasil claim
+    // otomatis ikut. Kegagalan cetak TIDAK membatalkan claim (bundle sudah TAKEN).
     [HttpPost("cutting-stock/take")]
     public async Task<IActionResult> TakeCuttingBundles([FromBody] CuttingBundleTakeRequest request)
     {
@@ -277,11 +280,36 @@ public class StationDeviceController : ControllerBase
         if (request.BundleIds.Count == 0) return BadRequest("Belum ada bundle yang discan.");
 
         var (success, error, hasil) = await _cuttingService.TakeBundlesAsync(
-            new CuttingBundleTakeRequest { BundleIds = request.BundleIds, ResourceId = operatorResourceId },
+            new CuttingBundleTakeRequest
+            {
+                BundleIds = request.BundleIds,
+                ResourceId = operatorResourceId,
+                TargetResourceId = request.TargetResourceId,
+                EmployeeId = request.EmployeeId
+            },
             _systemUserId);
 
         if (!success) return BadRequest(error);
-        return Ok(hasil);
+
+        var result = new CuttingBundleClaimResultDto
+        {
+            TakenCount = hasil?.TakenCount ?? request.BundleIds.Count,
+            TotalPcs = hasil?.TotalPcs ?? 0
+        };
+
+        if (request.TargetResourceId > 0 && request.PrintCopies >= 1)
+        {
+            foreach (var bundleId in request.BundleIds)
+            {
+                var (printOk, printError, _) =
+                    await _bundleService.ReprintAsync(bundleId, request.PrintCopies, _systemUserId);
+
+                if (printOk) result.LabelsQueued += request.PrintCopies;
+                else result.LabelError ??= printError;
+            }
+        }
+
+        return Ok(result);
     }
 
     // Prompt 24: cetak ulang label bundle -- semua station boleh, tanpa batasan divisi, cukup
@@ -439,18 +467,10 @@ public class StationDeviceController : ControllerBase
         return Ok(result);
     }
 
-    // Fix: foto utama artikel untuk kartu "Buat Bundle" di tab WIP -- setara
-    // api/article-photos/{articleId}/primary (ArticlePhotoController) tapi lewat token
-    // stasiun, bukan JWT, supaya bisa dipanggil dari /station tanpa login.
-    [HttpGet("articles/{articleId:int}/photo")]
-    public async Task<IActionResult> GetArticlePhoto(int articleId)
-    {
-        var result = await _articlePhotoService.GetPrimaryPhotoForDownloadAsync(articleId);
-        if (result is null) return NotFound();
-
-        var (stream, contentType, fileName) = result.Value;
-        return File(stream, contentType, fileName);
-    }
+    // Foto artikel kartu WIP dulu dilayani di sini (api/station/articles/{id}/photo) dan
+    // ditanam sebagai base64 di halaman, karena <img> tidak bisa mengirim X-Station-Token.
+    // Sekarang dilayani ArticlePhotoPublicController lewat URL biasa supaya browser bisa
+    // men-cache-nya melewati reload. Endpoint lama dihapus -- tidak ada pemanggilnya lagi.
 
     // Prompt 12e: strip 3 angka besar (Masuk/Dikerjakan/Dikirim) di atas /station.
     [HttpGet("counts")]

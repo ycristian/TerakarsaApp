@@ -57,17 +57,9 @@
             <div class="alert alert-danger" style="margin:0">@labelError</div>
         }
 
-        @if (labelJobs.Count > 0)
+        @if (hasil.ThreadSplitConeId.HasValue)
         {
-            <div class="bn-rows">
-                @foreach (var j in labelJobs)
-                {
-                    <div class="bn-row">
-                        <span class="bn-k">Cetak #@j.PrintJobId · @j.CreatedAt.ToString("HH:mm")</span>
-                        <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
-                    </div>
-                }
-            </div>
+            <ThreadLabelStatus @ref="statusLabel" Kind="SPLIT" RefId="@hasil.ThreadSplitConeId.Value" />
         }
 
         <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -170,7 +162,7 @@
     // Cetak label kones yang baru dibuat (Prompt 73) -- TIDAK otomatis, selalu lewat tombol.
     private bool isPrinting;
     private string? labelError;
-    private List<ThreadLabelJobDto> labelJobs = new();
+    private ThreadLabelStatus? statusLabel;
 
     private bool BolehSimpan => weightGram > 0 && toLocationId > 0;
 
@@ -248,7 +240,7 @@
             return;
         }
 
-        labelJobs = await ThreadApi.GetLabelStatusAsync("SPLIT", hasil.ThreadSplitConeId.Value, 3);
+        statusLabel?.Mulai();
     }
 
     private void TimbangLagi()
@@ -257,6 +249,6 @@
         weightGram = 0;
         error = null;
         labelError = null;
-        labelJobs = new();
+        statusLabel?.Kosongkan();
     }
 }

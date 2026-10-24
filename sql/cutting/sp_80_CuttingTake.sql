@@ -15,14 +15,10 @@
    action CREATE (Prompt 17/23/25/34/40, aturan #7/#10/#15/#18 di kepala file itu).
    Kalau blok di sana berubah, blok di sini ikut disesuaikan.
 
-   PERBEDAAN SENGAJA dari CREATE manual: log Bundling dibuat PENDING
-   (received_at NULL), bukan langsung diterima. Bundle manual WAJIB memilih
-   penjahit/Line tujuan saat dibuat (@ResourceId, lihat validasi di SP itu)
-   sehingga log-nya bisa langsung dianggap diterima; bundle cutting justru
-   dibentuk JAUH SEBELUM Line tujuan diketahui -- itu inti model stok cutting.
-   Jadi Line tujuan tetap ditentukan di tab IN stasiun berikutnya seperti baris
-   handover lain. Yang "persis seperti penerimaan bundle manual" adalah log
-   Cutting -> Bundling: auto-receive step non-bundle terakhir, sama persis.
+   Prompt 80 dulu membuat log Bundling PENDING karena bundle cutting dibentuk
+   jauh sebelum Line diketahui. Prompt 81 MEMBATALKAN itu: Line tujuan dipilih
+   saat bundle discan di stasiun Bundling, jadi lognya langsung diterima seperti
+   bundle manual. Tidak ada lagi bundle cutting yang beredar tanpa pemilik.
    ============================================================= */
 
 SET ANSI_NULLS ON;
@@ -133,6 +129,13 @@ BEGIN
         RETURN;
     END
 
+    -- Prompt 81: ArticleId + BundlingTargetDivisionId dipakai client untuk memuat pilihan
+    -- Line tujuan lewat endpoint resources/{divisionId} yang sudah ada. SENGAJA bukan
+    -- SIS_Station_ReceiverOptions: SP itu mengembalikan kolom ResourceId, sedangkan
+    -- ResourceLookupDto menuntut Id, jadi endpoint receiver-options melempar 500 dan
+    -- client (yang menelan error jadi list kosong) tidak pernah dapat Line. Divisi di
+    -- bawah ini dihitung dengan definisi yang SAMA dengan @BundlingTargetDivisionId di
+    -- SIS_CuttingBundle_Take, jadi pilihan UI dan validasi SP tidak bisa berbeda.
     SELECT
         b.bundle_id     AS BundleId,
         b.cutting_code  AS CuttingCode,
@@ -146,13 +149,21 @@ BEGIN
         b.number_from   AS NumberFrom,
         b.number_to     AS NumberTo,
         s.spread_code   AS SpreadCode,
-        s.spread_date   AS SpreadDate
+        s.spread_date   AS SpreadDate,
+        b.article_id    AS ArticleId,
+        (SELECT TOP 1 nx.division_id
+         FROM article_workflows nx
+         WHERE nx.article_id = b.article_id AND nx.deleted_at IS NULL AND nx.inactive_at IS NULL
+           AND nx.sort_order > bw.sort_order
+         ORDER BY nx.sort_order ASC) AS BundlingTargetDivisionId
     FROM bundles b
     INNER JOIN spreads s ON s.spread_id = b.spread_id
     INNER JOIN articles a ON a.article_id = b.article_id
     INNER JOIN projects p ON p.project_id = a.project_id
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
+    LEFT JOIN article_workflows bw ON bw.article_id = b.article_id
+        AND bw.deleted_at IS NULL AND bw.is_bundling = 1
     WHERE b.bundle_id = @BundleId;
 END;
 GO
@@ -169,11 +180,31 @@ GO
 
    Satu transaksi untuk SEMUA bundle: kalau ada satu yang tidak memenuhi syarat,
    tidak ada yang berubah.
+
+   ---------------------------------------------------------------
+   Prompt 81 -- sistem CLAIM (@TargetResourceId WAJIB, @EmployeeId opsional):
+
+   Bundle cutting TIDAK boleh lagi diambil tanpa Line tujuan. @TargetResourceId
+   kosong = RAISERROR; jalur "pending" Prompt 80 (log Bundling tanpa penerima)
+   sengaja DIHAPUS supaya tidak ada bundle yang beredar tanpa pemilik.
+   Konsekuensi yang memang dikehendaki: artikel yang workflow-nya tidak punya step
+   sesudah Bundling tidak bisa mengambil bundle sama sekali -- perbaiki workflow-nya
+   dulu.
+
+   Claim: bundles.resource_id/employee_id terisi dan log Bundling langsung diterima
+   (received_at / received_by_resource_id), mengikuti aturan #10 sp_Bundle_Manage.sql
+   (Prompt 25).
+
+   Label penyerahan (BUNDLE_LABEL, berisi nama Line + penjahit) TIDAK dicetak di
+   sini: API memanggil SIS_Bundle_ReprintLabel per bundle setelah SP ini sukses,
+   supaya result set tidak campur dan SP label yang sudah ada tidak diubah.
    ============================================================ */
 CREATE OR ALTER PROCEDURE SIS_CuttingBundle_Take
-    @BundleIdsJson NVARCHAR(MAX),
-    @ResourceId    INT,
-    @UserId        INT = NULL
+    @BundleIdsJson    NVARCHAR(MAX),
+    @ResourceId       INT,
+    @UserId           INT = NULL,
+    @TargetResourceId INT = NULL,
+    @EmployeeId       INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -275,6 +306,46 @@ BEGIN
       AND sort_order > @BundlingSortOrder
     ORDER BY sort_order ASC;
 
+    /* ---- Prompt 81: validasi claim (WAJIB) ------------------------------
+       Client mengirim 0 untuk "belum dipilih" -- dinormalkan ke NULL dulu. */
+    IF ISNULL(@TargetResourceId, 0) <= 0 SET @TargetResourceId = NULL;
+    IF ISNULL(@EmployeeId, 0) <= 0 SET @EmployeeId = NULL;
+
+    IF @TargetResourceId IS NULL
+    BEGIN
+        RAISERROR('Line tujuan wajib dipilih.', 16, 1);
+        RETURN;
+    END
+
+    -- Line tujuan harus resource divisi PENERIMA log Bundling (= target_division_id
+    -- di bawah). Prompt 40 SS7 mengunci pelaksana step berikutnya agar sama dengan
+    -- received_by_resource_id, jadi resource di luar divisi itu membuat bundle buntu.
+    IF @BundlingTargetDivisionId IS NULL
+    BEGIN
+        RAISERROR('Workflow artikel belum punya step sesudah Bundling, bundle tidak bisa diklaim ke Line.', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (
+        SELECT 1 FROM resources
+        WHERE resource_id = @TargetResourceId AND division_id = @BundlingTargetDivisionId
+          AND is_active = 1 AND deleted_at IS NULL
+    )
+    BEGIN
+        RAISERROR('Line tujuan tidak valid untuk artikel ini.', 16, 1);
+        RETURN;
+    END
+
+    -- Pesan sama dengan bundle manual (sp_Bundle_Manage.sql, Prompt 32).
+    IF @EmployeeId IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM employees
+        WHERE employee_id = @EmployeeId AND resource_id = @TargetResourceId AND deleted_at IS NULL
+    )
+    BEGIN
+        RAISERROR('Penjahit bukan anggota line ini.', 16, 1);
+        RETURN;
+    END
+
     -- Step non-bundle TERAKHIR (mis. Cutting) -- yang di-auto-receive, persis
     -- sp_Bundle_Manage.sql aturan #7 (dipersempit Prompt 23).
     DECLARE @LastNonBundleStepId INT;
@@ -313,17 +384,22 @@ BEGIN
             RETURN;
         END
 
+        -- Prompt 81: Line tujuan (resource_id) & penjahit ikut ditulis di sini -- sama
+        -- artinya dengan bundles.resource_id pada bundle manual.
         UPDATE b
         SET stock_status = 'TAKEN',
             taken_at = SYSDATETIME(),
             taken_by_resource_id = @ResourceId,
+            resource_id = @TargetResourceId,
+            employee_id = @EmployeeId,
             updated_at = SYSDATETIME(),
             updated_by = @UserId
         FROM bundles b
         INNER JOIN #ids i ON i.bundle_id = b.bundle_id;
 
-        -- Log Bundling per bundle -- PENDING (received_at NULL), lihat catatan
-        -- "PERBEDAAN SENGAJA" di kepala file.
+        -- Log Bundling per bundle -- Prompt 81: LANGSUNG diterima oleh Line tujuan.
+        -- received_by_resource_id = Line (resource divisi TUJUAN), bukan @ResourceId
+        -- (resource Bundling), persis aturan #10 sp_Bundle_Manage.sql.
         INSERT INTO article_workflow_logs (
             article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
             qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing,
@@ -333,7 +409,8 @@ BEGIN
         SELECT
             @BundlingStepId, b.bundle_id, NULL, @BundlingDivisionId, @ResourceId, NULL,
             b.qty, 0, 0, 0,
-            NULL, @BundlingTargetDivisionId, NULL, NULL, NULL,
+            NULL, @BundlingTargetDivisionId,
+            SYSDATETIME(), @TargetResourceId, 'Otomatis: bundle cutting diklaim Line',
             SYSDATETIME(), @UserId
         FROM bundles b
         INNER JOIN #ids i ON i.bundle_id = b.bundle_id

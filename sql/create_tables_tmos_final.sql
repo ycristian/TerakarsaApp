@@ -1445,12 +1445,50 @@ GO
 
 CREATE INDEX IX_ddp_plan_date       ON daily_division_plans(plan_date) WHERE deleted_at IS NULL;
 CREATE INDEX IX_movement_stock      ON material_movement(stock_id)  WHERE deleted_at IS NULL;
-CREATE INDEX IX_awl_bundle          ON article_workflow_logs(bundle_id) WHERE deleted_at IS NULL;
-CREATE INDEX IX_awl_article_workflow ON article_workflow_logs(article_workflow_id) WHERE deleted_at IS NULL;
+-- alter_82: kedua index ini dulu single-column (bundle_id / article_workflow_id) dan
+-- ternyata HILANG dari database produksi -- itulah sebab /station butuh 10-20 detik
+-- (lihat sql/alter_82_index_station_performance.sql). Definisinya sekaligus dinaikkan
+-- jadi composite + covering supaya CROSS APPLY frontier di SIS_Station_Counts /
+-- InProgress / ActiveWork tidak perlu key lookup ke clustered.
+CREATE INDEX IX_awl_bundle          ON article_workflow_logs(bundle_id, article_workflow_id)
+    INCLUDE (division_id, target_division_id, received_at, article_size_id, resource_id,
+             qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IX_awl_article_workflow ON article_workflow_logs(article_workflow_id, article_size_id)
+    INCLUDE (bundle_id, division_id, target_division_id, received_at, created_at, qty_ok)
+    WHERE deleted_at IS NULL;
+-- alter_82: MasukCount/PendingReceives (kiriman masuk belum diterima) dan
+-- DikirimCount/OutUnlockedCount/PendingHandover (keluaran divisi + status lock).
+CREATE INDEX IX_awl_target_division ON article_workflow_logs(target_division_id, received_at)
+    INCLUDE (bundle_id, article_workflow_id, article_size_id, resource_id, qty_ok, created_at)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IX_awl_division        ON article_workflow_logs(division_id)
+    INCLUDE (article_workflow_id, bundle_id, resource_id, qty_ok, received_at,
+             target_division_id, created_at, log_type, lock_id)
+    WHERE deleted_at IS NULL;
+-- alter_82: article_workflows sebelumnya tanpa index nonclustered sama sekali, padahal
+-- subquery IsLastStep/NextDivision/frontier memindainya ribuan kali per request station.
+CREATE INDEX IX_aw_article_sort      ON article_workflows(article_id, sort_order)
+    INCLUDE (division_id, step_name, requires_bundle, is_bundling, inactive_at, unit_price)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IX_aw_division          ON article_workflows(division_id)
+    INCLUDE (article_id, sort_order, step_name, requires_bundle, is_bundling, inactive_at)
+    WHERE deleted_at IS NULL;
 -- Prompt 47: modul Log Aktivitas -- filter rentang created_at/received_at langsung.
 CREATE INDEX IX_awl_created_at      ON article_workflow_logs(created_at) WHERE deleted_at IS NULL;
 CREATE INDEX IX_awl_received_at     ON article_workflow_logs(received_at) WHERE deleted_at IS NULL;
 CREATE INDEX IX_bundles_article     ON bundles(article_id);
+-- alter_83: SIS_Station_ActiveWork / SIS_Station_Counts / SIS_Article_BundleSummary
+-- mencari bundle lewat article_size_id, bukan article_id -- tanpa ini bundles dipindai
+-- 3.777 kali (543.888 reads) per request station.
+CREATE INDEX IX_bundles_article_size ON bundles(article_size_id)
+    INCLUDE (article_id, qty, resource_id, source, stock_status, bundle_no, sort_order)
+    WHERE deleted_at IS NULL;
+-- alter_83: article_sizes dulu tanpa index nonclustered sama sekali. SENGAJA TIDAK
+-- filtered -- subquery BundleCount/TotalBundleQty hanya menyaring b.deleted_at, bukan
+-- asz.deleted_at, jadi filtered index tidak akan terpakai di sana.
+CREATE INDEX IX_article_sizes_article ON article_sizes(article_id)
+    INCLUDE (size_pack_detail_id, qty, bundle_qty, deleted_at);
 CREATE INDEX IX_articles_project    ON articles(project_id);
 CREATE INDEX IX_stocks_material     ON material_stocks(material_id);
 CREATE INDEX IX_stations_division   ON stations(division_id) WHERE deleted_at IS NULL;

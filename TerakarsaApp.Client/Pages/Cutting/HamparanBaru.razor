@@ -77,6 +77,21 @@
                     <span>Total hamparan</span>
                     <span style="font-weight:700">@setCount × @sheetsPerSet = @Angka(setCount * sheetsPerSet) pcs</span>
                 </div>
+
+                @* Target qty/bundle awalnya ikut artikel, tapi boleh diubah di sini --
+                   mengubahnya menghitung ulang saran pembagian untuk SEMUA set
+                   (qty yang terlanjur diketik manual ikut tergantikan). Tombol di
+                   sebelahnya melakukan hal yang sama tanpa harus mengubah angkanya:
+                   isian hamparan (set, lembar, rincian size) tidak ikut dikosongkan. *@
+                <div class="ct-target-row">
+                    <label for="ct-target">Qty per bundle</label>
+                    <input id="ct-target" type="text" inputmode="numeric" class="ct-inp-sm"
+                           style="width:70px;text-align:center" value="@target" @onchange="TargetDiganti" />
+                    <button type="button" class="ct-btn ct-btn-sm ct-spacer"
+                            disabled="@(setRows.Count == 0)" @onclick="HitungUlangPembagian">
+                        Hitung ulang pembagian
+                    </button>
+                </div>
             </div>
 
             @* ---------- rincian set per size ---------- *@
@@ -96,40 +111,64 @@
                 }
                 else
                 {
+                    @* Saran nomor awal: dua pilihan umum -- mulai ulang dari 1, atau lanjut
+                       dari nomor terakhir artikel ini. Keduanya hanya mengisi kolom "Mulai no",
+                       isinya tetap bisa diedit manual per size. *@
+                    <div class="ct-num-saran">
+                        <span class="ct-hint" style="margin:0">Nomor awal:</span>
+                        <button type="button" class="ct-btn ct-btn-sm" @onclick="MulaiDariSatu">Mulai dari 1</button>
+                        <button type="button" class="ct-btn ct-btn-sm" @onclick="LanjutNomorTerakhir">
+                            Lanjut nomor terakhir
+                        </button>
+                    </div>
+
                     <div class="ct-row ct-row-h ct-g-size" style="border-bottom:0;padding-left:0;padding-right:0">
-                        <div>Size</div><div>Set</div><div>Pcs</div><div>Numbering</div>
+                        <div>Size</div><div>Set</div><div>Mulai no</div><div>Pcs</div>
                     </div>
 
                     @foreach (var s in sizes)
                     {
-                        <div class="ct-row ct-g-size @(s.SetCount > 0 ? "" : "ct-dim")"
+                        @* @key per size supaya baris tidak tertukar saat artikel diganti. *@
+                        <div class="ct-row ct-g-size @(s.SetCount > 0 ? "" : "ct-dim")" @key="s.ArticleSizeId"
                              style="border-top:0;padding-left:0;padding-right:0">
                             <div class="ct-k" data-l="Size">@s.SizeName</div>
                             <div data-l="Set">
                                 <input type="number" min="0" class="ct-inp-sm" aria-label="Set size @s.SizeName"
                                        value="@s.SetCount" @onchange="e => SizeSetDiganti(s, e.Value)" />
                             </div>
+                            <div data-l="Mulai no">
+                                <input type="number" min="1" class="ct-inp-sm" aria-label="Nomor awal size @s.SizeName"
+                                       value="@s.NumberFrom" @onchange="e => NomorAwalDiganti(s, e.Value)" />
+                            </div>
                             <div data-l="Pcs">@(s.SetCount > 0 ? Angka(s.SetCount * sheetsPerSet) : "–")</div>
-                            <div data-l="Numbering" style="font-size:13px">
+
+                            @* Rentang numbering sengaja di baris sendiri selebar kartu --
+                               sebagai kolom teksnya patah-patah di layar tablet. *@
+                            <div data-l="Numbering" class="ct-row-sub">
                                 @if (s.SetCount > 0 && sheetsPerSet > 0)
                                 {
-                                    <text>@s.SizeName-@s.NextFrom s/d @s.SizeName-@(s.NextFrom + s.SetCount * sheetsPerSet - 1)</text>
-                                }
-                                else if (s.NextFrom > 1)
-                                {
-                                    <text>lanjut dari @s.SizeName-@(s.NextFrom - 1)</text>
+                                    <text>@s.SizeName-@s.NumberFrom s/d @s.SizeName-@(s.NumberFrom + s.SetCount * sheetsPerSet - 1)</text>
                                 }
                                 else
                                 {
-                                    <text>mulai dari @s.SizeName-1</text>
+                                    <text>mulai dari @s.SizeName-@s.NumberFrom</text>
+                                }
+
+                                @* Info nomor terakhir yang sudah terpakai -- jadi patokan kalau
+                                   nomor awal diedit manual. *@
+                                @if (s.NextFrom > 1)
+                                {
+                                    <div class="ct-hint" style="margin:2px 0 0">
+                                        terakhir @s.SizeName-@(s.NextFrom - 1)@(s.NumberFrom == s.NextFrom ? " · lanjut" : "")
+                                    </div>
                                 }
                             </div>
                         </div>
                     }
 
                     <span class="ct-hint">
-                        Numbering lanjut dari hamparan terakhir artikel ini. Nomor diisi manual
-                        dengan mesin numbering sesuai rentang.
+                        Nomor awal terisi otomatis melanjutkan hamparan terakhir artikel ini, tapi
+                        boleh diubah per size. Nomor diisi manual dengan mesin numbering sesuai rentang.
                     </span>
                 }
             </div>
@@ -137,9 +176,11 @@
 
         @* ==================== kolom kanan ==================== *@
         <div class="ct-split-r">
-            <div class="ct-pagehead" style="height:32px">
+            @* Tanpa tinggi tetap -- chip ringkasan di kanan (± 33px) tadinya meluber
+               keluar kotak 32px dan menutupi baris header tabel di bawahnya. *@
+            <div class="ct-pagehead">
                 <div class="ct-panel-t" style="font-size:18px">Pembagian bundle</div>
-                <span class="ct-sub">Saran sistem · target @target pcs/bundle (dari artikel)</span>
+                <span class="ct-sub">Saran sistem · target @target pcs/bundle (diatur di kiri)</span>
                 @if (saran.Count > 0)
                 {
                     <span class="ct-spacer" style="font-size:13px;background:#fff;border:1px solid var(--ct-inp);border-radius:8px;padding:6px 10px">
@@ -156,37 +197,57 @@
                 else
                 {
                     <div class="ct-row ct-row-h ct-g-split">
-                        <div>Size</div><div>Set</div><div>Qty per bundle (bisa diedit)</div><div>Total</div><div></div>
+                        <div></div><div>Size</div><div>No</div><div>Set</div><div>Qty per bundle</div><div>Total</div><div></div>
                     </div>
 
-                    @foreach (var row in setRows)
+                    @for (var ri = 0; ri < setRows.Count; ri++)
                     {
+                        var row = setRows[ri];
+                        var urut = ri + 1;
+                        var diedit = row == rowEdit;
+
                         <div class="ct-row ct-g-split @(row.Pas(sheetsPerSet) ? "" : "is-bad")">
+                            @* Nomor urut baris saja (tanpa header) -- patokan hitung cepat
+                               berapa set yang sudah dilihat, bukan data yang disimpan. *@
+                            <div class="ct-urut">@urut</div>
                             <div class="ct-k" data-l="Size">@row.SizeName</div>
-                            <div data-l="Set">Set @row.SetNo</div>
-                            <div data-l="Qty per bundle">
-                                <div class="ct-qtys">
-                                    @for (var i = 0; i < row.Qtys.Count; i++)
-                                    {
-                                        var idx = i;
-                                        <input type="number" min="1" class="ct-inp-qty @(row.Pas(sheetsPerSet) ? "" : "bad")"
-                                               aria-label="Bundle @(idx + 1) size @row.SizeName set @row.SetNo"
-                                               value="@row.Qtys[idx]" @onchange="e => QtyDiganti(row, idx, e.Value)" />
-                                    }
-                                </div>
+                            @* Rentang nomor pcs set ini -- sama dengan yang dihitung SP:
+                               nomor awal size + (set ke-n - 1) x lembar per set.
+                               Ditumpuk dua baris (awal di atas, akhir di bawah) supaya
+                               kolomnya sempit dan angkanya tetap kebaca utuh. *@
+                            @{ var rentang = RentangSet(row); }
+                            <div data-l="No" class="ct-num">
+                                <div>@rentang.Awal</div>
+                                <div>@rentang.Akhir</div>
                             </div>
+                            <div data-l="Set" class="ct-num">#@row.SetNo</div>
+                            @* Default cuma label "50, 50, 50, 55" -- kotak input baru muncul
+                               setelah tombol Edit ditekan, di baris sendiri di bawah, supaya
+                               deretan kotaknya tidak pernah menumpuk di dalam sel sempit. *@
+                            <div data-l="Qty per bundle" class="ct-qty-lbl">@RingkasQty(row)</div>
                             <div data-l="Total" class="@(row.Pas(sheetsPerSet) ? "ct-ok" : "ct-bad")">
                                 @(row.Pas(sheetsPerSet) ? $"{row.Total} ✓" : $"{row.Total} ≠ {sheetsPerSet}")
                             </div>
                             <div class="ct-acts">
-                                <button type="button" class="ct-btn ct-btn-ico" aria-label="Tambah bundle"
-                                        @onclick="() => TambahBundle(row)">+</button>
-                                @if (row.Qtys.Count > 1)
-                                {
-                                    <button type="button" class="ct-btn ct-btn-ico" aria-label="Kurangi bundle"
-                                            @onclick="() => KurangiBundle(row)">−</button>
-                                }
+                                <button type="button" class="ct-btn ct-btn-xs"
+                                        aria-label="Edit qty size @row.SizeName set @row.SetNo"
+                                        @onclick="() => ToggleEdit(row)">@(diedit ? "Tutup" : "Edit")</button>
                             </div>
+
+                            @if (diedit)
+                            {
+                                <div class="ct-qty-edit">
+                                    <div class="ct-qtys">
+                                        @for (var i = 0; i < row.Qtys.Count; i++)
+                                        {
+                                            var idx = i;
+                                            <input type="text" inputmode="numeric" class="ct-inp-qty @(row.Pas(sheetsPerSet) ? "" : "bad")"
+                                                   aria-label="Bundle @(idx + 1) size @row.SizeName set @row.SetNo"
+                                                   value="@row.Qtys[idx]" @onchange="e => QtyDiganti(row, idx, e.Value)" />
+                                        }
+                                    </div>
+                                </div>
+                            }
                         </div>
                     }
 
@@ -240,6 +301,10 @@
     private List<SetRow> setRows = new();
     private List<CuttingSuggestItemDto> saran = new();
 
+    // Baris pembagian yang sedang dibuka kotak editnya -- satu baris saja, biar
+    // tabelnya tetap ringkas dan tidak ada deretan kotak input di mana-mana.
+    private SetRow? rowEdit;
+
     private bool sedangSimpan;
     private bool cetakSetelahSimpan;
     private string pesanError = string.Empty;
@@ -250,7 +315,8 @@
         public int ArticleSizeId { get; set; }
         public string SizeName { get; set; } = string.Empty;
         public int SizeSortOrder { get; set; }
-        public int NextFrom { get; set; }
+        public int NextFrom { get; set; }   // saran lanjutan dari hamparan terakhir
+        public int NumberFrom { get; set; } // nomor awal yang dipakai (bisa diedit user)
         public int SetCount { get; set; }
     }
 
@@ -277,6 +343,7 @@
         && setCount > 0 && sheetsPerSet > 0
         && SetTerisi == setCount
         && setRows.Count > 0
+        && sizes.Where(s => s.SetCount > 0).All(s => s.NumberFrom >= 1)
         && setRows.All(r => r.Pas(sheetsPerSet) && r.Qtys.All(q => q > 0));
 
     protected override async Task OnInitializedAsync()
@@ -301,6 +368,7 @@
             SizeName = s.SizeName,
             SizeSortOrder = s.SizeSortOrder,
             NextFrom = s.NextFrom,
+            NumberFrom = s.NextFrom,
             SetCount = 0
         }).ToList();
 
@@ -330,21 +398,55 @@
         SusunSetRows();
     }
 
+    private void NomorAwalDiganti(SizeRow s, object? nilai)
+    {
+        s.NumberFrom = Math.Max(1, Angka0(nilai));
+    }
+
+    private void MulaiDariSatu()
+    {
+        foreach (var s in sizes) s.NumberFrom = 1;
+    }
+
+    private void LanjutNomorTerakhir()
+    {
+        foreach (var s in sizes) s.NumberFrom = s.NextFrom;
+    }
+
+    // Hitung ulang pembagian bundle dari target yang berlaku sekarang. Isian hamparan
+    // (set, lembar, rincian size, nomor awal) sengaja TIDAK disentuh -- tombol ini
+    // cuma membuang qty yang terlanjur diedit manual dan mengembalikan saran sistem.
+    private async Task HitungUlangPembagian()
+    {
+        pesanError = string.Empty;
+        setRows.Clear();
+        await MuatSaranAsync();
+    }
+
     private void QtyDiganti(SetRow row, int idx, object? nilai)
     {
         row.Qtys[idx] = Math.Max(0, Angka0(nilai));
     }
 
-    private void TambahBundle(SetRow row)
+    private void ToggleEdit(SetRow row)
     {
-        // Bundle baru diisi 0 -- user yang menentukan; total langsung ditandai
-        // tidak pas sampai diseimbangkan.
-        row.Qtys.Add(0);
+        rowEdit = rowEdit == row ? null : row;
     }
 
-    private void KurangiBundle(SetRow row)
+    // Isi kolom qty saat tidak diedit: "50, 50, 50, 55".
+    private static string RingkasQty(SetRow row) => string.Join(", ", row.Qtys);
+
+    // Target qty/bundle diubah manual. Semua baris disusun ulang dari nol supaya
+    // pembagiannya benar-benar mengikuti target baru -- termasuk baris yang qty-nya
+    // sudah diketik manual, yang kalau dipertahankan malah tidak cocok lagi.
+    private async Task TargetDiganti(ChangeEventArgs e)
     {
-        if (row.Qtys.Count > 1) row.Qtys.RemoveAt(row.Qtys.Count - 1);
+        var baru = Math.Max(1, Angka0(e.Value));
+        if (baru == target) return;
+
+        target = baru;
+        setRows.Clear();
+        await MuatSaranAsync();
     }
 
     // ---------- saran & susunan set ----------
@@ -362,6 +464,8 @@
     // set yang masih ada DIPERTAHANKAN; set baru diisi saran sistem.
     private void SusunSetRows()
     {
+        rowEdit = null;
+
         var lama = setRows.ToDictionary(r => (r.ArticleSizeId, r.SetNo), r => r.Qtys);
         var baru = new List<SetRow>();
 
@@ -383,6 +487,17 @@
         }
 
         setRows = baru;
+    }
+
+    // Rentang nomor pcs satu SET: nomor awal size + (set ke-n - 1) x lembar per set.
+    // Dikembalikan terpisah (awal, akhir) karena di tabel ditampilkan dua baris.
+    private (string Awal, string Akhir) RentangSet(SetRow row)
+    {
+        if (sheetsPerSet <= 0) return ("–", "–");
+
+        var awal = (sizes.FirstOrDefault(s => s.ArticleSizeId == row.ArticleSizeId)?.NumberFrom ?? 1)
+                   + (row.SetNo - 1) * sheetsPerSet;
+        return ($"{awal}", $"{awal + sheetsPerSet - 1}");
     }
 
     private string RingkasSaran()
@@ -433,7 +548,12 @@
             SheetsPerSet = sheetsPerSet,
             Sizes = sizes.Where(s => s.SetCount > 0)
                          .OrderBy(s => s.SizeSortOrder)
-                         .Select(s => new SpreadSizeInput { ArticleSizeId = s.ArticleSizeId, SetCount = s.SetCount })
+                         .Select(s => new SpreadSizeInput
+                         {
+                             ArticleSizeId = s.ArticleSizeId,
+                             SetCount = s.SetCount,
+                             NumberFrom = s.NumberFrom
+                         })
                          .ToList(),
             // Urutan array = urutan bundle di dalam set (dipakai SP untuk bundle_seq
             // dan rentang nomor), jadi diurutkan size -> set -> posisi.

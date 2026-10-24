@@ -1,15 +1,23 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Cutting
+@using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.Resources
 @inject StationDeviceApiService StationApi
 
 @* Prompt 80 §1 -- "Scan Stok Bundle" di station Bundling.
 
    Bundling MENGAMBIL bundle yang sudah dibentuk Cutting dari hamparan; tidak membuat
-   bundle lagi. Boleh scan beberapa bundle dulu (daftar di bawah), lalu "Ambil N bundle"
-   sekali jalan -- satu transaksi di SIS_CuttingBundle_Take.
+   bundle lagi.
 
-   Setelah diambil, bundle masuk alur station seperti bundle lain (log Bundling pending,
-   Line tujuan ditentukan di tab IN divisi berikutnya). Tab IN/OUT tidak berubah.
+   Prompt 81 -- sistem claim, dua perubahan dari Prompt 80:
+     1. SATU bundle sekali proses (tidak ada daftar/pooling): scan -> pilih Line ->
+        Claim -> siap scan berikutnya. Pilihan Line & penjahit dipertahankan supaya
+        claim beruntun ke Line yang sama cepat.
+     2. Line tujuan WAJIB. Jalur "ambil tanpa claim" dihapus, juga di SP -- tidak ada
+        lagi bundle cutting yang beredar tanpa pemilik.
+
+   Label hasil claim = cetak ulang bundle yang SAMA dalam layout BUNDLE_LABEL (serial &
+   QR tidak berubah), berisi nama Line & penjahit seperti bundle manual.
 
    Kamera memakai QrScannerModal yang sudah dipakai halaman station lain; QR bundle
    berisi URL {PublicBaseUrl}/b/<serial> dan normalisasinya dikerjakan SP, jadi isi QR
@@ -17,8 +25,10 @@
 
 <div class="d-flex flex-column gap-2">
     <div class="alert alert-light border mb-0 py-2 small">
-        Scan QR stiker bundle dari Cutting, atau ketik kodenya. Bundle yang sudah diambil
-        atau bundle buatan manual akan ditolak.
+        Scan QR stiker bundle dari Cutting, atau ketik kodenya. Satu bundle sekali proses:
+        pilih Line tujuan lalu Claim. Serial bundle tidak berubah — labelnya dicetak ulang
+        dengan nama Line &amp; penjahit. Bundle yang sudah diambil atau bundle buatan manual
+        akan ditolak.
     </div>
 
     <div class="d-flex gap-2 flex-wrap">
@@ -45,47 +55,80 @@
         <div class="alert alert-success mb-0 py-2 small">@pesanSukses</div>
     }
 
-    @if (daftar.Count == 0)
+    @if (bundleAktif is null)
     {
         <div class="text-muted small py-3 text-center">Belum ada bundle yang discan.</div>
     }
     else
     {
-        @foreach (var b in daftar)
-        {
-            <div class="card mb-0">
-                <div class="card-body py-2 px-3">
-                    <div class="d-flex justify-content-between align-items-start gap-2">
-                        <div style="font-size: 0.85rem;">
-                            <div class="fw-bold">@b.CuttingCode <span class="text-muted">· @b.Serial</span></div>
-                            <div class="text-muted">@(b.NoPo ?? "-") &middot; @b.ArticleName</div>
-                            <div>
-                                Size <strong>@b.SizeName</strong> &middot;
-                                <strong>@b.Qty</strong> pcs &middot;
-                                Set @b.SetNo
-                            </div>
-                            <div class="text-muted">
-                                Nomor @b.NumberRange &middot; Hamparan @b.SpreadCode (@b.SpreadDate.ToString("dd MMM"))
-                            </div>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@sedangProses"
-                                title="Buang dari daftar" @onclick="() => Buang(b)">
-                            <i class="fe fe-x"></i>
-                        </button>
-                    </div>
+        <div class="card mb-0">
+            <div class="card-body py-2 px-3" style="font-size: 0.85rem;">
+                <div class="fw-bold">@bundleAktif.CuttingCode <span class="text-muted">· @bundleAktif.Serial</span></div>
+                <div class="text-muted">@(bundleAktif.NoPo ?? "-") &middot; @bundleAktif.ArticleName</div>
+                <div>
+                    Size <strong>@bundleAktif.SizeName</strong> &middot;
+                    <strong>@bundleAktif.Qty</strong> pcs &middot;
+                    Set @bundleAktif.SetNo
+                </div>
+                <div class="text-muted">
+                    Nomor @bundleAktif.NumberRange &middot;
+                    Hamparan @bundleAktif.SpreadCode (@bundleAktif.SpreadDate.ToString("dd MMM"))
                 </div>
             </div>
-        }
+        </div>
+
+        @* Prompt 81: Line tujuan WAJIB. Opsi = resource divisi penerima log Bundling,
+           dihitung SP (BundlingTargetDivisionId) dengan definisi yang sama seperti
+           validasi di SIS_CuttingBundle_Take, jadi pilihan UI tidak bisa ditolak SP. *@
+        <div class="border-top pt-2">
+            <label class="form-label mb-1 fw-bold">Claim ke Line</label>
+            @if (lineOptions.Count == 0)
+            {
+                <div class="alert alert-warning mb-0 py-2 small">
+                    Artikel ini belum punya Line tujuan (workflow-nya tidak punya step sesudah
+                    Bundling, atau divisi tujuan belum punya resource aktif). Perbaiki workflow
+                    artikelnya dulu — bundle tidak bisa diambil tanpa Line.
+                </div>
+            }
+            else
+            {
+                <div class="row g-2">
+                    @foreach (var r in lineOptions)
+                    {
+                        <div class="col-6 col-md-4">
+                            <button type="button" class="btn w-100 @(lineId == r.Id ? "btn-primary" : "btn-outline-secondary")"
+                                    disabled="@sedangProses" @onclick="() => PilihLineAsync(r.Id)">
+                                @r.ResourceName
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="row g-2 mt-2">
+                    <div class="col-8">
+                        <label class="form-label">Penjahit (opsional)</label>
+                        <SearchableSelect TItem="EmployeeLookupDto" Items="employeeOptions" @bind-Value="employeeId"
+                                          IdSelector="@(e => e.Id)"
+                                          TextSelector="@(e => BundleDisplay.FormatEmployeeOption(e.EmployeeCode, e.EmployeeName))"
+                                          AllowNone="true" NoneLabel="- Tidak ada -" Disabled="@(lineId <= 0)"
+                                          Placeholder="Cari penjahit..." />
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label">Jumlah Label</label>
+                        <input type="number" min="0" class="form-control" @bind="jumlahLabel" />
+                    </div>
+                </div>
+            }
+        </div>
 
         <div class="d-flex justify-content-between align-items-center gap-2 border-top pt-2">
-            <div class="small text-muted">
-                @daftar.Count bundle &middot; @daftar.Sum(b => b.Qty) pcs
-            </div>
+            <button type="button" class="btn btn-outline-secondary" disabled="@sedangProses" @onclick="Batal">
+                Batal
+            </button>
             <button type="button" class="btn btn-success"
-                    disabled="@(sedangProses || ResourceId <= 0)"
-                    title="@(ResourceId <= 0 ? "Pilih operator dulu" : "Ambil bundle ke Bundling")"
-                    @onclick="AmbilAsync">
-                @(sedangProses ? "Memproses…" : $"Ambil {daftar.Count} bundle")
+                    disabled="@(sedangProses || ResourceId <= 0 || lineId <= 0)"
+                    title="@ClaimTitle"
+                    @onclick="ClaimAsync">
+                @(sedangProses ? "Memproses…" : "Claim & cetak label")
             </button>
         </div>
     }
@@ -97,16 +140,29 @@
     // Operator sesi station (resource divisi Bundling) -- dipakai sebagai pengambil.
     [Parameter] public int ResourceId { get; set; }
 
-    // Dipanggil setelah pengambilan sukses supaya halaman station memuat ulang
-    // WIP/IN/OUT-nya (bundle yang diambil langsung jadi baris handover baru).
+    // Dipanggil setelah claim sukses supaya halaman station memuat ulang WIP/IN/OUT
+    // (bundle yang diklaim langsung jadi baris handover Bundling yang sudah diterima).
     [Parameter] public EventCallback OnTaken { get; set; }
 
-    private readonly List<CuttingBundleScanDto> daftar = new();
+    // Prompt 81: satu bundle sekali proses -- tidak ada daftar/pooling.
+    private CuttingBundleScanDto? bundleAktif;
     private string kodeManual = string.Empty;
     private bool showScanner;
     private bool sedangProses;
     private string pesanError = string.Empty;
     private string pesanSukses = string.Empty;
+
+    // Line & penjahit dipertahankan antar bundle supaya claim beruntun ke Line yang sama
+    // tidak perlu dipilih ulang; direset kalau artikel berikutnya tidak punya Line itu.
+    private List<ResourceLookupDto> lineOptions = new();
+    private List<EmployeeLookupDto> employeeOptions = new();
+    private int lineId;
+    private int employeeId;
+    private int jumlahLabel = 1;
+
+    private string ClaimTitle => ResourceId <= 0
+        ? "Pilih operator dulu"
+        : lineId <= 0 ? "Pilih Line tujuan dulu" : "Claim bundle ke Line & cetak label";
 
     private async Task HasilScanAsync(string nilai)
     {
@@ -139,32 +195,60 @@
             return;
         }
 
-        if (daftar.Any(b => b.BundleId == bundle.BundleId))
-        {
-            pesanError = $"Bundle {bundle.CuttingCode} sudah ada di daftar scan.";
-            return;
-        }
-
-        daftar.Add(bundle);
+        bundleAktif = bundle;
         kodeManual = string.Empty;
+
+        await MuatOpsiLineAsync(bundle);
     }
 
-    private void Buang(CuttingBundleScanDto b)
+    // Opsi Line = resource divisi PENERIMA log Bundling (divisi step sesudah Bundling,
+    // dihitung di SP dengan definisi yang sama seperti validasi SIS_CuttingBundle_Take).
+    // Pakai resources/{divisionId}, BUKAN receiver-options -- endpoint itu 500 karena
+    // SIS_Station_ReceiverOptions mengembalikan kolom ResourceId sedangkan
+    // ResourceLookupDto menuntut Id, dan client menelan errornya jadi list kosong.
+    private async Task MuatOpsiLineAsync(CuttingBundleScanDto bundle)
     {
-        daftar.Remove(b);
+        lineOptions = bundle.BundlingTargetDivisionId is int divisionId
+            ? await StationApi.GetResourcesByDivisionAsync(divisionId)
+            : new();
+
+        if (!lineOptions.Any(r => r.Id == lineId))
+        {
+            lineId = 0;
+            employeeId = 0;
+            employeeOptions = new();
+        }
+    }
+
+    private async Task PilihLineAsync(int resourceId)
+    {
+        lineId = resourceId;
+        employeeId = 0;
+        employeeOptions = resourceId > 0 ? await StationApi.GetEmployeesByResourceAsync(resourceId) : new();
+    }
+
+    private void Batal()
+    {
+        bundleAktif = null;
         pesanError = string.Empty;
+        pesanSukses = string.Empty;
     }
 
-    private async Task AmbilAsync()
+    private async Task ClaimAsync()
     {
-        if (daftar.Count == 0 || ResourceId <= 0) return;
+        if (bundleAktif is null || ResourceId <= 0 || lineId <= 0) return;
 
         sedangProses = true;
         pesanError = string.Empty;
         pesanSukses = string.Empty;
 
+        var kode = bundleAktif.CuttingCode;
+        var pcs = bundleAktif.Qty;
+        var namaLine = lineOptions.FirstOrDefault(r => r.Id == lineId)?.ResourceName ?? "Line";
+
         var (success, error, hasil) = await StationApi.TakeCuttingBundlesAsync(
-            daftar.Select(b => b.BundleId).ToList(), ResourceId);
+            new List<int> { bundleAktif.BundleId }, ResourceId,
+            lineId, employeeId, jumlahLabel < 0 ? 0 : jumlahLabel);
 
         sedangProses = false;
 
@@ -174,8 +258,15 @@
             return;
         }
 
-        pesanSukses = $"{hasil?.TakenCount ?? daftar.Count} bundle ({hasil?.TotalPcs ?? daftar.Sum(b => b.Qty)} pcs) diambil ke Bundling.";
-        daftar.Clear();
+        pesanSukses = $"{kode} ({hasil?.TotalPcs ?? pcs} pcs) diklaim ke {namaLine} " +
+                      $"· {hasil?.LabelsQueued ?? 0} label dikirim ke printer.";
+
+        // Claim tetap berhasil walau label gagal masuk antrean -- tampilkan sebagai
+        // peringatan, bukan error, supaya operator tidak scan ulang.
+        if (!string.IsNullOrWhiteSpace(hasil?.LabelError))
+            pesanError = $"Bundle sudah diklaim, tapi label gagal dikirim: {hasil!.LabelError}";
+
+        bundleAktif = null;   // siap scan bundle berikutnya; Line & penjahit dipertahankan
 
         if (OnTaken.HasDelegate) await OnTaken.InvokeAsync();
     }

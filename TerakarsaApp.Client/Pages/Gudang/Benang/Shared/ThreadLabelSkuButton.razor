@@ -46,21 +46,9 @@
                         <div class="alert alert-danger" style="margin:0">@error</div>
                     }
 
-                    @if (statusJobs.Count > 0)
-                    {
-                        <div style="display:flex;flex-direction:column;gap:6px">
-                            <div class="bn-sub">Permintaan cetak terakhir</div>
-                            <div class="bn-rows">
-                                @foreach (var j in statusJobs)
-                                {
-                                    <div class="bn-row">
-                                        <span class="bn-k">#@j.PrintJobId · @j.CreatedAt.ToString("dd MMM HH:mm")</span>
-                                        <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
-                                    </div>
-                                }
-                            </div>
-                        </div>
-                    }
+                    <ThreadLabelStatus @ref="statusLabel" Kind="SKU" RefId="@Item.ThreadItemId"
+                                       Judul="Permintaan cetak terakhir"
+                                       Prefix="#" FormatWaktu="dd MMM HH:mm" />
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" @onclick="Tutup" disabled="@isSaving">Tutup</button>
@@ -83,7 +71,7 @@
     private int copies = 1;
     private bool isSaving;
     private string? error;
-    private List<ThreadLabelJobDto> statusJobs = new();
+    private ThreadLabelStatus? statusLabel;
 
     private void UbahCopies(int delta)
     {
@@ -95,7 +83,7 @@
     {
         buka = false;
         error = null;
-        statusJobs = new();
+        statusLabel?.Kosongkan();
     }
 
     private async Task Cetak()
@@ -113,6 +101,6 @@
             return;
         }
 
-        statusJobs = await ThreadApi.GetLabelStatusAsync("SKU", Item.ThreadItemId, 3);
+        statusLabel?.Mulai();
     }
 }

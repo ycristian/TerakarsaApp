@@ -185,7 +185,11 @@ BEGIN
     INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
     WHERE a.deleted_at IS NULL
       AND p.manual_status IS NULL
-    ORDER BY p.no_po ASC, a.article_name ASC;
+    -- Nomor PO terbaru di ATAS (Prompt 82). Diurutkan dari angka SEBELUM titik
+    -- pertama ("318.AGS.2606" -> 318) supaya tetap benar waktu nomornya lewat 999;
+    -- PO yang tidak mengikuti pola (atau kosong) jatuh ke urutan teks dan ada di bawah.
+    ORDER BY TRY_CAST(LEFT(p.no_po, CHARINDEX('.', p.no_po + '.') - 1) AS INT) DESC,
+             p.no_po DESC, a.article_name ASC;
 END;
 GO
 
@@ -267,10 +271,14 @@ BEGIN
         END
 
         -- ---------- rincian size ----------
-        SELECT articleSizeId AS article_size_id, setCount AS set_count
+        -- numberFrom = nomor pcs awal pilihan user (Prompt 82). NULL/0 = pakai
+        -- lanjutan otomatis dari hamparan terakhir artikel + size ini.
+        SELECT articleSizeId AS article_size_id, setCount AS set_count,
+               NULLIF(numberFrom, 0) AS number_from
         INTO #sizes
         FROM OPENJSON(ISNULL(@SizesJson, '[]'))
-             WITH (articleSizeId INT '$.articleSizeId', setCount INT '$.setCount')
+             WITH (articleSizeId INT '$.articleSizeId', setCount INT '$.setCount',
+                   numberFrom INT '$.numberFrom')
         WHERE ISNULL(setCount, 0) > 0;
 
         IF NOT EXISTS (SELECT 1 FROM #sizes)
@@ -289,6 +297,12 @@ BEGIN
         )
         BEGIN
             RAISERROR('Ada ukuran yang bukan milik artikel ini.', 16, 1);
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM #sizes WHERE number_from < 1)
+        BEGIN
+            RAISERROR('Nomor awal numbering harus 1 atau lebih.', 16, 1);
             RETURN;
         END
 
@@ -395,14 +409,16 @@ BEGIN
 
             DECLARE @SpreadId INT = CAST(SCOPE_IDENTITY() AS INT);
 
-            -- Rentang nomor per size: lanjut dari hamparan terakhir artikel+size ini.
+            -- Rentang nomor per size: nomor awal dipilih user di form (Prompt 82);
+            -- kalau tidak dikirim, lanjut dari hamparan terakhir artikel + size ini.
             DECLARE @ss TABLE (spread_size_id INT, article_size_id INT, set_count INT, number_from INT);
 
             INSERT INTO spread_sizes (spread_id, article_size_id, set_count, number_from, number_to)
             OUTPUT inserted.spread_size_id, inserted.article_size_id, inserted.set_count, inserted.number_from
                 INTO @ss (spread_size_id, article_size_id, set_count, number_from)
-            SELECT @SpreadId, z.article_size_id, z.set_count, nx.NextFrom,
-                   nx.NextFrom + z.set_count * @SheetsPerSet - 1
+            SELECT @SpreadId, z.article_size_id, z.set_count,
+                   ISNULL(z.number_from, nx.NextFrom),
+                   ISNULL(z.number_from, nx.NextFrom) + z.set_count * @SheetsPerSet - 1
             FROM #sizes z
             CROSS APPLY (
                 SELECT ISNULL(MAX(ss2.number_to), 0) + 1 AS NextFrom

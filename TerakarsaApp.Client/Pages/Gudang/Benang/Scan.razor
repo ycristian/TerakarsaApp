@@ -145,18 +145,7 @@
             </button>
         </div>
 
-        @if (labelJobs.Count > 0)
-        {
-            <div class="bn-rows">
-                @foreach (var j in labelJobs)
-                {
-                    <div class="bn-row">
-                        <span class="bn-k">Cetak #@j.PrintJobId · @j.CreatedAt.ToString("HH:mm")</span>
-                        <span class="bn-b" style="color:@j.StatusColor">@j.StatusLabel</span>
-                    </div>
-                }
-            </div>
-        }
+        <ThreadLabelStatus @ref="statusLabel" Kind="SPLIT" RefId="@hasil.Cone.ThreadSplitConeId" />
 
         @* ---------- Ambil split: pilih line + project/keterangan ---------- *@
         @if (mulaiAmbilSplit)
@@ -295,7 +284,7 @@
     private bool isProcessing;
     private bool isSaving;
     private bool isPrinting;
-    private List<ThreadLabelJobDto> labelJobs = new();
+    private ThreadLabelStatus? statusLabel;
     private bool kameraJalan;
     private DotNetObjectReference<Scan>? selfRef;
 
@@ -367,7 +356,7 @@
         isProcessing = true;
         hasilError = null;
         pesanSukses = null;
-        labelJobs = new();
+        statusLabel?.Kosongkan();
         TutupAksi();
 
         hasil = await ThreadApi.ScanAsync(kode);
@@ -472,7 +461,7 @@
             return;
         }
 
-        labelJobs = await ThreadApi.GetLabelStatusAsync("SPLIT", hasil.Cone.ThreadSplitConeId, 3);
+        statusLabel?.Mulai();
     }
 
     private async Task SelesaiAksi(bool success, string error, string pesan)
