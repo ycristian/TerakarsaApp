@@ -1,0 +1,312 @@
+@* Prompt 82 -- modal "Kirim Hasil" model PEMECAHAN. Menggantikan modal Kirim Hasil lama
+   (grid Qty OK + 5 kolom reject) di SEMUA station yang punya Kirim Hasil: kartu WIP
+   /station (StationDevice.razor) dan kartu scan (BundleScanCard.razor).
+
+   Isi dari atas:
+     - Header: kode bundle, size, serial, step, "Masuk N pcs" (= qty bundle SAAT INI,
+       bukan angka stiker)
+     - Qty OK (terisi N saat dibuka; tanpa tombol "Set All OK")
+     - Baris Masalah (+ Tambah baris): [kode anak otomatis] [kategori] [alasan wajib]
+       [qty] [hapus] -- kode anak tampil SEBELUM Kirim supaya operator tahu barcode apa
+       yang akan lahir
+     - Sisa = Masuk - OK - Sigma qty baris, dihitung live
+     - Divisi tujuan (terkunci). TANPA field Catatan.
+
+   Mode EDIT: dipakai modal yang SAMA. Anak yang sudah lahir tampil read-only tanpa tombol
+   hapus, Qty OK hanya boleh TURUN, baris baru dapat kode anak berikutnya dari root.
+   Server (SIS_BundleSplit_Manage) yang memutuskan mode & menegakkan aturannya. *@
+@using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Shared.Resources
+@using TerakarsaApp.Client.Services
+@inject StationDeviceApiService StationApi
+
+@if (info?.Header is { } h)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(h.IsEdit ? "Edit Kirim Hasil" : "Kirim Hasil")</h5>
+                    <button type="button" class="btn-close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">
+                        <strong>No. @BundleCode(h) &middot; @h.SizeName</strong>
+                        <span class="text-muted">&middot; @h.Serial</span>
+                    </p>
+                    <p class="text-muted mb-2" style="font-size: 0.8rem;">
+                        @h.StepName
+                        @if (h.SequenceNo > 0)
+                        {
+                            <span class="badge bg-secondary ms-1">Bundle anak &middot; @BundleRejectCategory.Label(h.BundleStatus)</span>
+                        }
+                    </p>
+
+                    <div class="mb-3 p-2" style="border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa;">
+                        <span class="text-muted" style="font-size: 0.75rem;">Masuk</span>
+                        <div class="fw-bold fs-4">@h.QtyMasuk <span class="fs-6 fw-normal text-muted">pcs</span></div>
+                    </div>
+
+                    @if (!h.CanSubmit)
+                    {
+                        <div class="alert alert-warning py-2">
+                            @if (h.IsLocked)
+                            {
+                                <text>Data sudah di-lock. Ajukan unlock untuk mengubah.</text>
+                            }
+                            else
+                            {
+                                <text>Kiriman ini sudah diproses station berikutnya, tidak bisa diedit lagi.</text>
+                            }
+                        </div>
+                    }
+
+                    @* Prompt 39/49: picker "Pelaksana" -- hanya kalau pemanggil mengirim daftar
+                       resource DAN stasiunnya tidak terkunci ke resource bawaan. *@
+                    @if (AllowResourceChange && ResourceOptions.Count > 0)
+                    {
+                        <div class="mb-3">
+                            <ResourcePickerCards Resources="ResourceOptions" SelectedId="selectedResourceId"
+                                                 SelectedIdChanged="(int? v) => selectedResourceId = v ?? 0" Label="Pelaksana" />
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(ActiveResourceName))
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Pelaksana</label>
+                            <div class="form-control bg-light"><i class="fe fe-lock"></i> @ActiveResourceName</div>
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">Qty OK</label>
+                        <input type="number" min="0" class="form-control" @bind="qtyOk" @bind:event="oninput"
+                               disabled="@(!h.CanSubmit)" />
+                        @if (h.IsEdit)
+                        {
+                            <div class="form-text">Saat mengedit, Qty OK hanya boleh turun (sekarang @h.QtyNow).</div>
+                        }
+                    </div>
+
+                    @* Anak yang SUDAH lahir dari pemecahan di step ini -- read-only, aditif. *@
+                    @if (info.Children.Count > 0)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label mb-1">Sudah dicatat</label>
+                            @foreach (var c in info.Children)
+                            {
+                                <div class="d-flex align-items-center gap-2 mb-1 p-2"
+                                     style="border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa;">
+                                    <span class="badge bg-dark">@c.DisplayCode</span>
+                                    <span style="font-size: 0.8rem;">@BundleRejectCategory.Label(c.RejectCategory ?? c.Status)</span>
+                                    <span class="text-muted text-truncate flex-grow-1" style="font-size: 0.75rem;">@c.RejectReason</span>
+                                    <span class="fw-bold">@c.Qty</span>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label mb-0">Masalah</label>
+                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                disabled="@(!h.CanSubmit)" @onclick="AddRow">+ Tambah baris</button>
+                    </div>
+
+                    @for (var i = 0; i < rows.Count; i++)
+                    {
+                        var idx = i;
+                        var row = rows[idx];
+                        <div class="row g-1 align-items-center mb-1">
+                            <div class="col-auto">
+                                @* Kode anak yang AKAN lahir -- nomor urut diambil dari root. *@
+                                <span class="badge bg-dark">@ChildCode(h, idx)</span>
+                            </div>
+                            <div class="col-3">
+                                <select class="form-select form-select-sm" value="@row.Category"
+                                        @onchange="e => row.Category = e.Value?.ToString() ?? string.Empty">
+                                    @foreach (var cat in BundleRejectCategory.ForStation(AllowTidakLengkap))
+                                    {
+                                        <option value="@cat">@BundleRejectCategory.Label(cat)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col">
+                                <input class="form-control form-control-sm" placeholder="Alasan (wajib)"
+                                       value="@row.Reason" @oninput="e => row.Reason = e.Value?.ToString() ?? string.Empty" />
+                            </div>
+                            <div class="col-2">
+                                <input type="number" min="1" class="form-control form-control-sm"
+                                       value="@row.Qty" @oninput="e => OnRowQtyInput(row, e)" />
+                            </div>
+                            <div class="col-auto">
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1"
+                                        title="Hapus" @onclick="() => rows.RemoveAt(idx)">&times;</button>
+                            </div>
+                        </div>
+                    }
+
+                    @* Sisa = Masuk - OK - Sigma qty baris - anak yang sudah lahir. *@
+                    @if (Sisa > 0)
+                    {
+                        <div class="alert alert-warning py-2 mt-2 mb-2">
+                            Sisa @Sisa pcs tidak ditemukan, akan dicatat hilang di @BundleCode(h).
+                        </div>
+                    }
+                    else if (Sisa < 0)
+                    {
+                        <div class="alert alert-danger py-2 mt-2 mb-2">Melebihi qty masuk</div>
+                    }
+
+                    <div class="mb-2">
+                        <label class="form-label">Divisi Tujuan</label>
+                        <div class="form-control bg-light">
+                            @(h.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (h.NextDivisionName ?? "-"))
+                        </div>
+                    </div>
+
+                    @if (ReceiverPickerRequired)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Diterima Oleh (@h.NextDivisionName)</label>
+                            <SearchableSelect TItem="ResourceLookupDto" Items="receiverOptions" @bind-Value="receiverResourceId"
+                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)" Placeholder="Cari resource..." />
+                            @if (receiverResourceId <= 0)
+                            {
+                                <div class="text-danger small mt-1">Penerima wajib dipilih.</div>
+                            }
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(error))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@StripPrefix(error)</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="Close">Batal</button>
+                    <button class="btn btn-primary" disabled="@SubmitDisabled" @onclick="Submit">Kirim hasil</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int BundleId { get; set; }
+    [Parameter, EditorRequired] public int ArticleWorkflowId { get; set; }
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    // TidakLengkap hanya ditawarkan di station Loading/Bundling (part kurang dari sana).
+    [Parameter] public bool AllowTidakLengkap { get; set; }
+    // Prompt 40: step tujuan auto_receive = 1 DAN counterpart pengirim tidak valid.
+    [Parameter] public bool ReceiverPickerRequired { get; set; }
+    // Prompt 39/49: picker "Pelaksana" opsional -- pemanggil yang menyediakan daftarnya.
+    [Parameter] public List<ResourceLookupDto> ResourceOptions { get; set; } = new();
+    [Parameter] public bool AllowResourceChange { get; set; }
+    [Parameter] public string? ActiveResourceName { get; set; }
+    [Parameter] public EventCallback<List<BundleSplitResultDto>> OnSaved { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private class RowModel
+    {
+        public string Category { get; set; } = BundleRejectCategory.RejectJahit;
+        public string Reason { get; set; } = string.Empty;
+        public int Qty { get; set; } = 1;
+    }
+
+    private BundleSplitInfoResult? info;
+    private List<RowModel> rows = new();
+    private int qtyOk;
+    private string error = string.Empty;
+    private bool busy;
+    private List<ResourceLookupDto> receiverOptions = new();
+    private int receiverResourceId;
+    private int selectedResourceId;
+    private int loadedBundleId;
+    private int loadedStepId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedBundleId == BundleId && loadedStepId == ArticleWorkflowId) return;
+
+        loadedBundleId = BundleId;
+        loadedStepId = ArticleWorkflowId;
+        rows = new();
+        error = string.Empty;
+        receiverResourceId = 0;
+        selectedResourceId = ResourceId;
+
+        info = await StationApi.GetSplitInfoAsync(BundleId, ArticleWorkflowId);
+        // Qty OK terisi penuh saat dibuka: sisa isi bundle yang belum dialokasikan ke anak.
+        qtyOk = info?.Header is { } h ? Math.Max(0, h.QtyMasuk - h.ExistingChildQty) : 0;
+
+        receiverOptions = ReceiverPickerRequired
+            ? await StationApi.GetReceiverOptionsAsync(ArticleWorkflowId, BundleId)
+            : new();
+    }
+
+    private int ExistingChildQty => info?.Header?.ExistingChildQty ?? 0;
+
+    private int Sisa => (info?.Header?.QtyMasuk ?? 0) - qtyOk - ExistingChildQty - rows.Sum(r => Math.Max(0, r.Qty));
+
+    private bool SubmitDisabled =>
+        busy || info?.Header is null || !info.Header.CanSubmit || Sisa < 0
+        || rows.Any(r => r.Qty <= 0 || string.IsNullOrWhiteSpace(r.Reason))
+        || (ReceiverPickerRequired && receiverResourceId <= 0);
+
+    private void AddRow() => rows.Add(new RowModel());
+
+    private void OnRowQtyInput(RowModel row, ChangeEventArgs e) =>
+        row.Qty = int.TryParse(e.Value?.ToString(), out var v) ? v : 0;
+
+    // Kode anak yang akan lahir untuk baris ke-idx: nomor urut berikutnya di ROOT, maju
+    // satu per baris. Ditampilkan sebelum Kirim supaya operator tahu barcode apa yang
+    // akan tercetak.
+    private static string BundleCode(BundleSplitInfoDto h) =>
+        (string.IsNullOrEmpty(h.BundleLetter) ? $"{h.RootBundleNo}" : $"{h.BundleLetter}-{h.RootBundleNo}")
+        + (h.SequenceNo > 0 ? $"-{h.SequenceNo}" : string.Empty);
+
+    private static string ChildCode(BundleSplitInfoDto h, int idx)
+    {
+        var root = string.IsNullOrEmpty(h.BundleLetter) ? $"{h.RootBundleNo}" : $"{h.BundleLetter}-{h.RootBundleNo}";
+        return $"{root}-{h.NextSequenceNo + idx}";
+    }
+
+    // Pesan SP ber-prefix tetap ('LOCKED|') -- tampilkan isinya saja.
+    private static string StripPrefix(string message) =>
+        message.StartsWith("LOCKED|") ? message["LOCKED|".Length..] : message;
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Submit()
+    {
+        if (SubmitDisabled) return;
+
+        busy = true;
+        error = string.Empty;
+
+        var (success, err, children) = await StationApi.SplitAsync(new BundleSplitRequest
+        {
+            BundleId = BundleId,
+            ArticleWorkflowId = ArticleWorkflowId,
+            ResourceId = selectedResourceId > 0 ? selectedResourceId : ResourceId,
+            QtyOk = qtyOk,
+            Rows = rows.Select(r => new BundleSplitRowRequest
+            {
+                Category = r.Category,
+                Reason = r.Reason.Trim(),
+                Qty = r.Qty
+            }).ToList(),
+            AutoReceiveResourceId = receiverResourceId > 0 ? receiverResourceId : null
+        });
+
+        busy = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await OnSaved.InvokeAsync(children);
+    }
+}

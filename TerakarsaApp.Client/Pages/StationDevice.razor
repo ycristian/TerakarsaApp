@@ -461,15 +461,45 @@ else
                                             </div>
                                             <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
                                         </div>
+                                    @* Prompt 82: Hilang = Sigma missing_qty POSITIF semua induk artikel ini
+                                       (SEMUA station, bukan cuma station ini). > 0 merah & clickable ->
+                                       modal "Barang ketemu"; = 0 abu-abu dan tidak clickable.
+                                       Lebih = Sigma missing_qty negatif (absolut), tampil hanya kalau > 0.
+                                       Qty tetap = Sigma qty bundle NYATA di station ini. *@
+                                    @{
+                                        var missingQty = MissingQtyOf(first.ArticleId);
+                                        var overQty = OverQtyOf(first.ArticleId);
+                                        var statCols = overQty > 0 ? "col-3" : "col-4";
+                                    }
                                         <div class="row g-2 text-center @(wipExpanded ? "mb-2" : "mb-0")">
-                                            <div class="col-6">
+                                            <div class="@statCols">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Bundle</div>
                                                 <div class="fw-bold">@bundles.Count</div>
                                             </div>
-                                            <div class="col-6">
+                                            <div class="@statCols">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Qty</div>
                                                 <div class="fw-bold">@bundles.Sum(x => x.Qty)</div>
                                             </div>
+                                            <div class="@statCols">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Hilang</div>
+                                                @if (missingQty > 0)
+                                                {
+                                                    @* @onclick:stopPropagation supaya tidak ikut melipat kartu. *@
+                                                    <div class="fw-bold text-danger" style="text-decoration: underline; cursor: pointer;"
+                                                         @onclick="() => OpenKetemuModal(first)" @onclick:stopPropagation="true">@missingQty</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="fw-bold text-muted">0</div>
+                                                }
+                                            </div>
+                                            @if (overQty > 0)
+                                            {
+                                                <div class="@statCols">
+                                                    <div class="text-muted" style="font-size: 0.65rem;">Lebih</div>
+                                                    <div class="fw-bold text-warning">@overQty</div>
+                                                </div>
+                                            }
                                         </div>
                                     </div>
                                     @if (wipExpanded)
@@ -752,7 +782,18 @@ else
                                                             {
                                                                 @* Ikon, bukan teks -- sejajar dengan cabang IsBundling di atas. title
                                                                    dipertahankan supaya aksinya tetap jelas saat di-hover/ditekan lama. *@
+                                                                @* Prompt 82: baris BER-BUNDLE direvisi lewat modal Kirim Hasil (aditif:
+                                                                   qty OK hanya boleh turun, sisanya jadi anak baru atau menambah
+                                                                   hilang). Baris non-bundle (mis. Cutting per size) tetap memakai
+                                                                   modal "Revisi Data" lama -- step itu tidak punya bundle untuk dipecah. *@
+                                                                @if (b.BundleId is not null)
+                                                                {
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Edit Kirim Hasil" disabled="@isBusy" @onclick="() => OpenOutEditModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                }
+                                                                else
+                                                                {
                                                                 <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Revisi" disabled="@isBusy" @onclick="() => OpenReviseModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                }
                                                                 <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Batal Serah" disabled="@isBusy" @onclick="() => OpenBatalSerahModal(b)"><i class="fe fe-x"></i></button>
                                                             }
                                                         </div>
@@ -1109,92 +1150,39 @@ else
     </div>
 }
 
-@if (showSerahkanModal && serahkanTarget is not null)
+@* Prompt 82: modal Kirim Hasil lama (Qty OK + 5 kolom reject + Catatan) DIGANTI komponen
+   bersama KirimHasilModal -- qty OK + baris masalah yang lahir jadi bundle anak + Sisa
+   yang dicatat hilang di induk. Dipakai modal yang sama di kartu scan (BundleScanCard). *@
+@if (showSerahkanModal && serahkanTarget is { NextArticleWorkflowId: not null } st && currentOperatorId is not null)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Kirim Hasil</h5>
-                    <button type="button" class="btn-close" @onclick="CloseSerahkanModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p><strong>No. @BundleDisplay.Format(serahkanTarget.BundleLetter, serahkanTarget.BundleNo) &middot; @serahkanTarget.SizeName</strong> &middot; @serahkanTarget.Serial</p>
-                    <p class="text-muted">@serahkanTarget.NextStepName</p>
+    <KirimHasilModal BundleId="st.BundleId"
+                     ArticleWorkflowId="st.NextArticleWorkflowId.Value"
+                     ResourceId="currentOperatorId.Value"
+                     AllowTidakLengkap="AllowTidakLengkap"
+                     OnSaved="OnKirimHasilSaved"
+                     OnClose="CloseSerahkanModal" />
+}
 
-                    <div class="d-flex justify-content-end mb-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="SetSerahkanAllOk">Set All OK</button>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-6">
-                            <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyOk" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectPrint" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectFabric" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectSewing" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyRejectRework" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control" @bind="serahkanQtyLost" />
-                        </div>
-                    </div>
+@* Prompt 82: Edit Kirim Hasil dari tab OUT -- modal yang SAMA, mode EDIT dikenali server. *@
+@if (showOutEditModal && outEditTarget is { BundleId: not null } oet && currentOperatorId is not null)
+{
+    <KirimHasilModal BundleId="oet.BundleId.Value"
+                     ArticleWorkflowId="oet.ArticleWorkflowId"
+                     ResourceId="currentOperatorId.Value"
+                     AllowTidakLengkap="AllowTidakLengkap"
+                     OnSaved="OnOutEditSaved"
+                     OnClose="CloseOutEditModal" />
+}
 
-                    @if (serahkanQuotaInfo is not null)
-                    {
-                        <div class="form-text mb-2">Masuk: @serahkanQuotaInfo.QtyMasuk &middot; Tercatat: @serahkanQuotaInfo.QtySudah &middot; Sisa: @serahkanQuotaInfo.Sisa</div>
-                    }
-
-                    <div class="mb-2">
-                        <label class="form-label">Divisi Tujuan</label>
-                        <div class="form-control bg-light">
-                            @(serahkanTarget.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (serahkanTarget.NextDivisionName ?? "-"))
-                        </div>
-                    </div>
-
-                    <label class="form-label">Catatan (wajib jika ada reject)</label>
-                    <textarea class="form-control" rows="2" @bind="serahkanRemark"></textarea>
-
-                    @if (!string.IsNullOrEmpty(serahkanError) && serahkanError.StartsWith("QTY_EXCEED|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(serahkanError["QTY_EXCEED|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmSerahkan(true, false)">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(serahkanError) && serahkanError.StartsWith("QTY_SHORT|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(serahkanError["QTY_SHORT|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@isBusy" @onclick="() => ConfirmSerahkan(false, true)">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(serahkanError))
-                    {
-                        <div class="alert alert-danger mt-2 mb-0">@serahkanError</div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseSerahkanModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@isBusy" @onclick="() => ConfirmSerahkan(false, false)">Kirim Hasil</button>
-                </div>
-            </div>
-        </div>
-    </div>
+@* Prompt 82: modal "Barang ketemu" -- dibuka dari angka Hilang di kartu artikel. *@
+@if (showKetemuModal && ketemuTarget is { } kt && currentOperatorId is not null)
+{
+    <BarangKetemuModal ArticleId="kt.ArticleId"
+                       ArticleName="@kt.ArticleName"
+                       NoPo="@kt.NoPo"
+                       ResourceId="currentOperatorId.Value"
+                       OnSaved="OnBarangKetemuSaved"
+                       OnClose="CloseKetemuModal" />
 }
 
 @if (showNonBundleModal && nonBundleTarget is not null)
@@ -2099,15 +2087,22 @@ else
 
     private bool showSerahkanModal = false;
     private StationInProgressDto? serahkanTarget;
-    private int serahkanQtyOk;
-    private int serahkanQtyRejectPrint;
-    private int serahkanQtyRejectFabric;
-    private int serahkanQtyRejectSewing;
-    private int serahkanQtyRejectRework;
-    private int serahkanQtyLost;
-    private string serahkanRemark = string.Empty;
-    private string serahkanError = string.Empty;
-    private WorkflowQuotaInfoDto? serahkanQuotaInfo;
+
+    // Prompt 82: angka Hilang / Lebih per artikel (Sigma missing_qty semua induk artikel,
+    // SEMUA station) + modal "Barang ketemu" yang dibuka dari angka Hilang.
+    private Dictionary<int, BundleMissingSummaryDto> missingByArticle = new();
+    private bool showKetemuModal = false;
+    private StationInProgressDto? ketemuTarget;
+    // Edit Kirim Hasil dari tab OUT (baris ber-bundle).
+    private bool showOutEditModal = false;
+    private StationPendingHandoverDto? outEditTarget;
+
+    // Kategori TidakLengkap hanya ditawarkan di station Loading/Bundling (part kurang
+    // berasal dari sana) -- lihat BundleRejectCategory.ForStation.
+    private bool AllowTidakLengkap =>
+        station is not null
+        && (station.DivisionName.Contains("loading", StringComparison.OrdinalIgnoreCase)
+            || station.DivisionName.Contains("bundling", StringComparison.OrdinalIgnoreCase));
 
     private bool showNonBundleModal = false;
     private StationActiveWorkDto? nonBundleTarget;
@@ -2638,6 +2633,69 @@ else
         StateHasChanged();
 
         await LoadOutboundDatePeriodAsync();
+        await RefreshMissing();
+    }
+
+    // Prompt 82: angka Hilang / Lebih kartu artikel. Diambil sekali untuk semua artikel yang
+    // punya selisih terbuka (bukan per kartu) -- satu round-trip, kartu tinggal melihat dict.
+    private async Task RefreshMissing()
+    {
+        var rows = await StationApi.GetMissingAsync();
+        missingByArticle = rows.ToDictionary(r => r.ArticleId);
+        StateHasChanged();
+    }
+
+    private int MissingQtyOf(int articleId) =>
+        missingByArticle.TryGetValue(articleId, out var m) ? m.MissingQty : 0;
+
+    private int OverQtyOf(int articleId) =>
+        missingByArticle.TryGetValue(articleId, out var m) ? m.OverQty : 0;
+
+    private void OpenOutEditModal(StationPendingHandoverDto item)
+    {
+        outEditTarget = item;
+        showOutEditModal = true;
+    }
+
+    private void CloseOutEditModal()
+    {
+        showOutEditModal = false;
+        outEditTarget = null;
+    }
+
+    private async Task OnOutEditSaved(List<BundleSplitResultDto> children)
+    {
+        CloseOutEditModal();
+
+        reprintFeedback = children.Count == 0
+            ? "Kiriman diperbarui."
+            : $"Kiriman diperbarui. Bundle anak lahir: {string.Join(", ", children.Select(c => c.DisplayCode))} (stiker masuk antrian cetak).";
+
+        await RefreshLists();
+    }
+
+    private void OpenKetemuModal(StationInProgressDto item)
+    {
+        if (MissingQtyOf(item.ArticleId) <= 0) return;
+        ketemuTarget = item;
+        showKetemuModal = true;
+    }
+
+    private void CloseKetemuModal()
+    {
+        showKetemuModal = false;
+        ketemuTarget = null;
+    }
+
+    private async Task OnBarangKetemuSaved(List<BundleSplitResultDto> children)
+    {
+        CloseKetemuModal();
+
+        reprintFeedback = children.Count == 0
+            ? "Barang ketemu dicatat."
+            : $"Barang ketemu dicatat. Bundle anak lahir: {string.Join(", ", children.Select(c => c.DisplayCode))} (stiker masuk antrian cetak).";
+
+        await RefreshLists();
     }
 
     // Keterangan periode gajian di samping label "Tanggal Kirim". Memakai ULANG
@@ -3227,31 +3285,15 @@ else
         await RefreshLists();
     }
 
-    private async Task OpenSerahkanModal(StationInProgressDto item)
+    // Prompt 82: modal Kirim Hasil pindah ke komponen bersama KirimHasilModal -- kartu WIP
+    // cuma menentukan bundle & step-nya, isi form + submit (SIS_BundleSplit_Manage) ada di
+    // komponen itu.
+    private void OpenSerahkanModal(StationInProgressDto item)
     {
         if (item.NextArticleWorkflowId is null) return;
 
         serahkanTarget = item;
-        serahkanQtyOk = 0;
-        serahkanQtyRejectPrint = 0;
-        serahkanQtyRejectFabric = 0;
-        serahkanQtyRejectSewing = 0;
-        serahkanQtyRejectRework = 0;
-        serahkanQtyLost = 0;
-        serahkanRemark = string.Empty;
-        serahkanError = string.Empty;
-        serahkanQuotaInfo = await StationApi.GetQuotaInfoAsync(item.NextArticleWorkflowId.Value, item.BundleId);
         showSerahkanModal = true;
-    }
-
-    private void SetSerahkanAllOk()
-    {
-        serahkanQtyOk = Math.Max(0, serahkanQuotaInfo?.Sisa ?? 0);
-        serahkanQtyRejectPrint = 0;
-        serahkanQtyRejectFabric = 0;
-        serahkanQtyRejectSewing = 0;
-        serahkanQtyRejectRework = 0;
-        serahkanQtyLost = 0;
     }
 
     private void CloseSerahkanModal()
@@ -3260,46 +3302,17 @@ else
         serahkanTarget = null;
     }
 
-    private async Task ConfirmSerahkan(bool confirmExceed, bool confirmShort)
+    // Anak yang lahir dikabarkan ke operator (barcode-nya ikut tercetak otomatis dari SP).
+    private async Task OnKirimHasilSaved(List<BundleSplitResultDto> children)
     {
-        if (serahkanTarget?.NextArticleWorkflowId is null || currentOperatorId is null) return;
-
-        var serahkanTotalReject = serahkanQtyRejectPrint + serahkanQtyRejectFabric + serahkanQtyRejectSewing + serahkanQtyRejectRework + serahkanQtyLost;
-        if (serahkanTotalReject > 0 && string.IsNullOrWhiteSpace(serahkanRemark))
-        {
-            serahkanError = "Catatan wajib diisi jika ada reject.";
-            return;
-        }
-
-        isBusy = true;
-        serahkanError = string.Empty;
-
-        var (success, error) = await StationApi.CompleteAsync(new StationCompleteRequest
-        {
-            ArticleWorkflowId = serahkanTarget.NextArticleWorkflowId.Value,
-            BundleId = serahkanTarget.BundleId,
-            ResourceId = currentOperatorId.Value,
-            QtyOk = serahkanQtyOk,
-            QtyRejectPrint = serahkanQtyRejectPrint,
-            QtyRejectFabric = serahkanQtyRejectFabric,
-            QtyRejectSewing = serahkanQtyRejectSewing,
-            QtyRejectRework = serahkanQtyRejectRework,
-            QtyLost = serahkanQtyLost,
-            Remark = string.IsNullOrWhiteSpace(serahkanRemark) ? null : serahkanRemark,
-            ConfirmExceed = confirmExceed,
-            ConfirmShort = confirmShort
-        });
-
-        isBusy = false;
-
-        if (!success)
-        {
-            serahkanError = error;
-            return;
-        }
-
         CloseSerahkanModal();
+
+        reprintFeedback = children.Count == 0
+            ? "Hasil terkirim."
+            : $"Hasil terkirim. Bundle anak lahir: {string.Join(", ", children.Select(c => c.DisplayCode))} (stiker masuk antrian cetak).";
+
         await RefreshLists();
+        await RefreshMissing();
     }
 
     private void OpenPhotoModal(string? src)

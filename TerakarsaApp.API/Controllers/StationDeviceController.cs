@@ -26,6 +26,8 @@ public class StationDeviceController : ControllerBase
     private readonly WorkflowLockService _workflowLockService;
     private readonly ResourceService _resourceService;
     private readonly BundleService _bundleService;
+    // Prompt 82: pemecahan bundle (bundle anak) + selisih hilang/lebih.
+    private readonly BundleSplitService _bundleSplitService;
     private readonly EmployeeService _employeeService;
     private readonly PackService _packService;
     private readonly ProjectService _projectService;
@@ -43,6 +45,7 @@ public class StationDeviceController : ControllerBase
         WorkflowLockService workflowLockService,
         ResourceService resourceService,
         BundleService bundleService,
+        BundleSplitService bundleSplitService,
         EmployeeService employeeService,
         PackService packService,
         ProjectService projectService,
@@ -58,6 +61,7 @@ public class StationDeviceController : ControllerBase
         _workflowLockService = workflowLockService;
         _resourceService = resourceService;
         _bundleService = bundleService;
+        _bundleSplitService = bundleSplitService;
         _employeeService = employeeService;
         _packService = packService;
         _projectService = projectService;
@@ -564,6 +568,85 @@ public class StationDeviceController : ControllerBase
 
         if (!success) return BadRequest(error);
         return Ok();
+    }
+
+    // ===================== Prompt 82: pemecahan bundle & selisih =====================
+    // Modal "Kirim Hasil" model baru: qty OK + daftar baris masalah (tiap baris lahir jadi
+    // bundle anak berbarcode sendiri) + Sisa yang dicatat hilang di induk. Satu transaksi di
+    // SIS_BundleSplit_Manage. Action yang sama dipakai untuk EDIT kiriman (aditif) -- SP yang
+    // memutuskan: kalau step+bundle sudah punya baris Kirim hidup, Masuk diambil dari split
+    // sebelumnya dan qty OK hanya boleh turun.
+
+    [HttpGet("split/info")]
+    public async Task<IActionResult> GetSplitInfo([FromQuery] int bundleId, [FromQuery] int articleWorkflowId)
+    {
+        var result = await _bundleSplitService.GetInfoAsync(bundleId, articleWorkflowId);
+        if (result.Header is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpPost("split")]
+    public async Task<IActionResult> Split([FromBody] BundleSplitRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.QtyOk < 0) return BadRequest("Qty OK tidak boleh negatif.");
+
+        foreach (var row in request.Rows)
+        {
+            if (row.Qty <= 0) return BadRequest("Qty baris masalah harus lebih dari 0.");
+            if (string.IsNullOrWhiteSpace(row.Reason)) return BadRequest("Alasan wajib diisi untuk setiap baris masalah.");
+            if (!BundleRejectCategory.All.Contains(row.Category)) return BadRequest("Kategori masalah tidak dikenal.");
+        }
+
+        var (success, error, children) = await _bundleSplitService.SplitAsync(
+            request, resourceId, CurrentStation.DivisionId, CurrentStation.AllowResourceChange, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok(children);
+    }
+
+    // Angka Hilang / Lebih di kartu artikel tab WIP (Sigma missing_qty semua induk artikel,
+    // SEMUA station -- bukan cuma station pemanggil).
+    [HttpGet("split/missing")]
+    public async Task<IActionResult> GetMissing([FromQuery] int? articleId)
+    {
+        return Ok(await _bundleSplitService.GetMissingByArticleAsync(articleId));
+    }
+
+    // Modal "Barang ketemu": dropdown size (hanya yang punya selisih terbuka).
+    [HttpGet("split/missing-sizes")]
+    public async Task<IActionResult> GetMissingSizes([FromQuery] int articleId)
+    {
+        return Ok(await _bundleSplitService.GetMissingSizesAsync(articleId));
+    }
+
+    // Modal "Barang ketemu": blok "Akan dicatat ke" (alokasi LIFO otomatis untuk qty tsb,
+    // atau seluruh kandidat tanpa alokasi kalau qty tidak dikirim -- tombol "Ubah").
+    [HttpGet("split/missing-bundles")]
+    public async Task<IActionResult> GetMissingBundles([FromQuery] int articleSizeId, [FromQuery] int? qty)
+    {
+        return Ok(await _bundleSplitService.GetMissingBundlesAsync(articleSizeId, qty));
+    }
+
+    [HttpPost("split/found")]
+    public async Task<IActionResult> Found([FromBody] BundleFoundRequest request)
+    {
+        var resourceId = EffectiveResourceId(request.ResourceId);
+        if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request.QtyFound <= 0) return BadRequest("Qty ketemu harus lebih dari 0.");
+        if (!BundleRejectCategory.FoundConditions.Contains(request.Condition))
+            return BadRequest("Kondisi barang ketemu tidak dikenal.");
+        if (request.Condition != "OK" && string.IsNullOrWhiteSpace(request.Reason))
+            return BadRequest("Alasan wajib diisi kalau kondisi bukan OK.");
+
+        var (success, error, children) = await _bundleSplitService.FoundAsync(
+            request, resourceId, CurrentStation.DivisionId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok(children);
     }
 
     // Prompt 40: dropdown "Diterima Oleh ({divisi tujuan})" wajib di form Kirim Hasil ketika

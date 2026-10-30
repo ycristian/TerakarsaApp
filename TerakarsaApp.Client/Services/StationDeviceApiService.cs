@@ -334,6 +334,62 @@ public class StationDeviceApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyelesaikan." : error.Trim('"'));
     }
 
+    // ===================== Prompt 82: pemecahan bundle & selisih =====================
+
+    public async Task<BundleSplitInfoResult?> GetSplitInfoAsync(int bundleId, int articleWorkflowId)
+    {
+        var response = await _http.GetAsync($"api/station/split/info?bundleId={bundleId}&articleWorkflowId={articleWorkflowId}");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<BundleSplitInfoResult>();
+    }
+
+    // Submit modal "Kirim Hasil" model pemecahan (dipakai juga untuk EDIT kiriman -- server
+    // yang memutuskan mode-nya, lihat SIS_BundleSplit_Manage).
+    public async Task<(bool Success, string Error, List<BundleSplitResultDto> Children)> SplitAsync(BundleSplitRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/split", request);
+        if (response.IsSuccessStatusCode)
+            return (true, string.Empty, await response.Content.ReadFromJsonAsync<List<BundleSplitResultDto>>() ?? new());
+
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengirim hasil." : error.Trim('"'), new());
+    }
+
+    public async Task<List<BundleMissingSummaryDto>> GetMissingAsync(int? articleId = null)
+    {
+        var url = "api/station/split/missing";
+        if (articleId.HasValue) url += $"?articleId={articleId.Value}";
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleMissingSummaryDto>>() ?? new();
+    }
+
+    public async Task<List<BundleMissingSizeDto>> GetMissingSizesAsync(int articleId)
+    {
+        var response = await _http.GetAsync($"api/station/split/missing-sizes?articleId={articleId}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleMissingSizeDto>>() ?? new();
+    }
+
+    public async Task<List<BundleMissingBundleDto>> GetMissingBundlesAsync(int articleSizeId, int? qty)
+    {
+        var url = $"api/station/split/missing-bundles?articleSizeId={articleSizeId}";
+        if (qty.HasValue) url += $"&qty={qty.Value}";
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<BundleMissingBundleDto>>() ?? new();
+    }
+
+    public async Task<(bool Success, string Error, List<BundleSplitResultDto> Children)> FoundAsync(BundleFoundRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/station/split/found", request);
+        if (response.IsSuccessStatusCode)
+            return (true, string.Empty, await response.Content.ReadFromJsonAsync<List<BundleSplitResultDto>>() ?? new());
+
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencatat barang ketemu." : error.Trim('"'), new());
+    }
+
     public async Task<(bool Success, string Error)> UpdateLogAsync(int workflowLogId, StationLogUpdateRequest request)
     {
         var response = await _http.PutAsJsonAsync($"api/station/logs/{workflowLogId}", request);

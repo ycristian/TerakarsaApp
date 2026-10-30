@@ -400,15 +400,19 @@ BEGIN
         -- Log Bundling per bundle -- Prompt 81: LANGSUNG diterima oleh Line tujuan.
         -- received_by_resource_id = Line (resource divisi TUJUAN), bukan @ResourceId
         -- (resource Bundling), persis aturan #10 sp_Bundle_Manage.sql.
+        -- Prompt 82: baris Bundling ini SEKALIGUS baris 'Creation' rantai qty bundle --
+        -- sama perlakuan dengan SIS_Bundle_Manage CREATE.
         INSERT INTO article_workflow_logs (
             article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
             qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing,
+            qty_delta, qty_after, log_kind,
             remark, target_division_id, received_at, received_by_resource_id, received_remark,
             created_at, created_by
         )
         SELECT
             @BundlingStepId, b.bundle_id, NULL, @BundlingDivisionId, @ResourceId, NULL,
             b.qty, 0, 0, 0,
+            b.qty, b.qty, 'Creation',
             NULL, @BundlingTargetDivisionId,
             SYSDATETIME(), @TargetResourceId, 'Otomatis: bundle cutting diklaim Line',
             SYSDATETIME(), @UserId

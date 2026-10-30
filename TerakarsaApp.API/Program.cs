@@ -86,6 +86,8 @@ builder.Services.AddScoped<StationService>();
 builder.Services.AddScoped<WorkflowLogService>();
 builder.Services.AddScoped<WorkflowLockService>();
 builder.Services.AddScoped<BundleService>();
+// Prompt 82: pemecahan bundle (bundle anak) + selisih hilang/lebih.
+builder.Services.AddScoped<BundleSplitService>();
 builder.Services.AddScoped<PackService>();
 builder.Services.AddScoped<PrintJobService>();
 // Prompt 77: device cetak HP (Bluetooth) + routing job_type.

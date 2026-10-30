@@ -1,0 +1,259 @@
+@* Prompt 82 -- modal "Barang ketemu", dibuka dari angka Hilang di kartu artikel station.
+   Menutup selisih yang tercatat di induk: missing_qty induk berkurang dan bundle ANAK baru
+   lahir dengan barcode sendiri (anak OK langsung masuk WIP station ini dan mengalir normal).
+
+   Alokasi default LIFO: induk ber-selisih terbuka pada size itu, urut tanggal baris Hilang
+   TERAKHIR desc ("yang paling baru hilang diisi lebih dulu"). Tombol "Ubah" membuka daftar
+   semua induk ber-selisih dengan qty manual. Qty boleh MELEBIHI total selisih -- kelebihan
+   ditempel ke bundle LIFO terakhir dan dicatat sebagai Lebih (missing_qty negatif), tidak
+   lahir anak terpisah. *@
+@using TerakarsaApp.Shared.Bundles
+@using TerakarsaApp.Client.Services
+@inject StationDeviceApiService StationApi
+
+<div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Barang ketemu</h5>
+                <button type="button" class="btn-close" @onclick="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-1"><strong>@ArticleName</strong> <span class="text-muted">&middot; @(NoPo ?? "-")</span></p>
+                <p class="text-muted mb-3" style="font-size: 0.8rem;">
+                    Hilang terbuka:
+                    @if (sizes.Count == 0)
+                    {
+                        <text>-</text>
+                    }
+                    else
+                    {
+                        @string.Join(" · ", sizes.Select(s => $"{s.SizeName} {s.MissingQty}"))
+                    }
+                </p>
+
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label">Size</label>
+                        <select class="form-select" value="@selectedSizeId" @onchange="OnSizeChanged">
+                            <option value="0">-- pilih --</option>
+                            @foreach (var s in sizes)
+                            {
+                                <option value="@s.ArticleSizeId">@s.SizeName (selisih terbuka: @s.MissingQty)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Qty ketemu</label>
+                        <input type="number" min="1" class="form-control" value="@qtyFound" @oninput="OnQtyInput" />
+                    </div>
+                </div>
+
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label">Kondisi</label>
+                        <select class="form-select" value="@condition" @onchange="OnConditionChanged">
+                            @foreach (var c in BundleRejectCategory.FoundConditions)
+                            {
+                                <option value="@c">@BundleRejectCategory.Label(c)</option>
+                            }
+                        </select>
+                    </div>
+                    @if (condition != "OK")
+                    {
+                        <div class="col-6">
+                            <label class="form-label">Alasan</label>
+                            <input class="form-control" value="@reason"
+                                   @oninput="e => reason = e.Value?.ToString() ?? string.Empty" />
+                        </div>
+                    }
+                </div>
+
+                @if (selectedSizeId > 0 && qtyFound > 0)
+                {
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0">Akan dicatat ke</label>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ToggleManual">
+                                @(manual ? "Pakai urutan otomatis" : "Ubah")
+                            </button>
+                        </div>
+
+                        @* Mode otomatis hanya menampilkan bundle yang kebagian alokasi; mode
+                           manual menampilkan SEMUA induk ber-selisih di size itu. *@
+                        @foreach (var c in VisibleCandidates)
+                        {
+                            var alloc = manual ? manualQty.GetValueOrDefault(c.BundleId) : c.AllocQty;
+
+                            <div class="d-flex align-items-center gap-2 mb-1 p-2"
+                                 style="border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: @(c.IsOverflow && !manual ? "#fff3cd" : "#f8f9fa");">
+                                <span class="badge bg-dark">@c.DisplayCode</span>
+                                <span class="text-muted" style="font-size: 0.72rem;">
+                                    hilang @c.MissingQty &middot; @c.LastMissingAt.ToString("dd/MM HH:mm")
+                                </span>
+                                <span class="flex-grow-1"></span>
+                                <span class="badge bg-secondary">@c.NextChildCode</span>
+                                @if (manual)
+                                {
+                                    <input type="number" min="0" class="form-control form-control-sm" style="width: 5rem;"
+                                           value="@alloc" @oninput="e => SetManual(c.BundleId, e)" />
+                                }
+                                else
+                                {
+                                    <span class="fw-bold">@alloc</span>
+                                }
+                            </div>
+
+                            @if (c.IsOverflow && !manual)
+                            {
+                                <div class="text-muted mb-1" style="font-size: 0.7rem;">
+                                    melebihi selisih, dicatat Lebih
+                                </div>
+                            }
+                        }
+
+                        @if (!manual)
+                        {
+                            <div class="form-text">Urutan otomatis: yang paling baru hilang diisi lebih dulu.</div>
+                        }
+                        else if (ManualTotal != qtyFound)
+                        {
+                            <div class="text-danger small">Total alokasi (@ManualTotal) harus sama dengan qty ketemu (@qtyFound).</div>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <div class="alert alert-danger mt-2 mb-0">@error</div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-light" @onclick="Close">Batal</button>
+                <button class="btn btn-primary" disabled="@SubmitDisabled" @onclick="Submit">Catat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ArticleId { get; set; }
+    [Parameter] public string ArticleName { get; set; } = string.Empty;
+    [Parameter] public string? NoPo { get; set; }
+    [Parameter, EditorRequired] public int ResourceId { get; set; }
+    [Parameter] public EventCallback<List<BundleSplitResultDto>> OnSaved { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<BundleMissingSizeDto> sizes = new();
+    private List<BundleMissingBundleDto> candidates = new();
+    private Dictionary<int, int> manualQty = new();
+    private int selectedSizeId;
+    private int qtyFound = 1;
+    private string condition = "OK";
+    private string reason = string.Empty;
+    private bool manual;
+    private bool busy;
+    private string error = string.Empty;
+    private int loadedArticleId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedArticleId == ArticleId) return;
+        loadedArticleId = ArticleId;
+        sizes = await StationApi.GetMissingSizesAsync(ArticleId);
+        selectedSizeId = sizes.Count == 1 ? sizes[0].ArticleSizeId : 0;
+        if (selectedSizeId > 0) await ReloadCandidates();
+    }
+
+    private async Task OnSizeChanged(ChangeEventArgs e)
+    {
+        selectedSizeId = int.TryParse(e.Value?.ToString(), out var v) ? v : 0;
+        manual = false;
+        manualQty = new();
+        await ReloadCandidates();
+    }
+
+    private async Task OnQtyInput(ChangeEventArgs e)
+    {
+        qtyFound = int.TryParse(e.Value?.ToString(), out var v) ? v : 0;
+        if (!manual) await ReloadCandidates();
+    }
+
+    private void OnConditionChanged(ChangeEventArgs e)
+    {
+        condition = e.Value?.ToString() ?? "OK";
+        if (condition == "OK") reason = string.Empty;
+    }
+
+    private async Task ToggleManual()
+    {
+        manual = !manual;
+        if (manual)
+        {
+            // Mulai dari hasil alokasi otomatis supaya operator cuma menggeser angkanya.
+            candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound);
+            manualQty = candidates.ToDictionary(c => c.BundleId, c => c.AllocQty);
+        }
+        else
+        {
+            manualQty = new();
+            await ReloadCandidates();
+        }
+    }
+
+    private async Task ReloadCandidates()
+    {
+        if (selectedSizeId <= 0 || qtyFound <= 0)
+        {
+            candidates = new();
+            return;
+        }
+        candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound);
+    }
+
+    private void SetManual(int bundleId, ChangeEventArgs e) =>
+        manualQty[bundleId] = int.TryParse(e.Value?.ToString(), out var v) ? Math.Max(0, v) : 0;
+
+    private int ManualTotal => manualQty.Values.Sum();
+
+    private IEnumerable<BundleMissingBundleDto> VisibleCandidates =>
+        manual ? candidates : candidates.Where(c => c.AllocQty > 0);
+
+    private bool SubmitDisabled =>
+        busy || selectedSizeId <= 0 || qtyFound <= 0
+        || (condition != "OK" && string.IsNullOrWhiteSpace(reason))
+        || (manual && ManualTotal != qtyFound);
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Submit()
+    {
+        if (SubmitDisabled) return;
+
+        busy = true;
+        error = string.Empty;
+
+        var (success, err, children) = await StationApi.FoundAsync(new BundleFoundRequest
+        {
+            ArticleSizeId = selectedSizeId,
+            ResourceId = ResourceId,
+            QtyFound = qtyFound,
+            Condition = condition,
+            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+            Allocations = manual
+                ? manualQty.Where(kv => kv.Value > 0)
+                    .Select(kv => new BundleFoundAllocationRequest { BundleId = kv.Key, Qty = kv.Value }).ToList()
+                : new()
+        });
+
+        busy = false;
+
+        if (!success)
+        {
+            error = err;
+            return;
+        }
+
+        await OnSaved.InvokeAsync(children);
+    }
+}

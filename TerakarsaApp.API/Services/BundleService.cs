@@ -203,6 +203,15 @@ public class BundleService
                 // ke client, badge "Operator otomatis" jadi tampil kosong.
                 SuggestedResourceName = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceName")) ? null : reader.GetString(reader.GetOrdinal("SuggestedResourceName")),
                 SuggestedResourceSource = reader.IsDBNull(reader.GetOrdinal("SuggestedResourceSource")) ? null : reader.GetString(reader.GetOrdinal("SuggestedResourceSource")),
+                // Prompt 82: pohon induk/anak + status + selisih.
+                SequenceNo = reader.GetInt32(reader.GetOrdinal("SequenceNo")),
+                ParentBundleId = reader.IsDBNull(reader.GetOrdinal("ParentBundleId")) ? null : reader.GetInt32(reader.GetOrdinal("ParentBundleId")),
+                RootBundleId = reader.GetInt32(reader.GetOrdinal("RootBundleId")),
+                RootBundleNo = reader.GetInt32(reader.GetOrdinal("RootBundleNo")),
+                BundleStatus = reader.GetString(reader.GetOrdinal("BundleStatus")),
+                RejectCategory = reader.IsDBNull(reader.GetOrdinal("RejectCategory")) ? null : reader.GetString(reader.GetOrdinal("RejectCategory")),
+                RejectReason = reader.IsDBNull(reader.GetOrdinal("RejectReason")) ? null : reader.GetString(reader.GetOrdinal("RejectReason")),
+                MissingQty = reader.GetInt32(reader.GetOrdinal("MissingQty")),
             };
 
             await reader.NextResultAsync();
@@ -229,6 +238,11 @@ public class BundleService
                     ReceivedAt = reader.IsDBNull(reader.GetOrdinal("ReceivedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedAt")),
                     ReceivedByResourceName = reader.IsDBNull(reader.GetOrdinal("ReceivedByResourceName")) ? null : reader.GetString(reader.GetOrdinal("ReceivedByResourceName")),
                     ReceivedRemark = reader.IsDBNull(reader.GetOrdinal("ReceivedRemark")) ? null : reader.GetString(reader.GetOrdinal("ReceivedRemark")),
+                    // Prompt 82: jenis baris + rantai qty bertanda.
+                    LogKind = reader.IsDBNull(reader.GetOrdinal("LogKind")) ? null : reader.GetString(reader.GetOrdinal("LogKind")),
+                    QtyDelta = reader.IsDBNull(reader.GetOrdinal("QtyDelta")) ? 0 : reader.GetInt32(reader.GetOrdinal("QtyDelta")),
+                    QtyAfter = reader.IsDBNull(reader.GetOrdinal("QtyAfter")) ? 0 : reader.GetInt32(reader.GetOrdinal("QtyAfter")),
+                    Reason = reader.IsDBNull(reader.GetOrdinal("Reason")) ? null : reader.GetString(reader.GetOrdinal("Reason")),
                 });
             }
 

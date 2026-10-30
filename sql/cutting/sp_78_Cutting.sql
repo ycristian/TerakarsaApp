@@ -428,7 +428,9 @@ BEGIN
             ) nx;
 
             -- ---------- bundle ----------
-            DECLARE @NextSerialNo INT = (SELECT ISNULL(MAX(CAST(RIGHT(serial, 6) AS INT)), 0) FROM bundles);
+            -- Prompt 82: saring sequence_no = 0 (induk saja) -- serial anak '{serial}-{seq}'
+            -- membuat RIGHT(serial, 6) tidak lagi murni angka.
+            DECLARE @NextSerialNo INT = (SELECT ISNULL(MAX(CAST(RIGHT(serial, 6) AS INT)), 0) FROM bundles WHERE sequence_no = 0);
             DECLARE @Yy VARCHAR(2) = RIGHT(CAST(YEAR(SYSDATETIME()) AS VARCHAR(4)), 2);
 
             DECLARE @ProjectId INT = (SELECT project_id FROM articles WHERE article_id = @ArticleId);
@@ -487,6 +489,12 @@ BEGIN
             ORDER BY i.rn;
 
             DECLARE @Created INT = @@ROWCOUNT;
+
+            -- Prompt 82: bundle hamparan selalu INDUK UTAMA -- root_bundle_id = dirinya
+            -- sendiri (default kolom 0, diisi di sini karena identity baru terbit setelah
+            -- INSERT set-based di atas).
+            UPDATE bundles SET root_bundle_id = bundle_id
+            WHERE spread_id = @SpreadId AND root_bundle_id = 0;
 
             COMMIT TRAN;
 
@@ -867,7 +875,9 @@ BEGIN
                 RETURN;
             END
 
-            DECLARE @NextSerialNo INT = (SELECT ISNULL(MAX(CAST(RIGHT(serial, 6) AS INT)), 0) FROM bundles);
+            -- Prompt 82: saring sequence_no = 0 (induk saja) -- serial anak '{serial}-{seq}'
+            -- membuat RIGHT(serial, 6) tidak lagi murni angka.
+            DECLARE @NextSerialNo INT = (SELECT ISNULL(MAX(CAST(RIGHT(serial, 6) AS INT)), 0) FROM bundles WHERE sequence_no = 0);
             DECLARE @Yy VARCHAR(2) = RIGHT(CAST(YEAR(SYSDATETIME()) AS VARCHAR(4)), 2);
             DECLARE @ProjectId INT = (SELECT project_id FROM articles WHERE article_id = @ArticleId);
             DECLARE @NextBundleNo INT = (
@@ -904,6 +914,10 @@ BEGIN
                 SYSDATETIME(), @UserId, @SpreadId, @SpreadSizeId, n.serial,
                 @SetNo, 0, n.from_new, n.from_new + n.qty_new - 1, 'CUTTING', 'STOCK', 1
             FROM #newb n;
+
+            -- Prompt 82: lihat catatan yang sama di cabang CREATE di atas.
+            UPDATE bundles SET root_bundle_id = bundle_id
+            WHERE spread_id = @SpreadId AND root_bundle_id = 0;
         END
 
         -- 3. bundle yang dihapus (REMOVE)

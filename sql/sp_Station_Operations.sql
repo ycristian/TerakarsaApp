@@ -568,7 +568,13 @@ BEGIN
             -- Prompt 56: jendela H+1 DIHAPUS -- baris step terakhir tampil murni berdasarkan
             -- tanggal kirim. Baris lama yang belum di-lock ditemukan lewat chip "Belum lock"
             -- (SIS_Station_UnlockedDates) yang memindahkan filter tanggal ke sana.
+            -- Prompt 82: baris 'Hilang'/'Ketemu' (catatan selisih) dan baris 'Creation'
+            -- bundle ANAK hasil migrasi juga target_division_id NULL + log_type NORMAL --
+            -- semuanya qty 0 dan tidak ada yang bisa direvisi/dibatalkan di tab OUT.
+            -- Baris Bundling (JUGA log_kind 'Creation') tetap tampil lewat cabang PERTAMA
+            -- di atas karena target_division_id-nya terisi dan qty_ok > 0.
             OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL'
+                AND awl.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation')
                 AND CAST(awl.created_at AS DATE) = @Date)
             -- Prompt 56: cabang khusus "bundle Bundling auto-diterima, jendela 1 jam" DIHAPUS.
             -- Tanpa batas waktunya, cabang itu sepenuhnya tertutup cabang pertama di atas
@@ -659,11 +665,16 @@ BEGIN
         LEFT JOIN employees emp ON emp.employee_id = b.employee_id AND emp.deleted_at IS NULL
         WHERE b.deleted_at IS NULL
     ),
-    -- Fix (susulan): step FRONTIER per bundle -- step ber-bundle PERTAMA (sort_order
-    -- terkecil) yang sisa kuotanya (QtyMasuk - QtySudah, logika sama dengan Prompt 14b
-    -- @StepQuota di SIS_Bundle_ScanInfo & SIS_WorkflowLog_QuotaInfo) masih > 0. Ini
-    -- menggantikan "baris log TERAKHIR" supaya baris susulan yang belum diterima tidak
-    -- langsung menyingkirkan bundle dari Dikerjakan sebelum sisa kuotanya habis.
+    -- Prompt 82: step FRONTIER per bundle = step ber-bundle PERTAMA yang sort_order-nya
+    -- di atas step terakhir yang sudah punya baris 'Creation'/'Kirim' untuk bundle ini.
+    -- [MENGGANTIKAN definisi Prompt 14b "step pertama yang sisa kuotanya masih > 0"]:
+    -- di model pemecahan, satu baris Kirim MENGHABISKAN seluruh isi bundle (qty OK +
+    -- anak + selisih = qty masuk), jadi tidak ada lagi "sisa kuota"/baris susulan yang
+    -- perlu dikejar. Rumus kuota lama juga tidak bisa dipakai lagi: reject sekarang hidup
+    -- sebagai bundle ANAK, bukan di kolom qty_reject_*, sehingga QtySudah selalu terlihat
+    -- kurang dan bundle tidak pernah lepas dari step yang sudah dikirim.
+    -- Bonus: bundle anak -- yang rantai lognya dimulai dari baris 'Creation' di tengah
+    -- workflow -- otomatis ber-frontier di step tujuannya, bukan di step pertama artikel.
     Frontier AS (
         SELECT bs.bundle_id, f.ArticleWorkflowId, f.StepName, f.SortOrder, f.DivisionId, f.PrevArticleWorkflowId
         FROM Base bs
@@ -676,20 +687,13 @@ BEGIN
                 FROM article_workflows aw
                 WHERE aw.article_id = bs.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
             ) q
-            WHERE (
-                CASE WHEN q.PrevArticleWorkflowId IS NULL THEN bs.qty
-                     ELSE ISNULL((
-                         SELECT SUM(qty_ok) FROM article_workflow_logs
-                         WHERE article_workflow_id = q.PrevArticleWorkflowId AND bundle_id = bs.bundle_id AND deleted_at IS NULL
-                     ), 0)
-                END
-                -
-                ISNULL((
-                    SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
-                    FROM article_workflow_logs
-                    WHERE article_workflow_id = q.ArticleWorkflowId AND bundle_id = bs.bundle_id AND deleted_at IS NULL
-                ), 0)
-            ) > 0
+            WHERE q.SortOrder > ISNULL((
+                SELECT MAX(aw9.sort_order)
+                FROM article_workflow_logs awl9
+                INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
+                WHERE awl9.bundle_id = bs.bundle_id AND awl9.deleted_at IS NULL
+                  AND awl9.log_kind IN ('Creation', 'Kirim')
+            ), -1)
             ORDER BY q.SortOrder ASC
         ) f
     )
@@ -810,20 +814,15 @@ BEGIN
                         FROM article_workflows aw
                         WHERE aw.article_id = a.article_id AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
                     ) q
-                    WHERE (
-                        CASE WHEN q.PrevArticleWorkflowId IS NULL THEN b.qty
-                             ELSE ISNULL((
-                                 SELECT SUM(qty_ok) FROM article_workflow_logs
-                                 WHERE article_workflow_id = q.PrevArticleWorkflowId AND bundle_id = b.bundle_id AND deleted_at IS NULL
-                             ), 0)
-                        END
-                        -
-                        ISNULL((
-                            SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
-                            FROM article_workflow_logs
-                            WHERE article_workflow_id = q.ArticleWorkflowId AND bundle_id = b.bundle_id AND deleted_at IS NULL
-                        ), 0)
-                    ) > 0
+                    -- Prompt 82: definisi frontier WAJIB sama dengan SIS_Station_InProgress
+                    -- -- lihat komentar panjang di sana.
+                    WHERE q.SortOrder > ISNULL((
+                        SELECT MAX(aw9.sort_order)
+                        FROM article_workflow_logs awl9
+                        INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
+                        WHERE awl9.bundle_id = b.bundle_id AND awl9.deleted_at IS NULL
+                          AND awl9.log_kind IN ('Creation', 'Kirim')
+                    ), -1)
                     ORDER BY q.SortOrder ASC
                 ) fr
                 WHERE b.deleted_at IS NULL
@@ -892,6 +891,7 @@ BEGIN
                     (awl3.target_division_id IS NOT NULL AND awl3.qty_ok > 0
                      AND (awl3.received_at IS NULL OR CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
                     OR (awl3.target_division_id IS NULL AND awl3.log_type = 'NORMAL'
+                        AND awl3.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation')   -- Prompt 82
                         AND CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE))
                   )
               AND (@ResourceId IS NULL OR awl3.resource_id IS NULL OR awl3.resource_id = @ResourceId)
@@ -909,7 +909,8 @@ BEGIN
               AND awl5.lock_id IS NULL
               AND (
                     (awl5.target_division_id IS NOT NULL AND awl5.qty_ok > 0)
-                    OR (awl5.target_division_id IS NULL AND awl5.log_type = 'NORMAL')
+                    OR (awl5.target_division_id IS NULL AND awl5.log_type = 'NORMAL'
+                        AND awl5.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation'))   -- Prompt 82
                   )
               AND (@ResourceId IS NULL OR awl5.resource_id IS NULL OR awl5.resource_id = @ResourceId)
         ) AS OutUnlockedCount;
@@ -939,7 +940,8 @@ BEGIN
       -- OutUnlockedCount) -- chip harus selalu bisa ditindaklanjuti operator.
       AND (
             (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0)
-            OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL')
+            OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL'
+                AND awl.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation'))   -- Prompt 82
           )
       AND (@ResourceId IS NULL OR awl.resource_id IS NULL OR awl.resource_id = @ResourceId)
     GROUP BY CAST(awl.created_at AS DATE)

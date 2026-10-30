@@ -253,9 +253,13 @@ BEGIN
                 RETURN;
             END
 
+            -- Prompt 82: WAJIB menyaring sequence_no = 0 (bundle INDUK saja). Serial anak
+            -- berbentuk '{serial induk}-{seq}' (mis. B26-005742-1) -- RIGHT(serial, 6)
+            -- atasnya jadi '5742-1' dan CAST ke INT melempar error konversi.
             DECLARE @NextNumber INT;
             SELECT @NextNumber = ISNULL(MAX(CAST(RIGHT(serial, 6) AS INT)), 0) + 1
-            FROM bundles;
+            FROM bundles
+            WHERE sequence_no = 0;
 
             DECLARE @Yy VARCHAR(2) = RIGHT(CAST(YEAR(SYSDATETIME()) AS VARCHAR(4)), 2);
             DECLARE @NewSerial VARCHAR(20) = 'B' + @Yy + '-' + RIGHT('000000' + CAST(@NextNumber AS VARCHAR(6)), 6);
@@ -291,6 +295,12 @@ BEGIN
             );
 
             DECLARE @NewBundleId INT = CAST(SCOPE_IDENTITY() AS INT);
+
+            -- Prompt 82: bundle baru selalu INDUK UTAMA -- root_bundle_id menunjuk dirinya
+            -- sendiri. Diisi setelah INSERT karena identity-nya baru diketahui di sini
+            -- (kolom sengaja tanpa FK, lihat sql/alter_84_bundle_anak.sql).
+            UPDATE bundles SET root_bundle_id = @NewBundleId WHERE bundle_id = @NewBundleId;
+
             DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + @NewSerial;
 
             -- Fix: @PrintCopies < 1 (input "Jumlah Label" diisi 0 di station) -- lewati insert
@@ -358,15 +368,22 @@ BEGIN
             -- diterima oleh Line tersebut (received_at/received_by_resource_id terisi saat
             -- INSERT) -- Line tujuan sudah pasti, jadi tidak perlu scan/Terima manual lagi di
             -- tab IN stasiun. Tanpa penjahit (@ResourceId NULL), tetap pending seperti semula.
+            -- Prompt 82: baris Bundling ini SEKALIGUS baris 'Creation' rantai qty bundle
+            -- (qty_delta = +qty awal, qty_after = qty awal). SENGAJA tidak dibuat baris
+            -- Creation terpisah: pembuatan bundle memang satu kejadian, dan baris tambahan
+            -- di step Bundling akan ikut terbaca semua laporan/tab OUT lama. Invarian
+            -- Sigma qty_delta per bundle = bundles.qty tetap terpenuhi.
             INSERT INTO article_workflow_logs (
                 article_workflow_id, bundle_id, article_size_id, division_id, resource_id, employee_id,
                 qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing,
+                qty_delta, qty_after, log_kind,
                 remark, target_division_id, received_at, received_by_resource_id, received_remark,
                 created_at, created_by
             )
             VALUES (
                 @BundlingStepId, @NewBundleId, NULL, @BundlingDivisionId, @BundlingResourceId, NULL,
                 @Qty, 0, 0, 0,
+                @Qty, @Qty, 'Creation',
                 NULL, @BundlingTargetDivisionId,
                 CASE WHEN ISNULL(@BundlingTargetAutoReceive, 0) = 1 OR @ResourceId IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
                 -- Fix: received_by_resource_id HARUS resource divisi TUJUAN (Line/penjahit,
@@ -546,8 +563,14 @@ BEGIN
             updated_by = @UserId
         WHERE bundle_id = @Id AND deleted_at IS NULL;
 
+        -- Prompt 82: baris Bundling = baris 'Creation' rantai qty, jadi qty_delta/qty_after
+        -- ikut disinkronkan supaya invarian Sigma qty_delta = bundles.qty tetap benar
+        -- setelah qty bundle diubah dari form Buat/Edit Bundle.
         UPDATE awl
         SET awl.qty_ok = @Qty,
+            awl.qty_delta = @Qty,
+            awl.qty_after = @Qty,
+            awl.log_kind = 'Creation',
             awl.resource_id = ISNULL(@BundlingResourceId, awl.resource_id),
             awl.updated_at = SYSDATETIME(),
             awl.updated_by = @UserId

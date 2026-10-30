@@ -122,6 +122,19 @@ public class BundleLabelPayload
     // (lihat SIS_Bundle_ReprintLabel @RemarkOverride).
     [JsonPropertyName("remark")]
     public string? Remark { get; set; }
+
+    // Prompt 82: bundle anak. SequenceNo > 0 membuat nomor tercetak '{letter}-{no}-{seq}'
+    // (mis. K-49-1); 0/absen = induk utama, format lama tidak berubah. BundleStatus &
+    // RejectCategory dibawa untuk keperluan lain -- status & kategori yang TERCETAK sudah
+    // dirangkum SIS_BundleSplit_PrintLabel ke dalam Remark supaya template tidak berubah.
+    [JsonPropertyName("sequence_no")]
+    public int SequenceNo { get; set; }
+
+    [JsonPropertyName("bundle_status")]
+    public string? BundleStatus { get; set; }
+
+    [JsonPropertyName("reject_category")]
+    public string? RejectCategory { get; set; }
 }
 
 // Bentuk payload JSON print_jobs untuk job_type PACK_LABEL (lihat sql/sp_Pack_Manage.sql,

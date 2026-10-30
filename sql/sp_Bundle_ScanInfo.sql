@@ -101,7 +101,10 @@ BEGIN
         TargetDivisionId INT NULL,
         TargetDivisionName VARCHAR(255) NULL,
         CreatedAt DATETIME2,
-        ReceivedAt DATETIME2 NULL, ReceivedByResourceId INT NULL, ReceivedByResourceName VARCHAR(255) NULL, ReceivedRemark VARCHAR(500) NULL
+        ReceivedAt DATETIME2 NULL, ReceivedByResourceId INT NULL, ReceivedByResourceName VARCHAR(255) NULL, ReceivedRemark VARCHAR(500) NULL,
+        -- Prompt 82: rantai qty bertanda + jenis baris, supaya timeline kartu scan bisa
+        -- membaca '-5 (Split)' / 'Hilang 3 pcs' tanpa menebak dari kolom reject lama.
+        LogKind VARCHAR(15) NULL, QtyDelta INT NULL, QtyAfter INT NULL, Reason VARCHAR(500) NULL
     );
 
     INSERT INTO @Timeline
@@ -113,7 +116,8 @@ BEGIN
            awl.qty_reject_rework, awl.qty_lost, awl.log_type,
            awl.target_division_id, td.division_name,
            awl.created_at,
-           awl.received_at, awl.received_by_resource_id, rr.resource_name, awl.received_remark
+           awl.received_at, awl.received_by_resource_id, rr.resource_name, awl.received_remark,
+           awl.log_kind, awl.qty_delta, awl.qty_after, awl.reason
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     LEFT JOIN divisions d ON d.division_id = awl.division_id
@@ -294,33 +298,43 @@ BEGIN
                     QtyMasuk INT, QtySudah INT
                 );
 
+                -- Prompt 82: QtyMasuk tiap step ber-bundle kini SELALU qty bundle SAAT INI
+                -- (bundles.qty = cermin qty_after baris log terakhir) -- rantai "SUM qty_ok
+                -- step sebelumnya" tidak valid lagi karena reject hidup sebagai bundle ANAK
+                -- dan selisih sebagai bundles.missing_qty, bukan di kolom qty_reject_*/qty_lost.
+                -- QtySudah = SUM qty_ok step itu (kolom reject/lost berhenti diisi utk baris baru).
                 ;WITH BundleSteps AS (
-                    SELECT aw.article_workflow_id, aw.step_name, aw.sort_order, aw.division_id,
-                           LAG(aw.article_workflow_id) OVER (ORDER BY aw.sort_order) AS PrevArticleWorkflowId
+                    SELECT aw.article_workflow_id, aw.step_name, aw.sort_order, aw.division_id
                     FROM article_workflows aw
                     WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.inactive_at IS NULL AND aw.requires_bundle = 1
                 )
                 INSERT INTO @StepQuota (ArticleWorkflowId, StepName, SortOrder, DivisionId, QtyMasuk, QtySudah)
                 SELECT bs.article_workflow_id, bs.step_name, bs.sort_order, bs.division_id,
-                    CASE WHEN bs.PrevArticleWorkflowId IS NULL
-                         THEN ISNULL((SELECT qty FROM bundles WHERE bundle_id = @BundleId), 0)
-                         ELSE ISNULL((
-                             SELECT SUM(qty_ok) FROM article_workflow_logs
-                             WHERE article_workflow_id = bs.PrevArticleWorkflowId AND bundle_id = @BundleId AND deleted_at IS NULL
-                         ), 0)
-                    END,
+                    ISNULL((SELECT qty FROM bundles WHERE bundle_id = @BundleId), 0),
                     ISNULL((
-                        SELECT SUM(qty_ok + qty_reject_print + qty_reject_fabric + qty_reject_sewing + qty_reject_rework + qty_lost)
+                        SELECT SUM(qty_ok)
                         FROM article_workflow_logs
                         WHERE article_workflow_id = bs.article_workflow_id AND bundle_id = @BundleId AND deleted_at IS NULL
                     ), 0)
                 FROM BundleSteps bs;
 
+                -- Prompt 82: frontier = step ber-bundle pertama DI ATAS step terakhir yang
+                -- sudah punya baris 'Creation'/'Kirim' untuk bundle ini. Definisi ini WAJIB
+                -- sama dengan SIS_Station_InProgress/SIS_Station_Counts -- lihat komentar
+                -- panjang di sql/sp_Station_Operations.sql.
+                DECLARE @MaxDoneSort INT = ISNULL((
+                    SELECT MAX(aw9.sort_order)
+                    FROM article_workflow_logs awl9
+                    INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
+                    WHERE awl9.bundle_id = @BundleId AND awl9.deleted_at IS NULL
+                      AND awl9.log_kind IN ('Creation', 'Kirim')
+                ), -1);
+
                 DECLARE @CurStepId INT, @CurStepName VARCHAR(255), @CurSort INT, @CurDivisionId INT;
                 SELECT TOP 1 @CurStepId = ArticleWorkflowId, @CurStepName = StepName,
                              @CurSort = SortOrder, @CurDivisionId = DivisionId
                 FROM @StepQuota
-                WHERE (QtyMasuk - QtySudah) > 0
+                WHERE SortOrder > @MaxDoneSort
                 ORDER BY SortOrder ASC;
 
                 IF @CurStepId IS NULL
@@ -563,8 +577,19 @@ BEGIN
         emp.employee_name AS EmployeeName,
         @SuggestedResourceId AS SuggestedResourceId,
         @SuggestedResourceName AS SuggestedResourceName,
-        @SuggestedResourceSource AS SuggestedResourceSource
+        @SuggestedResourceSource AS SuggestedResourceSource,
+        -- Prompt 82: posisi bundle di pohon induk/anak + status + selisih. SequenceNo = 0
+        -- berarti induk utama; > 0 berarti bundle anak dan kodenya tampil '{induk}-{seq}'.
+        b.sequence_no AS SequenceNo,
+        b.parent_bundle_id AS ParentBundleId,
+        b.root_bundle_id AS RootBundleId,
+        rb.bundle_no AS RootBundleNo,
+        b.[status] AS BundleStatus,
+        b.reject_category AS RejectCategory,
+        b.reject_reason AS RejectReason,
+        b.missing_qty AS MissingQty
     FROM bundles b
+    INNER JOIN bundles rb ON rb.bundle_id = b.root_bundle_id
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     INNER JOIN articles a ON a.article_id = b.article_id
@@ -576,7 +601,8 @@ BEGIN
     -- 2. Timeline lengkap
     SELECT Id, StepName, SortOrder, SizeName, DivisionName, ResourceName,
            QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost, LogType,
-           TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark
+           TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark,
+           LogKind, QtyDelta, QtyAfter, Reason
     FROM @Timeline
     ORDER BY SortOrder ASC, CreatedAt ASC;
 
@@ -600,8 +626,18 @@ BEGIN
                ISNULL(SUM(awl.qty_reject_sewing), 0), ISNULL(SUM(awl.qty_reject_rework), 0),
                ISNULL(SUM(awl.qty_lost), 0)
         FROM article_workflows aw
+        -- Prompt 82 (revisi): panel Penyesuaian (ADJUSTMENT) adalah mekanisme GAYA LAMA --
+        -- hanya untuk bundle yang reject-nya masih berupa angka di kolom qty_reject_*/
+        -- qty_lost, yaitu baris log SEBELUM tanggal migrasi. Supaya reject lama yang
+        -- ternyata jadi bagus masih bisa dicatat. Bundle lain (reject = bundle anak)
+        -- memakai modal Kirim Hasil baru dan TIDAK menampilkan tombol ini.
+        -- Tanpa filter tanggal pun saldonya sudah 0 untuk data baru (kolom itu berhenti
+        -- diisi), tapi batasnya ditegaskan di sini supaya aturannya eksplisit.
         LEFT JOIN article_workflow_logs awl ON awl.article_workflow_id = aw.article_workflow_id
             AND awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
+            AND awl.created_at < ISNULL(
+                (SELECT TOP 1 bundle_split_migrated_at FROM app_settings WHERE deleted_at IS NULL),
+                '9999-12-31')
         WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND aw.requires_bundle = 1
           AND aw.is_bundling = 0 AND aw.division_id = @DivisionId
         GROUP BY aw.article_workflow_id, aw.step_name, aw.sort_order

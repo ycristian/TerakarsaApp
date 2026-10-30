@@ -11,8 +11,28 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-2">
             <div>
-                <h2 class="mb-0">No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo)</h2>
+                @* Prompt 82: bundle anak tampil '{induk}-{seq}' (mis. K-49-1) -- induk utama
+                   tetap seperti semula. Status & kategori melekat di bundle, bukan di log. *@
+                <h2 class="mb-0">
+                    No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.RootBundleNo)@(Info.Bundle.SequenceNo > 0 ? $"-{Info.Bundle.SequenceNo}" : "")
+                </h2>
                 <p class="text-muted mb-0">@Info.Bundle.Serial</p>
+                @if (Info.Bundle.BundleStatus != "OK")
+                {
+                    <span class="badge bg-danger">@BundleRejectCategory.Label(Info.Bundle.RejectCategory ?? Info.Bundle.BundleStatus)</span>
+                    @if (!string.IsNullOrEmpty(Info.Bundle.RejectReason))
+                    {
+                        <span class="text-muted ms-1" style="font-size: 0.75rem;">@Info.Bundle.RejectReason</span>
+                    }
+                }
+                @if (Info.Bundle.MissingQty > 0)
+                {
+                    <div class="text-danger" style="font-size: 0.75rem;">Hilang @Info.Bundle.MissingQty pcs</div>
+                }
+                else if (Info.Bundle.MissingQty < 0)
+                {
+                    <div class="text-warning" style="font-size: 0.75rem;">Lebih @(-Info.Bundle.MissingQty) pcs</div>
+                }
             </div>
             <div class="text-end">
                 <h4 class="mb-0">
@@ -140,6 +160,11 @@
         @if (!string.IsNullOrEmpty(printRejectFeedback))
         {
             <div class="small mb-2 @(printRejectFeedback.StartsWith("Nota") ? "text-success" : "text-danger")">@printRejectFeedback</div>
+        }
+        @* Prompt 82: barcode anak yang baru lahir -- operator perlu tahu stiker apa yang keluar. *@
+        @if (!string.IsNullOrEmpty(splitFeedback))
+        {
+            <div class="alert alert-success py-2 mb-2">@splitFeedback</div>
         }
 
         @if (!ReadOnly)
@@ -346,133 +371,28 @@
     </div>
 }
 
-@if (showEditModal)
+@* Prompt 82: modal "Revisi Data" lama (grid qty reject) DIGANTI komponen bersama
+   KirimHasilModal dalam mode EDIT -- server (SIS_BundleSplit_Manage) yang mengenali
+   bahwa step+bundle ini sudah punya baris Kirim, lalu menegakkan aturan aditifnya:
+   anak yang sudah lahir read-only, Qty OK hanya boleh turun, baris baru dapat kode anak
+   berikutnya dari root. Baris yang sudah di-lock / sudah diproses station berikutnya
+   ditolak dengan pesannya sendiri. *@
+@if (showEditModal && Info.Action.ActionArticleWorkflowId is int editStepId)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Revisi Data</h5>
-                    <button type="button" class="btn-close" @onclick="CloseEditModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
-
-                    <div class="d-flex justify-content-end mb-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ResetEdit">Reset</button>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-6">
-                            <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyOk" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyRejectPrint" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyRejectFabric" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyRejectSewing" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyRejectRework" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control" @bind="editQtyLost" />
-                        </div>
-                    </div>
-
-                    @if (editQuotaInfo is not null)
-                    {
-                        <div class="form-text mb-2">Masuk: @editQuotaInfo.QtyMasuk &middot; Tercatat: @editQuotaInfo.QtySudah &middot; Sisa: @editQuotaInfo.Sisa</div>
-                    }
-
-                    <label class="form-label">Catatan (wajib jika ada reject)</label>
-                    <textarea class="form-control" rows="2" @bind="editRemark"></textarea>
-                    @if (!string.IsNullOrEmpty(editRemarkError))
-                    {
-                        <div class="text-danger small mb-2">@editRemarkError</div>
-                    }
-
-                    @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(ActionError["QTY_EXCEED|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitEditExceed">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_SHORT|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(ActionError["QTY_SHORT|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitEditShort">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(ActionError))
-                    {
-                        <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseEditModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@Busy" @onclick="SubmitEdit">Simpan</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <KirimHasilModal BundleId="Info.Bundle.BundleId"
+                     ArticleWorkflowId="editStepId"
+                     ResourceId="@(ActiveResourceId ?? 0)"
+                     AllowTidakLengkap="AllowTidakLengkap"
+                     ResourceOptions="ResourceOptions"
+                     AllowResourceChange="AllowResourceChange"
+                     ActiveResourceName="@ActiveResourceName"
+                     OnSaved="OnSplitSaved"
+                     OnClose="CloseEditModal" />
 }
 
-@if (showDefectLabelModal)
-{
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Print Label Cacat</h5>
-                    <button type="button" class="btn-close" @onclick="CloseDefectLabelModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
-
-                    <div class="text-danger small mb-3">
-                        @if (defectQtyRejectPrint > 0)
-                        {
-                            <div>Reject Print: @defectQtyRejectPrint</div>
-                        }
-                        @if (defectQtyRejectFabric > 0)
-                        {
-                            <div>Reject Bahan: @defectQtyRejectFabric</div>
-                        }
-                        @if (defectQtyRejectSewing > 0)
-                        {
-                            <div>Reject Jahit: @defectQtyRejectSewing</div>
-                        }
-                    </div>
-
-                    <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control" @bind="defectLabelCopies" />
-
-                    @if (!string.IsNullOrEmpty(defectLabelError))
-                    {
-                        <div class="alert alert-danger mt-2 mb-0">@defectLabelError</div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseDefectLabelModal">Lewati</button>
-                    <button class="btn btn-primary" disabled="@(defectLabelBusy || defectLabelCopies < 1)" @onclick="SubmitDefectLabel">Cetak</button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+@* Prompt 82: modal "Print Label Cacat" DIHAPUS. Qty cacat tidak lagi melekat di baris log
+   (kolom qty_reject_* berhenti diisi) -- tiap masalah sekarang jadi bundle ANAK dengan
+   barcode & stikernya sendiri, dicetak otomatis oleh SIS_BundleSplit_Manage. *@
 
 @if (showReprintModal)
 {
@@ -501,134 +421,20 @@
     </div>
 }
 
-@if (showCompleteModal)
+@* Prompt 82: modal "Kirim Hasil" lama (Qty OK + 5 kolom reject + Catatan wajib) DIGANTI
+   komponen bersama KirimHasilModal -- sama persis dengan yang dipakai kartu WIP /station. *@
+@if (showCompleteModal && Info.Action.ActionArticleWorkflowId is int completeStepId)
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Kirim Hasil</h5>
-                    <button type="button" class="btn-close" @onclick="CloseCompleteModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p><strong>No. @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.BundleNo) - @Info.Bundle.SizeName</strong> &middot; @Info.Bundle.Serial</p>
-
-                    <div class="mb-3">
-                        @if (AllowResourceChange)
-                        {
-                            <ResourcePickerCards Resources="ResourceOptions" SelectedId="completeResourceId"
-                                                  SelectedIdChanged="(int? v) => completeResourceId = v ?? 0" Label="Pelaksana" />
-                        }
-                        else
-                        {
-                            <label class="form-label">Pelaksana</label>
-                            <div class="form-control bg-light"><i class="fe fe-lock"></i> @ActiveResourceName</div>
-                        }
-                    </div>
-
-                    <div class="d-flex justify-content-end mb-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="SetCompleteAllOk">Set All OK</button>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-6">
-                            <label class="form-label">Qty OK</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyOk" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Print</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectPrint" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Bahan</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectFabric" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Jahit</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectSewing" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Reject Rework</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyRejectRework" />
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label">Hilang</label>
-                            <input type="number" min="0" class="form-control" @bind="completeQtyLost" />
-                        </div>
-                    </div>
-
-                    @if (completeQuotaInfo is not null)
-                    {
-                        <div class="form-text mb-2">Masuk: @completeQuotaInfo.QtyMasuk &middot; Tercatat: @completeQuotaInfo.QtySudah &middot; Sisa: @completeQuotaInfo.Sisa</div>
-                    }
-
-                    <div class="mb-2">
-                        <label class="form-label">Divisi Tujuan</label>
-                        <div class="form-control bg-light">
-                            @(Info.Action.IsLastStep ? "Step terakhir — tidak ada serah lanjutan" : (Info.Action.NextDivisionName ?? "-"))
-                        </div>
-                    </div>
-
-                    @if (Info.Action.ReceiverPickerRequired == true)
-                    {
-                        <div class="mb-2">
-                            <label class="form-label">Diterima Oleh (@Info.Action.NextDivisionName)</label>
-                            <SearchableSelect TItem="ResourceLookupDto" Items="receiverOptions" @bind-Value="completeAutoReceiveResourceId"
-                                              IdSelector="@(r => r.Id)" TextSelector="@(r => r.ResourceName)" Placeholder="Cari resource..." />
-                            @if (completeAutoReceiveResourceId <= 0)
-                            {
-                                <div class="text-danger small mt-1">Penerima wajib dipilih.</div>
-                            }
-                        </div>
-                    }
-                    else if (Info.Action.NextAutoReceive == true && !string.IsNullOrEmpty(Info.Action.NextCounterpartResourceName))
-                    {
-                        <div class="alert alert-info py-2 mb-2">
-                            Otomatis diterima oleh <strong>@Info.Action.NextCounterpartResourceName</strong>.
-                        </div>
-                    }
-
-                    <label class="form-label">Catatan (wajib jika ada reject)</label>
-                    <textarea class="form-control mb-2" rows="2" @bind="completeRemark"></textarea>
-                    @if (!string.IsNullOrEmpty(completeRemarkError))
-                    {
-                        <div class="text-danger small mb-2">@completeRemarkError</div>
-                    }
-
-                    @if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_EXCEED|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(ActionError["QTY_EXCEED|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitCompleteExceed">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(ActionError) && ActionError.StartsWith("QTY_SHORT|"))
-                    {
-                        <div class="alert alert-warning mt-2 mb-0">
-                            <p class="mb-2">@(ActionError["QTY_SHORT|".Length..])</p>
-                            <p class="mb-2">Yakin tetap simpan?</p>
-                            <button class="btn btn-warning btn-sm" disabled="@Busy" @onclick="ConfirmSubmitCompleteShort">Ya, tetap simpan</button>
-                        </div>
-                    }
-                    else if (!string.IsNullOrEmpty(ActionError))
-                    {
-                        <div class="alert alert-danger mt-2 mb-0">@ActionError</div>
-                    }
-
-                    @if (AllowResourceChange && completeResourceId > 0 && completeResourceId != ActiveResourceId)
-                    {
-                        <div class="mt-2">
-                            <span class="badge bg-warning text-dark">Pelaksana: @(ResourceOptions.FirstOrDefault(r => r.Id == completeResourceId)?.ResourceName) — bukan operator sesi</span>
-                        </div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-light" @onclick="CloseCompleteModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@(Busy || (Info.Action.ReceiverPickerRequired == true && completeAutoReceiveResourceId <= 0))" @onclick="SubmitComplete">Kirim Hasil</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <KirimHasilModal BundleId="Info.Bundle.BundleId"
+                     ArticleWorkflowId="completeStepId"
+                     ResourceId="@(ActiveResourceId ?? 0)"
+                     AllowTidakLengkap="AllowTidakLengkap"
+                     ReceiverPickerRequired="@(Info.Action.ReceiverPickerRequired == true)"
+                     ResourceOptions="ResourceOptions"
+                     AllowResourceChange="AllowResourceChange"
+                     ActiveResourceName="@ActiveResourceName"
+                     OnSaved="OnSplitSaved"
+                     OnClose="CloseCompleteModal" />
 }
 
 @code {
@@ -755,232 +561,40 @@
     private static string FormatSigned(int value, string logType) =>
         logType == "ADJUSTMENT" && value > 0 ? $"+{value}" : value.ToString();
 
-    private int completeQtyOk;
-    private int completeQtyRejectPrint;
-    private int completeQtyRejectFabric;
-    private int completeQtyRejectSewing;
-    private int completeQtyRejectRework;
-    private int completeQtyLost;
-    private string completeRemark = string.Empty;
-    private string completeRemarkError = string.Empty;
-    private WorkflowQuotaInfoDto? completeQuotaInfo;
-    // Prompt 49: picker "Pelaksana" -- semua resource aktif divisi stasiun, sekali pakai per
-    // pengiriman (reset ke operator sesi tiap kali modal dibuka, lihat OpenCompleteModal).
-    private int completeResourceId;
-    // Prompt 40: dropdown "Diterima Oleh" wajib kalau ReceiverPickerRequired = true (step
-    // tujuan auto_receive = 1 tapi counterpart pengirim tidak valid) -- sekali pakai per
-    // pengiriman, TIDAK sticky antar bundle.
-    private List<ResourceLookupDto> receiverOptions = new();
-    private int completeAutoReceiveResourceId;
-
-    protected override async Task OnParametersSetAsync()
-    {
-        completeQuotaInfo = Info.Action.AllowedAction == "COMPLETE" && Info.Action.ActionArticleWorkflowId is not null
-            ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
-            : null;
-    }
-
+    // Prompt 82: isi form Kirim Hasil / Revisi pindah ke KirimHasilModal (komponen bersama)
+    // -- kartu ini cuma membuka/menutup modalnya. Field completeQty*/editQty* lama dan
+    // handler DoSubmitComplete/DoSubmitEdit DIHAPUS; submit-nya lewat SIS_BundleSplit_Manage
+    // di dalam komponen. Parameter OnComplete/OnEdit dipertahankan supaya pemanggil lama
+    // tetap kompilasi (tidak lagi dipakai untuk step ber-bundle).
     private bool showCompleteModal = false;
+    private bool showEditModal = false;
 
-    private async Task OpenCompleteModal()
-    {
-        completeRemarkError = string.Empty;
-        completeResourceId = ActiveResourceId ?? 0;
-        completeAutoReceiveResourceId = 0;
-        receiverOptions = Info.Action.ReceiverPickerRequired == true && Info.Action.ActionArticleWorkflowId is not null
-            ? await StationApi.GetReceiverOptionsAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
-            : new();
-        showCompleteModal = true;
-    }
+    // Kategori TidakLengkap hanya ditawarkan di station Loading/Bundling.
+    private bool AllowTidakLengkap =>
+        !string.IsNullOrEmpty(Info.Bundle.LastDivisionName)
+        && (Info.Bundle.LastDivisionName.Contains("loading", StringComparison.OrdinalIgnoreCase)
+            || Info.Bundle.LastDivisionName.Contains("bundling", StringComparison.OrdinalIgnoreCase));
 
-    private void CloseCompleteModal()
+    private void OpenCompleteModal() => showCompleteModal = true;
+
+    private void CloseCompleteModal() => showCompleteModal = false;
+
+    private void OpenEditModal() => showEditModal = true;
+
+    private void CloseEditModal() => showEditModal = false;
+
+    private async Task OnSplitSaved(List<BundleSplitResultDto> children)
     {
         showCompleteModal = false;
-    }
-
-    private void SetCompleteAllOk()
-    {
-        completeQtyOk = Math.Max(0, completeQuotaInfo?.Sisa ?? 0);
-        completeQtyRejectPrint = 0;
-        completeQtyRejectFabric = 0;
-        completeQtyRejectSewing = 0;
-        completeQtyRejectRework = 0;
-        completeQtyLost = 0;
-    }
-
-    private Task SubmitComplete() => DoSubmitComplete(false, false);
-    private Task ConfirmSubmitCompleteExceed() => DoSubmitComplete(true, false);
-    private Task ConfirmSubmitCompleteShort() => DoSubmitComplete(false, true);
-
-    private async Task DoSubmitComplete(bool confirmExceed, bool confirmShort)
-    {
-        var totalReject = completeQtyRejectPrint + completeQtyRejectFabric + completeQtyRejectSewing + completeQtyRejectRework + completeQtyLost;
-        if (totalReject > 0 && string.IsNullOrWhiteSpace(completeRemark))
-        {
-            completeRemarkError = "Catatan wajib diisi jika ada reject.";
-            return;
-        }
-        completeRemarkError = string.Empty;
-
-        await OnComplete.InvokeAsync(new BundleCompleteFormValues
-        {
-            QtyOk = completeQtyOk,
-            QtyRejectPrint = completeQtyRejectPrint,
-            QtyRejectFabric = completeQtyRejectFabric,
-            QtyRejectSewing = completeQtyRejectSewing,
-            QtyRejectRework = completeQtyRejectRework,
-            QtyLost = completeQtyLost,
-            Remark = string.IsNullOrWhiteSpace(completeRemark) ? null : completeRemark,
-            ConfirmExceed = confirmExceed,
-            ConfirmShort = confirmShort,
-            ResourceId = completeResourceId > 0 ? completeResourceId : null,
-            AutoReceiveResourceId = completeAutoReceiveResourceId > 0 ? completeAutoReceiveResourceId : null
-        });
-
-        if (string.IsNullOrEmpty(ActionError))
-        {
-            showCompleteModal = false;
-
-            if (totalReject > 0)
-            {
-                defectQtyRejectPrint = completeQtyRejectPrint;
-                defectQtyRejectFabric = completeQtyRejectFabric;
-                defectQtyRejectSewing = completeQtyRejectSewing;
-                defectRemark = completeRemark;
-                defectLabelCopies = 1;
-                defectLabelError = string.Empty;
-                showDefectLabelModal = true;
-            }
-            else
-            {
-                await OnCompleteFinished.InvokeAsync();
-            }
-        }
-    }
-
-    // Prompt: "Print Label Cacat" -- muncul setelah Kirim Hasil berhasil disimpan dengan
-    // reject > 0. Cetak ulang label bundle (template sama, lihat SIS_Bundle_ReprintLabel)
-    // sebanyak Copies lembar, remark di-override dengan catatan Kirim Hasil + ringkasan qty
-    // cacat (BUKAN qty cacat itu sendiri -- Copies murni jumlah lembar fisik yang dicetak).
-    private bool showDefectLabelModal = false;
-    private int defectLabelCopies = 1;
-    private bool defectLabelBusy = false;
-    private string defectLabelError = string.Empty;
-    private int defectQtyRejectPrint;
-    private int defectQtyRejectFabric;
-    private int defectQtyRejectSewing;
-    private string defectRemark = string.Empty;
-
-    private async Task CloseDefectLabelModal()
-    {
-        showDefectLabelModal = false;
+        showEditModal = false;
+        splitFeedback = children.Count == 0
+            ? "Hasil terkirim."
+            : $"Bundle anak lahir: {string.Join(", ", children.Select(c => c.DisplayCode))} (stiker masuk antrian cetak).";
         await OnCompleteFinished.InvokeAsync();
     }
 
-    private async Task SubmitDefectLabel()
-    {
-        if (defectLabelCopies < 1) return;
+    private string splitFeedback = string.Empty;
 
-        defectLabelBusy = true;
-        defectLabelError = string.Empty;
-
-        var parts = new List<string>();
-        if (defectQtyRejectPrint > 0) parts.Add($"Print {defectQtyRejectPrint}");
-        if (defectQtyRejectFabric > 0) parts.Add($"Bahan {defectQtyRejectFabric}");
-        if (defectQtyRejectSewing > 0) parts.Add($"Jahit {defectQtyRejectSewing}");
-        var defectSummary = "Cacat: " + string.Join(", ", parts);
-        var remark = string.IsNullOrWhiteSpace(defectRemark) ? defectSummary : $"{defectRemark} — {defectSummary}";
-
-        var (success, error) = await StationApi.PrintDefectLabelAsync(Info.Bundle.BundleId, defectLabelCopies, remark);
-
-        defectLabelBusy = false;
-        if (success)
-        {
-            showDefectLabelModal = false;
-            await OnCompleteFinished.InvokeAsync();
-        }
-        else
-        {
-            defectLabelError = error;
-        }
-    }
-
-    private bool showEditModal = false;
-    private int editQtyOk;
-    private int editQtyRejectPrint;
-    private int editQtyRejectFabric;
-    private int editQtyRejectSewing;
-    private int editQtyRejectRework;
-    private int editQtyLost;
-    private string editRemark = string.Empty;
-    private string editRemarkError = string.Empty;
-    private WorkflowQuotaInfoDto? editQuotaInfo;
-
-    private async Task OpenEditModal()
-    {
-        editQtyOk = Info.Action.ActionQtyOk ?? 0;
-        editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
-        editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
-        editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
-        editQtyRejectRework = Info.Action.ActionQtyRejectRework ?? 0;
-        editQtyLost = Info.Action.ActionQtyLost ?? 0;
-        editRemark = Info.Action.ActionRemark ?? string.Empty;
-        editQuotaInfo = Info.Action.ActionArticleWorkflowId is not null
-            ? await StationApi.GetQuotaInfoAsync(Info.Action.ActionArticleWorkflowId.Value, Info.Bundle.BundleId)
-            : null;
-        editRemarkError = string.Empty;
-        showEditModal = true;
-    }
-
-    private void CloseEditModal()
-    {
-        showEditModal = false;
-    }
-
-    private void ResetEdit()
-    {
-        editQtyOk = Info.Action.ActionQtyOk ?? 0;
-        editQtyRejectPrint = Info.Action.ActionQtyRejectPrint ?? 0;
-        editQtyRejectFabric = Info.Action.ActionQtyRejectFabric ?? 0;
-        editQtyRejectSewing = Info.Action.ActionQtyRejectSewing ?? 0;
-        editQtyRejectRework = Info.Action.ActionQtyRejectRework ?? 0;
-        editQtyLost = Info.Action.ActionQtyLost ?? 0;
-        editRemark = Info.Action.ActionRemark ?? string.Empty;
-        editRemarkError = string.Empty;
-    }
-
-    private Task SubmitEdit() => DoSubmitEdit(false, false);
-    private Task ConfirmSubmitEditExceed() => DoSubmitEdit(true, false);
-    private Task ConfirmSubmitEditShort() => DoSubmitEdit(false, true);
-
-    private async Task DoSubmitEdit(bool confirmExceed, bool confirmShort)
-    {
-        var totalReject = editQtyRejectPrint + editQtyRejectFabric + editQtyRejectSewing + editQtyRejectRework + editQtyLost;
-        if (totalReject > 0 && string.IsNullOrWhiteSpace(editRemark))
-        {
-            editRemarkError = "Catatan wajib diisi jika ada reject.";
-            return;
-        }
-        editRemarkError = string.Empty;
-
-        await OnEdit.InvokeAsync(new BundleCompleteFormValues
-        {
-            QtyOk = editQtyOk,
-            QtyRejectPrint = editQtyRejectPrint,
-            QtyRejectFabric = editQtyRejectFabric,
-            QtyRejectSewing = editQtyRejectSewing,
-            QtyRejectRework = editQtyRejectRework,
-            QtyLost = editQtyLost,
-            Remark = string.IsNullOrWhiteSpace(editRemark) ? null : editRemark,
-            ConfirmExceed = confirmExceed,
-            ConfirmShort = confirmShort
-        });
-
-        if (string.IsNullOrEmpty(ActionError))
-        {
-            showEditModal = false;
-        }
-    }
 
     // Prompt 28: panel Penyesuaian -- pilih step ber-bundle bersaldo, mutasi antar kategori
     // reject/hilang atau ke Qty OK, total wajib 0 (ditegakkan lagi di SIS_WorkflowLog_Manage).

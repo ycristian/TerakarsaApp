@@ -170,6 +170,19 @@ public class BundleScanBundleDto
     public string? SuggestedResourceName { get; set; }
     // "LINE_BUNDLE" | "PENERIMA" | "COUNTERPART" | "RIWAYAT" | null.
     public string? SuggestedResourceSource { get; set; }
+
+    // Prompt 82: posisi bundle di pohon induk/anak. SequenceNo 0 = induk utama; > 0 = anak
+    // (kode tampil '{RootBundleNo}-{SequenceNo}', mis. K-49-1). Status & kategori melekat
+    // di bundle, bukan di log. MissingQty hanya terisi di induk utama: positif = hilang,
+    // negatif = lebih.
+    public int SequenceNo { get; set; }
+    public int? ParentBundleId { get; set; }
+    public int RootBundleId { get; set; }
+    public int RootBundleNo { get; set; }
+    public string BundleStatus { get; set; } = "OK";
+    public string? RejectCategory { get; set; }
+    public string? RejectReason { get; set; }
+    public int MissingQty { get; set; }
 }
 
 public class BundleScanTimelineDto
@@ -196,6 +209,12 @@ public class BundleScanTimelineDto
     public DateTime? ReceivedAt { get; set; }
     public string? ReceivedByResourceName { get; set; }
     public string? ReceivedRemark { get; set; }
+    // Prompt 82: jenis baris + rantai qty bertanda.
+    // LogKind: Creation | Kirim | Split | Dikembalikan | Hilang | Ketemu.
+    public string? LogKind { get; set; }
+    public int QtyDelta { get; set; }
+    public int QtyAfter { get; set; }
+    public string? Reason { get; set; }
 }
 
 public class BundleScanActionDto

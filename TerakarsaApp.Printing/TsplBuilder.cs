@@ -199,7 +199,10 @@ public static class TsplBuilder
 
         // Prompt 27: kode huruf bundle per project (A-Z berputar) -- "B-27" bila project
         // ybs sudah punya bundle_letter, atau cuma nomor "27" utk project lama (NULL).
-        var bundleNoText = string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}";
+        // Prompt 82: bundle anak dapat akhiran '-{sequence_no}' (K-49-1). Induk utama
+        // (sequence_no 0) tidak berubah sama sekali.
+        var bundleNoText = (string.IsNullOrEmpty(data.BundleLetter) ? $"{data.BundleNo}" : $"{data.BundleLetter}-{data.BundleNo}")
+            + (data.SequenceNo > 0 ? $"-{data.SequenceNo}" : string.Empty);
         Write(Text(RightAlignX(RightEdge, "2", 1, bundleNoText), 26, "2", 1 , 1, bundleNoText));
 
         Write($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");

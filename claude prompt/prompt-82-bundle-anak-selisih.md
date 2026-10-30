@@ -10,7 +10,8 @@ Saat ini bundle harus komplit sebelum QC bisa menutupnya. Kita ubah: bundle dipe
 4. Induk setelah dipecah hanya menyatakan qty OK dan selisih.
 5. `bundles.qty` tidak pernah diubah langsung dari form. Dia cermin dari workflow log (`QtyDelta` bertanda, `QtyAfter`). Reject dan hilang dihitung dari bundle anak dan selisih, bukan dari kolom `qty_reject_*` di log.
 6. Satu pcs hanya hidup di satu bundle dan dicatat sekali.
-7. Tidak ada penghapusan kolom dan tidak ada data lama yang diubah. Semua penambahan. Satu-satunya nilai lama yang berubah makna: `bundles.qty` dari qty awal menjadi qty saat ini (qty awal pindah ke log Creation).
+7. Tidak ada penghapusan kolom dan tidak ada data lama yang diubah. Semua penambahan. Satu-satunya nilai lama yang berubah makna: `bundles.qty` dari qty awal menjadi qty saat ini (qty awal ada di qty_after log pertama).
+8. Kerjakan di branch `feature/bundle-anak`. Jangan jalankan migrasi EF atau script apa pun ke database produksi; siapkan saja scriptnya.
 
 ## Data
 
@@ -122,40 +123,35 @@ Saat Catat, per bundle tujuan (satu transaksi):
 
 ## Laporan dan query
 - Total pcs PO = Σ qty bundle aktif + Σ missing_qty (bisa negatif)
-- Reject per kategori dari bundle status=Reject/Perbaikan, bukan dari `qty_reject_*`
+- Reject per kategori: untuk log setelah tanggal migrasi dari bundle anak status=Reject/Perbaikan; untuk log sebelumnya tetap dari `qty_reject_*` (lihat bagian Migrasi)
 - Rekap per penjahit (employee_id di log Kirim induk): OK, RejectBahan, RejectPrint, RejectJahit, Perbaikan, hilang. Tidak ada logika upah di sistem
 - Audit semua tempat yang memakai `bundles.qty` sebagai qty awal → ambil dari log Creation. Dan yang mengambil angka reject dari `qty_reject_*` → arahkan ke bundle anak untuk data setelah migrasi
 
-## Migrasi data lama (script sekali jalan, idempotent, transaksi per root bundle)
-Kolom nyata: `article_workflow_logs` (qty_ok, qty_reject_print, qty_reject_fabric, qty_reject_sewing, qty_reject_rework, qty_lost, log_type NORMAL|ADJUSTMENT, remark, division_id, article_workflow_id, lock_id, deleted_at, created_at), `bundles` (qty, serial, bundle_no, article_id, article_size_id, needs_reprint, deleted_at). Step diurutkan lewat `article_workflows.sort_order`.
+## Migrasi data lama (ringan: hanya kolom default dan delta, TIDAK melahirkan anak)
+Kolom nyata: `article_workflow_logs` (qty_ok, qty_reject_*, qty_lost, log_type NORMAL|ADJUSTMENT, lock_id, deleted_at, created_at), `bundles` (qty, serial, bundle_no, deleted_at). Step diurutkan lewat `article_workflows.sort_order`.
 
-Hasil analisa data per 30/10/2026 (dasar angka di bawah): 28.775 log (28.623 aktif), 6.821 bundle (6.679 aktif, 6.297 punya log, 382 stok cutting tanpa log). Rantai qty 6.015 bundle konsisten, 282 bundle punya selisih tak tercatat. 3.452 log punya reject/lost. 14 log ADJUSTMENT (13 aktif). 20 step punya >1 log NORMAL (kirim bertahap). 991 log tanpa bundle_id (Cutting per size).
+Data per 30/10/2026: 28.775 log, 6.821 bundle (6.297 punya log, 382 stok cutting tanpa log), 991 log tanpa bundle_id (Cutting per size). Rantai qty_ok antar step konsisten di 6.015 bundle; 282 bundle punya selisih tak tercatat, dibiarkan.
 
-Lingkup: bundle aktif dan log aktif. Log tanpa bundle_id tidak disentuh. Log terhapus tidak dimigrasi.
+Script sekali jalan, idempotent, satu transaksi:
+1. Semua bundle lama: parent_bundle_id null, root_bundle_id = bundle_id, sequence_no 0, status 'OK', missing_qty 0. Tidak ada anak yang dilahirkan dari reject lama
+2. Semua log lama dengan bundle_id, urut sort_order lalu created_at per bundle:
+   - log pertama bundle: qty_delta = +qty_ok+Σreject+qty_lost (= bundles.qty, terbukti sama di semua 6.297 bundle), qty_after = nilai itu, log_kind = 'Creation'
+   - log berikutnya: qty_delta = qty_ok − qty_after sebelumnya, qty_after = qty_ok, log_kind = 'Kirim'. Selisih tak tercatat terserap di delta ini, tidak dicatat terpisah
+   - log ADJUSTMENT: log_kind = 'Kirim', delta mengikuti rumus yang sama
+3. Bundle tanpa log (382 stok cutting): tidak perlu log Creation; bundles.qty tetap, service membuat Creation saat bundle pertama kali dikirim
+4. Log tanpa bundle_id: tidak disentuh
+5. bundles.qty induk = qty_after log terakhir. Jangan set needs_reprint untuk bundle lama
+6. Kolom qty_reject_*, qty_lost lama tidak disentuh; tetap jadi sumber reject/lost untuk log sebelum tanggal migrasi
 
-Per bundle, log diurutkan `sort_order` lalu `created_at`:
-1. Bundle lama → parent_bundle_id null, root_bundle_id = self, sequence_no 0, status OK
-2. Baris Creation: log_kind=Creation, qty_delta = +bundles.qty (qty awal; terbukti sama dengan total step pertama di semua 6.297 bundle), qty_after = qty awal. Pakai article_workflow_id step pertama bundle itu, created_at = bundles.created_at
-3. Tiap log NORMAL: isi qty_delta = qty_ok − qty_after sebelumnya, qty_after = qty_ok, log_kind=Kirim (update in place kolom baru di baris yang sama). Gap = qty_after sebelumnya − (qty_ok + Σ reject + qty_lost):
-   - gap > 0 → baris baru log_kind=Hilang, qty_delta 0, reason "migrasi: selisih tak tercatat", missing_qty += gap (total 1.333 pcs di 201 step)
-   - gap < 0 → baris baru log_kind=Ketemu, reason sama, missing_qty += gap (negatif; total 1.031 pcs di 108 step)
-   - qty_lost > 0 → missing_qty += qty_lost, baris log_kind=Hilang reason "migrasi: qty_lost"
-4. Tiap kolom qty_reject_* > 0 di log itu → bundle anak baru: root = root, parent = induk, sequence_no berikutnya, serial "{serial}-{seq}", qty = nilai kolom, status Reject (print/fabric/sewing) atau Perbaikan (rework), reject_category sesuai kolom, reject_reason = remark log (remark sama disalin ke semua anak dari log yang sama), division = division_id log, created_at = created_at log. Buat `bundle_splits` kind=split + results, log Creation di anak dengan lock_id dan article_workflow_id mewarisi log sumber. Total ±3.831 anak
-5. Log ADJUSTMENT (kolom reject/lost bertanda negatif, qty_ok positif, di step yang sama): untuk tiap kolom negatif, kurangi qty anak kategori itu di step yang sama (atau missing_qty untuk qty_lost) dan lahirkan anak OK sebesar qty_ok dengan parent = anak yang dikurangi (parent = induk kalau dari lost). log_kind Ketemu kalau dari lost, Split kalau dari reject
-6. Step dengan >1 log NORMAL: tiap log tetap satu baris delta berurutan, jangan digabung
-7. Bundle tanpa log: hanya baris Creation
-8. Setelah semua: bundles.qty induk = qty_after terakhir; needs_reprint = 1 untuk induk yang qty-nya berubah
+Verifikasi wajib, gagal = rollback: Σ qty_delta per bundle = bundles.qty untuk setiap bundle yang punya log.
 
-Verifikasi wajib di akhir script, gagal = rollback seluruhnya:
-- Σ qty_delta per bundle = bundles.qty
-- qty awal root = bundles.qty root + Σ qty semua anak + missing_qty root, untuk setiap root
-- Σ qty_reject_* lama per kategori = Σ qty anak per kategori (dikoreksi ADJUSTMENT)
-- Σ qty_lost lama + gap positif − gap negatif = Σ missing_qty
-- Cetak ringkasan: jumlah anak lahir per kategori, jumlah induk dengan missing_qty > 0 dan < 0, total pcs
-
-Kolom `qty_reject_*`, `qty_lost` jangan dihapus atau dikosongkan. Dihapus di prompt terpisah setelah laporan lama dan baru terbukti sama.
+Dua jalur selama PO lama masih jalan:
+- Laporan reject/lost: log dengan created_at < tanggal migrasi dibaca dari qty_reject_*/qty_lost; sesudahnya dari bundle anak dan missing_qty. Simpan tanggal migrasi di app setting
+- Bundle lama yang punya reject gaya lama (ada log dengan qty_reject_* > 0 sebelum migrasi): tombol ADJUSTMENT lama tetap tersedia untuk bundle itu saja, supaya reject lama yang jadi bagus masih bisa dicatat. Bundle lain pakai modal baru
+- Modal Kirim Hasil baru berlaku untuk semua bundle sejak deploy, termasuk bundle lama yang masih di tengah alur; Masuk = qty_after terakhir
 
 ## Di luar scope
 - Konfirmasi per part saat serah bundle ke penjahit (prompt terpisah)
 - Pencocokan otomatis Hilang dan Lebih antar bundle
 - Penghapusan kolom qty_reject_* / qty_lost
+- Melahirkan bundle anak dari reject lama (tidak akan dilakukan; reject lama tetap angka di log)

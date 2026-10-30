@@ -552,8 +552,28 @@ CREATE TABLE bundles(
  taken_at datetime2 null,
  taken_by_resource_id int null      -- Line/penjahit yang mengambil (SIS_CuttingBundle_Take)
    constraint FK_bundles_taken_resources foreign key references resources(resource_id),
- needs_reprint bit not null default 0
+ needs_reprint bit not null default 0,
+ -- ---- Prompt 82: bundle anak, pemecahan, dan selisih ----
+ -- Satu bundle SATU status. Campur hasil = bundle dipecah: yang OK tetap di induk,
+ -- yang bermasalah lahir sebagai bundle ANAK dengan barcode sendiri, dan pcs yang
+ -- tidak ada dicatat sebagai SELISIH (missing_qty) di induk utama -- bukan bundle.
+ parent_bundle_id int null          -- bundle yang LANGSUNG memecahnya (induk atau anak lain);
+                                    -- NULL untuk induk utama
+   constraint FK_bundles_parent foreign key references bundles(bundle_id),
+ root_bundle_id int not null default 0,  -- induk utama; self untuk induk utama. SENGAJA tanpa FK:
+                                    -- self-reference ke identity yang baru lahir, jadi SP
+                                    -- mengisinya dua langkah (INSERT 0 -> UPDATE SCOPE_IDENTITY)
+                                    -- dalam satu transaksi. Lihat sql/alter_84_bundle_anak.sql.
+ sequence_no int not null default 0, -- 0 = induk utama, 1..n = anak (nomor diambil dari ROOT,
+                                    -- jadi anak-dari-anak tetap datar: B26-005742-5)
+ [status] varchar(15) not null default 'OK',   -- OK | Perbaikan | Reject | TidakLengkap
+ reject_category varchar(20) null,  -- RejectBahan | RejectJahit | RejectPrint | Perbaikan | TidakLengkap
+ reject_reason varchar(500) null,
+ missing_qty int not null default 0 -- HANYA di induk utama. Positif = hilang, negatif = lebih.
 );
+-- Prompt 82: `qty` di atas BERUBAH MAKNA -- dari "qty awal" menjadi "qty SAAT INI".
+-- Diisi service dari qty_after baris log terakhir, TIDAK PERNAH dari form. Qty awal
+-- hidup di baris log log_kind = 'Creation' (qty_delta = +qty awal).
 
 -- LOG MURNI, MODEL 1-BARIS-PER-SERAH-TERIMA (Prompt 12b): tidak boleh di-update
 -- kecuali trio received_* lewat action RECEIVE, atau (Prompt 12d) trio updated_* lewat
@@ -624,6 +644,17 @@ CREATE TABLE article_workflow_logs(
  deleted_at datetime2 null,
  deleted_by int null,
  delete_reason varchar(255) null,
+ -- ---- Prompt 82: rantai qty bertanda + jenis baris ----
+ -- Sigma qty_delta per bundle HARUS = bundles.qty (cek konsistensi). qty_reject_* dan
+ -- qty_lost BERHENTI diisi untuk baris BARU (dibiarkan 0) -- tidak dihapus, tidak
+ -- dikosongkan, laporan PO lama masih membacanya. Reject/hilang untuk data baru dibaca
+ -- dari bundle ANAK (status/reject_category) dan bundles.missing_qty.
+ qty_delta int not null default 0,          -- bertanda: +57 Creation, -5 Kirim/Split, +1 Ketemu
+ qty_after int not null default 0,          -- qty bundle SETELAH baris ini
+ log_kind varchar(15) not null default 'Kirim',  -- Creation | Kirim | Split | Dikembalikan | Hilang | Ketemu
+                                            -- (log_type NORMAL/ADJUSTMENT di atas TETAP, beda sumbu)
+ split_id int null,                         -- FK bundle_splits, dipasang di bagian 12
+ reason varchar(500) null,                  -- alasan baris Hilang/Ketemu/Dikembalikan
  lock_id int null                           -- Prompt 55: lock yang SEDANG berlaku untuk baris ini.
                                              -- NULL = bebas diubah/dihapus (selama saldo tidak jadi
                                              -- minus). Terisi = beku di SEMUA jalur, termasuk
@@ -1067,6 +1098,10 @@ GO
 CREATE TABLE app_settings(
  app_setting_id int primary key identity(1,1),
  auto_print_coupon_active bit not null default 1,
+ -- Prompt 82: batas "dua jalur" laporan reject. Diisi sql/migrasi_84_bundle_anak.sql.
+ -- Log dengan created_at < nilai ini dibaca dari qty_reject_*/qty_lost (gaya lama);
+ -- sesudahnya dari bundle anak + missing_qty. NULL = migrasi belum jalan.
+ bundle_split_migrated_at datetime2 null,
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -1386,6 +1421,47 @@ CREATE TABLE employee_change_log(
 );
 GO
 
+-- ============ 9l. PEMECAHAN BUNDLE (Prompt 82) ============
+-- Satu baris bundle_splits = satu PERNYATAAN: "bundle X berisi N pcs, hasilnya begini".
+-- kind = 'split' dari modal Kirim Hasil (induk dipecah: qty OK tetap di induk, tiap baris
+-- masalah lahir jadi bundle anak, sisanya dicatat hilang di induk utama).
+-- kind = 'found' dari modal "Barang ketemu" (selisih induk ditutup, anak baru lahir).
+-- Pernyataan boleh diedit selama baris log Kirim-nya belum di-lock, dan HANYA secara
+-- ADITIF: anak yang sudah lahir tidak bisa diubah/dihapus, qty OK hanya boleh turun --
+-- edit membuat bundle_splits BARU, split & log lama tidak disentuh.
+CREATE TABLE bundle_splits(
+ split_id int primary key identity(1,1),
+ source_bundle_id int not null
+   constraint FK_bsplit_bundles foreign key references bundles(bundle_id),
+ source_qty_before int not null,            -- qty bundle sumber SEBELUM pemecahan ("Masuk N pcs")
+ kind varchar(10) not null,                 -- split | found
+ division_id int not null
+   constraint FK_bsplit_divisions foreign key references divisions(division_id),
+ resource_id int null
+   constraint FK_bsplit_resources foreign key references resources(resource_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,
+ lock_id int null                           -- mewarisi lock baris log Kirim-nya (jejak periode)
+   constraint FK_bsplit_workflow_locks foreign key references workflow_locks(lock_id)
+);
+GO
+
+-- Anak yang lahir (atau anak yang ditambah qty-nya) dari satu bundle_splits.
+-- is_system_choice: 1 = alokasi hasil urutan otomatis LIFO, 0 = admin mengubah alokasi.
+CREATE TABLE bundle_split_results(
+ split_result_id int primary key identity(1,1),
+ split_id int not null
+   constraint FK_bsres_splits foreign key references bundle_splits(split_id),
+ bundle_id int not null
+   constraint FK_bsres_bundles foreign key references bundles(bundle_id),
+ qty int not null,
+ [status] varchar(15) not null,
+ reject_category varchar(20) null,
+ reject_reason varchar(500) null,
+ is_system_choice bit not null default 0
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
@@ -1524,6 +1600,16 @@ CREATE UNIQUE INDEX UX_bundles_cutting_code  ON bundles(article_id, cutting_code
     WHERE deleted_at IS NULL AND cutting_code IS NOT NULL;
 CREATE INDEX IX_bundles_cutting_stock        ON bundles(source, stock_status, article_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_bundles_spread               ON bundles(spread_id, bundle_seq) WHERE deleted_at IS NULL;
+-- Prompt 82: pohon induk/anak + selisih + rantai qty.
+CREATE UNIQUE INDEX UX_bundles_root_sequence ON bundles(root_bundle_id, sequence_no) WHERE deleted_at IS NULL;
+CREATE INDEX IX_bundles_root                 ON bundles(root_bundle_id) WHERE deleted_at IS NULL;
+CREATE INDEX IX_bundles_missing              ON bundles(article_id, article_size_id)
+    INCLUDE (missing_qty) WHERE deleted_at IS NULL AND missing_qty <> 0;
+CREATE INDEX IX_bsplit_source                ON bundle_splits(source_bundle_id, created_at DESC);
+CREATE INDEX IX_bsres_split                  ON bundle_split_results(split_id);
+CREATE INDEX IX_awl_split_id                 ON article_workflow_logs(split_id) WHERE split_id IS NOT NULL;
+CREATE INDEX IX_awl_log_kind                 ON article_workflow_logs(bundle_id, log_kind, created_at DESC)
+    WHERE deleted_at IS NULL;
 GO
 
 -- ============ 12. FK YANG BARU BISA DIPASANG SETELAH SEMUA TABEL ADA ============
@@ -1533,4 +1619,9 @@ GO
 
 ALTER TABLE article_workflow_logs ADD CONSTRAINT FK_awl_workflow_locks
     FOREIGN KEY (lock_id) REFERENCES workflow_locks(lock_id);
+GO
+
+-- Prompt 82: article_workflow_logs (bagian 5) menunjuk bundle_splits (bagian 9l).
+ALTER TABLE article_workflow_logs ADD CONSTRAINT FK_awl_bundle_splits
+    FOREIGN KEY (split_id) REFERENCES bundle_splits(split_id);
 GO
