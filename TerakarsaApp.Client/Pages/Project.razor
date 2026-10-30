@@ -514,7 +514,8 @@ else
     private int currentPage = 1;
     private int pageSize = 10;
     private string? sortColumn;
-    private string sortDirection = "asc";
+    // Default (sortColumn null): SP mengurutkan p.project_id, jadi "desc" = project terbaru di atas.
+    private string sortDirection = "desc";
     private System.Threading.Timer? debounceTimer;
 
     protected override async Task OnInitializedAsync()
@@ -544,7 +545,7 @@ else
             SortDirection = sortDirection
         });
         isLoading = false;
-        await LoadThumbnails();
+        StartLoadThumbnails();
     }
 
     private async Task HandleStatusFilterChange()
@@ -575,19 +576,32 @@ else
         _ => "bg-secondary"
     };
 
-    private async Task LoadThumbnails()
+    private int thumbnailToken;
+
+    private void StartLoadThumbnails()
     {
-        var tasks = pagedResult.Items.Select(async p =>
+        var token = ++thumbnailToken;
+        thumbnails = new();
+
+        foreach (var p in pagedResult.Items)
+            _ = LoadThumbnailAsync(p.Id, token);
+    }
+
+    private async Task LoadThumbnailAsync(int projectId, int token)
+    {
+        try
         {
-            var result = await ArticlePhotoApi.GetFirstPhotoForProjectAsync(p.Id);
-            if (result is null) return (p.Id, Url: (string?)null);
+            var result = await ArticlePhotoApi.GetFirstPhotoForProjectAsync(projectId);
+            if (token != thumbnailToken || result is null) return;
 
             var base64 = Convert.ToBase64String(result.Value.Bytes);
-            return (p.Id, Url: (string?)$"data:{result.Value.ContentType};base64,{base64}");
-        });
-
-        var results = await Task.WhenAll(tasks);
-        thumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
+            thumbnails[projectId] = $"data:{result.Value.ContentType};base64,{base64}";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // thumbnail gagal dimuat: biarkan placeholder "-"
+        }
     }
 
     private async Task HandlePageSizeChange(int newSize)
@@ -710,7 +724,7 @@ else
         isLoadingArticles = true;
         selectedProjectArticles = await ArticleApi.GetByProjectAsync(projectId);
         isLoadingArticles = false;
-        await LoadArticleThumbnails();
+        StartLoadArticleThumbnails();
         await LoadArticleSizes(projectId);
         await LoadSizeProgress();
         await LoadBundleSummaries();
@@ -750,19 +764,32 @@ else
         articleSizes = sizes.GroupBy(s => s.ArticleId).ToDictionary(g => g.Key, g => g.ToList());
     }
 
-    private async Task LoadArticleThumbnails()
+    private int articleThumbnailToken;
+
+    private void StartLoadArticleThumbnails()
     {
-        var tasks = selectedProjectArticles.Select(async a =>
+        var token = ++articleThumbnailToken;
+        articleThumbnails = new();
+
+        foreach (var a in selectedProjectArticles)
+            _ = LoadArticleThumbnailAsync(a.Id, token);
+    }
+
+    private async Task LoadArticleThumbnailAsync(int articleId, int token)
+    {
+        try
         {
-            var result = await ArticlePhotoApi.GetPrimaryPhotoAsync(a.Id);
-            if (result is null) return (a.Id, Url: (string?)null);
+            var result = await ArticlePhotoApi.GetPrimaryPhotoAsync(articleId);
+            if (token != articleThumbnailToken || result is null) return;
 
             var base64 = Convert.ToBase64String(result.Value.Bytes);
-            return (a.Id, Url: (string?)$"data:{result.Value.ContentType};base64,{base64}");
-        });
-
-        var results = await Task.WhenAll(tasks);
-        articleThumbnails = results.Where(r => r.Url is not null).ToDictionary(r => r.Id, r => r.Url!);
+            articleThumbnails[articleId] = $"data:{result.Value.ContentType};base64,{base64}";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // thumbnail gagal dimuat: biarkan placeholder "-"
+        }
     }
 
     private void HandleDeleteArticle(ArticleListItemDto article)

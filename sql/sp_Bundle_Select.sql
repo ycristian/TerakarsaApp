@@ -69,6 +69,17 @@ GO
 -- @LastNonBundleStepId di SIS_Bundle_Manage CREATE (step requires_bundle = 0 dengan sort_order
 -- terbesar). Dipakai station "Buat Bundle" (StationDevice.razor) menggantikan "Saran Bundle
 -- Qty" (asz.bundle_qty, tetap dipertahankan sebagai kolom BundleQty untuk BundleManager.razor).
+-- Fix (modul Cutting seri 78-81): yang DIKURANGI hanya bundle dengan source <> 'CUTTING'.
+-- Bundle hasil hamparan (source = 'CUTTING') di-INSERT langsung ke tabel bundles oleh
+-- tni/cutting SP tanpa pernah membuat log serah step Cutting, jadi kalau ikut dikurangi
+-- sisi "pasokan" rumus ini nol sementara sisi "terpakai" penuh -- StockCutting jadi minus
+-- besar (mis. -9024 di artikel TSHIRT LORENG PH) dan guard qty di station menolak SEMUA
+-- simpan, termasuk edit bundle yang hanya mengisi nama penjahit. Dengan filter ini kedua
+-- sisi konsisten: artikel yang bundlenya murni dari hamparan dapat StockCutting = 0 (Buat
+-- Bundle manual di station memang tidak dipakai lagi untuk artikel seperti itu), sedangkan
+-- artikel jalur manual lama tidak berubah sama sekali. Rumus kembaran di
+-- SIS_Station_ActiveWork (StockCuttingJson, sql/sp_Station_Operations.sql) ikut difilter.
+-- Kolom BundleCount/TotalBundleQty TETAP menghitung semua bundle (angka "sudah dibundle").
 CREATE OR ALTER PROCEDURE SIS_Article_BundleSummary
     @ArticleId INT
 AS
@@ -119,7 +130,7 @@ BEGIN
               AND awl.article_size_id = asz.article_size_id
               AND awl.deleted_at IS NULL
               AND awl.received_at IS NOT NULL
-        ), 0) - ISNULL(SUM(b.qty), 0) AS StockCutting,
+        ), 0) - ISNULL(SUM(CASE WHEN ISNULL(b.source, 'MANUAL') <> 'CUTTING' THEN b.qty ELSE 0 END), 0) AS StockCutting,
         @HasFirstBundleStep AS HasFirstBundleStep,
         @IsFirstBundleStepReceived AS IsFirstBundleStepReceived,
         @FirstStationBundleDivisionId AS FirstBundleStepDivisionId,

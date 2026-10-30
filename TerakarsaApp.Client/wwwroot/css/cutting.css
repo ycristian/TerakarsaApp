@@ -151,6 +151,10 @@
     overflow: hidden;
 }
 .ct-panel-pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+/* Panel yang memuat SearchableSelect: dropdown-nya position:absolute, jadi akan
+   terpotong oleh overflow:hidden milik .ct-panel dan tertimpa kartu di bawahnya. */
+.ct-panel-filter { overflow: visible; position: relative; z-index: 30; }
+.ct-panel-filter .dropdown-menu { z-index: 40; }
 .ct-panel-head {
     display: flex;
     align-items: center;
@@ -169,6 +173,8 @@
     flex-direction: column;
     gap: 4px;
 }
+/* nama artikel sebagai sub-judul di dalam panel PO (Stok Bundle) */
+.ct-panel-note b { color: var(--ct-ink); font-size: 15px; }
 
 /* ---------- grid tabel (bukan <table>: kolom tetap sejajar di tablet) ---------- */
 .ct-row { display: grid; align-items: center; padding: 12px 16px; font-size: 15px; }
@@ -187,6 +193,8 @@
 
 /* Stok Bundle: Size | Total | Tersedia | Diambil | Pcs tersedia */
 .ct-g-stock { grid-template-columns: 100px 1fr 1fr 1fr 1fr; }
+/* Stok Bundle per PO: Size | Qty PO | Cutting | Sisa | Bundle stok | Diambil | Pcs tersedia */
+.ct-g-po { grid-template-columns: 90px repeat(6, minmax(0, 1fr)); column-gap: 8px; }
 /* Detail Hamparan: Kode | Set | Nomor | Qty | Status | aksi */
 .ct-g-bundle { grid-template-columns: 130px 60px 160px 70px 1fr 160px; }
 /* Buat Hamparan, rincian size: Size | Set | Mulai no | Pcs; numbering pindah ke
@@ -198,11 +206,15 @@
 .ct-g-split > * { min-width: 0; }
 /* Daftar Hamparan: Kode | PO/artikel | Tgl | Hampar | Bundle | Stok | Status */
 .ct-g-spread { grid-template-columns: 90px 1fr 110px 120px 150px 120px; }
+/* Stok Bundle, panel "Diambil hari ini": Kode | PO/artikel | Line | Jam.
+   HARUS kelas, bukan style inline -- inline tidak bisa ditimpa media query di
+   bawah, jadi barisnya tidak akan pernah menumpuk jadi kartu di HP. */
+.ct-g-ambil { grid-template-columns: 140px 1fr 150px 90px; }
 
 @media (max-width: 899px) {
     /* Tabel lebar jadi kartu bertumpuk -- label kolom dibawa lewat data-l. */
     .ct-row-h { display: none; }
-    .ct-g-stock, .ct-g-bundle, .ct-g-size, .ct-g-split, .ct-g-spread {
+    .ct-g-stock, .ct-g-po, .ct-g-ambil, .ct-g-bundle, .ct-g-size, .ct-g-split, .ct-g-spread {
         grid-template-columns: 1fr;
         gap: 6px;
     }
@@ -404,6 +416,11 @@
 .ct-row.is-bad { background: var(--ct-amber-bg); }
 .ct-ok { color: var(--ct-teal); font-weight: 600; }
 .ct-bad { color: var(--ct-amber); font-weight: 600; }
+/* sisa belum cutting masih ada -- bukan error, cuma perlu menonjol */
+.ct-warn { color: var(--ct-amber); font-weight: 600; }
+/* baris Total per artikel di Stok Bundle */
+.ct-row-tot { background: var(--ct-div); font-weight: 700; }
+.ct-row-tot .ct-k { color: var(--ct-mut); }
 .ct-dim { color: #9ca3af; }
 
 /* ---------- tombol ---------- */
@@ -493,3 +510,34 @@
 .ct-msg-info { background: #f9fafb; border-color: var(--ct-line); color: var(--ct-mut); }
 
 .ct-empty { padding: 28px 16px; text-align: center; color: var(--ct-mut2); font-size: 14px; }
+
+/* ---------- Stok Bundle per PO: tetap tabel di tablet ----------
+   Grid cutting yang lain menumpuk jadi kartu di <=899px karena dipakai di HP.
+   Tabel Stok Bundle masih terbaca di tablet 768px (7 kolom, angka pendek), jadi
+   titik tumpuknya khusus untuk .ct-g-po diturunkan ke <=639px saja. Dua blok ini
+   SENGAJA ditaruh paling bawah: keduanya menimpa aturan di blok 899px di atas,
+   dan yang <=639px harus menang atas yang <=899px (specificity sama, urutan
+   sumber yang menentukan). */
+@media (max-width: 899px) {
+    .ct-row-h.ct-g-po { display: grid; padding: 8px 12px; }
+    .ct-g-po {
+        grid-template-columns: 54px repeat(6, minmax(0, 1fr));
+        column-gap: 6px;
+        row-gap: 0;
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+    .ct-g-po > [data-l]::before { content: none; }
+}
+
+@media (max-width: 639px) {
+    .ct-row-h.ct-g-po { display: none; }
+    .ct-g-po {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        padding: 12px 14px;
+        font-size: 15px;
+    }
+    /* sisa gaya label (warna/ukuran/spasi) tetap dari aturan .ct-row > [data-l] di atas */
+    .ct-g-po > [data-l]::before { content: attr(data-l) " "; }
+}

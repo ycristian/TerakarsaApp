@@ -224,17 +224,36 @@ public class CuttingStockTotalsDto
 
 public class CuttingStockSizeDto
 {
-    public int ArticleId { get; set; }
+    public int ProjectId { get; set; }
     public string? NoPo { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+    public int ArticleId { get; set; }
     public string ArticleName { get; set; } = string.Empty;
     public int BundleTargetQty { get; set; }
     public int SpreadCount { get; set; }
+    public int ArticleSizeId { get; set; }
     public string SizeName { get; set; } = string.Empty;
     public int SizeSortOrder { get; set; }
+
+    // Qty pesanan (article_sizes.qty) vs qty yang sudah dipotong. CutPcs = CutBundlePcs
+    // + CutLogPcs, definisi sama dgn kolom Cutting di SIS_Report_ArticleSizeProgress:
+    //   CutBundlePcs = SUM(bundles.qty) hasil hamparan, stock_status tidak difilter;
+    //   CutLogPcs    = SUM(qty_ok) log step Cutting yang diinput manual dari station.
+    public int PoQty { get; set; }
+    public int CutPcs { get; set; }
+    public int CutBundlePcs { get; set; }
+    public int CutLogPcs { get; set; }
+
     public int TotalBundles { get; set; }
     public int StockBundles { get; set; }
     public int TakenBundles { get; set; }
     public int StockPcs { get; set; }
+
+    // Boleh negatif kalau hamparan melebihi PO -- sengaja tidak di-clamp supaya
+    // kelebihan potong kelihatan di layar.
+    public int RemainQty => PoQty - CutPcs;
+
+    public string PoLabel => string.IsNullOrWhiteSpace(NoPo) ? ProjectName : NoPo;
 }
 
 public class CuttingStockSummaryDto

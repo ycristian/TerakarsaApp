@@ -343,6 +343,12 @@ BEGIN
                -- SIS_Article_BundleSummary, dipakai teks ringkas kartu "Buat Bundle"
                -- (StationDevice.razor) supaya operator langsung tahu size mana yang sudah
                -- siap dibundle tanpa buka modal dulu. Size dengan stock 0 tidak disertakan.
+               -- Fix (modul Cutting seri 78-81): yang dikurangi hanya bundle source <> 'CUTTING'
+               -- -- sama persis dengan SIS_Article_BundleSummary (alasan lengkap ada di
+               -- sql/sp_Bundle_Select.sql). Tanpa filter ini kartu WIP artikel yang bundlenya
+               -- dari hamparan menampilkan stok cutting minus besar. Efek samping yang
+               -- diinginkan: size yang hasilnya 0 kini tersaring oleh StockCutting <> 0, jadi
+               -- artikel jalur hamparan tidak lagi memunculkan teks "stok cutting" palsu.
                (
                    SELECT spd6.size_name AS SizeName, x6.StockCutting AS StockCutting
                    FROM article_sizes asz6
@@ -363,7 +369,7 @@ BEGIN
                            ), 0)
                            -
                            ISNULL((
-                               SELECT SUM(b.qty) FROM bundles b
+                               SELECT SUM(CASE WHEN ISNULL(b.source, 'MANUAL') <> 'CUTTING' THEN b.qty ELSE 0 END) FROM bundles b
                                WHERE b.article_size_id = asz6.article_size_id AND b.deleted_at IS NULL
                            ), 0) AS StockCutting
                    ) x6

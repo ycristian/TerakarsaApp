@@ -3,16 +3,25 @@
 @layout TerakarsaApp.Client.Layout.CuttingLayout
 @using Microsoft.AspNetCore.Authorization
 @using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Shared
 @using TerakarsaApp.Shared.Cutting
 @inject CuttingApiService CuttingApi
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @* Prompt 78 -- landing module Cutting: Stok Bundle.
    Mockup: claude prompt/mockup/Main.dc.html (layar 1).
 
-   Tampilan GLOBAL per artikel per size (bukan per hamparan, keputusan desain §7):
-   total bundle, tersedia (STOCK), diambil (TAKEN), pcs tersedia.
-   Panel "Diambil hari ini" = Prompt 80 §4. *@
+   Revisi 2026-10-26: tampilan dikelompokkan PER PO (dulu per artikel), dengan
+   filter PO di atas. Tiga angka pokok tiap PO -- Qty PO, sudah Cutting, sisa
+   belum cutting -- memakai definisi yang SAMA dengan laporan "Progress per
+   Ukuran" di /project (SIS_Report_ArticleSizeProgress): Cutting = seluruh qty
+   bundle yang lahir dari hamparan (termasuk yang sudah diklaim Line) DITAMBAH
+   qty_ok step Cutting yang diinput manual dari station. Kalau kedua sumber sama-sama
+   terisi, rinciannya muncul sebagai baris kecil di bawah angka Cutting.
+   Kolom stok bundle (tersedia / diambil / pcs tersedia) tetap ada di kanan.
+
+   Panel "Diambil hari ini" = Prompt 80 §4, ikut filter PO. *@
 
 <PageTitle>Stok Bundle Cutting</PageTitle>
 
@@ -20,7 +29,7 @@
     <div class="ct-pagehead">
         <h1>Stok Bundle</h1>
         <span class="ct-sub">
-            Semua artikel aktif
+            @(filterProjectId > 0 ? LabelPoTerpilih() : "Semua PO aktif")
             @if (dimuatPada is not null)
             {
                 <text> · diperbarui @dimuatPada.Value.ToString("dd MMM HH:mm")</text>
@@ -34,18 +43,40 @@
         <div class="ct-msg ct-msg-err">@pesanError</div>
     }
 
-    <div class="ct-cards ct-cards-4">
+    <div class="ct-panel ct-panel-pad ct-panel-filter">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div class="ct-field" style="min-width:280px;flex:1">
+                <label>Filter PO</label>
+                <SearchableSelect TItem="PoOption" Items="poOptions" Value="filterProjectId"
+                                  ValueChanged="PoDiganti" AllowNone="true" NoneLabel="- Semua PO -"
+                                  IdSelector="@(o => o.ProjectId)" TextSelector="@(o => o.Label)"
+                                  Placeholder="Cari no PO / project..." />
+            </div>
+            @if (filterProjectId > 0)
+            {
+                <button type="button" class="ct-btn" @onclick="() => PoDiganti(0)">Tampilkan semua PO</button>
+            }
+        </div>
+    </div>
+
+    <div class="ct-cards ct-cards-5">
+        <div class="ct-card">
+            <div class="ct-card-l">Qty PO</div>
+            <div class="ct-card-v">@Angka(RingkasTampil.PoQty)</div>
+        </div>
+        <div class="ct-card">
+            <div class="ct-card-l">Sudah cutting</div>
+            <div class="ct-card-v teal">@Angka(RingkasTampil.CutPcs)</div>
+            <div class="ct-card-l">@Persen(RingkasTampil.CutPcs, RingkasTampil.PoQty) dari PO</div>
+        </div>
+        <div class="ct-card">
+            <div class="ct-card-l">Sisa belum cutting</div>
+            <div class="ct-card-v @(RingkasTampil.Sisa > 0 ? "amber" : "")">@Selisih(RingkasTampil.Sisa)</div>
+        </div>
         <div class="ct-card">
             <div class="ct-card-l">Bundle di stok cutting</div>
-            <div class="ct-card-v">@Angka(stok.Totals.StockBundles)</div>
-        </div>
-        <div class="ct-card">
-            <div class="ct-card-l">Pcs di stok cutting</div>
-            <div class="ct-card-v">@Angka(stok.Totals.StockPcs)</div>
-        </div>
-        <div class="ct-card">
-            <div class="ct-card-l">Diambil Bundling hari ini</div>
-            <div class="ct-card-v">@Angka(stok.Totals.TakenToday)</div>
+            <div class="ct-card-v">@Angka(RingkasTampil.StockBundles)</div>
+            <div class="ct-card-l">@Angka(RingkasTampil.StockPcs) pcs</div>
         </div>
         <div class="ct-card">
             <div class="ct-card-l">Hamparan belum dicetak</div>
@@ -57,39 +88,87 @@
     {
         <div class="ct-panel"><div class="ct-empty">Memuat stok bundle…</div></div>
     }
-    else if (stok.Sizes.Count == 0)
+    else if (BarisTampil.Count == 0)
     {
         <div class="ct-panel">
             <div class="ct-empty">
-                Belum ada bundle cutting. Mulai dari <a href="/cutting/hamparan/baru" class="ct-link">Buat Hamparan</a>.
+                @if (filterProjectId > 0)
+                {
+                    <text>Tidak ada data ukuran untuk PO ini.</text>
+                }
+                else
+                {
+                    <text>Belum ada artikel aktif. Mulai dari </text>
+                    <a href="/cutting/hamparan/baru" class="ct-link">Buat Hamparan</a><text>.</text>
+                }
             </div>
         </div>
     }
     else
     {
-        @foreach (var grup in stok.Sizes
-                      .GroupBy(s => new { s.ArticleId, s.NoPo, s.ArticleName, s.BundleTargetQty, s.SpreadCount })
-                      .OrderBy(g => g.Key.NoPo).ThenBy(g => g.Key.ArticleName))
+        @foreach (var po in BarisTampil
+                      .GroupBy(s => new { s.ProjectId, s.NoPo, s.ProjectName })
+                      .OrderBy(g => UrutPo(g.Key.NoPo)).ThenBy(g => g.Key.NoPo))
         {
+            var poQty = po.Sum(s => s.PoQty);
+            var poCut = po.Sum(s => s.CutPcs);
+            var poSisa = poQty - poCut;
+
             <div class="ct-panel">
                 <div class="ct-panel-head">
-                    <div class="ct-panel-t">@Judul(grup.Key.NoPo, grup.Key.ArticleName)</div>
-                    <span class="ct-panel-sub">target @grup.Key.BundleTargetQty pcs/bundle</span>
-                    <span class="ct-panel-sub ct-spacer">@grup.Key.SpreadCount hamparan</span>
+                    <div class="ct-panel-t">@(string.IsNullOrWhiteSpace(po.Key.NoPo) ? "(tanpa no PO)" : po.Key.NoPo)</div>
+                    <span class="ct-panel-sub">@po.Key.ProjectName</span>
+                    <span class="ct-panel-sub ct-spacer">
+                        Qty PO <b>@Angka(poQty)</b> · Cutting <b>@Angka(poCut)</b> (@Persen(poCut, poQty)) ·
+                        Sisa <b class="@(poSisa > 0 ? "ct-warn" : "ct-ok")">@Selisih(poSisa)</b>
+                    </span>
                 </div>
 
-                <div class="ct-row ct-row-h ct-g-stock">
-                    <div>Size</div><div>Total bundle</div><div>Tersedia</div><div>Diambil</div><div>Pcs tersedia</div>
-                </div>
-
-                @foreach (var baris in grup.OrderBy(s => s.SizeSortOrder))
+                @foreach (var art in po
+                              .GroupBy(s => new { s.ArticleId, s.ArticleName, s.BundleTargetQty, s.SpreadCount })
+                              .OrderBy(g => g.Key.ArticleName))
                 {
-                    <div class="ct-row ct-g-stock">
-                        <div class="ct-k" data-l="Size">@baris.SizeName</div>
-                        <div data-l="Total bundle">@Angka(baris.TotalBundles)</div>
-                        <div data-l="Tersedia" class="@(baris.StockBundles > 0 ? "ct-ok" : "ct-bad")">@Angka(baris.StockBundles)</div>
-                        <div data-l="Diambil">@Angka(baris.TakenBundles)</div>
-                        <div data-l="Pcs tersedia">@Angka(baris.StockPcs)</div>
+                    <div class="ct-panel-note">
+                        <div>
+                            <b>@art.Key.ArticleName</b>
+                            <span class="ct-panel-sub"> · target @art.Key.BundleTargetQty pcs/bundle · @art.Key.SpreadCount hamparan</span>
+                        </div>
+                    </div>
+
+                    <div class="ct-row ct-row-h ct-g-po">
+                        <div>Size</div><div>Qty PO</div><div>Cutting</div><div>Sisa</div>
+                        <div>Bundle stok</div><div>Diambil</div><div>Pcs tersedia</div>
+                    </div>
+
+                    @foreach (var baris in art.OrderBy(s => s.SizeSortOrder))
+                    {
+                        <div class="ct-row ct-g-po">
+                            <div class="ct-k" data-l="Size">@baris.SizeName</div>
+                            <div data-l="Qty PO">@Angka(baris.PoQty)</div>
+                            <div data-l="Cutting">
+                                @Angka(baris.CutPcs)
+                                @if (baris.CutLogPcs > 0 && baris.CutBundlePcs > 0)
+                                {
+                                    <div class="ct-meta" style="font-size:12px">
+                                        hamparan @Angka(baris.CutBundlePcs) · input @Angka(baris.CutLogPcs)
+                                    </div>
+                                }
+                            </div>
+                            <div data-l="Sisa" class="@(baris.RemainQty > 0 ? "ct-warn" : "ct-ok")">@Selisih(baris.RemainQty)</div>
+                            <div data-l="Bundle stok" class="@(baris.StockBundles > 0 ? "ct-ok" : "ct-bad")">@Angka(baris.StockBundles)</div>
+                            <div data-l="Diambil">@Angka(baris.TakenBundles)</div>
+                            <div data-l="Pcs tersedia">@Angka(baris.StockPcs)</div>
+                        </div>
+                    }
+
+                    <div class="ct-row ct-g-po ct-row-tot">
+                        <div class="ct-k" data-l="Size">Total</div>
+                        <div data-l="Qty PO">@Angka(art.Sum(s => s.PoQty))</div>
+                        <div data-l="Cutting">@Angka(art.Sum(s => s.CutPcs))</div>
+                        <div data-l="Sisa">@Selisih(art.Sum(s => s.RemainQty))</div>
+                        <div data-l="Bundle stok">@Angka(art.Sum(s => s.StockBundles))</div>
+                        <div data-l="Diambil">@Angka(art.Sum(s => s.TakenBundles))</div>
+                        <div data-l="Pcs tersedia">@Angka(art.Sum(s => s.StockPcs))</div>
                     </div>
                 }
             </div>
@@ -97,17 +176,17 @@
     }
 
     @* Prompt 80 §4 -- pengambilan hari ini (kode bundle · line · jam). *@
-    @if (diambilHariIni.Count > 0)
+    @if (DiambilTampil.Count > 0)
     {
         <div class="ct-panel">
             <div class="ct-panel-head">
                 <div class="ct-panel-t">Diambil hari ini</div>
-                <span class="ct-panel-sub ct-spacer">@diambilHariIni.Count bundle</span>
+                <span class="ct-panel-sub ct-spacer">@DiambilTampil.Count bundle</span>
             </div>
 
-            @foreach (var b in diambilHariIni)
+            @foreach (var b in DiambilTampil)
             {
-                <div class="ct-row" style="grid-template-columns:140px 1fr 150px 90px">
+                <div class="ct-row ct-g-ambil">
                     <div class="ct-k" data-l="Kode">@b.CuttingCode</div>
                     <div data-l="Artikel">@Judul(b.NoPo, b.ArticleName) · @b.SizeName · @b.Qty pcs</div>
                     <div data-l="Diambil" class="ct-meta">@(b.TakenByResourceName ?? "–")</div>
@@ -121,11 +200,88 @@
 @code {
     private CuttingStockSummaryDto stok = new();
     private List<CuttingTakenTodayDto> diambilHariIni = new();
+    private List<PoOption> poOptions = new();
+    private int filterProjectId;
     private bool sedangMuat = true;
     private string pesanError = string.Empty;
     private DateTime? dimuatPada;
 
-    protected override async Task OnInitializedAsync() => await MuatAsync();
+    // Opsi dropdown filter PO -- diturunkan dari hasil SP, tidak perlu endpoint sendiri.
+    public class PoOption
+    {
+        public int ProjectId { get; set; }
+        public string? NoPo { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+
+        public string Label => string.IsNullOrWhiteSpace(NoPo)
+            ? ProjectName
+            : $"{NoPo} · {ProjectName}";
+    }
+
+    private List<CuttingStockSizeDto> BarisTampil =>
+        filterProjectId > 0
+            ? stok.Sizes.Where(s => s.ProjectId == filterProjectId).ToList()
+            : stok.Sizes;
+
+    // Panel "Diambil hari ini" ikut filter. CuttingTakenTodayDto hanya membawa NoPo,
+    // jadi pencocokannya lewat no PO dari opsi yang sedang dipilih.
+    private List<CuttingTakenTodayDto> DiambilTampil
+    {
+        get
+        {
+            if (filterProjectId <= 0) return diambilHariIni;
+            var noPo = poOptions.FirstOrDefault(o => o.ProjectId == filterProjectId)?.NoPo;
+            return diambilHariIni.Where(b => b.NoPo == noPo).ToList();
+        }
+    }
+
+    private (int PoQty, int CutPcs, int Sisa, int StockBundles, int StockPcs) RingkasTampil
+    {
+        get
+        {
+            var baris = BarisTampil;
+            var poQty = baris.Sum(s => s.PoQty);
+            var cut = baris.Sum(s => s.CutPcs);
+            return (poQty, cut, poQty - cut, baris.Sum(s => s.StockBundles), baris.Sum(s => s.StockPcs));
+        }
+    }
+
+    // Pilihan PO terakhir disimpan per perangkat (localStorage, BUKAN Blazored --
+    // lihat CLAUDE.md). Admin Cutting biasanya bekerja di satu PO seharian, jadi
+    // halaman dibuka langsung di PO itu.
+    private const string KunciFilterPo = "cuttingStokFilterProjectId";
+
+    protected override async Task OnInitializedAsync()
+    {
+        filterProjectId = await BacaFilterTersimpanAsync();
+        await MuatAsync();
+    }
+
+    private async Task<int> BacaFilterTersimpanAsync()
+    {
+        // localStorage bisa diblokir (mode privat) -- jangan sampai menggagalkan halaman.
+        try
+        {
+            var nilai = await JS.InvokeAsync<string?>("localStorage.getItem", KunciFilterPo);
+            return int.TryParse(nilai, out var id) ? id : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private async Task SimpanFilterAsync(int projectId)
+    {
+        try
+        {
+            if (projectId > 0)
+                await JS.InvokeVoidAsync("localStorage.setItem", KunciFilterPo, projectId.ToString());
+            else
+                await JS.InvokeVoidAsync("localStorage.removeItem", KunciFilterPo);
+        }
+        catch { }
+    }
 
     private async Task MuatAsync()
     {
@@ -136,6 +292,26 @@
         {
             stok = await CuttingApi.GetStockAsync();
             diambilHariIni = await CuttingApi.GetTakenTodayAsync();
+
+            poOptions = stok.Sizes
+                .GroupBy(s => s.ProjectId)
+                .Select(g => new PoOption
+                {
+                    ProjectId = g.Key,
+                    NoPo = g.First().NoPo,
+                    ProjectName = g.First().ProjectName,
+                })
+                .OrderBy(o => UrutPo(o.NoPo)).ThenBy(o => o.NoPo)
+                .ToList();
+
+            // PO yang sedang dipilih bisa hilang setelah refresh (mis. project ditutup) --
+            // termasuk PO tersimpan dari kunjungan sebelumnya, jadi simpanannya ikut dibuang.
+            if (filterProjectId > 0 && poOptions.All(o => o.ProjectId != filterProjectId))
+            {
+                filterProjectId = 0;
+                await SimpanFilterAsync(0);
+            }
+
             dimuatPada = DateTime.Now;
         }
         catch (Exception ex)
@@ -148,8 +324,39 @@
         }
     }
 
+    private async Task PoDiganti(int projectId)
+    {
+        filterProjectId = projectId;
+        await SimpanFilterAsync(projectId);
+    }
+
+    private string LabelPoTerpilih()
+        => poOptions.FirstOrDefault(o => o.ProjectId == filterProjectId)?.Label ?? "PO terpilih";
+
+    // Nomor PO terbaru di ATAS -- angka sebelum titik pertama, pola sama dgn SP.
+    private static int UrutPo(string? noPo)
+    {
+        if (string.IsNullOrWhiteSpace(noPo)) return int.MaxValue;
+        var potong = noPo.IndexOf('.');
+        var depan = potong > 0 ? noPo[..potong] : noPo;
+        return int.TryParse(depan, out var n) ? -n : int.MaxValue;
+    }
+
     private static string Judul(string? noPo, string articleName)
         => string.IsNullOrWhiteSpace(noPo) ? articleName : $"{noPo} · {articleName}";
 
     private static string Angka(int nilai) => nilai.ToString("N0", new System.Globalization.CultureInfo("id-ID"));
+
+    // Kolom Sisa ditampilkan dari sudut pandang hasil cutting, BUKAN sisa pekerjaan:
+    //   masih kurang dipotong -> minus ("-5.854"), kelebihan potong -> plus ("+8").
+    // Nilainya kebalikan tanda RemainQty (= CutPcs - PoQty); 0 tetap polos.
+    private static string Selisih(int remainQty)
+    {
+        var n = -remainQty;
+        if (n == 0) return "0";
+        return (n > 0 ? "+" : "-") + Angka(Math.Abs(n));
+    }
+
+    private static string Persen(int bagian, int total)
+        => total <= 0 ? "–" : $"{Math.Round(100.0 * bagian / total, 1)}%";
 }

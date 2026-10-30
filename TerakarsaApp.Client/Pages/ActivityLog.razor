@@ -143,11 +143,13 @@ else
             <div class="row g-2 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label">Dari</label>
-                    <input type="datetime-local" class="form-control" @bind="dateFrom" @bind:format="yyyy-MM-ddTHH:mm" />
+                    <input type="datetime-local" class="form-control"
+                           value="@dateFrom.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandleDateFromChanged" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Sampai</label>
-                    <input type="datetime-local" class="form-control" @bind="dateTo" @bind:format="yyyy-MM-ddTHH:mm" />
+                    <input type="datetime-local" class="form-control"
+                           value="@dateTo.ToString("yyyy-MM-ddTHH:mm")" @onchange="HandleDateToChanged" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Basis Waktu</label>
@@ -386,6 +388,21 @@ else
         var today = DateTime.Today;
         dateFrom = today;
         dateTo = today.AddHours(23).AddMinutes(59);
+    }
+
+    // Fix: filter Dari/Sampai pakai value+@onchange manual (BUKAN @bind:format) -- sama pola
+    // dgn ReportBundle.razor/StationDevice.razor; @bind:format pada datetime-local gagal parse
+    // balik sehingga Blazor mengembalikan input ke nilai lama (tanggal "selalu balik ke hari ini").
+    private void HandleDateFromChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+            dateFrom = parsed;
+    }
+
+    private void HandleDateToChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var parsed))
+            dateTo = parsed;
     }
 
     private void SetYesterday()

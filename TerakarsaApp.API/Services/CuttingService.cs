@@ -402,13 +402,20 @@ public class CuttingService
             {
                 hasil.Sizes.Add(new CuttingStockSizeDto
                 {
-                    ArticleId = reader.GetInt32(reader.GetOrdinal("ArticleId")),
+                    ProjectId = reader.GetInt32(reader.GetOrdinal("ProjectId")),
                     NoPo = GetNullableString(reader, "NoPo"),
+                    ProjectName = reader.GetString(reader.GetOrdinal("ProjectName")),
+                    ArticleId = reader.GetInt32(reader.GetOrdinal("ArticleId")),
                     ArticleName = reader.GetString(reader.GetOrdinal("ArticleName")),
                     BundleTargetQty = reader.GetInt32(reader.GetOrdinal("BundleTargetQty")),
                     SpreadCount = reader.GetInt32(reader.GetOrdinal("SpreadCount")),
                     SizeName = reader.GetString(reader.GetOrdinal("SizeName")),
+                    ArticleSizeId = reader.GetInt32(reader.GetOrdinal("ArticleSizeId")),
                     SizeSortOrder = reader.GetInt32(reader.GetOrdinal("SizeSortOrder")),
+                    PoQty = reader.GetInt32(reader.GetOrdinal("PoQty")),
+                    CutPcs = reader.GetInt32(reader.GetOrdinal("CutPcs")),
+                    CutBundlePcs = reader.GetInt32(reader.GetOrdinal("CutBundlePcs")),
+                    CutLogPcs = reader.GetInt32(reader.GetOrdinal("CutLogPcs")),
                     TotalBundles = reader.GetInt32(reader.GetOrdinal("TotalBundles")),
                     StockBundles = reader.GetInt32(reader.GetOrdinal("StockBundles")),
                     TakenBundles = reader.GetInt32(reader.GetOrdinal("TakenBundles")),

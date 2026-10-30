@@ -531,6 +531,16 @@ GO
 -- bundles.article_size_id (nilai TERKINI, konsisten dengan SIS_Report_BundleWip yang juga
 -- pakai ukuran bundle saat ini, bukan ukuran saat log dibuat). Step non-bundle menyimpan
 -- article_size_id langsung di baris log.
+-- Revisi 2026-10-26 (module Cutting, seri 78-81): sejak kain dipotong lewat module Cutting,
+-- step Cutting TIDAK lagi punya baris log -- hamparan langsung mencetak bundle, dan baris log
+-- pertama baru muncul di step Bundling saat bundle diklaim Line (SIS_CuttingBundle_Take).
+-- Akibatnya kolom Cutting selalu 0 padahal kainnya sudah terpotong. Jadi kolom step non-bundle
+-- TERAKHIR (= Cutting; definisi @LastNonBundleStepId yang sama dengan sql/cutting/sp_80_CuttingTake.sql)
+-- kini = SUM(qty_ok) log step itu + SUM(qty) SELURUH bundle yang lahir dari hamparan
+-- (INNER JOIN spreads), TANPA melihat stock_status. Kolom Cutting = berapa banyak yang sudah
+-- DIPOTONG (kumulatif, sama sifatnya dengan kolom step lain), bukan sisa stok cutting --
+-- bundle yang sudah diteruskan ke Bundling tetap terhitung di Cutting dan muncul lagi di
+-- kolom Bundling, persis seperti step berurutan lain. Sisa stok cutting = Cutting - Bundling.
 CREATE OR ALTER PROCEDURE SIS_Report_ArticleSizeProgress
     @ArticleId INT
 AS
@@ -557,7 +567,20 @@ BEGIN
     WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL
     ORDER BY aw.sort_order ASC;
 
-    -- Result set 3: isi sel matriks -- SUM(qty_ok) per (step, ukuran).
+    -- Step non-bundle TERAKHIR (mis. Cutting). Definisi SAMA PERSIS dengan
+    -- @LastNonBundleStepId di SIS_CuttingBundle_Take -- step yang di-auto-receive saat
+    -- bundle cutting diambil Bundling. NULL kalau artikel tidak punya step non-bundle
+    -- (semua step ber-bundle): hasil hamparan tidak punya kolom tempat ditampilkan,
+    -- laporan tetap jalan seperti sebelumnya.
+    DECLARE @CuttingStepId INT;
+    SELECT TOP 1 @CuttingStepId = article_workflow_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL
+      AND requires_bundle = 0
+    ORDER BY sort_order DESC;
+
+    -- Result set 3: isi sel matriks -- SUM(qty_ok) per (step, ukuran), ditambah hasil
+    -- hamparan di kolom step Cutting (lihat catatan revisi di atas SP ini).
     ;WITH LogSized AS (
         SELECT
             l.article_workflow_id,
@@ -567,6 +590,23 @@ BEGIN
         INNER JOIN article_workflows aw ON aw.article_workflow_id = l.article_workflow_id
         LEFT JOIN bundles b ON b.bundle_id = l.bundle_id
         WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND l.deleted_at IS NULL
+
+        UNION ALL
+
+        -- SELURUH bundle yang lahir dari hamparan = yang benar-benar sudah dipotong,
+        -- baik yang masih di stok cutting maupun yang sudah diklaim Line (stock_status
+        -- SENGAJA tidak difilter -- lihat catatan revisi di atas SP ini). INNER JOIN
+        -- spreads: hamparan yang dihapus ikut menghapus bundle-nya (SIS_Spread_Manage
+        -- DELETE), join ini menjaga laporan tetap benar kalau ada baris yatim.
+        SELECT
+            @CuttingStepId,
+            b.article_size_id,
+            b.qty
+        FROM bundles b
+        INNER JOIN spreads s ON s.spread_id = b.spread_id AND s.deleted_at IS NULL
+        WHERE @CuttingStepId IS NOT NULL
+          AND b.article_id = @ArticleId
+          AND b.deleted_at IS NULL
     )
     SELECT
         article_workflow_id AS ArticleWorkflowId,

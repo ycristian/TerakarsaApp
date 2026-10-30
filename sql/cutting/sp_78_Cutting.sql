@@ -1032,9 +1032,30 @@ END;
 GO
 
 /* ============================================================
-   SIS_Cutting_StockSummary -- landing Stok Bundle.
-   Result set 1 : angka ringkas (4 kartu)
-   Result set 2 : per artikel per size
+   SIS_Cutting_StockSummary -- landing Stok Bundle (revisi 2026-10-26).
+
+   Dulu: satu baris per (artikel, size) yang SUDAH punya bundle cutting.
+   Sekarang: satu baris per (PO, artikel, size) untuk SELURUH size artikel,
+   termasuk yang belum dipotong sama sekali -- supaya kolom "Sisa belum cutting"
+   (qty PO - qty sudah cutting) bisa dihitung dan halaman bisa difilter per PO.
+
+   Definisi "sudah cutting" SAMA PERSIS dengan kolom Cutting di
+   SIS_Report_ArticleSizeProgress (sql/sp_Report_Bundle.sql), yaitu DUA sumber
+   yang dijumlahkan:
+     a. SELURUH bundle yang lahir dari hamparan, stock_status TIDAK difilter --
+        bundle yang sudah diklaim Line tetap terhitung sudah dipotong (CutBundlePcs);
+     b. SUM(qty_ok) log step Cutting yang diinput manual dari station
+        (tab WIP kartu artikel x step non-bundle) -- CutLogPcs.
+   Step Cutting = step non-bundle TERAKHIR artikel, definisi @LastNonBundleStepId
+   yang sama dengan SIS_CuttingBundle_Take. Tidak ada dobel hitung: Take menulis
+   log step BUNDLING, bukan log step Cutting.
+
+   Baris yang ditampilkan: artikel di project aktif (manual_status IS NULL),
+   DITAMBAH project yang sudah ON_HOLD/COMPLETED/CANCELLED tapi masih punya bundle
+   cutting -- supaya stok fisik tidak pernah hilang dari layar.
+
+   Result set 1 : angka ringkas global (kartu "Hamparan belum dicetak" dll)
+   Result set 2 : per PO per artikel per size
    ============================================================ */
 CREATE OR ALTER PROCEDURE SIS_Cutting_StockSummary
 AS
@@ -1051,25 +1072,64 @@ BEGIN
         (SELECT COUNT(*) FROM spreads WHERE [status] = 'DRAFT' AND deleted_at IS NULL) AS DraftSpreads;
 
     SELECT
-        a.article_id    AS ArticleId,
-        p.no_po         AS NoPo,
-        a.article_name  AS ArticleName,
+        p.project_id        AS ProjectId,
+        p.no_po             AS NoPo,
+        p.project_name      AS ProjectName,
+        a.article_id        AS ArticleId,
+        a.article_name      AS ArticleName,
         a.bundle_target_qty AS BundleTargetQty,
         (SELECT COUNT(*) FROM spreads s WHERE s.article_id = a.article_id AND s.deleted_at IS NULL) AS SpreadCount,
-        spd.size_name   AS SizeName,
-        spd.sort_order  AS SizeSortOrder,
-        COUNT(*)        AS TotalBundles,
-        SUM(CASE WHEN b.stock_status = 'STOCK' THEN 1 ELSE 0 END) AS StockBundles,
-        SUM(CASE WHEN b.stock_status = 'TAKEN' THEN 1 ELSE 0 END) AS TakenBundles,
-        SUM(CASE WHEN b.stock_status = 'STOCK' THEN b.qty ELSE 0 END) AS StockPcs
-    FROM bundles b
-    INNER JOIN articles a ON a.article_id = b.article_id
-    INNER JOIN projects p ON p.project_id = a.project_id
-    INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
+        asz.article_size_id AS ArticleSizeId,
+        spd.size_name       AS SizeName,
+        spd.sort_order      AS SizeSortOrder,
+        asz.qty             AS PoQty,
+        cut.CutBundlePcs + lg.CutLogPcs AS CutPcs,
+        cut.CutBundlePcs    AS CutBundlePcs,
+        lg.CutLogPcs        AS CutLogPcs,
+        cut.TotalBundles    AS TotalBundles,
+        cut.StockBundles    AS StockBundles,
+        cut.TakenBundles    AS TakenBundles,
+        cut.StockPcs        AS StockPcs
+    FROM article_sizes asz
+    INNER JOIN articles a ON a.article_id = asz.article_id AND a.deleted_at IS NULL
+    INNER JOIN projects p ON p.project_id = a.project_id AND p.deleted_at IS NULL
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
-    WHERE b.source = 'CUTTING' AND b.deleted_at IS NULL
-    GROUP BY a.article_id, p.no_po, a.article_name, a.bundle_target_qty, spd.size_name, spd.sort_order
-    ORDER BY p.no_po, a.article_name, spd.sort_order;
+    CROSS APPLY (
+        SELECT
+            ISNULL(SUM(b.qty), 0)                                      AS CutBundlePcs,
+            COUNT(b.bundle_id)                                         AS TotalBundles,
+            ISNULL(SUM(CASE WHEN b.stock_status = 'STOCK' THEN 1 ELSE 0 END), 0)      AS StockBundles,
+            ISNULL(SUM(CASE WHEN b.stock_status = 'TAKEN' THEN 1 ELSE 0 END), 0)      AS TakenBundles,
+            ISNULL(SUM(CASE WHEN b.stock_status = 'STOCK' THEN b.qty ELSE 0 END), 0)  AS StockPcs
+        FROM bundles b
+        WHERE b.article_size_id = asz.article_size_id
+          AND b.source = 'CUTTING'
+          AND b.deleted_at IS NULL
+    ) cut
+    -- Step Cutting artikel ini (step non-bundle TERAKHIR yang masih aktif). Artikel
+    -- yang semua stepnya ber-bundle tidak punya step ini -> CutLogPcs = 0.
+    OUTER APPLY (
+        SELECT TOP 1 aw.article_workflow_id
+        FROM article_workflows aw
+        WHERE aw.article_id = a.article_id
+          AND aw.deleted_at IS NULL
+          AND aw.inactive_at IS NULL
+          AND aw.requires_bundle = 0
+        ORDER BY aw.sort_order DESC
+    ) cs
+    CROSS APPLY (
+        SELECT ISNULL(SUM(l.qty_ok), 0) AS CutLogPcs
+        FROM article_workflow_logs l
+        WHERE cs.article_workflow_id IS NOT NULL
+          AND l.article_workflow_id = cs.article_workflow_id
+          AND l.article_size_id = asz.article_size_id
+          AND l.deleted_at IS NULL
+    ) lg
+    WHERE asz.deleted_at IS NULL
+      AND (p.manual_status IS NULL OR cut.TotalBundles > 0 OR lg.CutLogPcs > 0)
+    -- Nomor PO terbaru di ATAS, pola sama dgn SIS_Cutting_Articles.
+    ORDER BY TRY_CAST(LEFT(p.no_po, CHARINDEX('.', p.no_po + '.') - 1) AS INT) DESC,
+             p.no_po DESC, a.article_name ASC, spd.sort_order ASC;
 END;
 GO
 

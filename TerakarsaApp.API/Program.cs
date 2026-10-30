@@ -187,6 +187,10 @@ static bool IsAllowedOrigin(string origin)
     if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
         return true;
 
+    // Nama DNS LAN (static DNS MikroTik), mis. terakarsa.lan
+    if (host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase))
+        return true;
+
     if (!System.Net.IPAddress.TryParse(host, out var ip))
         return false;
 
