@@ -190,6 +190,11 @@ public class WorkflowLogService
         public bool CanEdit { get; set; }
         public bool CanDelete { get; set; }
         public string? LockPeriodCode { get; set; }
+        public bool CanEditSplit { get; set; }
+        public string? BlockedByStepName { get; set; }
+        public string? SplitChildrenJson { get; set; }
+        public int PriorRejectQty { get; set; }
+        public int SplitMissingQty { get; set; }
     }
 
     public async Task<List<WorkflowLogDto>> ListByArticleAsync(int articleId)
@@ -310,7 +315,16 @@ public class WorkflowLogService
             HasPendingUnlock = row.HasPendingUnlock,
             CanEdit = row.CanEdit,
             CanDelete = row.CanDelete,
-            LockPeriodCode = row.LockPeriodCode
+            LockPeriodCode = row.LockPeriodCode,
+            CanEditSplit = row.CanEditSplit,
+            BlockedByStepName = row.BlockedByStepName,
+            // Ad hoc (2026-10-31): bundle anak hasil pemecahan baris ini -- baris turunan
+            // di tab OUT (anak 'Reject' sudah tidak tampil di WIP lagi).
+            SplitChildren = string.IsNullOrEmpty(row.SplitChildrenJson)
+                ? new()
+                : JsonSerializer.Deserialize<List<StationSplitChildDto>>(row.SplitChildrenJson) ?? new(),
+            PriorRejectQty = row.PriorRejectQty,
+            SplitMissingQty = row.SplitMissingQty
         }).ToList();
     }
 

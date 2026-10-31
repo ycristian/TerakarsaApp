@@ -73,6 +73,11 @@ public class BundleSplitInfoDto
     public bool IsEdit { get; set; }
     public bool IsLocked { get; set; }
     public bool NextStationDone { get; set; }
+    // Nama step yang sudah menyentuh bundle ini sesudah step ini -- isi tooltip
+    // "Sudah diproses {nama step}" waktu tombol Edit disabled.
+    public string? BlockedByStepName { get; set; }
+    // Kategori TidakLengkap hanya ditawarkan kalau step ini is_bundling = 1.
+    public bool IsBundlingStep { get; set; }
     public bool CanSubmit { get; set; }
     public int? NextDivisionId { get; set; }
     public string? NextDivisionName { get; set; }
@@ -135,6 +140,12 @@ public class BundleMissingSummaryDto
     public int ArticleId { get; set; }
     public int MissingQty { get; set; }
     public int OverQty { get; set; }
+    // Sigma qty bundle ber-status TidakLengkap artikel ini. Tampil hanya kalau > 0.
+    public int IncompleteQty { get; set; }
+    // Ad hoc (2026-10-31): hilang GAYA LAMA (qty_lost sebelum tanggal migrasi) -- riwayat
+    // beku yang tidak bisa ditutup lewat "Barang ketemu", jadi ditampilkan sebagai angka
+    // kecil terpisah di bawah Hilang, bukan dijumlahkan ke MissingQty.
+    public int LegacyMissingQty { get; set; }
 }
 
 // Dropdown Size modal "Barang ketemu" -- hanya size yang punya selisih terbuka.
@@ -151,6 +162,8 @@ public class BundleMissingBundleDto
     public int BundleId { get; set; }
     public string Serial { get; set; } = string.Empty;
     public string DisplayCode { get; set; } = string.Empty;
+    // Ad hoc (2026-10-31): wajib untuk daftar lintas size di bawah form Barang ketemu.
+    public string? SizeName { get; set; }
     public int MissingQty { get; set; }
     public DateTime LastMissingAt { get; set; }
     public string NextChildCode { get; set; } = string.Empty;

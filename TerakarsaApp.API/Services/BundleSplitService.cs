@@ -68,6 +68,8 @@ public class BundleSplitService
                     IsEdit = reader.GetBoolean(reader.GetOrdinal("IsEdit")),
                     IsLocked = reader.GetBoolean(reader.GetOrdinal("IsLocked")),
                     NextStationDone = reader.GetBoolean(reader.GetOrdinal("NextStationDone")),
+                    BlockedByStepName = reader.IsDBNull(reader.GetOrdinal("BlockedByStepName")) ? null : reader.GetString(reader.GetOrdinal("BlockedByStepName")),
+                    IsBundlingStep = reader.GetBoolean(reader.GetOrdinal("IsBundlingStep")),
                     CanSubmit = reader.GetBoolean(reader.GetOrdinal("CanSubmit")),
                     NextDivisionId = reader.IsDBNull(reader.GetOrdinal("NextDivisionId")) ? null : reader.GetInt32(reader.GetOrdinal("NextDivisionId")),
                     NextDivisionName = reader.IsDBNull(reader.GetOrdinal("NextDivisionName")) ? null : reader.GetString(reader.GetOrdinal("NextDivisionName")),
@@ -183,30 +185,45 @@ public class BundleSplitService
         }
     }
 
-    public async Task<List<BundleMissingSummaryDto>> GetMissingByArticleAsync(int? articleId)
+    // resourceId: line pemanggil -- angka Hilang/Lebih/Tidak lengkap hanya menghitung
+    // selisih yang dinyatakan hilang oleh line itu sendiri (lihat komentar atribusi di
+    // sql/sp_BundleSplit_Select.sql). NULL = semua line.
+    public async Task<List<BundleMissingSummaryDto>> GetMissingByArticleAsync(int? articleId, int? resourceId)
     {
         var p = new SqlParameter("@ArticleId", (object?)articleId ?? DBNull.Value);
+        var resourceParam = new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value);
         return await _db.Database
-            .SqlQueryRaw<BundleMissingSummaryDto>("EXEC SIS_BundleSplit_MissingByArticle @ArticleId = @ArticleId", p)
+            .SqlQueryRaw<BundleMissingSummaryDto>(
+                "EXEC SIS_BundleSplit_MissingByArticle @ArticleId = @ArticleId, @ResourceId = @ResourceId",
+                p, resourceParam)
             .ToListAsync();
     }
 
-    public async Task<List<BundleMissingSizeDto>> GetMissingSizesAsync(int articleId)
+    public async Task<List<BundleMissingSizeDto>> GetMissingSizesAsync(int articleId, int? resourceId)
     {
         var p = new SqlParameter("@ArticleId", articleId);
+        var resourceParam = new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value);
         return await _db.Database
-            .SqlQueryRaw<BundleMissingSizeDto>("EXEC SIS_BundleSplit_MissingSizes @ArticleId = @ArticleId", p)
+            .SqlQueryRaw<BundleMissingSizeDto>(
+                "EXEC SIS_BundleSplit_MissingSizes @ArticleId = @ArticleId, @ResourceId = @ResourceId",
+                p, resourceParam)
             .ToListAsync();
     }
 
-    public async Task<List<BundleMissingBundleDto>> GetMissingBundlesAsync(int articleSizeId, int? qty)
+    // Dua cara pakai (lihat komentar SP): articleSizeId = kandidat alokasi satu size,
+    // articleId = daftar seluruh bundle ber-selisih terbuka artikel itu lintas size
+    // (daftar "Bundle yang masih hilang" di bawah form Barang ketemu, qty NULL).
+    public async Task<List<BundleMissingBundleDto>> GetMissingBundlesAsync(
+        int? articleSizeId, int? qty, int? resourceId, int? articleId = null)
     {
-        var sizeParam = new SqlParameter("@ArticleSizeId", articleSizeId);
+        var sizeParam = new SqlParameter("@ArticleSizeId", (object?)articleSizeId ?? DBNull.Value);
         var qtyParam = new SqlParameter("@Qty", (object?)qty ?? DBNull.Value);
+        var resourceParam = new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value);
+        var articleParam = new SqlParameter("@ArticleId", (object?)articleId ?? DBNull.Value);
         return await _db.Database
             .SqlQueryRaw<BundleMissingBundleDto>(
-                "EXEC SIS_BundleSplit_MissingBundles @ArticleSizeId = @ArticleSizeId, @Qty = @Qty",
-                sizeParam, qtyParam)
+                "EXEC SIS_BundleSplit_MissingBundles @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @ArticleId = @ArticleId",
+                sizeParam, qtyParam, resourceParam, articleParam)
             .ToListAsync();
     }
 }

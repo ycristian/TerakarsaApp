@@ -157,6 +157,40 @@ public class StationPendingHandoverDto
     // Kode periode gajian lock yang sedang berlaku ('26-w40'), NULL kalau belum di-lock.
     // Ditampilkan di samping ikon gembok supaya operator tahu baris itu masuk periode mana.
     public string? LockPeriodCode { get; set; }
+    // Prompt 82: ikon pensil tab OUT untuk baris ber-bundle membuka modal Kirim Hasil mode
+    // edit. true = boleh (belum lock DAN station berikutnya belum bergerak). Kalau false
+    // dan BlockedByStepName terisi, tooltipnya "Sudah diproses {nama step}".
+    public bool CanEditSplit { get; set; }
+    public string? BlockedByStepName { get; set; }
+    // Ad hoc (2026-10-31): bundle ANAK yang lahir dari pemecahan baris ini (split_id yang
+    // sama). Dirender sebagai baris turunan di bawah baris induk di tab OUT -- termasuk anak
+    // 'Reject' yang tidak lagi tampil di WIP, berikut tombol cetak ulang stikernya.
+    public List<StationSplitChildDto> SplitChildren { get; set; } = new();
+    // Qty anak 'Reject' bundle yang sama dari pemecahan divisi ini SEBELUM baris ini
+    // (hari-hari sebelumnya). 0 = belum pernah ada.
+    public int PriorRejectQty { get; set; }
+    // Pcs yang dinyatakan HILANG pada pernyataan Kirim Hasil baris ini (Masuk - QtyOK -
+    // Sigma anak). Tidak punya baris turunan sendiri karena barangnya tidak ada, jadi
+    // ditampilkan sebagai keterangan di kolom Reject. Negatif = koreksi saat edit.
+    public int SplitMissingQty { get; set; }
+}
+
+// Ad hoc (2026-10-31): satu bundle anak hasil pemecahan, tampil sebagai baris turunan di
+// tab OUT (lihat SplitChildrenJson di SIS_Station_PendingHandover).
+public class StationSplitChildDto
+{
+    public int BundleId { get; set; }
+    public string Serial { get; set; } = string.Empty;
+    // Nomor tampil anak = '{BundleLetter}-{RootBundleNo}-{SequenceNo}' (mis. K-49-1).
+    public int? RootBundleNo { get; set; }
+    public string? BundleLetter { get; set; }
+    public int SequenceNo { get; set; }
+    public string? SizeName { get; set; }
+    public int Qty { get; set; }
+    // OK | Perbaikan | Reject | TidakLengkap
+    public string Status { get; set; } = string.Empty;
+    public string? RejectCategory { get; set; }
+    public string? RejectReason { get; set; }
 }
 
 // Prompt 56: chip pengingat "Belum lock" di tab OUT -- lihat SIS_Station_UnlockedDates.
@@ -171,6 +205,9 @@ public class StationUnlockedDateDto
 public class StationLockRequest
 {
     public List<int> WorkflowLogIds { get; set; } = new();
+    // Prompt 83: baris output manual yang ikut di-lock dalam SATU lock bersama baris log.
+    // Boleh kosong, tapi tidak boleh kosong BERSAMAAN dengan WorkflowLogIds.
+    public List<int> ManualOutputIds { get; set; } = new();
     public int PayrollPeriodId { get; set; }
     public int ResourceId { get; set; }
 }
@@ -215,6 +252,14 @@ public class StationInProgressDto
     // Fix: catatan bebas bundle (bundles.remarks, Prompt 35) -- dipakai pencarian teks tab WIP.
     public string? Remarks { get; set; }
     public DateTime ReceivedAt { get; set; }
+    // Prompt 82: status & kategori melekat di BUNDLE, bukan di log. Dipakai badge
+    // "Tidak lengkap"/Reject/Perbaikan di kartu WIP; SequenceNo > 0 berarti bundle ANAK
+    // dan kodenya tampil '{RootBundleNo}-{SequenceNo}'.
+    public string BundleStatus { get; set; } = "OK";
+    public string? RejectCategory { get; set; }
+    public string? RejectReason { get; set; }
+    public int SequenceNo { get; set; }
+    public int RootBundleNo { get; set; }
     public int? NextArticleWorkflowId { get; set; }
     public string? NextStepName { get; set; }
     public string? NextDivisionName { get; set; }

@@ -3,6 +3,7 @@ using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Cutting;
 using TerakarsaApp.Shared.Divisions;
 using TerakarsaApp.Shared.Employees;
+using TerakarsaApp.Shared.ManualOutputs;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Positions;
 using TerakarsaApp.Shared.Payroll;
@@ -277,6 +278,40 @@ public class StationDeviceApiService
         return (false, await response.Content.ReadAsStringAsync());
     }
 
+    // ---- Prompt 83: output manual di tab OUT ----
+    // Divisi diambil server dari token perangkat. TIDAK ADA harga di sisi stasiun.
+    public async Task<List<ManualOutputRowDto>> GetManualOutputsAsync()
+    {
+        var response = await _http.GetAsync("api/station/manual-outputs");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ManualOutputRowDto>>() ?? new();
+    }
+
+    public async Task<List<ArticleSearchDto>> SearchManualOutputArticlesAsync(string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword)) return new();
+        var response = await _http.GetAsync($"api/station/manual-outputs/articles?q={Uri.EscapeDataString(keyword)}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<ArticleSearchDto>>() ?? new();
+    }
+
+    public async Task<(bool Success, string Error)> SaveManualOutputAsync(
+        ManualOutputSaveRequest request, int? resourceId)
+    {
+        var response = await _http.PostAsJsonAsync(
+            $"api/station/manual-outputs{ResourceIdQuery(resourceId)}", request);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<(bool Success, string Error)> DeleteManualOutputAsync(int id, int? resourceId)
+    {
+        var response = await _http.DeleteAsync(
+            $"api/station/manual-outputs/{id}{ResourceIdQuery(resourceId)}");
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await response.Content.ReadAsStringAsync());
+    }
+
     private static string ResourceIdQuery(int? resourceId) =>
         resourceId.HasValue ? $"?resourceId={resourceId.Value}" : string.Empty;
 
@@ -355,26 +390,37 @@ public class StationDeviceApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mengirim hasil." : error.Trim('"'), new());
     }
 
-    public async Task<List<BundleMissingSummaryDto>> GetMissingAsync(int? articleId = null)
+    // resourceId: line sesi ini -- angka Hilang/Lebih hanya milik line itu sendiri.
+    public async Task<List<BundleMissingSummaryDto>> GetMissingAsync(int? articleId = null, int? resourceId = null)
     {
-        var url = "api/station/split/missing";
-        if (articleId.HasValue) url += $"?articleId={articleId.Value}";
+        var query = new List<string>();
+        if (articleId.HasValue) query.Add($"articleId={articleId.Value}");
+        if (resourceId.HasValue) query.Add($"resourceId={resourceId.Value}");
+        var url = "api/station/split/missing" + (query.Count == 0 ? "" : "?" + string.Join("&", query));
         var response = await _http.GetAsync(url);
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<BundleMissingSummaryDto>>() ?? new();
     }
 
-    public async Task<List<BundleMissingSizeDto>> GetMissingSizesAsync(int articleId)
+    public async Task<List<BundleMissingSizeDto>> GetMissingSizesAsync(int articleId, int? resourceId = null)
     {
-        var response = await _http.GetAsync($"api/station/split/missing-sizes?articleId={articleId}");
+        var url = $"api/station/split/missing-sizes?articleId={articleId}";
+        if (resourceId.HasValue) url += $"&resourceId={resourceId.Value}";
+        var response = await _http.GetAsync(url);
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<BundleMissingSizeDto>>() ?? new();
     }
 
-    public async Task<List<BundleMissingBundleDto>> GetMissingBundlesAsync(int articleSizeId, int? qty)
+    // articleSizeId = kandidat alokasi satu size; articleId = daftar seluruh bundle
+    // ber-selisih terbuka artikel itu lintas size (daftar di bawah form Barang ketemu).
+    public async Task<List<BundleMissingBundleDto>> GetMissingBundlesAsync(int? articleSizeId, int? qty,
+                                                                           int? resourceId = null, int? articleId = null)
     {
-        var url = $"api/station/split/missing-bundles?articleSizeId={articleSizeId}";
+        var url = "api/station/split/missing-bundles?";
+        if (articleSizeId.HasValue) url += $"articleSizeId={articleSizeId.Value}";
+        if (articleId.HasValue) url += $"&articleId={articleId.Value}";
         if (qty.HasValue) url += $"&qty={qty.Value}";
+        if (resourceId.HasValue) url += $"&resourceId={resourceId.Value}";
         var response = await _http.GetAsync(url);
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<BundleMissingBundleDto>>() ?? new();

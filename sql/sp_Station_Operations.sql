@@ -156,7 +156,11 @@ BEGIN
            p.project_name AS ProjectName, p.no_po AS NoPo, buy.buyer_name AS BuyerName, a.article_name AS ArticleName,
            a.style AS Style, a.color AS Color,
            aw.step_name AS StepName,
-           awl.qty_ok AS QtyOk, awl.created_at AS SentAt,
+           -- Prompt 82: qty yang DITAMPILKAN selalu bundles.qty (= qty_after terakhir),
+           -- bukan qty_ok baris serah. Kalau station sebelumnya mengedit hasilnya
+           -- (mis. Loading menurunkan 57 -> 55), tab ini ikut berubah tanpa input apa pun
+           -- dari station penerima. Baris non-bundle tetap pakai qty_ok.
+           COALESCE(b.qty, awl.qty_ok) AS QtyOk, awl.created_at AS SentAt,
            d.division_name AS FromDivisionName,
            awl.bundle_id AS BundleId, b.bundle_no AS BundleNo, p.bundle_letter AS BundleLetter, b.serial AS Serial,
            spd.size_name AS SizeName, spd.sort_order AS SizeSortOrder,
@@ -465,6 +469,11 @@ BEGIN
            -- CREATE) -- ukuran diambil dari bundles.article_size_id lewat COALESCE supaya
            -- badge ukuran di kartu OUT & prefill modal Edit bundle tidak kosong.
            COALESCE(b.article_size_id, awl.article_size_id) AS ArticleSizeId, spd.size_name AS SizeName, spd.sort_order AS SizeSortOrder,
+           -- Prompt 82: tab OUT SENGAJA tetap memakai qty_ok baris, bukan bundles.qty --
+           -- beda dengan tab IN/WIP yang satu baris = satu bundle. Di sini satu bundle bisa
+           -- punya DUA baris setelah diedit (Kirim 57 lalu koreksi -2), dan baris koreksi
+           -- memang bernilai delta. Pakai bundles.qty di sini akan menampilkan 55 dua kali
+           -- dan total kartu jadi 110; dengan qty_ok totalnya benar 55.
            awl.qty_ok AS QtyOk, awl.qty_reject_print AS QtyRejectPrint,
            awl.qty_reject_fabric AS QtyRejectFabric, awl.qty_reject_sewing AS QtyRejectSewing,
            -- Fix: dua kolom ini ada di StationPendingHandoverRow (C#) sejak Prompt 28 tapi
@@ -528,6 +537,68 @@ BEGIN
                 ) THEN 1 ELSE 0 END AS BIT) AS HasPendingUnlock,
            CAST(CASE WHEN awl.lock_id IS NULL THEN 1 ELSE 0 END AS BIT) AS CanEdit,
            CAST(CASE WHEN awl.lock_id IS NULL THEN 1 ELSE 0 END AS BIT) AS CanDelete,
+           -- Prompt 82: ikon pensil tab OUT untuk baris BER-BUNDLE membuka modal Kirim
+           -- Hasil mode edit. Syaratnya dua: lock_id masih NULL DAN belum ada log aktif
+           -- bundle ini di step dengan sort_order lebih besar (begitu station berikutnya
+           -- mencatat sesuatu, hasil ini tidak bisa diubah lagi). BlockedByStepName
+           -- dipakai client untuk tooltip "Sudah diproses {nama step}".
+           CAST(CASE WHEN awl.lock_id IS NULL AND awl.bundle_id IS NOT NULL
+                          AND nextstep.step_name IS NULL
+                     THEN 1 ELSE 0 END AS BIT) AS CanEditSplit,
+           nextstep.step_name AS BlockedByStepName,
+           -- Ad hoc (2026-10-31): bundle ANAK yang lahir dari pemecahan baris ini (join lewat
+           -- split_id, jadi tiap anak menempel tepat di baris kiriman yang melahirkannya dan
+           -- tidak pernah dobel walau satu bundle punya beberapa baris di layar). Client
+           -- merendernya sebagai baris turunan di bawah baris induk di tab OUT -- termasuk
+           -- anak 'Reject' yang sejak hari ini TIDAK lagi tampil di WIP
+           -- (lihat SIS_Station_InProgress). Dari situ pula stikernya dicetak ulang.
+           (
+               SELECT ch.bundle_id AS BundleId, ch.serial AS Serial,
+                      rbc.bundle_no AS RootBundleNo, p.bundle_letter AS BundleLetter,
+                      ch.sequence_no AS SequenceNo,
+                      spdc.size_name AS SizeName, ch.qty AS Qty,
+                      ch.[status] AS [Status], ch.reject_category AS RejectCategory,
+                      ch.reject_reason AS RejectReason
+               FROM bundle_split_results sr
+               INNER JOIN bundles ch ON ch.bundle_id = sr.bundle_id AND ch.deleted_at IS NULL
+               INNER JOIN bundles rbc ON rbc.bundle_id = ch.root_bundle_id
+               INNER JOIN article_sizes aszc ON aszc.article_size_id = ch.article_size_id
+               INNER JOIN size_pack_details spdc ON spdc.size_pack_detail_id = aszc.size_pack_detail_id
+               WHERE sr.split_id = awl.split_id
+               ORDER BY ch.sequence_no
+               FOR JSON PATH
+           ) AS SplitChildrenJson,
+           -- Reject bundle yang SAMA, dinyatakan divisi ini pada pemecahan SEBELUM baris ini
+           -- (hari-hari sebelumnya). Dipakai client menampilkan "sblm N" di samping angka
+           -- reject hari ini, supaya operator tahu total yang sudah dianggap reject untuk
+           -- bundle itu, bukan cuma potongan hari yang sedang dibuka.
+           ISNULL((
+               SELECT SUM(ch2.qty)
+               FROM bundle_split_results sr2
+               INNER JOIN bundle_splits s2 ON s2.split_id = sr2.split_id
+               INNER JOIN bundles ch2 ON ch2.bundle_id = sr2.bundle_id AND ch2.deleted_at IS NULL
+               WHERE s2.source_bundle_id = awl.bundle_id AND s2.kind = 'split'
+                 AND s2.division_id = awl.division_id
+                 AND ch2.[status] = 'Reject'
+                 -- Baris tanpa split_id (mis. baris Bundling 'Creation') SELALU 0: baris itu
+                 -- kelahiran bundle, apa pun yang direject divisi ini pasti terjadi SESUDAHNYA.
+                 AND awl.split_id IS NOT NULL AND s2.split_id < awl.split_id
+           ), 0) AS PriorRejectQty,
+           -- Ad hoc (2026-10-31): pcs yang dinyatakan HILANG pada pernyataan Kirim Hasil
+           -- baris ini -- barang yang tidak ketemu fisiknya, jadi tidak lahir bundle anak
+           -- dan tidak punya barisnya sendiri di tab OUT. Dihitung ulang dari invarian
+           --     Hilang = Masuk - QtyOK - Sigma anak
+           -- (Masuk = bundle_splits.source_qty_before, QtyOK = qty_after baris ini) karena
+           -- angkanya memang TIDAK disimpan di mana pun: baris log 'Hilang' penyertanya
+           -- ber-qty 0 dan hanya menulis jumlahnya sebagai teks di reason.
+           -- Bisa NEGATIF pada baris koreksi (edit yang mengembalikan selisih).
+           ISNULL((
+               SELECT s.source_qty_before - awl.qty_after
+                      - ISNULL((SELECT SUM(sr.qty) FROM bundle_split_results sr
+                                WHERE sr.split_id = s.split_id), 0)
+               FROM bundle_splits s
+               WHERE s.split_id = awl.split_id AND s.kind = 'split'
+           ), 0) AS SplitMissingQty,
            -- Kode periode gajian lock yang sedang berlaku ('26-w40'), NULL bila belum
            -- di-lock. Ditampilkan di samping ikon gembok di tab OUT -- periode sebuah baris
            -- SELALU diturunkan dari lock_id, tidak pernah dari created_at (Prompt 55).
@@ -548,6 +619,18 @@ BEGIN
     -- Prompt 57 (susulan): periode gajian lock aktif baris ini.
     LEFT JOIN workflow_locks lwl ON lwl.lock_id = awl.lock_id
     LEFT JOIN payroll_periods lpp ON lpp.payroll_period_id = lwl.payroll_period_id
+    -- Prompt 82: step BERIKUTNYA yang sudah menyentuh bundle ini (kalau ada) -- pengunci
+    -- otomatis tombol Edit di tab OUT.
+    OUTER APPLY (
+        SELECT TOP 1 aw9.step_name
+        FROM article_workflow_logs awl9
+        INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
+        WHERE awl.bundle_id IS NOT NULL
+          AND awl9.bundle_id = awl.bundle_id AND awl9.deleted_at IS NULL
+          AND awl9.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
+          AND aw9.sort_order > aw.sort_order
+        ORDER BY aw9.sort_order ASC
+    ) nextstep
     WHERE awl.division_id = @DivisionId
       AND awl.deleted_at IS NULL
       AND (
@@ -559,7 +642,10 @@ BEGIN
             -- (tanpa Revisi/Batal Serah, lihat StationDevice.razor) karena sudah terkunci.
             -- Baris LAWAS yang belum diterima tetap tampil tanpa batas hari (received_at IS
             -- NULL saja, tanpa syarat tanggal) -- perilaku lama dipertahankan.
-            (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0
+            -- Prompt 82: baris koreksi (Split/Dikembalikan) qty_ok-nya NEGATIF, tapi tetap
+            -- harus tampil & bisa di-lock -- itu pengurang upah step ini.
+            ((awl.qty_ok > 0 OR awl.log_kind IN ('Split', 'Dikembalikan'))
+             AND awl.target_division_id IS NOT NULL
              AND (awl.received_at IS NULL OR CAST(awl.created_at AS DATE) = @Date))
             -- Prompt 28: baris ADJUSTMENT dengan qty_ok = 0 SELALU target_division_id NULL
             -- (lihat SIS_WorkflowLog_Manage ADJUST) terlepas dari step ini step terakhir
@@ -604,7 +690,8 @@ BEGIN
            spd.size_name AS SizeName,
            aw.step_name AS StepName,
            d.division_name AS DivisionAsalName,
-           awl.qty_ok AS QtyOk,
+           -- Prompt 82: qty tampil = bundles.qty (lihat SIS_Station_PendingReceives).
+           COALESCE(b.qty, awl.qty_ok) AS QtyOk,
            awl.received_at AS ReceivedAt,
            r.resource_name AS ReceivedByResourceName,
            CASE WHEN awl.bundle_id IS NOT NULL AND EXISTS (
@@ -652,6 +739,13 @@ BEGIN
             rr.resource_name AS tailor_name,
             emp.employee_name AS employee_name,
             b.remarks AS remarks,
+            -- Prompt 82: status & kategori melekat di BUNDLE (bukan di log) -- dipakai badge
+            -- "Tidak lengkap"/Reject/Perbaikan di kartu WIP beserta alasannya.
+            b.[status] AS bundle_status,
+            b.reject_category AS reject_category,
+            b.reject_reason AS reject_reason,
+            b.sequence_no AS sequence_no,
+            b.root_bundle_id AS root_bundle_id,
             b.resource_id AS bundle_resource_id,
             rr.division_id AS bundle_resource_division_id
         FROM bundles b
@@ -692,7 +786,7 @@ BEGIN
                 FROM article_workflow_logs awl9
                 INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
                 WHERE awl9.bundle_id = bs.bundle_id AND awl9.deleted_at IS NULL
-                  AND awl9.log_kind IN ('Creation', 'Kirim')
+                  AND awl9.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
             ), -1)
             ORDER BY q.SortOrder ASC
         ) f
@@ -715,6 +809,11 @@ BEGIN
         bs.tailor_name AS TailorName,
         bs.employee_name AS EmployeeName,
         bs.remarks AS Remarks,
+        bs.bundle_status AS BundleStatus,
+        bs.reject_category AS RejectCategory,
+        bs.reject_reason AS RejectReason,
+        bs.sequence_no AS SequenceNo,
+        rb.bundle_no AS RootBundleNo,
         lr.received_at AS ReceivedAt,
         fr.ArticleWorkflowId AS NextArticleWorkflowId,
         fr.StepName AS NextStepName,
@@ -724,6 +823,8 @@ BEGIN
         ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsLastStep
     FROM Base bs
     INNER JOIN Frontier fr ON fr.bundle_id = bs.bundle_id
+    -- Prompt 82: induk utama pohon ini -- nomor tampil bundle anak = '{bundle_no root}-{seq}'.
+    INNER JOIN bundles rb ON rb.bundle_id = bs.root_bundle_id
     -- Baris TERAKHIR yang membawa bundle ini MASUK ke @DivisionId (baris manapun yang
     -- target_division_id = @DivisionId & sudah diterima) -- dipakai utk WorkflowLogId/
     -- ReceivedAt/Batal Terima, bukan lagi harus baris log paling akhir secara keseluruhan.
@@ -766,6 +867,15 @@ BEGIN
           )
       -- Fix: lihat komentar Line vs divisi di SIS_Station_PendingReceives.
       AND (@ResourceId IS NULL OR bs.bundle_resource_id IS NULL OR bs.bundle_resource_id = @ResourceId OR bs.bundle_resource_division_id <> @DivisionId)
+      -- Ad hoc (2026-10-31): bundle anak ber-status 'Reject' TIDAK pernah tampil di WIP.
+      -- Barangnya memang mati di tangan station ini (reject bahan/jahit/print tidak akan
+      -- pernah "dikirim" ke mana pun), jadi kalau dibiarkan di WIP ia menggantung selamanya
+      -- dan menenggelamkan pekerjaan yang betul-betul harus dikerjakan. Penggantinya: anak
+      -- reject tampil di tab OUT sebagai BARIS TURUNAN di bawah baris kiriman induknya
+      -- (SplitChildrenJson di SIS_Station_PendingHandover) -- di situ juga tempat cetak ulang
+      -- stikernya, supaya tidak terpencar. 'Perbaikan' & 'TidakLengkap' TETAP di WIP: dua
+      -- status itu masih menunggu dikerjakan ulang/dilengkapi partnya.
+      AND bs.bundle_status <> 'Reject'
     ORDER BY bs.project_name ASC, bs.article_name ASC, bs.bundle_no ASC;
 END;
 GO
@@ -821,7 +931,7 @@ BEGIN
                         FROM article_workflow_logs awl9
                         INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
                         WHERE awl9.bundle_id = b.bundle_id AND awl9.deleted_at IS NULL
-                          AND awl9.log_kind IN ('Creation', 'Kirim')
+                          AND awl9.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
                     ), -1)
                     ORDER BY q.SortOrder ASC
                 ) fr
@@ -847,6 +957,10 @@ BEGIN
                           AND pend.target_division_id IS NOT NULL AND pend.received_at IS NULL
                       )
                   AND (@ResourceId IS NULL OR b.resource_id IS NULL OR b.resource_id = @ResourceId OR br.division_id <> @DivisionId)
+                  -- Ad hoc (2026-10-31): anak 'Reject' dikeluarkan dari WIP -- alasan lengkap
+                  -- di SIS_Station_InProgress. Angka ini WAJIB ikut, kalau tidak strip WIP
+                  -- menghitung bundle yang tidak ada di daftarnya.
+                  AND b.[status] <> 'Reject'
             ) x
         )
         +
@@ -888,7 +1002,8 @@ BEGIN
             INNER JOIN article_workflows aw3 ON aw3.article_workflow_id = awl3.article_workflow_id
             WHERE awl3.division_id = @DivisionId AND awl3.deleted_at IS NULL
               AND (
-                    (awl3.target_division_id IS NOT NULL AND awl3.qty_ok > 0
+                    ((awl3.qty_ok > 0 OR awl3.log_kind IN ('Split', 'Dikembalikan'))   -- Prompt 82
+                     AND awl3.target_division_id IS NOT NULL
                      AND (awl3.received_at IS NULL OR CAST(awl3.created_at AS DATE) = CAST(SYSDATETIME() AS DATE)))
                     OR (awl3.target_division_id IS NULL AND awl3.log_type = 'NORMAL'
                         AND awl3.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation')   -- Prompt 82
@@ -908,7 +1023,8 @@ BEGIN
             WHERE awl5.division_id = @DivisionId AND awl5.deleted_at IS NULL
               AND awl5.lock_id IS NULL
               AND (
-                    (awl5.target_division_id IS NOT NULL AND awl5.qty_ok > 0)
+                    ((awl5.qty_ok > 0 OR awl5.log_kind IN ('Split', 'Dikembalikan'))   -- Prompt 82
+                     AND awl5.target_division_id IS NOT NULL)
                     OR (awl5.target_division_id IS NULL AND awl5.log_type = 'NORMAL'
                         AND awl5.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation'))   -- Prompt 82
                   )
@@ -939,7 +1055,8 @@ BEGIN
       -- Cakupan baris SAMA dengan yang bisa muncul di tab OUT (lihat catatan yang sama di
       -- OutUnlockedCount) -- chip harus selalu bisa ditindaklanjuti operator.
       AND (
-            (awl.target_division_id IS NOT NULL AND awl.qty_ok > 0)
+            ((awl.qty_ok > 0 OR awl.log_kind IN ('Split', 'Dikembalikan'))   -- Prompt 82
+             AND awl.target_division_id IS NOT NULL)
             OR (awl.target_division_id IS NULL AND awl.log_type = 'NORMAL'
                 AND awl.log_kind NOT IN ('Hilang', 'Ketemu', 'Creation'))   -- Prompt 82
           )

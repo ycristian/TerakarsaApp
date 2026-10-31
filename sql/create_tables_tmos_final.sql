@@ -1160,8 +1160,59 @@ CREATE TABLE workflow_locks(
  deleted_by int null
 );
 
+-- Prompt 83: OUTPUT MANUAL -- output yang tidak lewat bundle, dicatat tiap divisi sendiri
+-- dari tab OUT stasiun. Tidak bergantung artikel, PO, maupun divisi lain.
+--
+-- TIDAK MENYENTUH SALDO BUNDLE sama sekali -- murni untuk gajian dan laporan per resource,
+-- jadi tidak ada rantai qty_delta/qty_after seperti article_workflow_logs.
+--
+-- TIDAK ADA payroll_period_id: periode gajian baris ini datang dari lock_id ->
+-- workflow_locks.payroll_period_id, sama seperti article_workflow_logs. Itu yang
+-- membedakannya dari non_po_outputs (Prompt 59, kini DIRETIRE) yang menyimpan periodenya
+-- sendiri dari output_at dan harganya diisi sendiri oleh PIC.
+--
+-- Harga TIDAK ADA di tabel ini dan memang tidak boleh ada: harga melekat ke lock item
+-- (workflow_lock_items.unit_price). PIC tidak pernah melihat atau mengisi harga.
+--
+-- Didefinisikan SETELAH workflow_locks (lock_id menunjuk ke sana) dan SEBELUM
+-- workflow_lock_items (yang menunjuk balik ke tabel ini).
+CREATE TABLE manual_outputs(
+ manual_output_id int primary key identity(1,1),
+ resource_id int not null                   -- operator/line yang mengerjakan (pemilik upah)
+   constraint FK_mo_resources foreign key references resources(resource_id),
+ division_id int not null                   -- divisi stasiun; disalin SP dari resources
+   constraint FK_mo_divisions foreign key references divisions(division_id),
+ article_id int null                        -- OPSIONAL; boleh ditempel admin belakangan lewat
+                                            -- SIS_ManualOutput_LinkArticle, TERMASUK ke baris
+                                            -- yang sudah lock (menempel artikel bukan
+                                            -- mengubah fakta qty)
+   constraint FK_mo_articles foreign key references articles(article_id),
+ work_description nvarchar(300) not null,   -- wajib, mis. 'kaos polos hitam pak Budi'
+ size_name varchar(50) null,                -- teks bebas, BUKAN FK ke size_pack_details
+ qty int not null default 0,                -- boleh 0 ATAU MINUS. Baris minus = CATATAN
+                                            -- POTONGAN: PIC menulis kronologi + usulan
+                                            -- potongan di note, nominalnya ditentukan admin
+                                            -- lewat unit_price di lock item.
+ reject_qty int not null default 0,         -- satu angka, TANPA kategori (beda dari log)
+ note nvarchar(500) null,
+ lock_id int null                           -- Prompt 55/83: lock yang SEDANG berlaku.
+                                            -- Terisi = qty beku di SEMUA jalur, termasuk
+                                            -- Super Admin -- pesan 'LOCKED|'.
+   constraint FK_mo_workflow_locks foreign key references workflow_locks(lock_id),
+ created_at datetime2 not null default sysdatetime(),
+ created_by int not null,                   -- user sistem station_system (tabel Users), tanpa FK
+ updated_at datetime2 null,
+ updated_by int null,
+ deleted_at datetime2 null,
+ deleted_by int null
+);
+
 -- Pengajuan buka lock dari stasiun. Menunggu = approved_at IS NULL AND rejected_at IS NULL
 -- AND deleted_at IS NULL; pembatalan oleh pengaju = soft delete.
+--
+-- CATATAN Prompt 83: tabel ini (dan unlock_request_items.workflow_log_id yang NOT NULL)
+-- hanya mengenal baris LOG. Baris MANUAL yang sudah di-lock karena itu BELUM punya jalur
+-- unlock -- di luar cakupan Prompt 83.
 CREATE TABLE unlock_requests(
  request_id int primary key identity(1,1),
  division_id int not null
@@ -1186,13 +1237,29 @@ CREATE TABLE unlock_requests(
 
 -- Isi lock + riwayat. Lock yang dilepas TIDAK dihapus (released_at terisi) supaya jejak
 -- "baris ini pernah di-lock ke periode mana, dibuka oleh request mana" tetap utuh.
+-- Prompt 83: satu lock menampung DUA sumber baris -- article_workflow_logs (source='LOG')
+-- dan manual_outputs (source='MANUAL'). Karena itu workflow_log_id NULLABLE, dan
+-- unit_price (harga borongan) ikut DIBEKUKAN di sini.
 CREATE TABLE workflow_lock_items(
  lock_item_id int primary key identity(1,1),
  lock_id int not null
    constraint FK_wli_workflow_locks foreign key references workflow_locks(lock_id),
- workflow_log_id int not null
+ source varchar(10) not null constraint DF_wli_source default 'LOG',  -- 'LOG' | 'MANUAL'
+ workflow_log_id int null                   -- terisi HANYA saat source='LOG'
    constraint FK_wli_article_workflow_logs foreign key references article_workflow_logs(workflow_log_id),
+ manual_output_id int null                  -- terisi HANYA saat source='MANUAL'
+   constraint FK_wli_manual_outputs foreign key references manual_outputs(manual_output_id),
+ -- Harga borongan SAAT DI-LOCK. NULL = tarif belum diketahui -- disorot di Rekap Gajian dan
+ -- MEMBLOKIR finalisasi periode. Sengaja nullable: 0 adalah harga yang sah (step Bundling),
+ -- jadi 0 tidak boleh dipakai sebagai penanda "belum diisi". Diisi SIS_WorkflowLock_Manage
+ -- lewat dbo.SIS_fn_StepUnitPrice / dbo.SIS_fn_ManualStepUnitPrice; dikoreksi admin lewat
+ -- SIS_LockItem_UpdatePrice selama payroll_periods.finalized_at periode itu masih NULL.
+ -- Mengubah master tarif article_workflows.unit_price TIDAK mengubah nilai di sini.
+ unit_price decimal(19,4) null,
  -- Snapshot nilai baris saat di-lock (bukti isi periode gajian tidak berubah diam-diam).
+ -- Baris MANUAL: snap_qty_ok = manual_outputs.qty (boleh MINUS -- catatan potongan) dan
+ -- snap_resource_id = pemilik upah; kolom snap reject per kategori dibiarkan 0 karena
+ -- output manual hanya punya satu angka reject tanpa kategori.
  snap_qty_ok int not null default 0,
  snap_qty_reject_print int not null default 0,
  snap_qty_reject_fabric int not null default 0,
@@ -1462,6 +1529,30 @@ CREATE TABLE bundle_split_results(
 );
 GO
 
+-- Migrasi 86 (sql/migrasi_86_qty_lost_ke_missing.sql): hilang GAYA LAMA
+-- (article_workflow_logs.qty_lost) dilipat jadi saldo bundles.missing_qty supaya hanya
+-- ada SATU angka hilang yang bisa ditutup lewat "Barang ketemu". qty_lost sendiri tidak
+-- dinolkan (masih dibaca laporan lama + fn_55_workflow_saldo), jadi tabel pemetaan di
+-- bawah inilah yang mencegah angkanya terhitung DUA KALI: v_bundle_reject_unified dan
+-- SIS_BundleSplit_MissingByArticle menyaring baris yang sudah terdaftar di sini.
+-- Karena itu tabel ini WAJIB ADA walau migrasinya tidak pernah dijalankan (view-nya
+-- gagal dibuat kalau tabel ini tidak ada) -- bukan sekadar penanda migrasi.
+CREATE TABLE qty_lost_migration(
+ migration_id int primary key identity(1,1),
+ ran_at datetime2 not null default sysdatetime(),
+ summary nvarchar(max) null
+);
+GO
+
+CREATE TABLE qty_lost_migration_items(
+ workflow_log_id int primary key,           -- baris log ASAL; satu baris dilipat sekali
+ bundle_id int not null,
+ qty int not null,                          -- nilai qty_lost yang dilipat (boleh negatif)
+ new_workflow_log_id int not null,          -- baris log 'Hilang' penyerta yang dibuat
+ ran_at datetime2 not null default sysdatetime()
+);
+GO
+
 -- ============ 10. UNIQUE INDEX (filtered: berlaku hanya untuk baris hidup) ============
 
 -- Dengan pola ini, kode lama bisa dipakai lagi setelah barisnya di-soft-delete.
@@ -1499,7 +1590,11 @@ CREATE UNIQUE INDEX UX_print_kupon_job_types_job_type ON print_kupon_job_types(j
 CREATE UNIQUE INDEX UX_payroll_periods_year_no ON payroll_periods(period_year, period_no) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_payroll_periods_code   ON payroll_periods(period_code)             WHERE deleted_at IS NULL;
 -- Satu baris log maksimal punya SATU lock aktif.
-CREATE UNIQUE INDEX UX_wli_log_active         ON workflow_lock_items(workflow_log_id)     WHERE released_at IS NULL AND deleted_at IS NULL;
+-- Prompt 83: filter "IS NOT NULL" WAJIB ada di kedua index ini. Index UNIQUE memperlakukan
+-- NULL sebagai nilai yang SAMA, jadi tanpa filter itu hanya SATU baris MANUAL (workflow_log_id
+-- NULL) yang boleh aktif di seluruh tabel -- dan sebaliknya untuk baris LOG.
+CREATE UNIQUE INDEX UX_wli_log_active         ON workflow_lock_items(workflow_log_id)     WHERE released_at IS NULL AND deleted_at IS NULL AND workflow_log_id IS NOT NULL;
+CREATE UNIQUE INDEX UX_wli_manual_active      ON workflow_lock_items(manual_output_id)    WHERE released_at IS NULL AND deleted_at IS NULL AND manual_output_id IS NOT NULL;
 -- Prompt 58: satu pegawai maksimal satu baris absen per tanggal (resource TIDAK ikut --
 -- pegawai hanya bisa anggota satu line).
 CREATE UNIQUE INDEX UX_ea_employee_date       ON employee_attendances(employee_id, attendance_date) WHERE deleted_at IS NULL;
@@ -1575,6 +1670,17 @@ CREATE INDEX IX_pack_items_pack     ON pack_items(pack_id) WHERE deleted_at IS N
 -- Prompt 55.
 CREATE INDEX IX_awl_lock_id         ON article_workflow_logs(lock_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_wli_lock_id         ON workflow_lock_items(lock_id) WHERE deleted_at IS NULL;
+
+-- Prompt 83: output manual.
+CREATE INDEX IX_mo_division_lock    ON manual_outputs(division_id, lock_id) INCLUDE (resource_id, article_id, qty) WHERE deleted_at IS NULL;
+CREATE INDEX IX_mo_lock_id          ON manual_outputs(lock_id)    WHERE deleted_at IS NULL;
+CREATE INDEX IX_mo_article_id       ON manual_outputs(article_id) WHERE deleted_at IS NULL;
+
+-- Prompt 83: TEPAT SATU dari workflow_log_id / manual_output_id terisi, sesuai source.
+ALTER TABLE workflow_lock_items ADD CONSTRAINT CK_wli_source CHECK (
+    (source = 'LOG'    AND workflow_log_id IS NOT NULL AND manual_output_id IS NULL)
+ OR (source = 'MANUAL' AND manual_output_id IS NOT NULL AND workflow_log_id IS NULL)
+);
 CREATE INDEX IX_uri_request_id      ON unlock_request_items(request_id);
 -- Prompt 58: list & rekap absen per line per tanggal; pencarian no. telp (BUKAN unique --
 -- keunikan dicek di SP supaya nomor pegawai nonaktif bisa ditawarkan "Aktifkan lagi?").
@@ -1601,7 +1707,12 @@ CREATE UNIQUE INDEX UX_bundles_cutting_code  ON bundles(article_id, cutting_code
 CREATE INDEX IX_bundles_cutting_stock        ON bundles(source, stock_status, article_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_bundles_spread               ON bundles(spread_id, bundle_seq) WHERE deleted_at IS NULL;
 -- Prompt 82: pohon induk/anak + selisih + rantai qty.
-CREATE UNIQUE INDEX UX_bundles_root_sequence ON bundles(root_bundle_id, sequence_no) WHERE deleted_at IS NULL;
+-- Filter root_bundle_id <> 0 WAJIB: induk baru di-INSERT dengan root_bundle_id = 0
+-- (default kolom) lalu di-UPDATE jadi dirinya sendiri di transaksi yang sama. INSERT
+-- set-based banyak baris sekaligus (SIS_CuttingSpread_Manage) akan bentrok di (0,0)
+-- kalau baris transit itu ikut diindex.
+CREATE UNIQUE INDEX UX_bundles_root_sequence ON bundles(root_bundle_id, sequence_no)
+    WHERE deleted_at IS NULL AND root_bundle_id <> 0;
 CREATE INDEX IX_bundles_root                 ON bundles(root_bundle_id) WHERE deleted_at IS NULL;
 CREATE INDEX IX_bundles_missing              ON bundles(article_id, article_size_id)
     INCLUDE (missing_qty) WHERE deleted_at IS NULL AND missing_qty <> 0;

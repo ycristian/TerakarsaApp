@@ -67,6 +67,15 @@ WHERE awl.deleted_at IS NULL
   AND awl.created_at < ISNULL(
         (SELECT TOP 1 bundle_split_migrated_at FROM app_settings WHERE deleted_at IS NULL),
         '9999-12-31')
+  -- Migrasi 86 (sql/migrasi_86_qty_lost_ke_missing.sql): KHUSUS irisan 'Hilang',
+  -- qty_lost sudah dilipat ke bundles.missing_qty dan dibaca di cabang C. Baris yang
+  -- sudah dilipat WAJIB berhenti dibaca dari sini, kalau tidak angkanya dobel.
+  -- Kolom qty_lost-nya sendiri sengaja TIDAK dinolkan (masih dipakai laporan lama dan
+  -- fn_55_workflow_saldo), jadi penyaringnya tabel pemetaan, bukan nilai kolomnya.
+  -- Kategori reject lain tidak terpengaruh -- batas tanggal di atas tetap berlaku.
+  AND NOT (v.Category = 'Hilang' AND EXISTS (
+            SELECT 1 FROM qty_lost_migration_items i
+            WHERE i.workflow_log_id = awl.workflow_log_id))
 
 UNION ALL
 

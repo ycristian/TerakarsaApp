@@ -123,6 +123,48 @@
                     </div>
                 }
 
+                @* Ad hoc (2026-10-31): daftar bundle yang masih punya selisih terbuka di artikel
+                   ini (lintas size, line sesi ini) -- tampil begitu modal dibuka, sebelum size
+                   dipilih, supaya operator bisa mencocokkan barang yang dipegangnya dengan
+                   nomor bundle dan waktu kehilangannya. Murni informasi; alokasi tetap lewat
+                   blok "Akan dicatat ke" di atas. *@
+                @if (missingList.Count > 0)
+                {
+                    <div class="mt-3">
+                        <label class="form-label mb-1">Bundle yang masih hilang</label>
+                        <div class="table-responsive" style="max-height: 14rem; overflow-y: auto;">
+                            <table class="table table-sm mb-0 align-middle" style="font-size: 0.75rem;">
+                                <thead>
+                                    <tr>
+                                        <th>No bundle</th>
+                                        <th>Size</th>
+                                        <th class="text-end">Qty</th>
+                                        <th class="text-end">Waktu</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var m in missingList)
+                                    {
+                                        <tr>
+                                            <td><span class="badge bg-dark">@m.DisplayCode</span></td>
+                                            <td>@(m.SizeName ?? "-")</td>
+                                            <td class="text-end fw-bold text-danger">@m.MissingQty</td>
+                                            <td class="text-end text-muted">@m.LastMissingAt.ToString("dd/MM HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="2" class="fw-bold">Total</td>
+                                        <td class="text-end fw-bold text-danger">@missingList.Sum(m => m.MissingQty)</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                }
+
                 @if (!string.IsNullOrEmpty(error))
                 {
                     <div class="alert alert-danger mt-2 mb-0">@error</div>
@@ -146,6 +188,9 @@
 
     private List<BundleMissingSizeDto> sizes = new();
     private List<BundleMissingBundleDto> candidates = new();
+    // Daftar informasi di bawah form: semua bundle artikel ini yang selisihnya masih
+    // terbuka, lintas size. Dimuat sekali saat modal dibuka.
+    private List<BundleMissingBundleDto> missingList = new();
     private Dictionary<int, int> manualQty = new();
     private int selectedSizeId;
     private int qtyFound = 1;
@@ -160,7 +205,9 @@
     {
         if (loadedArticleId == ArticleId) return;
         loadedArticleId = ArticleId;
-        sizes = await StationApi.GetMissingSizesAsync(ArticleId);
+        sizes = await StationApi.GetMissingSizesAsync(ArticleId, ResourceId);
+        // qty NULL = daftar saja, tanpa alokasi.
+        missingList = await StationApi.GetMissingBundlesAsync(null, null, ResourceId, ArticleId);
         selectedSizeId = sizes.Count == 1 ? sizes[0].ArticleSizeId : 0;
         if (selectedSizeId > 0) await ReloadCandidates();
     }
@@ -191,7 +238,7 @@
         if (manual)
         {
             // Mulai dari hasil alokasi otomatis supaya operator cuma menggeser angkanya.
-            candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound);
+            candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound, ResourceId);
             manualQty = candidates.ToDictionary(c => c.BundleId, c => c.AllocQty);
         }
         else
@@ -208,7 +255,7 @@
             candidates = new();
             return;
         }
-        candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound);
+        candidates = await StationApi.GetMissingBundlesAsync(selectedSizeId, qtyFound, ResourceId);
     }
 
     private void SetManual(int bundleId, ChangeEventArgs e) =>

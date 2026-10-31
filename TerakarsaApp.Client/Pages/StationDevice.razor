@@ -6,6 +6,7 @@
 @using TerakarsaApp.Shared.Bundles
 @using TerakarsaApp.Shared.Divisions
 @using TerakarsaApp.Shared.Employees
+@using TerakarsaApp.Shared.ManualOutputs
 @using TerakarsaApp.Shared.Packs
 @using TerakarsaApp.Shared.Payroll
 @using TerakarsaApp.Shared.Projects
@@ -329,6 +330,19 @@ else
                     </button>
                 </div>
 
+                @* Prompt 82: filter cepat bundle anak yang menunggu dilengkapi partnya.
+                   Hanya muncul kalau memang ada -- station yang tidak pernah punya
+                   TidakLengkap tidak perlu melihat chip mati. *@
+                @if (IncompleteWipCount > 0)
+                {
+                    <div class="mb-3">
+                        <button class="btn btn-sm @(wipOnlyIncomplete ? "btn-warning" : "btn-outline-warning")"
+                                @onclick="() => wipOnlyIncomplete = !wipOnlyIncomplete">
+                            Tidak lengkap (@IncompleteWipCount)
+                        </button>
+                    </div>
+                }
+
                 @if (FilteredWipCards.Count == 0)
                 {
                     <p class="text-muted mb-0">Tidak ada pekerjaan yang cocok.</p>
@@ -461,15 +475,26 @@ else
                                             </div>
                                             <i class="fe @(wipExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
                                         </div>
-                                    @* Prompt 82: Hilang = Sigma missing_qty POSITIF semua induk artikel ini
-                                       (SEMUA station, bukan cuma station ini). > 0 merah & clickable ->
+                                    @* Prompt 82: Hilang = Sigma missing_qty POSITIF induk artikel ini yang
+                                       dinyatakan hilang oleh LINE SESI INI (bukan semua station -- lihat
+                                       atribusi di SIS_BundleSplit_MissingByArticle). Cakupannya seluruh
+                                       riwayat artikel, termasuk bundle yang sudah lama lewat dari sini,
+                                       dan berkurang sendiri saat "Barang ketemu" dicatat.
+                                       > 0 merah & clickable ->
                                        modal "Barang ketemu"; = 0 abu-abu dan tidak clickable.
                                        Lebih = Sigma missing_qty negatif (absolut), tampil hanya kalau > 0.
+                                       Tidak lengkap = Sigma qty bundle ber-status TidakLengkap artikel ini,
+                                       tampil hanya kalau > 0, abu-abu dan tidak clickable.
                                        Qty tetap = Sigma qty bundle NYATA di station ini. *@
                                     @{
                                         var missingQty = MissingQtyOf(first.ArticleId);
                                         var overQty = OverQtyOf(first.ArticleId);
-                                        var statCols = overQty > 0 ? "col-3" : "col-4";
+                                        var incompleteQty = IncompleteQtyOf(first.ArticleId);
+                                        var legacyMissingQty = LegacyMissingQtyOf(first.ArticleId);
+                                        // Bundle + Qty + Hilang selalu tampil; Lebih & Tidak lengkap menyusul
+                                        // kalau ada isinya -- lebar kolom dibagi rata atas jumlah yang tampil.
+                                        var statCount = 3 + (overQty > 0 ? 1 : 0) + (incompleteQty > 0 ? 1 : 0);
+                                        var statCols = statCount >= 5 ? "col" : statCount == 4 ? "col-3" : "col-4";
                                     }
                                         <div class="row g-2 text-center @(wipExpanded ? "mb-2" : "mb-0")">
                                             <div class="@statCols">
@@ -492,12 +517,31 @@ else
                                                 {
                                                     <div class="fw-bold text-muted">0</div>
                                                 }
+                                                @* Ad hoc (2026-10-31): hilang gaya lama (qty_lost sebelum tanggal
+                                                   migrasi). SENGAJA angka terpisah & tidak clickable -- "Barang
+                                                   ketemu" hanya bisa menutup saldo gaya baru (bundles.missing_qty),
+                                                   jadi kalau digabung operator akan mengklik angka yang sebagian
+                                                   tidak akan pernah bisa turun. *@
+                                                @if (legacyMissingQty != 0)
+                                                {
+                                                    <div class="text-muted" style="font-size: 0.6rem;"
+                                                         title="Hilang tercatat sebelum sistem bundle anak (tidak bisa ditutup lewat Barang ketemu)">
+                                                        lama @legacyMissingQty
+                                                    </div>
+                                                }
                                             </div>
                                             @if (overQty > 0)
                                             {
                                                 <div class="@statCols">
                                                     <div class="text-muted" style="font-size: 0.65rem;">Lebih</div>
                                                     <div class="fw-bold text-warning">@overQty</div>
+                                                </div>
+                                            }
+                                            @if (incompleteQty > 0)
+                                            {
+                                                <div class="@statCols">
+                                                    <div class="text-muted" style="font-size: 0.65rem;">Tidak lengkap</div>
+                                                    <div class="fw-bold text-muted">@incompleteQty</div>
                                                 </div>
                                             }
                                         </div>
@@ -510,7 +554,24 @@ else
                                                 @foreach (var b in bundles)
                                                 {
                                                     <tr>
-                                                        <td style="font-size: 0.7rem;">@BundleDisplay.Format(b.BundleLetter, b.BundleNo)</td>
+                                                        @* Prompt 82: bundle ANAK tampil '{induk}-{seq}' (K-49-1) + badge
+                                                           statusnya, alasan di baris kedua. Anak TidakLengkap menunggu
+                                                           part di station ini sampai dikirim ulang lewat Kirim Hasil. *@
+                                                        <td style="font-size: 0.7rem;">
+                                                            @BundleDisplay.Format(b.BundleLetter, b.RootBundleNo)@(b.SequenceNo > 0 ? $"-{b.SequenceNo}" : "")
+                                                            @if (b.BundleStatus == "TidakLengkap")
+                                                            {
+                                                                <span class="badge bg-warning text-dark d-block mt-1" style="font-size: 0.6rem;">Tidak lengkap</span>
+                                                            }
+                                                            else if (b.BundleStatus != "OK")
+                                                            {
+                                                                <span class="badge bg-danger d-block mt-1" style="font-size: 0.6rem;">@BundleRejectCategory.Label(b.RejectCategory ?? b.BundleStatus)</span>
+                                                            }
+                                                            @if (b.BundleStatus != "OK" && !string.IsNullOrEmpty(b.RejectReason))
+                                                            {
+                                                                <div class="text-muted" style="font-size: 0.6rem;">@b.RejectReason</div>
+                                                            }
+                                                        </td>
                                                         <td style="font-size: 0.7rem;">@(b.SizeName ?? "-")</td>
                                                         <td style="font-size: 0.7rem;">@b.Qty</td>
                                                         <td style="font-size: 0.7rem;">@(b.EmployeeName ?? "-")</td>
@@ -578,6 +639,13 @@ else
                         <button type="button" class="btn @(outLockMode == "unlock" ? "btn-warning" : "btn-outline-warning")"
                                 @onclick='() => SetOutLockMode("unlock")'>Unlock</button>
                     </div>
+                    @* Prompt 83: output manual -- output yang tidak lewat bundle. Tidak
+                       butuh artikel/PO, jadi tombolnya berdiri sendiri di luar kartu artikel. *@
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-2"
+                            disabled="@(currentOperatorId is null)"
+                            @onclick="() => OpenManualForm(null)">
+                        <i class="fe fe-plus"></i> Tambah Output Manual
+                    </button>
                 </div>
 
                 @* Prompt 56: chip merah tanggal yang masih punya baris belum lock -- tap untuk
@@ -609,12 +677,163 @@ else
                     <div class="alert alert-success py-2 mb-3">@outToast</div>
                 }
 
-                @if (outbound.Count == 0)
+                @* Prompt 83: kartu OUTPUT MANUAL -- di luar kartu artikel karena baris manual
+                   tidak harus punya artikel/PO. Baris di sini masuk checklist lock yang SAMA
+                   dengan baris log: satu kali tekan LOCK mengirim keduanya sebagai satu lock.
+                   TIDAK ADA kolom harga -- PIC tidak pernah melihat atau mengisi harga. *@
+                @if (manualOutputs.Count > 0)
+                {
+                    <div class="card mb-2">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start gap-2">
+                                @if (manualOutputs.Any(IsManualRowSelectable))
+                                {
+                                    <input class="form-check-input flex-shrink-0" type="checkbox"
+                                           style="position: static; margin: 0.25rem 0 0 0;"
+                                           checked="@manualOutputs.Where(IsManualRowSelectable).All(r => manualSelected.Contains(r.ManualOutputId))"
+                                           @onchange="ToggleManualAll" />
+                                }
+                                <div class="flex-grow-1" style="cursor: pointer;" @onclick="() => showManualOutputs = !showManualOutputs">
+                                    <div class="d-flex justify-content-between align-items-start mb-2" style="font-size: 0.85rem;">
+                                        <div>
+                                            <div class="fw-bold">
+                                                Output Manual
+                                                <span class="badge bg-info ms-1">Manual</span>
+                                            </div>
+                                            <div class="text-muted">Tanpa bundle &middot; tidak terikat PO</div>
+                                        </div>
+                                        <i class="fe @(showManualOutputs ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
+                                    </div>
+                                    <div class="row g-2 text-center @(showManualOutputs ? "mb-2" : "mb-0")">
+                                        <div class="col-3">
+                                            <div class="text-muted" style="font-size: 0.65rem;">Baris</div>
+                                            <div class="fw-bold">@manualOutputs.Count</div>
+                                        </div>
+                                        <div class="col-3">
+                                            <div class="text-muted" style="font-size: 0.65rem;">Qty</div>
+                                            <div class="fw-bold">@manualOutputs.Sum(r => r.Qty)</div>
+                                        </div>
+                                        <div class="col-3">
+                                            <div class="text-muted" style="font-size: 0.65rem;">Reject</div>
+                                            <div class="fw-bold @(manualOutputs.Sum(r => r.RejectQty) > 0 ? "text-danger" : "")">@manualOutputs.Sum(r => r.RejectQty)</div>
+                                        </div>
+                                        <div class="col-3">
+                                            <div class="text-muted" style="font-size: 0.65rem;">Lock</div>
+                                            @if (ManualUnlockedCount > 0)
+                                            {
+                                                <div class="fw-bold text-danger"><i class="bi bi-unlock"></i> @ManualUnlockedCount</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="fw-bold text-success"><i class="bi bi-lock-fill"></i></div>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (showManualOutputs)
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered border mb-0 align-middle" style="font-size: 0.75rem;">
+                                        <tbody>
+                                            @foreach (var m in manualOutputs)
+                                            {
+                                                <tr class="@(manualSelected.Contains(m.ManualOutputId) ? "table-primary" : "")"
+                                                    style="@(IsManualRowSelectable(m) ? "cursor: pointer;" : "")"
+                                                    @onclick="() => ToggleManualRow(m)">
+                                                    <td style="width: 2rem;">
+                                                        @if (IsManualRowSelectable(m))
+                                                        {
+                                                            @* position/margin inline: sama dengan sel centang baris log. *@
+                                                            <input class="form-check-input" type="checkbox"
+                                                                   style="position: static; margin: 0;"
+                                                                   checked="@manualSelected.Contains(m.ManualOutputId)" />
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        <div class="fw-bold">
+                                                            @m.WorkDescription
+                                                            @if (m.IsPotongan)
+                                                            {
+                                                                <span class="badge bg-danger ms-1">Potongan</span>
+                                                            }
+                                                        </div>
+                                                        <div class="text-muted">
+                                                            @if (!string.IsNullOrWhiteSpace(m.ArticleName))
+                                                            {
+                                                                <span>@m.ArticleName</span>
+                                                                @if (!string.IsNullOrWhiteSpace(m.NoPo))
+                                                                {
+                                                                    <span> &middot; @m.NoPo</span>
+                                                                }
+                                                            }
+                                                            else
+                                                            {
+                                                                <span>tanpa artikel</span>
+                                                            }
+                                                            @if (!string.IsNullOrWhiteSpace(m.SizeName))
+                                                            {
+                                                                <span> &middot; @m.SizeName</span>
+                                                            }
+                                                        </div>
+                                                        @if (!string.IsNullOrWhiteSpace(m.Note))
+                                                        {
+                                                            <div class="text-muted fst-italic">@m.Note</div>
+                                                        }
+                                                    </td>
+                                                    <td class="text-end" style="width: 4rem;">
+                                                        <div class="fw-bold @(m.Qty < 0 ? "text-danger" : "")">@m.Qty</div>
+                                                        @if (m.RejectQty > 0)
+                                                        {
+                                                            <div class="text-danger">R@m.RejectQty</div>
+                                                        }
+                                                    </td>
+                                                    <td class="text-end text-nowrap" style="width: 5.5rem;">
+                                                        @if (m.IsLocked)
+                                                        {
+                                                            @* Sudah lock: Edit & Hapus hilang, diganti gembok + kode
+                                                               periode -- pola sama dengan baris log. *@
+                                                            <span class="text-success" title="Sudah di-lock"><i class="bi bi-lock-fill"></i></span>
+                                                            @if (!string.IsNullOrEmpty(m.LockPeriodCode))
+                                                            {
+                                                                <span class="text-success" style="font-size: 0.6rem;">@m.LockPeriodCode</span>
+                                                            }
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="btn btn-sm btn-link p-0 me-2" title="Ubah"
+                                                                    @onclick:stopPropagation="true" @onclick="() => OpenManualForm(m)">
+                                                                <i class="fe fe-edit-2"></i>
+                                                            </button>
+                                                            <button class="btn btn-sm btn-link text-danger p-0" title="Hapus"
+                                                                    @onclick:stopPropagation="true" @onclick="() => AskDeleteManualOutput(m)">
+                                                                <i class="fe fe-trash-2"></i>
+                                                            </button>
+                                                        }
+                                                        <div class="text-muted" style="font-size: 0.6rem;">@FormatDateTime(m.CreatedAt)</div>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (outbound.Count == 0 && manualOutputs.Count == 0)
                 {
                     <p class="text-muted mb-0">Belum ada data yang dikirim pada tanggal ini.</p>
                 }
                 else
                 {
+                    @if (outbound.Count == 0)
+                    {
+                        <p class="text-muted">Belum ada data bundle/non-bundle yang dikirim pada tanggal ini.</p>
+                    }
+
                     @* Prompt 56: satu kartu per ARTIKEL, isinya baris bundle DAN non-bundle
                        (mis. Cutting) dengan pola tabel yang sama -- lihat OutCards. *@
                     @foreach (var card in OutCards)
@@ -659,6 +878,15 @@ else
                                             <div class="col-3">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Reject</div>
                                                 <div class="fw-bold @(rows.Sum(RejectTotal) > 0 ? "text-danger" : "")">@rows.Sum(RejectTotal)</div>
+                                                @* Ad hoc (2026-10-31): reject bundle-bundle ini yang dinyatakan
+                                                   station ini pada hari-hari SEBELUM tanggal yang dibuka -- angka
+                                                   besar di atas tetap murni milik tanggal ini. *@
+                                                @if (rows.Sum(r => r.PriorRejectQty) > 0)
+                                                {
+                                                    <div class="text-muted" style="font-size: 0.6rem;" title="Reject bundle yang sama pada hari-hari sebelumnya">
+                                                        sblm @rows.Sum(r => r.PriorRejectQty)
+                                                    </div>
+                                                }
                                             </div>
                                             <div class="col-3">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Lock</div>
@@ -775,7 +1003,16 @@ else
                                                             }
                                                             else if (b.IsBundling)
                                                             {
-                                                                <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Edit" disabled="@isBusy" @onclick="() => OpenEditBundleModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                @* Prompt 82: baris Bundling = serah Loading ke Line. Ini justru
+                                                                   kasus utama "Edit hasil": penjahit mengembalikan sebagian karena
+                                                                   part kurang, Loading menurunkan Qty OK dan menambah baris
+                                                                   TidakLengkap. Ikon gunting dipisah dari pensil "Edit Bundle"
+                                                                   (Prompt 24) yang mengubah line/penjahit/ukuran -- dua hal beda. *@
+                                                                <button class="btn btn-outline-warning btn-sm py-0 px-1"
+                                                                        title="@OutEditTooltip(b)"
+                                                                        disabled="@(isBusy || !b.CanEditSplit)"
+                                                                        @onclick="() => OpenOutEditModal(b)"><i class="fe fe-scissors"></i></button>
+                                                                <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Edit Bundle" disabled="@isBusy" @onclick="() => OpenEditBundleModal(b)"><i class="fe fe-edit-2"></i></button>
                                                                 <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Hapus" disabled="@isBusy" @onclick="() => OpenDeleteBundleModal(b)"><i class="fe fe-x"></i></button>
                                                             }
                                                             else
@@ -788,7 +1025,13 @@ else
                                                                    modal "Revisi Data" lama -- step itu tidak punya bundle untuk dipecah. *@
                                                                 @if (b.BundleId is not null)
                                                                 {
-                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Edit Kirim Hasil" disabled="@isBusy" @onclick="() => OpenOutEditModal(b)"><i class="fe fe-edit-2"></i></button>
+                                                                    @* Prompt 82: disabled kalau baris sudah di-lock ATAU station
+                                                                       berikutnya sudah menyentuh bundle ini -- tooltipnya menyebut
+                                                                       alasannya, bukan sekadar mati tanpa penjelasan. *@
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-1"
+                                                                            title="@OutEditTooltip(b)"
+                                                                            disabled="@(isBusy || !b.CanEditSplit)"
+                                                                            @onclick="() => OpenOutEditModal(b)"><i class="fe fe-edit-2"></i></button>
                                                                 }
                                                                 else
                                                                 {
@@ -813,6 +1056,41 @@ else
                                                         </div>
                                                     </td>
                                                 </tr>
+                                                @* Ad hoc (2026-10-31): bundle ANAK hasil pemecahan baris ini sebagai
+                                                   baris TURUNAN tepat di bawah induknya (K-49 -> K-49-1). Anak
+                                                   'Reject' sengaja tidak lagi tampil di WIP (lihat
+                                                   SIS_Station_InProgress) -- di sinilah ia terlihat, lengkap dengan
+                                                   tombol cetak ulang stikernya supaya tidak terpencar antar tab.
+                                                   Barisnya tidak bisa dicentang: yang di-lock tetap baris induk. *@
+                                                @foreach (var ch in b.SplitChildren)
+                                                {
+                                                    var chReject = ch.Status == "Reject";
+                                                    <tr style="background-color: var(--bs-tertiary-bg);">
+                                                        <td class="align-middle">
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <span class="flex-shrink-0" style="width: 1em;"></span>
+                                                                <div style="font-size: 0.65rem;">
+                                                                    <span class="text-muted">&#8627;</span>
+                                                                    @BundleDisplay.Format(ch.BundleLetter, ch.RootBundleNo)@(ch.SequenceNo > 0 ? $"-{ch.SequenceNo}" : "")
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td class="align-middle" style="font-size: 0.9rem;">@(ch.SizeName ?? "-")</td>
+                                                        <td class="align-middle @(chReject ? "text-danger" : "")" style="font-size: 0.9rem;">@ch.Qty</td>
+                                                        <td class="align-middle" style="font-size: 0.65rem;">
+                                                            <span class="badge @(chReject ? "bg-danger" : "bg-warning text-dark")" style="font-size: 0.6rem;">
+                                                                @BundleRejectCategory.Label(ch.RejectCategory ?? ch.Status)
+                                                            </span>
+                                                            @if (!string.IsNullOrWhiteSpace(ch.RejectReason))
+                                                            {
+                                                                <div class="text-muted">@ch.RejectReason</div>
+                                                            }
+                                                        </td>
+                                                        <td class="align-middle" @onclick:stopPropagation="true">
+                                                            <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Cetak Ulang" disabled="@isBusy" @onclick="() => OpenReprintBundleModal(ch.BundleId, ch.Serial)"><i class="fe fe-printer"></i></button>
+                                                        </td>
+                                                    </tr>
+                                                }
                                                 }
                                             }
                                         </tbody>
@@ -842,13 +1120,22 @@ else
                          style="position: sticky; bottom: 0; z-index: 5; border-top: 1px solid var(--bs-border-color); margin-left: -25px; margin-right: -25px; padding-bottom: env(safe-area-inset-bottom);">
                         <div class="d-flex align-items-center justify-content-between gap-2 py-2 @(outLockMode == "unlock" ? "bg-warning-transparent" : "")"
                              style="padding-left: 25px; padding-right: 25px;">
+                            @* Prompt 83: hitungan menggabungkan baris log + baris output manual
+                               (keduanya masuk satu lock). Mode Unlock tidak pernah memilih
+                               baris manual, jadi angkanya otomatis kembali ke baris log saja. *@
                             <div style="font-size: 0.8rem;">
-                                @OutSelectedRows.Count baris &middot; @OutSelectedRows.Sum(x => x.QtyOk) pcs &middot; reject @OutSelectedRows.Sum(RejectTotal)
+                                @(OutSelectedRows.Count + ManualSelectedRows.Count) baris
+                                &middot; @(OutSelectedRows.Sum(x => x.QtyOk) + ManualSelectedRows.Sum(m => m.Qty)) pcs
+                                &middot; reject @(OutSelectedRows.Sum(RejectTotal) + ManualSelectedRows.Sum(m => m.RejectQty))
+                                @if (ManualSelectedRows.Count > 0)
+                                {
+                                    <span class="badge bg-info ms-1">@ManualSelectedRows.Count manual</span>
+                                }
                             </div>
                             @if (outLockMode == "lock")
                             {
-                                <button class="btn btn-primary" disabled="@(isBusy || OutSelectedRows.Count == 0)" @onclick="OpenLockModal">
-                                    LOCK (@OutSelectedRows.Count)
+                                <button class="btn btn-primary" disabled="@(isBusy || LockSelectedCount == 0)" @onclick="OpenLockModal">
+                                    LOCK (@LockSelectedCount)
                                 </button>
                             }
                             else
@@ -1158,7 +1445,6 @@ else
     <KirimHasilModal BundleId="st.BundleId"
                      ArticleWorkflowId="st.NextArticleWorkflowId.Value"
                      ResourceId="currentOperatorId.Value"
-                     AllowTidakLengkap="AllowTidakLengkap"
                      OnSaved="OnKirimHasilSaved"
                      OnClose="CloseSerahkanModal" />
 }
@@ -1169,7 +1455,6 @@ else
     <KirimHasilModal BundleId="oet.BundleId.Value"
                      ArticleWorkflowId="oet.ArticleWorkflowId"
                      ResourceId="currentOperatorId.Value"
-                     AllowTidakLengkap="AllowTidakLengkap"
                      OnSaved="OnOutEditSaved"
                      OnClose="CloseOutEditModal" />
 }
@@ -1516,6 +1801,18 @@ else
                                         <td class="text-end">@g.Count()</td>
                                         <td class="text-end">@g.Sum(x => x.QtyOk)</td>
                                         <td class="text-end @(g.Sum(RejectTotal) > 0 ? "text-danger" : "")">@g.Sum(RejectTotal)</td>
+                                    </tr>
+                                }
+                                @* Prompt 83: baris output manual dirangkum jadi SATU baris --
+                                   tidak dikelompokkan per artikel karena sebagian besar belum
+                                   punya artikel. *@
+                                @if (ManualSelectedRows.Count > 0)
+                                {
+                                    <tr>
+                                        <td><span class="badge bg-info">Manual</span> Output manual</td>
+                                        <td class="text-end">@ManualSelectedRows.Count</td>
+                                        <td class="text-end">@ManualSelectedRows.Sum(m => m.Qty)</td>
+                                        <td class="text-end @(ManualSelectedRows.Sum(m => m.RejectQty) > 0 ? "text-danger" : "")">@ManualSelectedRows.Sum(m => m.RejectQty)</td>
                                     </tr>
                                 }
                             </tbody>
@@ -2011,6 +2308,103 @@ else
 
 <QrScannerModal Show="showQrScanner" OnScanned="HandleQrScanned" OnClose="() => showQrScanner = false" />
 
+@* Prompt 83: form OUTPUT MANUAL. Operator diambil dari sesi stasiun dan divisi dari token
+   perangkat (keduanya ditentukan server), jadi tidak ada field untuk keduanya di sini.
+   TIDAK ADA field harga -- itu disengaja. *@
+@if (showManualForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(manualForm.ManualOutputId is null ? "Tambah Output Manual" : "Ubah Output Manual")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseManualForm"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Deskripsi kerjaan <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" maxlength="300"
+                               placeholder="mis. kaos polos hitam pak Budi"
+                               @bind="manualForm.WorkDescription" @bind:event="oninput" />
+                    </div>
+
+                    @* Artikel OPSIONAL -- boleh ditempelkan admin belakangan lewat halaman
+                       Output Manual, termasuk setelah baris ini di-lock. SearchableSelect
+                       memfilter daftar yang sudah dimuat, jadi ada kotak cari di depannya. *@
+                    <div class="mb-3">
+                        <label class="form-label">Artikel <span class="text-muted">(opsional)</span></label>
+                        <input type="text" class="form-control mb-2" placeholder="Cari artikel atau style..."
+                               value="@manualArticleKeyword" @onchange="HandleManualArticleKeywordChanged" />
+                        <SearchableSelect TItem="ArticleSearchDto" Items="manualArticleOptions"
+                                          Value="@(manualForm.ArticleId ?? 0)"
+                                          ValueChanged="@(id => manualForm.ArticleId = id > 0 ? id : null)"
+                                          IdSelector="@(a => a.Id)" TextSelector="@(a => a.ArticleName)"
+                                          AllowNone="true" NoneLabel="Tanpa artikel"
+                                          Placeholder="@(manualArticleOptions.Count == 0 ? "Cari artikel dulu..." : "Pilih artikel...")" />
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-4">
+                            <label class="form-label">Size</label>
+                            <input type="text" class="form-control" maxlength="50" @bind="manualForm.SizeName" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Qty <span class="text-danger">*</span></label>
+                            @* Boleh 0 atau MINUS -- minus = catatan potongan. *@
+                            <input type="number" class="form-control" @bind="manualForm.Qty" @bind:event="oninput" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Reject</label>
+                            <input type="number" min="0" class="form-control" @bind="manualForm.RejectQty" />
+                        </div>
+                    </div>
+
+                    @if (manualForm.Qty < 0)
+                    {
+                        <div class="alert alert-warning py-2">
+                            <i class="fe fe-alert-triangle"></i>
+                            Qty minus = <strong>catatan potongan</strong>. Tulis kronologi dan usulan
+                            potongan di catatan &mdash; nominalnya ditentukan admin produksi.
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">
+                            Catatan
+                            @if (manualForm.Qty < 0)
+                            {
+                                <span class="text-danger">*</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">(opsional)</span>
+                            }
+                        </label>
+                        <textarea class="form-control" rows="3" maxlength="500" @bind="manualForm.Note" @bind:event="oninput"></textarea>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(manualFormError))
+                    {
+                        <div class="alert alert-danger mb-0">@manualFormError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseManualForm">Batal</button>
+                    <button type="button" class="btn btn-primary" disabled="@isBusy" @onclick="SaveManualOutput">
+                        @(isBusy ? "Menyimpan..." : "Simpan")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="manualPendingDelete is not null" IsBusy="isBusy"
+                    Title="Hapus Output Manual"
+                    OnConfirm="ConfirmDeleteManualOutput" OnCancel="() => manualPendingDelete = null">
+    <Message>Hapus output manual <strong>@manualPendingDelete?.WorkDescription</strong> (qty @manualPendingDelete?.Qty)?</Message>
+</ConfirmDeleteModal>
+
 <ConfirmDeleteModal Show="showLogoutConfirm" IsBusy="isLoggingOut" Title="Keluar dari Perangkat"
                      ConfirmText="Ya, Keluar" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
                      OnConfirm="ConfirmLogout" OnCancel="() => showLogoutConfirm = false">
@@ -2065,6 +2459,19 @@ else
     // workflow_log_id yang sedang dicentang. Dikosongkan saat mode/tanggal diganti, pindah
     // tab, dan setelah lock/ajukan berhasil.
     private HashSet<int> outSelected = new();
+
+    // ---- Prompt 83: output manual (tab OUT) ----
+    // TIDAK ADA field harga di sini dan tidak boleh ada -- harga melekat ke lock item dan
+    // hanya admin produksi yang mengisinya (module PAYROLL_REKAP).
+    private List<ManualOutputRowDto> manualOutputs = new();
+    private HashSet<int> manualSelected = new();
+    private bool showManualOutputs = true;
+    private bool showManualForm = false;
+    private ManualOutputSaveRequest manualForm = new();
+    private string manualFormError = string.Empty;
+    private string manualArticleKeyword = string.Empty;
+    private List<ArticleSearchDto> manualArticleOptions = new();
+    private ManualOutputRowDto? manualPendingDelete;
     // Tanggal kirim yang masih punya baris belum lock (chip merah di atas daftar).
     private List<StationUnlockedDateDto> outUnlockedDates = new();
     private string outToast = string.Empty;
@@ -2096,13 +2503,6 @@ else
     // Edit Kirim Hasil dari tab OUT (baris ber-bundle).
     private bool showOutEditModal = false;
     private StationPendingHandoverDto? outEditTarget;
-
-    // Kategori TidakLengkap hanya ditawarkan di station Loading/Bundling (part kurang
-    // berasal dari sana) -- lihat BundleRejectCategory.ForStation.
-    private bool AllowTidakLengkap =>
-        station is not null
-        && (station.DivisionName.Contains("loading", StringComparison.OrdinalIgnoreCase)
-            || station.DivisionName.Contains("bundling", StringComparison.OrdinalIgnoreCase));
 
     private bool showNonBundleModal = false;
     private StationActiveWorkDto? nonBundleTarget;
@@ -2271,7 +2671,170 @@ else
     private void ClearOutSelection()
     {
         outSelected.Clear();
+        manualSelected.Clear();
         outToast = string.Empty;
+    }
+
+    // ---- Prompt 83: output manual di tab OUT ---------------------------------------------
+    // Baris manual ikut checklist lock yang SAMA dengan baris log -- satu kali tekan LOCK
+    // mengirim keduanya dalam satu lock. TIDAK ADA harga di sisi stasiun.
+    //
+    // Mode Unlock sengaja TIDAK bisa memilih baris manual: unlock_request_items hanya
+    // mengenal workflow_log_id (lihat catatan di sp_ManualOutput_Manage.sql), jadi baris
+    // manual yang sudah lock belum punya jalur unlock -- di luar cakupan Prompt 83.
+    private bool IsManualRowSelectable(ManualOutputRowDto row) =>
+        outLockMode == "lock" && !row.IsLocked;
+
+    private List<ManualOutputRowDto> ManualSelectedRows =>
+        manualOutputs.Where(r => manualSelected.Contains(r.ManualOutputId)).ToList();
+
+    private int ManualUnlockedCount => manualOutputs.Count(r => !r.IsLocked);
+
+    // Jumlah baris yang akan masuk SATU lock: baris log + baris output manual.
+    private int LockSelectedCount => OutSelectedRows.Count + ManualSelectedRows.Count;
+
+    private void ToggleManualRow(ManualOutputRowDto row)
+    {
+        if (!IsManualRowSelectable(row)) return;
+        if (!manualSelected.Add(row.ManualOutputId)) manualSelected.Remove(row.ManualOutputId);
+    }
+
+    private void ToggleManualAll()
+    {
+        var selectable = manualOutputs.Where(IsManualRowSelectable).ToList();
+        if (selectable.Count == 0) return;
+
+        if (selectable.All(r => manualSelected.Contains(r.ManualOutputId)))
+            foreach (var r in selectable) manualSelected.Remove(r.ManualOutputId);
+        else
+            foreach (var r in selectable) manualSelected.Add(r.ManualOutputId);
+    }
+
+    private async Task RefreshManualOutputs()
+    {
+        manualOutputs = await StationApi.GetManualOutputsAsync();
+        manualSelected.RemoveWhere(id =>
+            !manualOutputs.Any(r => r.ManualOutputId == id && IsManualRowSelectable(r)));
+        StateHasChanged();
+    }
+
+    private void OpenManualForm(ManualOutputRowDto? row)
+    {
+        manualFormError = string.Empty;
+        manualArticleKeyword = string.Empty;
+        manualArticleOptions = new();
+
+        if (row is null)
+        {
+            manualForm = new ManualOutputSaveRequest();
+        }
+        else
+        {
+            manualForm = new ManualOutputSaveRequest
+            {
+                ManualOutputId = row.ManualOutputId,
+                ArticleId = row.ArticleId,
+                WorkDescription = row.WorkDescription,
+                SizeName = row.SizeName,
+                Qty = row.Qty,
+                RejectQty = row.RejectQty,
+                Note = row.Note
+            };
+
+            // Artikel yang sudah terpasang dimasukkan sebagai satu-satunya pilihan awal,
+            // supaya labelnya tampil tanpa harus mencari ulang.
+            if (row.ArticleId is int articleId && !string.IsNullOrWhiteSpace(row.ArticleName))
+            {
+                manualArticleOptions = new()
+                {
+                    new ArticleSearchDto { Id = articleId, ArticleName = row.ArticleName, ProjectName = row.NoPo ?? string.Empty }
+                };
+            }
+        }
+
+        showManualForm = true;
+    }
+
+    private void CloseManualForm()
+    {
+        showManualForm = false;
+        manualFormError = string.Empty;
+    }
+
+    private async Task HandleManualArticleKeywordChanged(ChangeEventArgs e)
+    {
+        manualArticleKeyword = e.Value?.ToString() ?? string.Empty;
+        manualArticleOptions = string.IsNullOrWhiteSpace(manualArticleKeyword)
+            ? new()
+            : await StationApi.SearchManualOutputArticlesAsync(manualArticleKeyword.Trim());
+    }
+
+    private async Task SaveManualOutput()
+    {
+        if (currentOperatorId is null)
+        {
+            manualFormError = "Operator wajib dipilih.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(manualForm.WorkDescription))
+        {
+            manualFormError = "Deskripsi kerjaan wajib diisi.";
+            return;
+        }
+
+        // Dicek juga di SP (single source of truth) -- di sini supaya pesannya tidak perlu
+        // bolak-balik ke server.
+        if (manualForm.Qty < 0 && string.IsNullOrWhiteSpace(manualForm.Note))
+        {
+            manualFormError = "Qty minus adalah catatan potongan -- catatan wajib diisi.";
+            return;
+        }
+
+        isBusy = true;
+        manualFormError = string.Empty;
+
+        var (success, error) = await StationApi.SaveManualOutputAsync(manualForm, currentOperatorId);
+
+        isBusy = false;
+
+        if (!success)
+        {
+            manualFormError = StripLockedPrefix(error);
+            return;
+        }
+
+        showManualForm = false;
+        outToast = manualForm.ManualOutputId is null ? "Output manual disimpan" : "Output manual diubah";
+        await RefreshManualOutputs();
+    }
+
+    private void AskDeleteManualOutput(ManualOutputRowDto row)
+    {
+        manualPendingDelete = row;
+    }
+
+    private async Task ConfirmDeleteManualOutput()
+    {
+        if (manualPendingDelete is null || currentOperatorId is null) return;
+
+        isBusy = true;
+        var (success, error) = await StationApi.DeleteManualOutputAsync(
+            manualPendingDelete.ManualOutputId, currentOperatorId);
+        isBusy = false;
+
+        if (!success)
+        {
+            outToast = string.Empty;
+            manualFormError = StripLockedPrefix(error);
+        }
+        else
+        {
+            outToast = "Output manual dihapus";
+        }
+
+        manualPendingDelete = null;
+        await RefreshManualOutputs();
     }
 
     private void ToggleOutRow(StationPendingHandoverDto row)
@@ -2634,13 +3197,19 @@ else
 
         await LoadOutboundDatePeriodAsync();
         await RefreshMissing();
+        // Prompt 83: baris output manual divisi ini. TIDAK ikut filter outboundDate -- baris
+        // manual yang belum lock harus selalu terlihat sampai dibereskan (sama alasannya
+        // dengan chip "Belum lock").
+        await RefreshManualOutputs();
     }
 
     // Prompt 82: angka Hilang / Lebih kartu artikel. Diambil sekali untuk semua artikel yang
     // punya selisih terbuka (bukan per kartu) -- satu round-trip, kartu tinggal melihat dict.
+    // Disaring ke line sesi ini (currentOperatorId): yang tampil hanya selisih yang line ini
+    // sendiri nyatakan hilang, bukan gabungan semua station.
     private async Task RefreshMissing()
     {
-        var rows = await StationApi.GetMissingAsync();
+        var rows = await StationApi.GetMissingAsync(resourceId: currentOperatorId);
         missingByArticle = rows.ToDictionary(r => r.ArticleId);
         StateHasChanged();
     }
@@ -2650,6 +3219,20 @@ else
 
     private int OverQtyOf(int articleId) =>
         missingByArticle.TryGetValue(articleId, out var m) ? m.OverQty : 0;
+
+    private int IncompleteQtyOf(int articleId) =>
+        missingByArticle.TryGetValue(articleId, out var m) ? m.IncompleteQty : 0;
+
+    // Ad hoc (2026-10-31): hilang gaya lama (qty_lost sebelum tanggal migrasi) -- angka
+    // beku, tidak bisa ditutup lewat "Barang ketemu", jadi dipisah dari MissingQty.
+    private int LegacyMissingQtyOf(int articleId) =>
+        missingByArticle.TryGetValue(articleId, out var m) ? m.LegacyMissingQty : 0;
+
+    private static string OutEditTooltip(StationPendingHandoverDto r) =>
+        r.CanEditSplit ? "Edit hasil"
+        : r.IsLocked ? "Sudah dikunci"
+        : !string.IsNullOrEmpty(r.BlockedByStepName) ? $"Sudah diproses {r.BlockedByStepName}"
+        : "Tidak bisa diedit";
 
     private void OpenOutEditModal(StationPendingHandoverDto item)
     {
@@ -2919,21 +3502,38 @@ else
 
     // Prompt 23: kartu bundle (inProgress) dan kartu non-bundle (activeWork) digabung dalam
     // satu daftar WIP, dikelompokkan per project supaya tetap terbaca saat jumlahnya banyak.
-    private IEnumerable<WipCard> AllWipCards =>
-        activeWork.Select(a => new WipCard
-            {
-                ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a,
-                Key = $"w{a.ArticleWorkflowId}"
-            })
-            .Concat(inProgress
+    // Prompt 82: filter cepat "Tidak lengkap" -- hanya bundle anak ber-status TidakLengkap
+    // (barang balik dari penjahit karena part kurang, menunggu dilengkapi di station ini).
+    // Kartu non-bundle ikut disembunyikan: tidak ada bundle di sana yang bisa cocok.
+    private bool wipOnlyIncomplete;
+
+    private IEnumerable<WipCard> AllWipCards
+    {
+        get
+        {
+            var bundleCards = inProgress
+                .Where(b => !wipOnlyIncomplete || b.BundleStatus == "TidakLengkap")
                 .GroupBy(b => b.ArticleId)
                 .Select(g => new WipCard
                 {
                     ProjectName = g.First().ProjectName,
                     NoPo = g.First().NoPo,
-                    BundleGroup = g.OrderBy(b => b.BundleNo).ToList(),
+                    BundleGroup = g.OrderBy(b => b.BundleNo).ThenBy(b => b.SequenceNo).ToList(),
                     Key = $"b{g.Key}"
-                }));
+                });
+
+            if (wipOnlyIncomplete) return bundleCards;
+
+            return activeWork.Select(a => new WipCard
+                {
+                    ProjectName = a.ProjectName, NoPo = a.NoPo, NonBundle = a,
+                    Key = $"w{a.ArticleWorkflowId}"
+                })
+                .Concat(bundleCards);
+        }
+    }
+
+    private int IncompleteWipCount => inProgress.Count(b => b.BundleStatus == "TidakLengkap");
 
     private static bool ContainsSearch(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
@@ -3165,8 +3765,17 @@ else
         public List<StationPendingHandoverDto> Items = new();
     }
 
+    // Ad hoc (2026-10-31): kolom qty_reject_* adalah model LAMA (pra-Prompt 82) dan selalu 0
+    // untuk kiriman baru -- reject sekarang hidup sebagai bundle ANAK. Keduanya dijumlah di
+    // sini supaya angka Reject kartu OUT benar untuk data lama maupun baru.
+    private static int RejectChildQty(StationPendingHandoverDto item) =>
+        item.SplitChildren.Where(c => c.Status == "Reject").Sum(c => c.Qty);
+
+    // SplitMissingQty ikut: kolom qty_lost lama pun selalu ikut di sini, jadi "hilang"
+    // memang bagian dari angka Reject kartu OUT -- bukan hal baru, cuma sumbernya pindah.
     private static int RejectTotal(StationPendingHandoverDto item) =>
-        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework + item.QtyLost;
+        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework + item.QtyLost
+        + RejectChildQty(item) + item.SplitMissingQty;
 
     private static List<string> RejectLines(StationPendingHandoverDto item)
     {
@@ -3176,6 +3785,22 @@ else
         if (item.QtyRejectSewing > 0) parts.Add($"Jahit : {item.QtyRejectSewing}");
         if (item.QtyRejectRework > 0) parts.Add($"Rework : {item.QtyRejectRework}");
         if (item.QtyLost > 0) parts.Add($"Hilang : {item.QtyLost}");
+        // Bundle anak reject baris ini, digabung per kategori -- detail per bundle ada di
+        // baris turunan tepat di bawahnya, di sini cukup angkanya.
+        foreach (var g in item.SplitChildren.Where(c => c.Status == "Reject")
+                              .GroupBy(c => c.RejectCategory ?? c.Status))
+        {
+            parts.Add($"{BundleRejectCategory.Label(g.Key).Replace("Reject ", "")} : {g.Sum(c => c.Qty)}");
+        }
+        // Barang yang tidak ketemu fisiknya pada kiriman ini. Tidak punya baris turunan
+        // (tidak lahir barcode), jadi keterangannya hanya di sini -- tepat di bawah
+        // kategori rejectnya. Negatif = koreksi saat edit, labelnya dibedakan supaya
+        // tidak terbaca sebagai kehilangan baru.
+        if (item.SplitMissingQty > 0) parts.Add($"Hilang : {item.SplitMissingQty}");
+        else if (item.SplitMissingQty < 0) parts.Add($"Koreksi hilang : {item.SplitMissingQty}");
+        // "di hari tersebut dan sebelumnya": reject bundle yang sama yang sudah dinyatakan
+        // station ini pada hari-hari sebelum baris ini.
+        if (item.PriorRejectQty > 0) parts.Add($"(sblm : {item.PriorRejectQty})");
         return parts;
     }
 
@@ -3527,19 +4152,29 @@ else
     private async Task OpenLockModal()
     {
         var selected = OutSelectedRows;
-        if (selected.Count == 0) return;
+        // Prompt 83: baris output manual ikut dihitung -- lock boleh berisi HANYA baris
+        // manual (mis. divisi yang output-nya memang tidak lewat bundle sama sekali).
+        var selectedManual = ManualSelectedRows;
+        if (selected.Count == 0 && selectedManual.Count == 0) return;
 
         lockError = string.Empty;
+
         // defaultAt = created_at TERBARU di antara baris terpilih (lihat SIS_PayrollPeriod_Options).
-        var defaultAt = selected.Max(r => r.CreatedAt);
+        // Kedua sumber digabung dulu supaya periode bawaan tetap benar kalau yang dipilih
+        // cuma baris manual (tanpa ini, Max() di list kosong akan melempar exception).
+        var createdAts = selected.Select(r => r.CreatedAt)
+            .Concat(selectedManual.Select(m => m.CreatedAt))
+            .ToList();
+        var defaultAt = createdAts.Max();
+
         lockPeriodOptions = await StationApi.GetPayrollPeriodsAsync(defaultAt);
         lockPeriodId = (lockPeriodOptions.FirstOrDefault(p => p.IsDefault) ?? lockPeriodOptions.LastOrDefault())?.PayrollPeriodId ?? 0;
 
         // Peringatan kalau baris terpilih jatuh di lebih dari satu periode: batasnya Sabtu
         // 10:00, jadi cukup dicek lewat periode mana yang memuat created_at masing-masing --
         // didekati dengan rentang periode yang sedang dimuat.
-        lockMultiPeriodWarning = lockPeriodOptions.Count > 0 && selected
-            .Select(r => lockPeriodOptions.FirstOrDefault(p => r.CreatedAt >= p.PeriodStart && r.CreatedAt < p.PeriodEnd)?.PayrollPeriodId ?? 0)
+        lockMultiPeriodWarning = lockPeriodOptions.Count > 0 && createdAts
+            .Select(at => lockPeriodOptions.FirstOrDefault(p => at >= p.PeriodStart && at < p.PeriodEnd)?.PayrollPeriodId ?? 0)
             .Distinct().Count() > 1;
 
         showLockModal = true;
@@ -3560,7 +4195,9 @@ else
         }
 
         var ids = OutSelectedRows.Select(r => r.WorkflowLogId).ToList();
-        if (ids.Count == 0 || lockPeriodId <= 0) return;
+        // Prompt 83: baris output manual ikut dalam SATU lock bersama baris log.
+        var manualIds = ManualSelectedRows.Select(m => m.ManualOutputId).ToList();
+        if ((ids.Count == 0 && manualIds.Count == 0) || lockPeriodId <= 0) return;
 
         isBusy = true;
         lockError = string.Empty;
@@ -3568,6 +4205,7 @@ else
         var (success, error) = await StationApi.LockOutRowsAsync(new StationLockRequest
         {
             WorkflowLogIds = ids,
+            ManualOutputIds = manualIds,
             PayrollPeriodId = lockPeriodId,
             ResourceId = currentOperatorId.Value
         });
@@ -3582,9 +4220,10 @@ else
         }
 
         var periodCode = lockPeriodOptions.FirstOrDefault(p => p.PayrollPeriodId == lockPeriodId)?.PeriodCode ?? "-";
+        var lockedTotal = ids.Count + manualIds.Count;
         showLockModal = false;
         ClearOutSelection();
-        outToast = $"{ids.Count} baris di-lock ke {periodCode}";
+        outToast = $"{lockedTotal} baris di-lock ke {periodCode}";
         await RefreshLists();
     }
 

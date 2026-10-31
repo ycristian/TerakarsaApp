@@ -4,6 +4,7 @@ using TerakarsaApp.API.Authorization;
 using TerakarsaApp.API.Services;
 using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Cutting;
+using TerakarsaApp.Shared.ManualOutputs;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
@@ -38,6 +39,9 @@ public class StationDeviceController : ControllerBase
     private readonly PositionService _positionService;
     // Prompt 80: Scan Stok Bundle -- pengambilan bundle hasil cutting oleh Bundling.
     private readonly CuttingService _cuttingService;
+    // Prompt 83: output manual di tab OUT (manual_outputs) + pencarian artikel untuk formnya.
+    private readonly ManualOutputService _manualOutputService;
+    private readonly ArticleService _articleService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
@@ -55,6 +59,8 @@ public class StationDeviceController : ControllerBase
         StationRekapProduksiService stationRekapService,
         PositionService positionService,
         CuttingService cuttingService,
+        ManualOutputService manualOutputService,
+        ArticleService articleService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
@@ -71,6 +77,8 @@ public class StationDeviceController : ControllerBase
         _stationRekapService = stationRekapService;
         _positionService = positionService;
         _cuttingService = cuttingService;
+        _manualOutputService = manualOutputService;
+        _articleService = articleService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -412,16 +420,69 @@ public class StationDeviceController : ControllerBase
         var resourceId = EffectiveResourceId(request.ResourceId);
         if (resourceId <= 0) return BadRequest("Operator wajib dipilih.");
 
-        if (request.WorkflowLogIds is null || request.WorkflowLogIds.Count == 0)
+        // Prompt 83: baris log DAN/ATAU baris output manual -- cukup salah satu berisi.
+        var logIds = request.WorkflowLogIds ?? new List<int>();
+        var manualIds = request.ManualOutputIds ?? new List<int>();
+
+        if (logIds.Count == 0 && manualIds.Count == 0)
             return BadRequest("Pilih minimal satu baris untuk di-lock.");
 
         if (request.PayrollPeriodId <= 0)
             return BadRequest("Periode gajian wajib dipilih.");
 
         var (success, error) = await _workflowLockService.LockAsync(
-            request.WorkflowLogIds, request.PayrollPeriodId,
+            logIds, manualIds, request.PayrollPeriodId,
             CurrentStation.DivisionId, CurrentStation.StationId, resourceId, _systemUserId);
 
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // ---- Prompt 83: output manual di tab OUT ----
+    // Divisi SELALU dari token perangkat; operator dari sesi stasiun; created_by = user
+    // sistem station_system. TIDAK ADA endpoint harga di sisi stasiun dan tidak boleh ada --
+    // PIC tidak pernah melihat atau mengisi harga (koreksi harga ada di module PAYROLL_REKAP).
+    [HttpGet("manual-outputs")]
+    public async Task<IActionResult> GetManualOutputs()
+    {
+        var result = await _manualOutputService.GetStationListAsync(CurrentStation.DivisionId);
+        return Ok(result);
+    }
+
+    // Pencarian artikel untuk SearchableSelect pada form output manual (artikel OPSIONAL --
+    // boleh ditempel admin belakangan lewat halaman Output Manual).
+    [HttpGet("manual-outputs/articles")]
+    public async Task<IActionResult> SearchManualOutputArticles([FromQuery] string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q)) return Ok(new List<object>());
+        var result = await _articleService.SearchAsync(q.Trim());
+        return Ok(result);
+    }
+
+    [HttpPost("manual-outputs")]
+    public async Task<IActionResult> SaveManualOutput(
+        [FromBody] ManualOutputSaveRequest request, [FromQuery] int? resourceId)
+    {
+        var operatorResourceId = EffectiveResourceId(resourceId ?? 0);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        if (request is null || string.IsNullOrWhiteSpace(request.WorkDescription))
+            return BadRequest("Deskripsi kerjaan wajib diisi.");
+
+        var (success, error) = await _manualOutputService.SaveAsync(
+            request, operatorResourceId, _systemUserId);
+
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    [HttpDelete("manual-outputs/{id:int}")]
+    public async Task<IActionResult> DeleteManualOutput(int id, [FromQuery] int? resourceId)
+    {
+        var operatorResourceId = EffectiveResourceId(resourceId ?? 0);
+        if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
+
+        var (success, error) = await _manualOutputService.DeleteAsync(id, operatorResourceId, _systemUserId);
         if (!success) return BadRequest(error);
         return Ok();
     }
@@ -607,27 +668,31 @@ public class StationDeviceController : ControllerBase
         return Ok(children);
     }
 
-    // Angka Hilang / Lebih di kartu artikel tab WIP (Sigma missing_qty semua induk artikel,
-    // SEMUA station -- bukan cuma station pemanggil).
+    // Angka Hilang / Lebih di kartu artikel tab WIP -- Sigma missing_qty induk artikel yang
+    // DINYATAKAN HILANG OLEH line pemanggil (resourceId), bukan gabungan semua station.
     [HttpGet("split/missing")]
-    public async Task<IActionResult> GetMissing([FromQuery] int? articleId)
+    public async Task<IActionResult> GetMissing([FromQuery] int? articleId, [FromQuery] int? resourceId)
     {
-        return Ok(await _bundleSplitService.GetMissingByArticleAsync(articleId));
+        return Ok(await _bundleSplitService.GetMissingByArticleAsync(articleId, EffectiveResourceId(resourceId)));
     }
 
-    // Modal "Barang ketemu": dropdown size (hanya yang punya selisih terbuka).
+    // Modal "Barang ketemu": dropdown size (hanya yang punya selisih terbuka milik line ini).
     [HttpGet("split/missing-sizes")]
-    public async Task<IActionResult> GetMissingSizes([FromQuery] int articleId)
+    public async Task<IActionResult> GetMissingSizes([FromQuery] int articleId, [FromQuery] int? resourceId)
     {
-        return Ok(await _bundleSplitService.GetMissingSizesAsync(articleId));
+        return Ok(await _bundleSplitService.GetMissingSizesAsync(articleId, EffectiveResourceId(resourceId)));
     }
 
     // Modal "Barang ketemu": blok "Akan dicatat ke" (alokasi LIFO otomatis untuk qty tsb,
     // atau seluruh kandidat tanpa alokasi kalau qty tidak dikirim -- tombol "Ubah").
+    // articleSizeId = kandidat alokasi satu size; articleId = daftar bundle ber-selisih
+    // terbuka artikel itu lintas size (daftar di bawah form Barang ketemu).
     [HttpGet("split/missing-bundles")]
-    public async Task<IActionResult> GetMissingBundles([FromQuery] int articleSizeId, [FromQuery] int? qty)
+    public async Task<IActionResult> GetMissingBundles([FromQuery] int? articleSizeId, [FromQuery] int? qty,
+                                                       [FromQuery] int? resourceId, [FromQuery] int? articleId)
     {
-        return Ok(await _bundleSplitService.GetMissingBundlesAsync(articleSizeId, qty));
+        if (articleSizeId is null && articleId is null) return BadRequest("articleSizeId atau articleId wajib diisi.");
+        return Ok(await _bundleSplitService.GetMissingBundlesAsync(articleSizeId, qty, EffectiveResourceId(resourceId), articleId));
     }
 
     [HttpPost("split/found")]
