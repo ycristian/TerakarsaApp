@@ -22,7 +22,9 @@
 --     4. Hanya induk OK yang pindah ke divisi tujuan. Anak Perbaikan dikembalikan ke
 --        step ber-bundle sebelumnya (mis. Sewing), anak Reject/TidakLengkap tetap di
 --        station ini.
---     5. Cetak ulang stiker induk + stiker tiap anak; needs_reprint = 1.
+--     5. Cetak stiker tiap anak; needs_reprint = 1. Stiker INDUK hanya dicetak ulang
+--        kalau qty induk berubah (ada anak lahir dan/atau ada Sisa hilang) -- kiriman
+--        yang OK full tidak mencetak apa pun.
 --
 --   EDIT memakai action yang SAMA: kalau step+bundle ini SUDAH punya baris Kirim hidup,
 --   @Masuk tidak diambil dari bundles.qty lagi tapi dari MIN(source_qty_before) split
@@ -103,9 +105,11 @@ BEGIN
             RETURN;
         END
 
-        DECLARE @DivisionId INT, @RequiresBundle BIT, @StepArticleId INT, @SortOrder INT, @IsBundling BIT;
+        DECLARE @DivisionId INT, @RequiresBundle BIT, @StepArticleId INT, @SortOrder INT, @IsBundling BIT,
+                @StepNameLabel VARCHAR(255);
         SELECT @DivisionId = division_id, @RequiresBundle = requires_bundle,
-               @StepArticleId = article_id, @SortOrder = sort_order, @IsBundling = is_bundling
+               @StepArticleId = article_id, @SortOrder = sort_order, @IsBundling = is_bundling,
+               @StepNameLabel = step_name
         FROM article_workflows
         WHERE article_workflow_id = @ArticleWorkflowId AND deleted_at IS NULL AND inactive_at IS NULL;
 
@@ -115,11 +119,15 @@ BEGIN
             RETURN;
         END
 
-        IF @RequiresBundle = 0 OR @IsBundling = 1
+        IF @RequiresBundle = 0
         BEGIN
-            RAISERROR('Kirim Hasil pemecahan hanya untuk step ber-bundle (bukan step Bundling).', 16, 1);
+            RAISERROR('Kirim Hasil pemecahan hanya untuk step ber-bundle.', 16, 1);
             RETURN;
         END
+        -- Step Bundling (is_bundling = 1) SENGAJA diizinkan: kasus utama "Edit Kirim Hasil
+        -- di tab OUT" justru di sana -- Loading sudah serah bundle ke Sew, lalu penjahit
+        -- mengembalikan sebagian karena part kurang, dan Loading mengedit serahnya sendiri
+        -- dengan menambah baris TidakLengkap.
 
         IF @StepArticleId <> @SrcArticleId
         BEGIN
@@ -163,7 +171,10 @@ BEGIN
           AND requires_bundle = 1 AND sort_order < @SortOrder
         ORDER BY sort_order DESC;
 
-        IF @PrevStepId IS NULL OR NOT EXISTS (
+        -- Step Bundling tidak punya step ber-bundle sebelumnya (@PrevStepId NULL) -- di sana
+        -- tidak ada "diterima dari siapa pun", jadi prasyarat ini dilewati. Kepemilikannya
+        -- sudah dijaga @ActingDivisionId = divisi step.
+        IF @PrevStepId IS NOT NULL AND NOT EXISTS (
             SELECT 1 FROM article_workflow_logs
             WHERE article_workflow_id = @PrevStepId AND bundle_id = @BundleId
               AND received_at IS NOT NULL AND target_division_id = @DivisionId AND deleted_at IS NULL
@@ -205,58 +216,82 @@ BEGIN
         ------------------------------------------------------------------
         -- 3. Jalur EDIT: sudah ada baris Kirim hidup di step ini?
         ------------------------------------------------------------------
-        DECLARE @IsEdit BIT = 0;
+        -- Baris HASIL pertama yang dibuat step ini untuk bundle ini. Ada = ini EDIT atas
+        -- pernyataan sendiri, bukan Kirim pertama.
+        DECLARE @FirstSendLogId INT, @FirstSendAt DATETIME2;
+        SELECT TOP 1 @FirstSendLogId = awl.workflow_log_id, @FirstSendAt = awl.created_at
+        FROM article_workflow_logs awl
+        WHERE awl.bundle_id = @BundleId AND awl.article_workflow_id = @ArticleWorkflowId
+          AND awl.deleted_at IS NULL AND awl.log_kind IN ('Kirim', 'Split', 'Dikembalikan')
+        ORDER BY awl.created_at ASC, awl.workflow_log_id ASC;
+
+        DECLARE @IsEdit BIT = CASE WHEN @FirstSendLogId IS NULL THEN 0 ELSE 1 END;
+
+        -- Serah yang SUDAH terjadi dari step ini (cakupannya lebih luas dari @IsEdit:
+        -- baris Bundling 'Creation' juga menyerahkan bundle ke Line). Dipakai mewarisi
+        -- status terima, lihat blok divisi tujuan di bawah.
+        DECLARE @HasPriorSend BIT = 0, @PriorReceivedAt DATETIME2,
+                @PriorReceivedBy INT, @PriorReceivedRemark VARCHAR(500);
+        SELECT TOP 1 @HasPriorSend = 1, @PriorReceivedAt = awl.received_at,
+                     @PriorReceivedBy = awl.received_by_resource_id,
+                     @PriorReceivedRemark = awl.received_remark
+        FROM article_workflow_logs awl
+        WHERE awl.bundle_id = @BundleId AND awl.article_workflow_id = @ArticleWorkflowId
+          AND awl.deleted_at IS NULL AND awl.target_division_id IS NOT NULL
+          AND awl.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
+        ORDER BY awl.created_at ASC, awl.workflow_log_id ASC;
+
+        -- Dua penjaga edit, dicek juga saat step ini BELUM punya baris serah: baris
+        -- Bundling (log_kind 'Creation') ikut bisa di-lock dan ikut beku kalau station
+        -- berikutnya sudah bergerak.
         IF EXISTS (
             SELECT 1 FROM article_workflow_logs
             WHERE article_workflow_id = @ArticleWorkflowId AND bundle_id = @BundleId
-              AND deleted_at IS NULL AND log_kind = 'Kirim'
+              AND deleted_at IS NULL AND lock_id IS NOT NULL
+              AND log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
         )
-            SET @IsEdit = 1;
-
-        IF @IsEdit = 1
         BEGIN
-            -- Baris sudah di-lock = beku di semua jalur (Prompt 55).
-            IF EXISTS (
-                SELECT 1 FROM article_workflow_logs
-                WHERE article_workflow_id = @ArticleWorkflowId AND bundle_id = @BundleId
-                  AND deleted_at IS NULL AND log_kind = 'Kirim' AND lock_id IS NOT NULL
-            )
-            BEGIN
-                RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
-                RETURN;
-            END
+            RAISERROR('LOCKED|Data sudah di-lock. Ajukan unlock untuk mengubah.', 16, 1);
+            RETURN;
+        END
 
-            -- Lock otomatis: station berikutnya sudah mencatat hasil bundle ini.
-            IF EXISTS (
-                SELECT 1
-                FROM article_workflow_logs awl
-                INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl.article_workflow_id
-                WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
-                  AND awl.log_kind IN ('Kirim', 'Creation')
-                  AND aw2.sort_order > @SortOrder
-            )
-            BEGIN
-                RAISERROR('Kiriman ini sudah diproses station berikutnya, tidak bisa diedit lagi.', 16, 1);
-                RETURN;
-            END
+        -- Lock otomatis: station berikutnya sudah menyentuh bundle ini.
+        DECLARE @BlockedByStepName VARCHAR(255);
+        SELECT TOP 1 @BlockedByStepName = aw2.step_name
+        FROM article_workflow_logs awl
+        INNER JOIN article_workflows aw2 ON aw2.article_workflow_id = awl.article_workflow_id
+        WHERE awl.bundle_id = @BundleId AND awl.deleted_at IS NULL
+          AND awl.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
+          AND aw2.sort_order > @SortOrder
+        ORDER BY aw2.sort_order ASC;
+
+        IF @IsEdit = 1 AND @BlockedByStepName IS NOT NULL
+        BEGIN
+            RAISERROR('Sudah diproses %s, hasil ini tidak bisa diubah lagi.', 16, 1, @BlockedByStepName);
+            RETURN;
         END
 
         ------------------------------------------------------------------
         -- 4. Masuk / anak yang sudah lahir / Sisa
         ------------------------------------------------------------------
-        -- @Masuk = qty bundle SEBELUM pemecahan pertama di step ini. Untuk Kirim Hasil
-        -- pertama itu sama dengan bundles.qty; untuk EDIT diambil dari split terdahulu
-        -- supaya invarian "OK + Sigma anak + hilang = Masuk" tetap utuh lintas edit.
-        DECLARE @Masuk INT = ISNULL((
-            SELECT MIN(s.source_qty_before)
-            FROM bundle_splits s
-            WHERE s.source_bundle_id = @BundleId AND s.kind = 'split'
-              AND EXISTS (
-                  SELECT 1 FROM article_workflow_logs l
-                  WHERE l.split_id = s.split_id AND l.bundle_id = @BundleId
-                    AND l.article_workflow_id = @ArticleWorkflowId AND l.deleted_at IS NULL
-              )
-        ), @SrcQty);
+        -- @Masuk = isi bundle sewaktu step ini MENERIMANYA. Kirim pertama -> bundles.qty
+        -- sekarang. EDIT -> qty_after baris TEPAT SEBELUM baris serah pertama step ini,
+        -- supaya invarian "OK + Sigma anak + hilang = Masuk" tetap utuh berapa kali pun
+        -- hasilnya diedit. Rumus ini WAJIB sama dengan SIS_BundleSplit_Info.
+        DECLARE @Masuk INT = @SrcQty;
+        IF @FirstSendLogId IS NOT NULL
+            SET @Masuk = ISNULL((
+                SELECT TOP 1 prev.qty_after
+                FROM article_workflow_logs prev
+                INNER JOIN article_workflows paw ON paw.article_workflow_id = prev.article_workflow_id
+                WHERE prev.bundle_id = @BundleId AND prev.deleted_at IS NULL
+                  AND prev.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
+                  AND (paw.sort_order < @SortOrder
+                       OR (paw.sort_order = @SortOrder
+                           AND (prev.created_at < @FirstSendAt
+                                OR (prev.created_at = @FirstSendAt AND prev.workflow_log_id < @FirstSendLogId))))
+                ORDER BY paw.sort_order DESC, prev.created_at DESC, prev.workflow_log_id DESC
+            ), @SrcQty);
 
         -- Anak yang SUDAH lahir dari pemecahan di step ini (tidak bisa diubah/dihapus).
         DECLARE @ExistingChildQty INT = ISNULL((
@@ -324,6 +359,15 @@ BEGIN
             RETURN;
         END
 
+        -- TidakLengkap = "part-nya kurang", hanya bisa dinyatakan station yang merakit
+        -- bundle (is_bundling = 1). Client sudah menyembunyikan pilihannya; ditegakkan
+        -- lagi di sini supaya tidak bisa dilewati lewat panggilan API langsung.
+        IF @IsBundling = 0 AND EXISTS (SELECT 1 FROM @Rows WHERE Category = 'TidakLengkap')
+        BEGIN
+            RAISERROR('Kategori Tidak Lengkap hanya untuk station Loading/Bundling.', 16, 1);
+            RETURN;
+        END
+
         DECLARE @NewRowQty INT = ISNULL((SELECT SUM(Qty) FROM @Rows), 0);
         DECLARE @Sisa INT = @Masuk - @QtyOk - @ExistingChildQty - @NewRowQty;
 
@@ -334,6 +378,17 @@ BEGIN
         END
 
         DECLARE @MissingDelta INT = @Sisa - @ExistingMissing;
+
+        -- Jenis baris log induk yang akan ditulis:
+        --   'Dikembalikan' -- ada baris TidakLengkap baru (barang balik dari penjahit
+        --                     karena part kurang); ini yang membedakan pengembalian dari
+        --                     koreksi angka biasa saat dibaca di timeline/laporan
+        --   'Split'        -- edit lain atas hasil yang sudah pernah dikirim
+        --   'Kirim'        -- pernyataan hasil yang pertama di step ini
+        DECLARE @NewLogKind VARCHAR(15) =
+            CASE WHEN EXISTS (SELECT 1 FROM @Rows WHERE Category = 'TidakLengkap') THEN 'Dikembalikan'
+                 WHEN @IsEdit = 1 THEN 'Split'
+                 ELSE 'Kirim' END;
 
         ------------------------------------------------------------------
         -- 5. Divisi tujuan + auto-terima (pola sama SIS_WorkflowLog_Manage CREATE)
@@ -353,7 +408,20 @@ BEGIN
         DECLARE @AutoReceivedAt DATETIME2 = NULL, @AutoReceivedByResourceId INT = NULL,
                 @AutoReceivedRemark VARCHAR(500) = NULL;
 
-        IF @TargetDivisionId IS NOT NULL AND ISNULL(@TargetAutoReceive, 0) = 1
+        -- Kalau step ini SUDAH pernah menyerahkan bundle ini (baris lama dengan tujuan
+        -- serah -- termasuk baris Bundling 'Creation' yang menyerahkan ke Line), baris
+        -- baru ini cuma KOREKSI, bukan serah kedua. Status terimanya diwarisi supaya
+        -- divisi tujuan TIDAK melihat "menunggu diterima" lagi untuk bundle yang sudah
+        -- lama ada di tangannya -- mereka cukup melihat qty-nya berubah, karena semua
+        -- tab memakai bundles.qty. Inilah yang membuat Sew & QC tidak perlu melakukan
+        -- apa pun setelah Loading mengedit hasilnya.
+        IF @HasPriorSend = 1
+        BEGIN
+            SET @AutoReceivedAt = @PriorReceivedAt;
+            SET @AutoReceivedByResourceId = @PriorReceivedBy;
+            SET @AutoReceivedRemark = @PriorReceivedRemark;
+        END
+        ELSE IF @TargetDivisionId IS NOT NULL AND ISNULL(@TargetAutoReceive, 0) = 1
         BEGIN
             SET @AutoReceivedAt = SYSDATETIME();
             SET @AutoReceivedRemark = 'Otomatis: auto-terima';
@@ -424,13 +492,23 @@ BEGIN
                 RETURN;
             END
 
-            -- (1) pernyataan pemecahan
+            -- (1) pernyataan pemecahan. source_qty_before = qty induk TEPAT SEBELUM
+            -- pernyataan ini (bukan @Masuk): tiap pernyataan merekam titik tolaknya
+            -- sendiri, jadi rantai edit bisa dibaca mundur satu per satu.
             INSERT INTO bundle_splits (source_bundle_id, source_qty_before, kind, division_id, resource_id, created_at, created_by)
-            VALUES (@BundleId, @Masuk, 'split', @DivisionId, @ResourceId, SYSDATETIME(), @UserId);
+            VALUES (@BundleId, @SrcQty, 'split', @DivisionId, @ResourceId, SYSDATETIME(), @UserId);
 
             DECLARE @SplitId INT = CAST(SCOPE_IDENTITY() AS INT);
 
-            -- (2) baris log Kirim induk + update induk
+            -- (2) baris log hasil induk + update induk.
+            -- qty_ok baris KOREKSI diisi DELTA-nya (bertanda), bukan OK baru. Baris Kirim
+            -- lama tidak diubah (aturan aditif), jadi step ini punya dua baris sekaligus;
+            -- kalau keduanya berisi "OK penuh" (57 lalu 55), SEMUA laporan yang
+            -- menjumlahkan qty_ok -- termasuk upah -- menghitungnya dobel jadi 112.
+            -- Dengan delta, SUM(qty_ok) per (bundle, step) tetap = OK terakhir: 57 + (-2) = 55.
+            -- Baris Kirim PERTAMA tetap berisi OK penuh seperti biasa.
+            DECLARE @RowQtyOk INT = CASE WHEN @IsEdit = 1 THEN @QtyOk - @SrcQty ELSE @QtyOk END;
+
             INSERT INTO article_workflow_logs (
                 article_workflow_id, bundle_id, article_size_id, division_id, resource_id,
                 qty_ok, log_type, qty_delta, qty_after, log_kind, split_id,
@@ -439,7 +517,7 @@ BEGIN
             )
             VALUES (
                 @ArticleWorkflowId, @BundleId, NULL, @DivisionId, @ResourceId,
-                @QtyOk, 'NORMAL', @QtyOk - @SrcQty, @QtyOk, 'Kirim', @SplitId,
+                @RowQtyOk, 'NORMAL', @QtyOk - @SrcQty, @QtyOk, @NewLogKind, @SplitId,
                 @TargetDivisionId, @AutoReceivedAt, @AutoReceivedByResourceId, @AutoReceivedRemark,
                 SYSDATETIME(), @UserId
             );
@@ -530,8 +608,23 @@ BEGIN
 
                 IF @ChildCreationStepId IS NULL
                 BEGIN
-                    -- Tidak ada step sebelum step tujuan (artikel tanpa Bundling) -- taruh
-                    -- baris Creation di step tujuan itu sendiri tanpa serah lanjutan.
+                    -- Step tujuan = step ber-bundle PERTAMA (Bundling/Loading), jadi tidak
+                    -- ada step ber-bundle sebelumnya. Pakai step NON-bundle terakhir (mis.
+                    -- Cutting) sebagai tempat baris Creation: frontier anak baru jatuh tepat
+                    -- di step Bundling kalau baris terakhirnya ada di sort_order yang lebih
+                    -- kecil (lihat definisi frontier di SIS_Station_InProgress). Tanpa ini
+                    -- anak TidakLengkap tidak pernah muncul di WIP Loading.
+                    SELECT TOP 1 @ChildCreationStepId = article_workflow_id, @ChildCreationDivisionId = division_id
+                    FROM article_workflows
+                    WHERE article_id = @SrcArticleId AND deleted_at IS NULL AND inactive_at IS NULL
+                      AND requires_bundle = 0 AND sort_order < @ChildTargetSort
+                    ORDER BY sort_order DESC;
+                END
+
+                IF @ChildCreationStepId IS NULL
+                BEGIN
+                    -- Benar-benar tidak ada step apa pun sebelum step tujuan -- taruh baris
+                    -- Creation di step tujuan itu sendiri tanpa serah lanjutan.
                     SET @ChildCreationStepId = @ChildTargetStepId;
                     SET @ChildCreationDivisionId = @ChildTargetDivisionId;
                     SET @ChildTargetDivisionId = NULL;
@@ -562,9 +655,15 @@ BEGIN
                 SET @RowNo += 1;
             END
 
-            -- (5) cetak ulang stiker induk + stiker tiap anak
-            IF @QtyOk > 0
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId;
+            -- (5) cetak ulang stiker induk (hanya kalau perlu) + stiker tiap anak.
+            -- Stiker induk HANYA dicetak ulang kalau qty induk benar-benar BERUBAH, yaitu
+            -- ada anak yang lahir dan/atau ada Sisa yang dicatat hilang -- cuma di situ
+            -- angka qty di stiker lama jadi basi. Kiriman yang OK full (tanpa baris masalah,
+            -- tanpa Sisa) tidak mencetak apa pun lagi: dulu syaratnya hanya @QtyOk > 0,
+            -- jadi SETIAP Kirim Hasil mengeluarkan satu stiker identik dengan yang sudah
+            -- menempel di bundle.
+            IF @QtyOk > 0 AND @QtyOk <> @SrcQty
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId;
 
             DECLARE @PrintChildId INT;
             DECLARE child_cur CURSOR LOCAL FAST_FORWARD FOR SELECT BundleId FROM @Children;
@@ -572,7 +671,7 @@ BEGIN
             FETCH NEXT FROM child_cur INTO @PrintChildId;
             WHILE @@FETCH_STATUS = 0
             BEGIN
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @PrintChildId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId;
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @PrintChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId;
                 FETCH NEXT FROM child_cur INTO @PrintChildId;
             END
             CLOSE child_cur;
@@ -641,8 +740,9 @@ BEGIN
             RETURN;
         END
 
-        DECLARE @FoundStepId INT, @FoundStepSort INT;
-        SELECT TOP 1 @FoundStepId = article_workflow_id, @FoundStepSort = sort_order
+        DECLARE @FoundStepId INT, @FoundStepSort INT, @FoundStepName VARCHAR(255);
+        SELECT TOP 1 @FoundStepId = article_workflow_id, @FoundStepSort = sort_order,
+                     @FoundStepName = step_name
         FROM article_workflows
         WHERE article_id = @FoundArticleId AND deleted_at IS NULL AND inactive_at IS NULL
           AND requires_bundle = 1 AND is_bundling = 0 AND division_id = @FoundDivisionId
@@ -667,6 +767,12 @@ BEGIN
         -- TERAKHIR desc ("yang paling baru hilang diisi lebih dulu").
         -- Qty boleh MELEBIHI total selisih -- kelebihan ditempel ke bundle LIFO terakhir
         -- (missing_qty jadi negatif = Lebih), tidak lahir anak terpisah.
+        --
+        -- Kandidat DIBATASI ke line pencatat (@ResourceId), atribusi sama persis dengan
+        -- SIS_BundleSplit_MissingByArticle (baris log 'Hilang' terakhir bundle itu, jatuh
+        -- ke bundles.resource_id kalau belum pernah ada). Tanpa batas ini barang yang
+        -- ketemu bisa menutup kehilangan line LAIN, sehingga angka Hilang di kartu line
+        -- yang mencatat tidak berkurang sama sekali -- persis yang tidak diinginkan.
         ------------------------------------------------------------------
         DECLARE @Alloc TABLE (RowNo INT IDENTITY(1,1), BundleId INT, Qty INT);
         DECLARE @IsSystemChoice BIT = 1;
@@ -695,6 +801,26 @@ BEGIN
                 RAISERROR('Bundle tujuan alokasi tidak valid untuk ukuran ini.', 16, 1);
                 RETURN;
             END
+
+            -- Alokasi manual pun tidak boleh menutup kehilangan line lain (daftar kandidat
+            -- di client sudah disaring, ini penegakan supaya tidak bisa dilewati lewat
+            -- panggilan API langsung). Induk yang belum punya selisih terbuka sama sekali
+            -- tetap boleh dipilih -- itu kasus "Lebih" yang sah.
+            IF @ResourceId IS NOT NULL AND EXISTS (
+                SELECT 1 FROM @Alloc al
+                INNER JOIN bundles b ON b.bundle_id = al.BundleId AND b.deleted_at IS NULL
+                OUTER APPLY (
+                    SELECT TOP 1 l.resource_id
+                    FROM article_workflow_logs l
+                    WHERE l.bundle_id = b.bundle_id AND l.deleted_at IS NULL AND l.log_kind = 'Hilang'
+                    ORDER BY l.created_at DESC, l.workflow_log_id DESC
+                ) lm
+                WHERE b.missing_qty > 0 AND ISNULL(lm.resource_id, b.resource_id) <> @ResourceId
+            )
+            BEGIN
+                RAISERROR('Bundle tujuan alokasi bukan kehilangan line ini.', 16, 1);
+                RETURN;
+            END
         END
         ELSE
         BEGIN
@@ -705,8 +831,15 @@ BEGIN
                            WHERE l.bundle_id = b.bundle_id AND l.deleted_at IS NULL AND l.log_kind = 'Hilang'
                        ), b.created_at) AS LastMissingAt
                 FROM bundles b
+                OUTER APPLY (
+                    SELECT TOP 1 l.resource_id
+                    FROM article_workflow_logs l
+                    WHERE l.bundle_id = b.bundle_id AND l.deleted_at IS NULL AND l.log_kind = 'Hilang'
+                    ORDER BY l.created_at DESC, l.workflow_log_id DESC
+                ) lm
                 WHERE b.deleted_at IS NULL AND b.sequence_no = 0
                   AND b.article_size_id = @ArticleSizeId AND b.missing_qty > 0
+                  AND (@ResourceId IS NULL OR ISNULL(lm.resource_id, b.resource_id) = @ResourceId)
             ),
             Ordered AS (
                 SELECT bundle_id, missing_qty,
@@ -733,11 +866,21 @@ BEGIN
                 IF @LastAllocRow IS NULL
                 BEGIN
                     -- Tidak ada selisih terbuka sama sekali: tempel ke induk TERBARU size ini.
+                    -- Induk milik line pencatat didahulukan supaya angka "Lebih" muncul di
+                    -- kartunya sendiri, bukan di kartu line lain; kalau line ini memang tidak
+                    -- punya induk di size itu, baru jatuh ke induk terbaru siapa pun.
                     DECLARE @FallbackBundleId INT;
                     SELECT TOP 1 @FallbackBundleId = bundle_id
                     FROM bundles
                     WHERE deleted_at IS NULL AND sequence_no = 0 AND article_size_id = @ArticleSizeId
+                      AND (@ResourceId IS NULL OR resource_id = @ResourceId)
                     ORDER BY created_at DESC, bundle_id DESC;
+
+                    IF @FallbackBundleId IS NULL
+                        SELECT TOP 1 @FallbackBundleId = bundle_id
+                        FROM bundles
+                        WHERE deleted_at IS NULL AND sequence_no = 0 AND article_size_id = @ArticleSizeId
+                        ORDER BY created_at DESC, bundle_id DESC;
 
                     IF @FallbackBundleId IS NULL
                     BEGIN
@@ -855,7 +998,7 @@ BEGIN
                 INSERT INTO @FoundChildren (BundleId, Serial, SequenceNo, Qty)
                 VALUES (@FChildId, @FChildSerial, @FNextSeq, @TgtQty);
 
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @FChildId, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId;
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @FChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @FoundStepName, @UserId = @UserId;
 
                 SET @ARow += 1;
             END
@@ -894,6 +1037,7 @@ CREATE OR ALTER PROCEDURE SIS_BundleSplit_PrintLabel
     @BundleId      INT,
     @PublicBaseUrl VARCHAR(255) = NULL,
     @Copies        INT = 1,
+    @StepName      VARCHAR(255) = NULL,
     @UserId        INT = NULL
 AS
 BEGIN
@@ -907,13 +1051,11 @@ BEGIN
 
     DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + @Serial;
 
-    -- Teks remark stiker: 'REJECT JAHIT - benang lepas' / 'OK'. Dipakai supaya status &
-    -- kategori terbaca tanpa mengubah template TSPL (field remark sudah dicetak).
-    DECLARE @LabelRemark VARCHAR(255) =
-        CASE WHEN @Status = 'OK' THEN 'OK'
-             ELSE UPPER(ISNULL(@Category, @Status))
-                  + CASE WHEN LTRIM(RTRIM(ISNULL(@RejectReason, ''))) = '' THEN '' ELSE ' - ' + @RejectReason END
-        END;
+    -- STATUS dan NOTE adalah dua baris TERPISAH di stiker (lihat TsplBuilder.BuildBundleLabel):
+    -- status/kategori dirender dari bundle_status + reject_category, sedangkan remark murni
+    -- berisi CATATANNYA saja (alasan). Jangan digabung ke satu teks -- stiker anak harus bisa
+    -- dibaca sekilas: statusnya besar, alasannya di bawah.
+    DECLARE @LabelRemark VARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@RejectReason, ''))), '');
 
     DECLARE @Payload NVARCHAR(MAX) = (
         SELECT
@@ -923,6 +1065,7 @@ BEGIN
             b.sequence_no AS sequence_no,
             b.[status] AS bundle_status,
             b.reject_category AS reject_category,
+            @StepName AS step_name,
             @QrContent AS qr_content,
             p.project_name AS project_name,
             p.no_po AS no_po,

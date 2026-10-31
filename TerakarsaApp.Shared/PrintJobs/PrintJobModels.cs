@@ -135,6 +135,11 @@ public class BundleLabelPayload
 
     [JsonPropertyName("reject_category")]
     public string? RejectCategory { get; set; }
+
+    // Step tempat stiker ini dicetak. Hanya dikirim jalur pemecahan
+    // (SIS_BundleSplit_PrintLabel); payload lama tidak punya ini -> barisnya dilewati.
+    [JsonPropertyName("step_name")]
+    public string? StepName { get; set; }
 }
 
 // Bentuk payload JSON print_jobs untuk job_type PACK_LABEL (lihat sql/sp_Pack_Manage.sql,

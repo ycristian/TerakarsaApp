@@ -382,7 +382,6 @@
     <KirimHasilModal BundleId="Info.Bundle.BundleId"
                      ArticleWorkflowId="editStepId"
                      ResourceId="@(ActiveResourceId ?? 0)"
-                     AllowTidakLengkap="AllowTidakLengkap"
                      ResourceOptions="ResourceOptions"
                      AllowResourceChange="AllowResourceChange"
                      ActiveResourceName="@ActiveResourceName"
@@ -428,7 +427,6 @@
     <KirimHasilModal BundleId="Info.Bundle.BundleId"
                      ArticleWorkflowId="completeStepId"
                      ResourceId="@(ActiveResourceId ?? 0)"
-                     AllowTidakLengkap="AllowTidakLengkap"
                      ReceiverPickerRequired="@(Info.Action.ReceiverPickerRequired == true)"
                      ResourceOptions="ResourceOptions"
                      AllowResourceChange="AllowResourceChange"
@@ -568,12 +566,6 @@
     // tetap kompilasi (tidak lagi dipakai untuk step ber-bundle).
     private bool showCompleteModal = false;
     private bool showEditModal = false;
-
-    // Kategori TidakLengkap hanya ditawarkan di station Loading/Bundling.
-    private bool AllowTidakLengkap =>
-        !string.IsNullOrEmpty(Info.Bundle.LastDivisionName)
-        && (Info.Bundle.LastDivisionName.Contains("loading", StringComparison.OrdinalIgnoreCase)
-            || Info.Bundle.LastDivisionName.Contains("bundling", StringComparison.OrdinalIgnoreCase));
 
     private void OpenCompleteModal() => showCompleteModal = true;
 

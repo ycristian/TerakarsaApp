@@ -1,0 +1,419 @@
+@page "/manual-outputs"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.ManualOutputs
+@using TerakarsaApp.Shared.Payroll
+@using TerakarsaApp.Shared.Projects
+@inject ManualOutputApiService ManualOutputApi
+@inject PayrollRekapApiService PayrollRekapApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Prompt 83: daftar semua output manual (module MANUAL_OUTPUT) + aksi massal "Hubungkan ke
+   Artikel". Artikel boleh ditempelkan belakangan, TERMASUK ke baris yang sudah lock --
+   menempelkan artikel tidak mengubah fakta qty.
+
+   Harga di halaman ini READ-ONLY (cuma untuk dilihat). Koreksinya di Rekap Gajian
+   (/payroll-rekap) supaya hak melihat daftar output tidak otomatis berarti hak mengubah
+   nominal upah.
+
+   Pencatatan/penghapusan baris TIDAK ada di sini -- itu tetap milik stasiun (tab OUT). *@
+
+<PageTitle>Output Manual</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Output Manual</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Output Manual</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Divisi</label>
+                    <SearchableSelect TItem="DivisionDto" Items="divisions" Value="divisionFilterId" ValueChanged="HandleDivisionChanged"
+                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                      AllowNone="true" NoneLabel="Semua divisi"
+                                      Placeholder="Semua divisi..." />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Periode gajian</label>
+                    <SearchableSelect TItem="PayrollRekapPeriodDto" Items="periods" Value="periodFilterId" ValueChanged="HandlePeriodChanged"
+                                      IdSelector="@(p => p.PayrollPeriodId)" TextSelector="@(p => p.PeriodCode)"
+                                      AllowNone="true" NoneLabel="Semua periode"
+                                      Placeholder="Semua periode..." />
+                    @* Baris yang BELUM lock tidak punya periode, jadi tidak pernah ikut
+                       kalau filter ini dipakai. *@
+                    <div class="form-text">Hanya baris yang sudah di-lock punya periode.</div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Cari</label>
+                    <input type="text" class="form-control" placeholder="Deskripsi / catatan / artikel"
+                           value="@searchText" @onchange="HandleSearchChanged" />
+                </div>
+                <div class="col-12 col-md-3 d-flex gap-2">
+                    <button class="btn btn-light w-100" @onclick="LoadAsync" disabled="@isLoading">
+                        <i class="fe fe-refresh-cw"></i> Muat ulang
+                    </button>
+                </div>
+            </div>
+
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" id="onlyUnlinked"
+                       checked="@onlyUnlinked" @onchange="HandleOnlyUnlinkedChanged" />
+                <label class="form-check-label" for="onlyUnlinked">
+                    Hanya yang belum terhubung artikel
+                </label>
+            </div>
+
+            @if (divisionFilterId > 0 || periodFilterId > 0 || onlyUnlinked || !string.IsNullOrWhiteSpace(searchText))
+            {
+                <button class="btn btn-link btn-sm px-0 mt-2" @onclick="ClearFilters">Hapus filter</button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success">@successMessage</div>
+    }
+
+    @* Bar aksi massal -- muncul hanya kalau ada baris terpilih. *@
+    @if (selectedIds.Count > 0)
+    {
+        <div class="card mb-3" style="border: 1px solid #d0d7de; border-radius: 6px;">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    @* SearchableSelect memfilter daftar yang SUDAH dimuat, sedangkan daftar
+                       artikel di app ini dicari di server (SIS_Article_Search, TOP 20).
+                       Karena itu ada kotak cari sendiri di depannya -- komponen bersama
+                       SearchableSelect sengaja TIDAK diubah. *@
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Cari artikel</label>
+                        <input type="text" class="form-control" placeholder="Nama artikel atau style..."
+                               value="@articleKeyword" @onchange="HandleArticleKeywordChanged" />
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">
+                            Hubungkan <strong>@selectedIds.Count baris</strong> ke
+                        </label>
+                        <SearchableSelect TItem="ArticleSearchDto" Items="articleOptions" Value="linkArticleId"
+                                          ValueChanged="HandleLinkArticleChanged"
+                                          IdSelector="@(a => a.Id)" TextSelector="@(a => ArticleLabel(a))"
+                                          AllowNone="true" NoneLabel="Pilih artikel..."
+                                          Placeholder="@(articleOptions.Count == 0 ? "Cari artikel dulu..." : "Pilih artikel...")" />
+                    </div>
+                    <div class="col-12 col-md-4 d-flex gap-2">
+                        <button class="btn btn-primary" disabled="@(isBusy || linkArticleId <= 0)" @onclick="LinkArticleAsync">
+                            <i class="fe fe-link"></i> Hubungkan ke Artikel
+                        </button>
+                        <button class="btn btn-light" disabled="@isBusy" @onclick="ClearSelection">Batal pilih</button>
+                    </div>
+                </div>
+                @if (selectedLockedCount > 0)
+                {
+                    <div class="alert alert-info mt-3 mb-0">
+                        <i class="fe fe-info"></i>
+                        @selectedLockedCount dari @selectedIds.Count baris terpilih sudah di-lock. Menempelkan
+                        artikel tetap boleh &mdash; qty-nya tidak berubah. Kalau harga baris itu masih kosong,
+                        harga akan ikut terisi dari tarif artikel; harga yang sudah diisi admin tidak ditimpa.
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <p>Memuat...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="alert alert-light">Tidak ada output manual yang cocok dengan filter.</div>
+    }
+    else
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width: 2.5rem;">
+                                <input type="checkbox" class="form-check-input"
+                                       checked="@allSelected" @onchange="ToggleSelectAll" />
+                            </th>
+                            <th>Tanggal</th>
+                            <th>Divisi</th>
+                            <th>Operator</th>
+                            <th>Deskripsi kerjaan</th>
+                            <th>Artikel</th>
+                            <th>Size</th>
+                            <th class="text-end">Qty</th>
+                            <th class="text-end">Reject</th>
+                            <th class="text-end">Harga</th>
+                            <th>Periode</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in items)
+                        {
+                            <tr class="@(selectedIds.Contains(row.ManualOutputId) ? "table-active" : "")">
+                                <td>
+                                    <input type="checkbox" class="form-check-input"
+                                           checked="@selectedIds.Contains(row.ManualOutputId)"
+                                           @onchange="@(e => ToggleRow(row.ManualOutputId, e))" />
+                                </td>
+                                <td class="text-nowrap">@row.CreatedAt.ToString("dd/MM/yy HH:mm")</td>
+                                <td>@row.DivisionName</td>
+                                <td>@row.ResourceName</td>
+                                <td>
+                                    @row.WorkDescription
+                                    @if (row.IsPotongan)
+                                    {
+                                        <span class="badge bg-danger ms-1">Potongan</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(row.Note))
+                                    {
+                                        <div class="text-muted" style="font-size: 0.75rem;">@row.Note</div>
+                                    }
+                                </td>
+                                <td>
+                                    @if (row.ArticleId is null)
+                                    {
+                                        <span class="badge bg-warning text-dark">Belum terhubung</span>
+                                    }
+                                    else
+                                    {
+                                        <div>@row.ArticleName</div>
+                                        @if (!string.IsNullOrWhiteSpace(row.NoPo))
+                                        {
+                                            <div class="text-muted" style="font-size: 0.75rem;">@row.NoPo</div>
+                                        }
+                                    }
+                                </td>
+                                <td>@row.SizeName</td>
+                                <td class="text-end @(row.Qty < 0 ? "text-danger fw-bold" : "")">@row.Qty</td>
+                                <td class="text-end">@(row.RejectQty == 0 ? "" : row.RejectQty.ToString())</td>
+                                <td class="text-end">
+                                    @if (!row.IsLocked)
+                                    {
+                                        <span class="text-muted">&mdash;</span>
+                                    }
+                                    else if (row.UnitPrice is null)
+                                    {
+                                        <span class="badge bg-warning text-dark">Kosong</span>
+                                    }
+                                    else
+                                    {
+                                        @row.UnitPrice.Value.ToString("N0")
+                                    }
+                                </td>
+                                <td class="text-nowrap">
+                                    @if (row.IsLocked)
+                                    {
+                                        <i class="bi bi-lock-fill text-success"></i>
+                                        <span>@row.PeriodCode</span>
+                                        @if (row.IsPeriodFinalized)
+                                        {
+                                            <span class="badge bg-secondary ms-1">Final</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-danger"><i class="bi bi-unlock"></i> belum lock</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="text-muted mt-2" style="font-size: 0.8rem;">@items.Count baris.</div>
+    }
+}
+
+@code {
+    private bool? hasAccess = null;
+    private bool isLoading = false;
+    private bool isBusy = false;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    private List<ManualOutputAdminRowDto> items = new();
+    private List<DivisionDto> divisions = new();
+    private List<PayrollRekapPeriodDto> periods = new();
+    private List<ArticleSearchDto> articleOptions = new();
+
+    private int divisionFilterId = 0;
+    private int periodFilterId = 0;
+    private bool onlyUnlinked = false;
+    private string searchText = string.Empty;
+
+    private readonly HashSet<int> selectedIds = new();
+    private int linkArticleId = 0;
+    private string articleKeyword = string.Empty;
+
+    private bool allSelected => items.Count > 0 && items.All(i => selectedIds.Contains(i.ManualOutputId));
+    private int selectedLockedCount => items.Count(i => selectedIds.Contains(i.ManualOutputId) && i.IsLocked);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "MANUAL_OUTPUT");
+
+        if (hasAccess == true)
+        {
+            divisions = await ManualOutputApi.GetDivisionsAsync();
+            // Pemilih periode memakai ulang endpoint Rekap Gajian -- daftar periode yang
+            // PUNYA isi lock. Kalau user tidak punya akses PAYROLL_REKAP, hasilnya kosong
+            // dan filter periode cuma jadi "Semua periode" (sengaja: tidak perlu endpoint
+            // periode kedua hanya untuk filter ini).
+            periods = await PayrollRekapApi.GetPeriodsAsync();
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        int? divisionId = divisionFilterId > 0 ? divisionFilterId : null;
+        int? periodId = periodFilterId > 0 ? periodFilterId : null;
+        var search = string.IsNullOrWhiteSpace(searchText) ? null : searchText.Trim();
+
+        items = await ManualOutputApi.GetListAsync(onlyUnlinked, divisionId, periodId, null, search);
+
+        // Buang pilihan yang sudah tidak ada di hasil -- supaya aksi massal tidak pernah
+        // mengenai baris yang tidak terlihat.
+        selectedIds.RemoveWhere(id => items.All(i => i.ManualOutputId != id));
+
+        isLoading = false;
+    }
+
+    private async Task HandleDivisionChanged(int id)
+    {
+        divisionFilterId = id;
+        await LoadAsync();
+    }
+
+    private async Task HandlePeriodChanged(int id)
+    {
+        periodFilterId = id;
+        await LoadAsync();
+    }
+
+    private async Task HandleSearchChanged(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task HandleOnlyUnlinkedChanged(ChangeEventArgs e)
+    {
+        onlyUnlinked = e.Value is bool b && b;
+        await LoadAsync();
+    }
+
+    private async Task ClearFilters()
+    {
+        divisionFilterId = 0;
+        periodFilterId = 0;
+        onlyUnlinked = false;
+        searchText = string.Empty;
+        await LoadAsync();
+    }
+
+    private void ToggleRow(int id, ChangeEventArgs e)
+    {
+        if (e.Value is bool on && on) selectedIds.Add(id);
+        else selectedIds.Remove(id);
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        if (e.Value is bool on && on)
+            foreach (var i in items) selectedIds.Add(i.ManualOutputId);
+        else
+            selectedIds.Clear();
+    }
+
+    private void ClearSelection()
+    {
+        selectedIds.Clear();
+        linkArticleId = 0;
+        articleKeyword = string.Empty;
+        articleOptions = new();
+    }
+
+    private async Task HandleArticleKeywordChanged(ChangeEventArgs e)
+    {
+        articleKeyword = e.Value?.ToString() ?? string.Empty;
+        linkArticleId = 0;
+        articleOptions = string.IsNullOrWhiteSpace(articleKeyword)
+            ? new()
+            : await ManualOutputApi.SearchArticlesAsync(articleKeyword.Trim());
+    }
+
+    private void HandleLinkArticleChanged(int id)
+    {
+        linkArticleId = id;
+    }
+
+    private async Task LinkArticleAsync()
+    {
+        if (linkArticleId <= 0 || selectedIds.Count == 0) return;
+
+        isBusy = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var (result, error) = await ManualOutputApi.LinkArticleAsync(selectedIds.ToList(), linkArticleId);
+
+        if (result is null)
+        {
+            errorMessage = error;
+        }
+        else
+        {
+            successMessage = result.PricedCount > 0
+                ? $"{result.LinkedCount} baris dihubungkan ke artikel; {result.PricedCount} di antaranya ikut terisi harganya dari tarif artikel."
+                : $"{result.LinkedCount} baris dihubungkan ke artikel.";
+
+            ClearSelection();
+            await LoadAsync();
+        }
+
+        isBusy = false;
+    }
+
+    private static string ArticleLabel(ArticleSearchDto a)
+    {
+        var detail = string.Join(" ", new[] { a.Style, a.Color }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"{a.ArticleName} ({a.ProjectName})"
+            : $"{a.ArticleName} - {detail} ({a.ProjectName})";
+    }
+}

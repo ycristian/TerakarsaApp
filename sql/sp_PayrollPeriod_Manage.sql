@@ -17,9 +17,22 @@
 -- @@DATEFIRST lewat pola @Dow yang sudah dipakai fn_EffectiveMinutes (1=Senin..7=Minggu,
 -- Sabtu = 6).
 --
--- FINALIZE/UNFINALIZE sengaja BELUM dibuat (UI finalisasi menyusul) -- kolom
--- finalized_at/finalized_by sudah ada dan sudah dibaca sebagai guard oleh
--- SIS_WorkflowLock_Manage & SIS_UnlockRequest_Manage.
+-- Prompt 83: FINALIZE/UNFINALIZE SEKARANG ADA (sebelumnya finalized_at/finalized_by cuma
+-- dibaca sebagai guard oleh SIS_WorkflowLock_Manage, SIS_UnlockRequest_Manage dan
+-- SIS_NonPoOutput_Manage, tanpa satu pun SP yang mengisinya).
+--
+-- DUA LAPIS PEMBEKUAN yang berbeda -- jangan dicampur:
+--   LOCK BARIS (Prompt 55/56) -- per BARIS, ditekan PIC di stasiun, mengisi
+--     article_workflow_logs.lock_id / manual_outputs.lock_id. Membekukan QTY.
+--   FINALISASI PERIODE (Prompt 83) -- per PERIODE, ditekan admin di Rekap Gajian,
+--     mengisi payroll_periods.finalized_at. Membekukan HARGA (workflow_lock_items
+--     .unit_price).
+--
+-- FINALIZE SENGAJA TIDAK ikut me-lock baris log yang belum di-lock PIC. Untuk menyapu
+-- baris begitu, SP harus memilihnya berdasarkan created_at -- bertentangan dengan aturan
+-- "periode gajian log = periode di workflow_locks, bukan dari created_at" dan masuk daftar
+-- "di luar cakupan" Prompt 83. Konsekuensi yang dikehendaki: baris yang belum di-lock saat
+-- finalisasi memang tidak ikut periode itu, dan nanti masuk periode yang dipilih PIC.
 
 SET ANSI_NULLS ON;
 GO
@@ -85,9 +98,11 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE SIS_PayrollPeriod_Manage
-    @Action VARCHAR(20),
-    @Year   INT = NULL,
-    @UserId INT = NULL
+    -- GENERATE_YEAR (Prompt 55) / FINALIZE / UNFINALIZE (Prompt 83)
+    @Action           VARCHAR(20),
+    @Year             INT = NULL,   -- GENERATE_YEAR
+    @PayrollPeriodId  INT = NULL,   -- FINALIZE / UNFINALIZE
+    @UserId           INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -142,6 +157,133 @@ BEGIN
 
         SELECT @@ROWCOUNT AS InsertedCount, @PeriodCount AS PeriodCount, @FirstSaturday AS FirstSaturday;
     END
+
+    -- =======================================================================
+    -- FINALIZE -- "gajian periode ini sudah dibayar". Setelah ini harga lock item
+    -- periode tersebut read-only (ditegakkan SIS_LockItem_UpdatePrice), lock baru ke
+    -- periode itu ditolak (SIS_WorkflowLock_Manage) dan unlock request atas barisnya
+    -- ditolak (SIS_UnlockRequest_Manage).
+    --
+    -- DITOLAK bila masih ada lock item aktif dengan unit_price IS NULL -- dan daftar
+    -- baris bermasalahnya DIKEMBALIKAN sebagai result set supaya admin tahu harus
+    -- memperbaiki apa (Bagian 3.5), bukan cuma pesan error.
+    -- =======================================================================
+    ELSE IF @Action = 'FINALIZE'
+    BEGIN
+        IF @UserId IS NULL
+        BEGIN
+            RAISERROR('User pencatat tidak dikenal.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @PeriodId INT = @PayrollPeriodId;
+
+        DECLARE @PeriodCode VARCHAR(10), @FinalizedAt DATETIME2;
+        SELECT @PeriodCode = period_code, @FinalizedAt = finalized_at
+        FROM payroll_periods
+        WHERE payroll_period_id = @PeriodId AND deleted_at IS NULL;
+
+        IF @PeriodCode IS NULL
+        BEGIN
+            RAISERROR('Periode gajian tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @FinalizedAt IS NOT NULL
+        BEGIN
+            RAISERROR('Periode gajian %s sudah final.', 16, 1, @PeriodCode);
+            RETURN;
+        END
+
+        DECLARE @MissingCount INT = (
+            SELECT COUNT(*)
+            FROM workflow_lock_items wli
+            INNER JOIN workflow_locks wl ON wl.lock_id = wli.lock_id AND wl.deleted_at IS NULL
+            WHERE wl.payroll_period_id = @PeriodId
+              AND wli.released_at IS NULL AND wli.deleted_at IS NULL
+              AND wli.unit_price IS NULL
+        );
+
+        IF @MissingCount > 0
+        BEGIN
+            -- Daftar baris bermasalah: id, source, resource, deskripsi/artikel, qty.
+            SELECT wli.lock_item_id AS LockItemId,
+                   wli.source       AS Source,
+                   res.resource_name AS ResourceName,
+                   CASE WHEN wli.source = 'MANUAL'
+                        THEN mo.work_description
+                        ELSE CAST(ISNULL(a.article_name, '?') + ' - ' + ISNULL(aw.step_name, '?') AS NVARCHAR(300))
+                   END AS Description,
+                   CASE WHEN wli.source = 'MANUAL'
+                        THEN wli.snap_qty_ok
+                        ELSE wli.snap_qty_ok + wli.snap_qty_reject_fabric END AS Qty
+            FROM workflow_lock_items wli
+            INNER JOIN workflow_locks wl ON wl.lock_id = wli.lock_id AND wl.deleted_at IS NULL
+            LEFT JOIN resources res ON res.resource_id = wli.snap_resource_id
+            LEFT JOIN article_workflow_logs awl ON awl.workflow_log_id = wli.workflow_log_id
+            LEFT JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
+            LEFT JOIN articles a ON a.article_id = aw.article_id
+            LEFT JOIN manual_outputs mo ON mo.manual_output_id = wli.manual_output_id
+            WHERE wl.payroll_period_id = @PeriodId
+              AND wli.released_at IS NULL AND wli.deleted_at IS NULL
+              AND wli.unit_price IS NULL
+            ORDER BY wli.source DESC, res.resource_name, wli.lock_item_id;
+
+            RAISERROR('HARGA_KOSONG|%d baris di periode %s belum punya harga. Isi dulu harganya sebelum finalisasi.', 16, 1, @MissingCount, @PeriodCode);
+            RETURN;
+        END
+
+        UPDATE payroll_periods
+        SET finalized_at = SYSDATETIME(),
+            finalized_by = @UserId,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
+        WHERE payroll_period_id = @PeriodId AND deleted_at IS NULL;
+
+        SELECT @PeriodId AS PayrollPeriodId, @PeriodCode AS PeriodCode;
+    END
+
+    -- =======================================================================
+    -- UNFINALIZE -- membuka periode yang salah difinalisasi. TIDAK menyentuh harga
+    -- maupun lock baris: hanya mengosongkan finalized_at/finalized_by sehingga kolom
+    -- harga bisa diedit lagi. Disediakan karena tanpa ini satu salah klik membuat
+    -- harga periode itu read-only permanen (hanya bisa dibuka lewat SQL manual).
+    -- =======================================================================
+    ELSE IF @Action = 'UNFINALIZE'
+    BEGIN
+        IF @UserId IS NULL
+        BEGIN
+            RAISERROR('User pencatat tidak dikenal.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @UnfPeriodCode VARCHAR(10), @UnfFinalizedAt DATETIME2;
+        SELECT @UnfPeriodCode = period_code, @UnfFinalizedAt = finalized_at
+        FROM payroll_periods
+        WHERE payroll_period_id = @PayrollPeriodId AND deleted_at IS NULL;
+
+        IF @UnfPeriodCode IS NULL
+        BEGIN
+            RAISERROR('Periode gajian tidak ditemukan.', 16, 1);
+            RETURN;
+        END
+
+        IF @UnfFinalizedAt IS NULL
+        BEGIN
+            RAISERROR('Periode gajian %s belum final.', 16, 1, @UnfPeriodCode);
+            RETURN;
+        END
+
+        UPDATE payroll_periods
+        SET finalized_at = NULL,
+            finalized_by = NULL,
+            updated_at = SYSDATETIME(),
+            updated_by = @UserId
+        WHERE payroll_period_id = @PayrollPeriodId AND deleted_at IS NULL;
+
+        SELECT @PayrollPeriodId AS PayrollPeriodId, @UnfPeriodCode AS PeriodCode;
+    END
+
     ELSE
     BEGIN
         RAISERROR('Action tidak valid.', 16, 1);

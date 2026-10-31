@@ -105,6 +105,10 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.ThreadReportApiService>(
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PrintAdminApiService>();
 // Prompt 78-80: module Cutting (stok bundle dari hamparan).
 builder.Services.AddScoped<TerakarsaApp.Client.Services.CuttingApiService>();
+// Prompt 83: module MANUAL_OUTPUT (daftar output manual + hubungkan artikel) dan
+// PAYROLL_REKAP (Rekap Gajian -- harga lock item + finalisasi periode).
+builder.Services.AddScoped<TerakarsaApp.Client.Services.ManualOutputApiService>();
+builder.Services.AddScoped<TerakarsaApp.Client.Services.PayrollRekapApiService>();
 // Module PDH TNI AD -- dipakai SEPERTI STASIUN, TANPA LOGIN: tiap service di
 // bawah ini memakai HttpClient sendiri yang menyisipkan header X-Tni-Token
 // (TniDeviceTokenHandler), BUKAN JWT. Petugas dikenali server dari perangkat.

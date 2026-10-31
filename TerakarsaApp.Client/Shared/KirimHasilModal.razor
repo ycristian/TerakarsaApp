@@ -26,7 +26,7 @@
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(h.IsEdit ? "Edit Kirim Hasil" : "Kirim Hasil")</h5>
+                    <h5 class="modal-title">@(h.IsEdit ? "Edit hasil" : "Kirim Hasil")</h5>
                     <button type="button" class="btn-close" @onclick="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -56,7 +56,7 @@
                             }
                             else
                             {
-                                <text>Kiriman ini sudah diproses station berikutnya, tidak bisa diedit lagi.</text>
+                                <text>Sudah diproses @(h.BlockedByStepName ?? "station berikutnya"), hasil ini tidak bisa diubah lagi.</text>
                             }
                         </div>
                     }
@@ -124,7 +124,9 @@
                             <div class="col-3">
                                 <select class="form-select form-select-sm" value="@row.Category"
                                         @onchange="e => row.Category = e.Value?.ToString() ?? string.Empty">
-                                    @foreach (var cat in BundleRejectCategory.ForStation(AllowTidakLengkap))
+                                    @* TidakLengkap hanya di step Bundling/Loading -- ditegakkan
+                                       lagi di SIS_BundleSplit_Manage, ini sekadar menyembunyikan. *@
+                                    @foreach (var cat in BundleRejectCategory.ForStation(h.IsBundlingStep))
                                     {
                                         <option value="@cat">@BundleRejectCategory.Label(cat)</option>
                                     }
@@ -184,7 +186,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="Close">Batal</button>
-                    <button class="btn btn-primary" disabled="@SubmitDisabled" @onclick="Submit">Kirim hasil</button>
+                    <button class="btn btn-primary" disabled="@SubmitDisabled" @onclick="Submit">@(h.IsEdit ? "Simpan perubahan" : "Kirim hasil")</button>
                 </div>
             </div>
         </div>
@@ -195,8 +197,6 @@
     [Parameter, EditorRequired] public int BundleId { get; set; }
     [Parameter, EditorRequired] public int ArticleWorkflowId { get; set; }
     [Parameter, EditorRequired] public int ResourceId { get; set; }
-    // TidakLengkap hanya ditawarkan di station Loading/Bundling (part kurang dari sana).
-    [Parameter] public bool AllowTidakLengkap { get; set; }
     // Prompt 40: step tujuan auto_receive = 1 DAN counterpart pengirim tidak valid.
     [Parameter] public bool ReceiverPickerRequired { get; set; }
     // Prompt 39/49: picker "Pelaksana" opsional -- pemanggil yang menyediakan daftarnya.
@@ -221,6 +221,7 @@
     private List<ResourceLookupDto> receiverOptions = new();
     private int receiverResourceId;
     private int selectedResourceId;
+    private int initialQtyOk;
     private int loadedBundleId;
     private int loadedStepId;
 
@@ -236,8 +237,12 @@
         selectedResourceId = ResourceId;
 
         info = await StationApi.GetSplitInfoAsync(BundleId, ArticleWorkflowId);
-        // Qty OK terisi penuh saat dibuka: sisa isi bundle yang belum dialokasikan ke anak.
-        qtyOk = info?.Header is { } h ? Math.Max(0, h.QtyMasuk - h.ExistingChildQty) : 0;
+        // Kirim pertama: terisi penuh (isi bundle yang belum dialokasikan ke anak).
+        // Mode EDIT: terisi qty induk SEKARANG, dan hanya boleh turun dari situ.
+        qtyOk = info?.Header is { } h
+            ? (h.IsEdit ? h.QtyNow : Math.Max(0, h.QtyMasuk - h.ExistingChildQty))
+            : 0;
+        initialQtyOk = qtyOk;
 
         receiverOptions = ReceiverPickerRequired
             ? await StationApi.GetReceiverOptionsAsync(ArticleWorkflowId, BundleId)
@@ -248,10 +253,14 @@
 
     private int Sisa => (info?.Header?.QtyMasuk ?? 0) - qtyOk - ExistingChildQty - rows.Sum(r => Math.Max(0, r.Qty));
 
+    // Mode EDIT: tidak ada yang berubah = tidak ada yang perlu disimpan.
+    private bool NothingChanged => (info?.Header?.IsEdit ?? false) && qtyOk == initialQtyOk && rows.Count == 0;
+
     private bool SubmitDisabled =>
         busy || info?.Header is null || !info.Header.CanSubmit || Sisa < 0
         || rows.Any(r => r.Qty <= 0 || string.IsNullOrWhiteSpace(r.Reason))
-        || (ReceiverPickerRequired && receiverResourceId <= 0);
+        || (ReceiverPickerRequired && receiverResourceId <= 0)
+        || NothingChanged;
 
     private void AddRow() => rows.Add(new RowModel());
 

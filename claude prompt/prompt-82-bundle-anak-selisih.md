@@ -86,21 +86,42 @@ Saat Kirim (satu transaksi):
 
 Bundle anak diperlakukan sama di semua station: bisa discan, dialirkan, dan di-Kirim Hasil lagi dengan modal yang sama. Anak yang semua pcs-nya jadi OK cukup ubah status, tidak lahir nomor baru.
 
-## Edit Kirim Hasil
-- Tombol Edit aktif selama baris workflow log Kirim Hasil ini `lock_id` null. Sudah lock = disabled
-- Modal sama, baris anak yang sudah lahir tampil read-only (kode, kategori, alasan, qty), tanpa tombol hapus
-- Qty OK hanya boleh turun. Selisih turunannya jadi baris masalah baru atau menambah hilang
-- Baris baru dapat kode anak berikutnya dari root
-- Saat simpan: `bundle_splits` baru kind=split, induk qty turun (log Kirim baru dengan delta negatif), anak baru lahir, missing_qty bertambah. Split dan log lama tidak disentuh
-- Status anak yang sudah tercatat tidak bisa diubah dari modal ini; hanya lewat Kirim Hasil di anak itu
-- Setelah edit, induk `needs_reprint = 1`
-- Lock otomatis: begitu station berikutnya membuat log Kirim di bundle ini, log station sebelumnya tidak bisa diedit lagi (cek: ada log bundle ini dengan sort_order lebih besar)
-- Kasus Loading: penjahit mengembalikan sebagian karena part kurang → Loading edit Kirim Hasil-nya, tambah baris TidakLengkap dengan alasan. Tidak ada aksi baru. Setelah edit, station berikutnya melihat Masuk = qty baru
+## Edit Kirim Hasil di tab OUT (pengembalian ke Loading)
+Ikon pensil di tab OUT membuka modal Kirim Hasil yang sama dalam mode edit, aturan aditif. Modal edit lama dihapus. Berlaku di semua station yang punya tab OUT.
+
+Kasus utama: Loading sudah serah K-49 57 ke Sew. Penjahit mengembalikan 2 pcs karena part kurang. Loading edit log serahnya sendiri: Qty OK 57 → 55, tambah baris TidakLengkap 2. Hasil: K-49 log `Dikembalikan` qty_delta −2, qty_after 55, bundles.qty 55; K-49-1 lahir status TidakLengkap qty 2, tetap di WIP Loading. Sew+QC tanpa input apa pun melihat K-49 = 55; saat QC Kirim Hasil, Masuk = 55, Sisa 0. Σ qty_delta root tetap 57. Penjahit dan QC tidak melakukan apa pun di sistem.
+
+Syarat tombol Edit aktif:
+- `lock_id` log Kirim ini null
+- Belum ada log aktif bundle ini di step dengan `sort_order` lebih besar
+Gagal salah satu: ikon disabled, tooltip "Sudah dikunci" / "Sudah diproses {nama step}".
+
+Modal mode edit:
+- Judul "Edit hasil". "Masuk N" = qty_after sebelum log Kirim ini
+- Qty OK terisi qty_after log Kirim ini; hanya boleh turun
+- Baris anak yang sudah lahir dari log ini (bundle_split_results lewat split_id log ini dan log edit sebelumnya di step yang sama) read-only: kode, kategori, alasan, qty, tanpa hapus
+- `+ Tambah baris`: kode anak = sequence_no berikutnya di root, tampil sebelum simpan
+- Kategori TidakLengkap hanya muncul kalau step ini `is_bundling = 1`
+- Sisa = Masuk − OK − Σ semua baris (lama + baru); aturan kotak kuning / disabled sama dengan modal Kirim
+- Divisi tujuan tidak bisa diubah. Tombol: Batal, Simpan perubahan (disabled kalau tidak ada perubahan)
+
+Saat Simpan (satu transaksi):
+1. `bundle_splits` baru kind=split, source_qty_before = qty_after terakhir induk
+2. Log baru di induk, step sama, log_kind `Dikembalikan` kalau ada baris TidakLengkap baru, selain itu `Split`; qty_delta = OK baru − OK lama, qty_after = OK baru, split_id, reason. Log Kirim lama TIDAK diubah
+3. bundles.qty induk = OK baru, needs_reprint = 1
+4. Tiap baris baru: bundle anak + log Creation + bundle_split_results, division = station ini
+5. Anak TidakLengkap masuk WIP station ini, tidak dikirim ke mana pun. Anak Perbaikan/Reject mengikuti aturan Kirim
+6. Sisa bertambah → missing_qty induk bertambah, log Hilang
+
+Anak TidakLengkap di WIP Loading: badge kuning "Tidak lengkap", alasan di baris kedua, filter cepat "Tidak lengkap". Keluarnya lewat Kirim Hasil biasa: Qty OK penuh → status OK, kirim ke Sew; atau Qty OK 0 + baris RejectBahan kalau part tidak bisa dibuat.
+
+Semua angka qty di tab IN/WIP/OUT dan kartu artikel memakai bundles.qty (= qty_after terakhir), bukan qty_ok log serah/terima. Setelah Loading edit, WIP Sew langsung menampilkan 55.
 
 ## Kartu artikel (semua station)
 Di bawah Bundle dan Qty, tambah:
 - **Hilang**: Σ `missing_qty` positif semua induk artikel ini, semua station. > 0 merah dan clickable → modal Barang ketemu; = 0 abu-abu, tidak clickable
 - **Lebih**: Σ `missing_qty` negatif (absolut). Tampil hanya kalau > 0
+- **Tidak lengkap**: Σ qty bundle status TidakLengkap artikel ini. Tampil hanya kalau > 0, abu-abu, tidak clickable
 - Qty tetap = Σ qty bundle nyata di station
 
 ## Modal Barang ketemu (dibuka dari angka Hilang)
@@ -152,6 +173,8 @@ Dua jalur selama PO lama masih jalan:
 
 ## Di luar scope
 - Konfirmasi per part saat serah bundle ke penjahit (prompt terpisah)
+- Permintaan part ke Cutting lewat sistem
+- Aksi "kembalikan bundle utuh"
 - Pencocokan otomatis Hilang dan Lebih antar bundle
 - Penghapusan kolom qty_reject_* / qty_lost
 - Melahirkan bundle anak dari reject lama (tidak akan dilakukan; reject lama tetap angka di log)

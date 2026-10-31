@@ -35,15 +35,20 @@ public class WorkflowLockService
             .ToListAsync();
     }
 
+    // Prompt 83: satu lock menampung DUA sumber baris -- article_workflow_logs dan
+    // manual_outputs. manualOutputIds boleh kosong (SP menolak kalau KEDUANYA kosong).
     public async Task<(bool Success, string Error)> LockAsync(
-        IEnumerable<int> workflowLogIds, int payrollPeriodId, int divisionId, int? stationId, int resourceId, int userId)
+        IEnumerable<int> workflowLogIds, IEnumerable<int> manualOutputIds, int payrollPeriodId,
+        int divisionId, int? stationId, int resourceId, int userId)
     {
         var csv = string.Join(",", workflowLogIds.Distinct());
+        var manualCsv = string.Join(",", manualOutputIds.Distinct());
 
         var parameters = new[]
         {
             new SqlParameter("@Action", "LOCK"),
             new SqlParameter("@WorkflowLogIds", csv),
+            new SqlParameter("@ManualOutputIds", manualCsv),
             new SqlParameter("@DivisionId", divisionId),
             new SqlParameter("@StationId", (object?)stationId ?? DBNull.Value),
             new SqlParameter("@ResourceId", resourceId),
@@ -55,6 +60,7 @@ public class WorkflowLockService
         {
             await _db.Database.ExecuteSqlRawAsync(
                 "EXEC SIS_WorkflowLock_Manage @Action = @Action, @WorkflowLogIds = @WorkflowLogIds, " +
+                "@ManualOutputIds = @ManualOutputIds, " +
                 "@DivisionId = @DivisionId, @StationId = @StationId, @ResourceId = @ResourceId, " +
                 "@PayrollPeriodId = @PayrollPeriodId, @UserId = @UserId",
                 parameters);

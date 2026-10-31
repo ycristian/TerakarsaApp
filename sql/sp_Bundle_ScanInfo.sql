@@ -327,7 +327,7 @@ BEGIN
                     FROM article_workflow_logs awl9
                     INNER JOIN article_workflows aw9 ON aw9.article_workflow_id = awl9.article_workflow_id
                     WHERE awl9.bundle_id = @BundleId AND awl9.deleted_at IS NULL
-                      AND awl9.log_kind IN ('Creation', 'Kirim')
+                      AND awl9.log_kind IN ('Creation', 'Kirim', 'Split', 'Dikembalikan')
                 ), -1);
 
                 DECLARE @CurStepId INT, @CurStepName VARCHAR(255), @CurSort INT, @CurDivisionId INT;

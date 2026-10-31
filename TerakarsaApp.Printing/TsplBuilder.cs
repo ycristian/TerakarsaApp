@@ -187,7 +187,10 @@ public static class TsplBuilder
         var serial = Sanitize(data.Serial);
         Write(Text(CenterAlignX(qrCenterX, "1", 1, serial), qrY + qrHeightDots + 4, "1", 1, 1, serial));
 
-        Write(Text(qrX, 20, "2", 1, 1, data.ProjectName?.ToUpperInvariant() ?? string.Empty));
+        // Nama project dipotong 25 karakter: lebih panjang dari itu teksnya merambat ke
+        // kanan dan menutup nomor bundle di pojok kanan atas (keluhan lapangan).
+        var projectText = TruncateToFit(Sanitize(data.ProjectName).ToUpperInvariant(), 25, "2", 1, 335);
+        Write(Text(qrX, 20, "2", 1, 1, projectText));
         Write(Text(qrX, 50, "1", 1, 1, "#"+data.NoPo?.ToUpperInvariant() ?? string.Empty));
         Write(Text(qrX, 70, "2", 1, 1, data.ArticleName?.ToUpperInvariant() ?? string.Empty));
 
@@ -205,6 +208,14 @@ public static class TsplBuilder
             + (data.SequenceNo > 0 ? $"-{data.SequenceNo}" : string.Empty);
         Write(Text(RightAlignX(RightEdge, "2", 1, bundleNoText), 26, "2", 1 , 1, bundleNoText));
 
+        // Step tempat stiker ini dicetak (prompt: stiker induk memuat step, user, tanggal).
+        // Hanya dari jalur pemecahan; payload lama tidak mengirimnya.
+        if (!string.IsNullOrWhiteSpace(data.StepName))
+        {
+            var stepText = TruncateToFit(Sanitize(data.StepName).ToUpperInvariant(), 36, "1", 1, RightEdge - RightColX);
+            Write(Text(RightColX, 88, "1", 1, 1, stepText));
+        }
+
         Write($"BAR {RightColX},114,{RightEdge - RightColX},3\r\n");
 
         var sizeName = Sanitize(data.SizeName);
@@ -215,19 +226,53 @@ public static class TsplBuilder
 
         Write($"BAR {RightColX},162,{RightEdge - RightColX},3\r\n");
         
-        Write(Text(RightColX, 174, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 200, "2", 1, 1, "> " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 225, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
-        Write(Text(RightColX, 240, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
+        // Baris identitas digeser naik beberapa dot dibanding sebelumnya (174/200/225/240)
+        // untuk memberi ruang baris NOTE yang sekarang pakai font "2" (12x20) -- bukan
+        // perubahan desain, murni konsekuensi tinggi baris note yang naik ~8 dot per baris.
+        Write(Text(RightColX, 172, "2", 1, 1, data.ResourceName?.ToUpperInvariant() ?? string.Empty +" - " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 196, "2", 1, 1, "> " + data.EmployeeName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 220, "1", 1, 1, data.MaterialName?.ToUpperInvariant() ?? string.Empty));
+        Write(Text(RightColX, 234, "1", 1, 1, data.SizePackName?.ToUpperInvariant() ?? string.Empty));
 
+        // Prompt 82: catatan diberi label "NOTE:" dan boleh dua baris -- untuk bundle anak
+        // isinya alasan (kenapa direject/dikembalikan), dan satu baris sering tidak cukup.
+        // Font dinaikkan ke "2" (12x20, dari "1" 8x12) karena alasan reject harus kebaca
+        // dari jarak tumpukan; konsekuensinya satu baris cuma muat 21 karakter
+        // ((RightEdge - RightColX) / 12), jadi teks panjang terpotong lebih cepat.
         if (!string.IsNullOrWhiteSpace(data.Remark))
         {
-            var remarkText = TruncateToFit(Sanitize(data.Remark).ToUpperInvariant(), 40, "1", 1, RightEdge - RightColX);
+            const int noteCap = 21;
+            var noteBody = Sanitize(data.Remark).ToUpperInvariant();
+            var (noteLine1, noteLine2) = WrapTwoLines("NOTE: " + noteBody, noteCap);
+
             // TSPL tidak punya bold bawaan -- disimulasikan dengan cetak ganda digeser 1 dot
-            // horizontal (double-strike), sama ukuran font dengan baris Size Pack di atasnya.
-            Write(Text(RightColX, 255, "1", 1, 1, remarkText));
-            Write(Text(RightColX + 1, 255, "1", 1, 1, remarkText));
+            // horizontal (double-strike).
+            var line1 = TruncateToFit(noteLine1, noteCap, "2", 1, RightEdge - RightColX);
+            Write(Text(RightColX, 248, "2", 1, 1, line1));
+            Write(Text(RightColX + 1, 248, "2", 1, 1, line1));
+
+            if (!string.IsNullOrWhiteSpace(noteLine2))
+            {
+                var line2 = TruncateToFit(noteLine2, noteCap, "2", 1, RightEdge - RightColX);
+                Write(Text(RightColX, 269, "2", 1, 1, line2));
+                Write(Text(RightColX + 1, 269, "2", 1, 1, line2));
+            }
         }
+
+        // Baris kaki: STATUS bundle di kiri bawah (di bawah QR), tanggal di kanan bawah.
+        // Satu bundle satu status, dan stiker adalah satu-satunya yang ikut barangnya
+        // secara fisik -- jadi status dicetak font "2" + double-strike (bold) supaya
+        // kebaca sekilas dari tumpukan: "OK" untuk bundle normal, kategorinya untuk
+        // bundle anak ("REJECT BAHAN", "PERBAIKAN", "TIDAK LENGKAP").
+        // Payload lama (SIS_Bundle_Manage CREATE / SIS_Bundle_ReprintLabel) tidak mengirim
+        // bundle_status -- NULL diperlakukan OK, jadi stiker lama tidak berubah artinya.
+        var statusRaw = string.IsNullOrWhiteSpace(data.BundleStatus) ? "OK" : data.BundleStatus;
+        var statusLabel = string.Equals(statusRaw, "OK", StringComparison.OrdinalIgnoreCase)
+            ? "OK"
+            : BundleStatusLabel(string.IsNullOrWhiteSpace(data.RejectCategory) ? statusRaw : data.RejectCategory);
+        var statusText = TruncateToFit(statusLabel, 15, "2", 1, RightColX - qrX - 8);
+        Write(Text(qrX, 290, "2", 1, 1, statusText));
+        Write(Text(qrX + 1, 290, "2", 1, 1, statusText));
 
         var mulaiText = data.StartedAt.ToString("dd/MM HH:mm");
         Write(Text(RightAlignX(RightEdge, "2", 1, mulaiText + "   "), 290, "2", 1, 1, mulaiText));
@@ -613,6 +658,20 @@ public static class TsplBuilder
 
     // Pecah teks jadi maks 2 baris di batas spasi terdekat (bukan potong di tengah kata);
     // baris kedua tetap dipotong dgn "..." kalau masih kepanjangan setelah dibagi 2.
+    // Prompt 82: kategori bundle -> teks stiker. Disalin dari BundleRejectCategory.Label
+    // (TerakarsaApp.Shared) dan TIDAK memanggilnya: TerakarsaApp.Printing dipakai juga oleh
+    // app HP, dan label cetak harus tetap sama walau teks UI suatu saat diperhalus.
+    private static string BundleStatusLabel(string category) => category switch
+    {
+        "RejectBahan" => "REJECT BAHAN",
+        "RejectJahit" => "REJECT JAHIT",
+        "RejectPrint" => "REJECT PRINT",
+        "Perbaikan" => "PERBAIKAN",
+        "TidakLengkap" => "TIDAK LENGKAP",
+        "Reject" => "REJECT",
+        _ => Sanitize(category).ToUpperInvariant()
+    };
+
     private static (string Line1, string Line2) WrapTwoLines(string value, int maxCharsPerLine)
     {
         if (value.Length <= maxCharsPerLine) return (value, "");

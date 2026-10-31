@@ -10,9 +10,17 @@
 -- berbeda dari Laporan Produksi admin yang menampilkan kelimanya terpisah.
 --
 -- Harga SELALU article_workflows.unit_price yang BERLAKU SEKARANG -- tidak ada snapshot
--- harga di log maupun di workflow_lock_items (lihat sql/prompt_59_harga_rekap_nonpo.sql).
+-- harga di log (lihat sql/prompt_59_harga_rekap_nonpo.sql).
 -- Konsekuensi yang disengaja: mengubah harga step langsung mengubah kolom Nilai periode
--- lampau juga. Pencatatan nilai per periode menyusul lewat settlement payroll.
+-- lampau juga.
+--
+-- CATATAN Prompt 83: snapshot harga per periode SEKARANG ADA, di
+-- workflow_lock_items.unit_price, dan dipakai halaman admin Rekap Gajian
+-- (sql/sp_PayrollRekap_Select.sql). Rekap stasiun ini SENGAJA dibiarkan tetap membaca
+-- harga yang berlaku sekarang -- mengubahnya di luar cakupan Prompt 83. Akibatnya kedua
+-- rekap bisa berbeda untuk periode yang tarifnya diubah SETELAH di-lock, atau yang
+-- harganya dikoreksi admin lewat SIS_LockItem_UpdatePrice. Rekap Gajian yang jadi acuan
+-- pembayaran; rekap stasiun ini acuan PIC di lapangan.
 --
 -- Dua mode, dua definisi "tanggal" yang berbeda:
 --   OUTPUT -- baris yang DIBUAT resource ini (awl.resource_id) dan sudah DI-LOCK ke periode

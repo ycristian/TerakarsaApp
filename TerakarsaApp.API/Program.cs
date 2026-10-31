@@ -135,6 +135,10 @@ builder.Services.AddScoped<ThreadOpnameService>();
 builder.Services.AddScoped<ThreadReportService>();
 // Prompt 78-80: module Cutting (stok bundle dari hamparan), module CUTTING.
 builder.Services.AddScoped<CuttingService>();
+// Prompt 83: output manual (module MANUAL_OUTPUT + tab OUT stasiun) & Rekap Gajian
+// (module PAYROLL_REKAP -- harga lock item + finalisasi periode).
+builder.Services.AddScoped<ManualOutputService>();
+builder.Services.AddScoped<PayrollRekapService>();
 builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
 builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));

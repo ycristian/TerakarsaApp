@@ -1,0 +1,533 @@
+@page "/payroll-rekap"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Globalization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Divisions
+@using TerakarsaApp.Shared.Payroll
+@inject PayrollRekapApiService PayrollRekapApi
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Prompt 83: Rekap Gajian (module PAYROLL_REKAP) -- isi satu periode gajian, baris LOG dan
+   MANUAL dalam satu daftar per resource dengan badge sumber.
+
+   Harga di sini adalah SNAPSHOT yang dibekukan saat lock, BUKAN tarif step yang berlaku
+   sekarang. Harga kosong (null) BERARTI "belum diisi" -- barisnya disorot dan memblokir
+   tombol Finalisasi Periode. 0 adalah harga yang SAH (step Bundling), jadi harga kosong
+   TIDAK PERNAH ditampilkan atau dikirim sebagai 0.
+
+   Setelah periode difinalisasi, kolom harga jadi read-only (ditegakkan juga di SP). *@
+
+<PageTitle>Rekap Gajian</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Rekap Gajian</h1>
+    <div>
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="javascript:void(0)">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Rekap Gajian</li>
+        </ol>
+    </div>
+</div>
+
+@if (hasAccess is null)
+{
+    <p>Memeriksa akses...</p>
+}
+else if (hasAccess == false)
+{
+    <div class="alert alert-danger">Anda tidak memiliki akses ke modul ini.</div>
+}
+else if (periods.Count == 0)
+{
+    <div class="alert alert-light">
+        Belum ada periode gajian yang berisi data. Periode baru muncul di sini setelah PIC
+        menekan <strong>Lock</strong> di stasiun.
+    </div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Periode gajian</label>
+                    <SearchableSelect TItem="PayrollRekapPeriodDto" Items="periods" Value="periodId"
+                                      ValueChanged="HandlePeriodChanged"
+                                      IdSelector="@(p => p.PayrollPeriodId)" TextSelector="@(p => PeriodLabel(p))"
+                                      Placeholder="Pilih periode..." />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Divisi</label>
+                    <SearchableSelect TItem="DivisionDto" Items="divisions" Value="divisionFilterId"
+                                      ValueChanged="HandleDivisionChanged"
+                                      IdSelector="@(d => d.Id)" TextSelector="@(d => d.DivisionName)"
+                                      AllowNone="true" NoneLabel="Semua divisi"
+                                      Placeholder="Semua divisi..." />
+                </div>
+                <div class="col-12 col-md-3 d-flex align-items-center" style="padding-top: 1.75rem;">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="onlyMissing"
+                               checked="@onlyMissingPrice" @onchange="HandleOnlyMissingChanged" />
+                        <label class="form-check-label" for="onlyMissing">Hanya harga kosong</label>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3 d-flex gap-2">
+                    <button class="btn btn-light w-100" @onclick="LoadAsync" disabled="@isLoading">
+                        <i class="fe fe-refresh-cw"></i> Muat ulang
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success">@successMessage</div>
+    }
+
+    @* ---- Status periode + tombol Finalisasi ---- *@
+    @if (result.Header is not null)
+    {
+        var header = result.Header;
+        <div class="card mb-3" style="border: 1px solid #d0d7de; border-radius: 6px;">
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                    <div>
+                        <div class="fw-bold">
+                            Periode @header.PeriodCode
+                            @if (header.IsFinalized)
+                            {
+                                <span class="badge bg-secondary ms-2">Final</span>
+                            }
+                        </div>
+                        <div class="text-muted" style="font-size: 0.8rem;">
+                            @header.PeriodStart.ToString("dd/MM/yy HH:mm") &mdash; @header.PeriodEnd.ToString("dd/MM/yy HH:mm")
+                            @if (header.IsFinalized && header.FinalizedAt is not null)
+                            {
+                                <span>
+                                    &middot; difinalisasi @header.FinalizedAt.Value.ToString("dd/MM/yy HH:mm")
+                                    @if (!string.IsNullOrWhiteSpace(header.FinalizedByName))
+                                    {
+                                        <span>oleh @header.FinalizedByName</span>
+                                    }
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="text-end">
+                            <div class="text-muted" style="font-size: 0.7rem;">Total periode</div>
+                            <div class="fw-bold">@TotalNilai.ToString("N0")</div>
+                        </div>
+
+                        @if (header.IsFinalized)
+                        {
+                            @* Disediakan untuk salah tekan -- tanpa ini harga periode itu
+                               read-only permanen. *@
+                            <button class="btn btn-outline-warning" disabled="@isBusy" @onclick="UnfinalizeAsync">
+                                <i class="bi bi-unlock"></i> Buka Periode
+                            </button>
+                        }
+                        else if (MissingPriceCount > 0)
+                        {
+                            @* Terkunci selama masih ada harga kosong, dengan hitungannya. *@
+                            <button class="btn btn-secondary" disabled>
+                                <i class="bi bi-lock-fill"></i>
+                                Finalisasi Periode (@MissingPriceCount harga kosong)
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary" disabled="@isBusy" @onclick="FinalizeAsync">
+                                <i class="bi bi-lock-fill"></i> Finalisasi Periode
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (!header.IsFinalized && MissingPriceCount > 0)
+                {
+                    <div class="alert alert-warning mt-3 mb-0">
+                        <i class="fe fe-alert-triangle"></i>
+                        <strong>@MissingPriceCount baris</strong> belum punya harga. Isi harganya dulu
+                        &mdash; selama masih ada yang kosong, periode tidak bisa difinalisasi.
+                        Harga <strong>0</strong> boleh diisi dan dianggap sah (mis. step Bundling).
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <p>Memuat...</p>
+    }
+    else if (result.Rows.Count == 0)
+    {
+        <div class="alert alert-light">Tidak ada baris yang cocok dengan filter.</div>
+    }
+    else
+    {
+        @* ---- Ringkasan per resource ---- *@
+        <div class="card mb-3">
+            <div class="card-header">
+                <h3 class="card-title">Ringkasan per operator</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Operator</th>
+                            <th>Divisi</th>
+                            <th class="text-end">Baris</th>
+                            <th class="text-end">Qty</th>
+                            <th class="text-end">Nilai</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in result.Resources)
+                        {
+                            <tr>
+                                <td>
+                                    @(r.ResourceName ?? "(tanpa operator)")
+                                    @if (r.MissingPriceCount > 0)
+                                    {
+                                        <span class="badge bg-warning text-dark ms-1">@r.MissingPriceCount kosong</span>
+                                    }
+                                </td>
+                                <td>@r.DivisionName</td>
+                                <td class="text-end">@r.ItemCount</td>
+                                <td class="text-end">@r.TotalQty</td>
+                                <td class="text-end fw-bold">@r.TotalNilai.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---- Detail baris, dikelompokkan per resource ---- *@
+        @foreach (var group in result.Rows.GroupBy(r => new { r.ResourceId, r.ResourceName, r.DivisionName }))
+        {
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        @(group.Key.ResourceName ?? "(tanpa operator)")
+                        <span class="text-muted" style="font-size: 0.8rem;">&middot; @group.Key.DivisionName</span>
+                    </h3>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Sumber</th>
+                                <th>Deskripsi</th>
+                                <th>Artikel / PO</th>
+                                <th>Size</th>
+                                <th class="text-end">Qty</th>
+                                <th class="text-end">Reject</th>
+                                <th class="text-end" style="width: 9rem;">Harga</th>
+                                <th class="text-end">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in group)
+                            {
+                                <tr style="@(row.IsMissingPrice ? "background: #FFF8E1;" : "")">
+                                    <td class="text-nowrap">
+                                        @if (row.IsManual)
+                                        {
+                                            <span class="badge bg-info">Manual</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-light text-dark">Log</span>
+                                        }
+                                        @if (row.IsPotongan)
+                                        {
+                                            <span class="badge bg-danger ms-1">Potongan</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @row.WorkDescription
+                                        @if (!string.IsNullOrWhiteSpace(row.Note))
+                                        {
+                                            <div class="text-muted" style="font-size: 0.75rem;">@row.Note</div>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (string.IsNullOrWhiteSpace(row.ArticleName))
+                                        {
+                                            <span class="badge bg-warning text-dark">Tanpa artikel</span>
+                                        }
+                                        else
+                                        {
+                                            <div>@row.ArticleName</div>
+                                            @if (!string.IsNullOrWhiteSpace(row.NoPo))
+                                            {
+                                                <div class="text-muted" style="font-size: 0.75rem;">@row.NoPo</div>
+                                            }
+                                        }
+                                    </td>
+                                    <td>@row.SizeName</td>
+                                    <td class="text-end @(row.Qty < 0 ? "text-danger fw-bold" : "")">@row.Qty</td>
+                                    <td class="text-end">@(row.RejectQty == 0 ? "" : row.RejectQty.ToString())</td>
+                                    <td class="text-end">
+                                        @if (IsFinalized)
+                                        {
+                                            @* Periode final -> read-only. *@
+                                            <span>@(row.UnitPrice is null ? "-" : row.UnitPrice.Value.ToString("N0"))</span>
+                                        }
+                                        else
+                                        {
+                                            @* Nilai MINUS diperbolehkan (dipakai baris potongan).
+                                               Kosongkan field -> harga kembali jadi "belum diisi". *@
+                                            <input type="number" step="0.01" class="form-control form-control-sm text-end"
+                                                   value="@PriceText(row.UnitPrice)"
+                                                   disabled="@isBusy"
+                                                   placeholder="kosong"
+                                                   @onchange="@(e => SavePriceAsync(row, e))" />
+                                        }
+                                    </td>
+                                    <td class="text-end fw-bold">
+                                        @(row.Total is null ? "-" : row.Total.Value.ToString("N0"))
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+
+    @* ---- Baris yang menghalangi finalisasi (hasil penolakan SP) ---- *@
+    @if (missingRows.Count > 0)
+    {
+        <div class="card mb-3" style="border: 1px solid #f0ad4e; border-radius: 6px;">
+            <div class="card-header">
+                <h3 class="card-title text-warning">Baris yang menghalangi finalisasi</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Sumber</th>
+                            <th>Operator</th>
+                            <th>Deskripsi</th>
+                            <th class="text-end">Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in missingRows)
+                        {
+                            <tr>
+                                <td>@(m.Source == "MANUAL" ? "Manual" : "Log")</td>
+                                <td>@m.ResourceName</td>
+                                <td>@m.Description</td>
+                                <td class="text-end">@m.Qty</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool? hasAccess = null;
+    private bool isLoading = false;
+    private bool isBusy = false;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    private List<PayrollRekapPeriodDto> periods = new();
+    private List<DivisionDto> divisions = new();
+    private PayrollRekapResultDto result = new();
+    private List<PayrollMissingPriceRowDto> missingRows = new();
+
+    private int periodId = 0;
+    private int divisionFilterId = 0;
+    private bool onlyMissingPrice = false;
+
+    private bool IsFinalized => result.Header?.IsFinalized == true;
+
+    // Hitungan harga kosong SELALU dari periode utuh (bukan dari baris yang sedang terlihat)
+    // -- filter divisi/"hanya harga kosong" tidak boleh membuat tombol Finalisasi terbuka
+    // padahal masih ada baris kosong di divisi lain.
+    private int MissingPriceCount =>
+        periods.FirstOrDefault(p => p.PayrollPeriodId == periodId)?.MissingPriceCount ?? 0;
+
+    private decimal TotalNilai => result.Resources.Sum(r => r.TotalNilai);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        hasAccess = authState.User.HasClaim("module", "PAYROLL_REKAP");
+
+        if (hasAccess == true)
+        {
+            divisions = await PayrollRekapApi.GetDivisionsAsync();
+            periods = await PayrollRekapApi.GetPeriodsAsync();
+
+            // Periode terbaru yang BELUM final itu yang biasanya sedang dikerjakan admin;
+            // kalau semuanya sudah final, ambil yang terbaru.
+            var first = periods.FirstOrDefault(p => !p.IsFinalized) ?? periods.FirstOrDefault();
+            periodId = first?.PayrollPeriodId ?? 0;
+
+            if (periodId > 0) await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (periodId <= 0) return;
+
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        int? divisionId = divisionFilterId > 0 ? divisionFilterId : null;
+        result = await PayrollRekapApi.GetAsync(periodId, divisionId, null, onlyMissingPrice);
+
+        isLoading = false;
+    }
+
+    // Daftar periode dimuat ulang supaya MissingPriceCount (penjaga tombol Finalisasi) ikut
+    // segar setelah harga diubah atau periode difinalisasi.
+    private async Task ReloadPeriodsAsync()
+    {
+        periods = await PayrollRekapApi.GetPeriodsAsync();
+    }
+
+    private async Task HandlePeriodChanged(int id)
+    {
+        periodId = id;
+        missingRows = new();
+        successMessage = string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task HandleDivisionChanged(int id)
+    {
+        divisionFilterId = id;
+        await LoadAsync();
+    }
+
+    private async Task HandleOnlyMissingChanged(ChangeEventArgs e)
+    {
+        onlyMissingPrice = e.Value is bool b && b;
+        await LoadAsync();
+    }
+
+    // Harga kosong ditampilkan sebagai string KOSONG, bukan 0 -- 0 adalah harga yang sah.
+    private static string PriceText(decimal? price) =>
+        price is null ? string.Empty : price.Value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private async Task SavePriceAsync(PayrollRekapRowDto row, ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+
+        decimal? newPrice;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            // Field dikosongkan -> harga kembali jadi "belum diisi" (null, bukan 0).
+            newPrice = null;
+        }
+        else if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+                 || decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed))
+        {
+            newPrice = parsed;
+        }
+        else
+        {
+            errorMessage = $"Harga '{text}' tidak valid.";
+            return;
+        }
+
+        if (newPrice == row.UnitPrice) return;
+
+        isBusy = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var (success, error) = await PayrollRekapApi.UpdatePriceAsync(row.LockItemId, newPrice);
+
+        if (!success)
+        {
+            errorMessage = error;
+            // Muat ulang supaya nilai di layar kembali sesuai isi DB.
+            await LoadAsync();
+        }
+        else
+        {
+            await LoadAsync();
+            await ReloadPeriodsAsync();
+        }
+
+        isBusy = false;
+    }
+
+    private async Task FinalizeAsync()
+    {
+        isBusy = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        missingRows = new();
+
+        var (success, error, rows) = await PayrollRekapApi.FinalizeAsync(periodId);
+
+        if (!success)
+        {
+            // Prefix 'HARGA_KOSONG|' dikupas -- pesannya saja yang ditampilkan.
+            errorMessage = StripPrefix(error);
+            missingRows = rows;
+        }
+        else
+        {
+            successMessage = "Periode difinalisasi. Harga periode ini sekarang read-only.";
+        }
+
+        await LoadAsync();
+        await ReloadPeriodsAsync();
+        isBusy = false;
+    }
+
+    private async Task UnfinalizeAsync()
+    {
+        isBusy = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var (success, error) = await PayrollRekapApi.UnfinalizeAsync(periodId);
+
+        if (!success) errorMessage = error;
+        else successMessage = "Periode dibuka kembali. Harga bisa diedit lagi.";
+
+        await LoadAsync();
+        await ReloadPeriodsAsync();
+        isBusy = false;
+    }
+
+    private static string StripPrefix(string message)
+    {
+        if (string.IsNullOrEmpty(message)) return message;
+        var idx = message.IndexOf('|');
+        return idx >= 0 && idx <= 20 ? message.Substring(idx + 1) : message;
+    }
+
+    private static string PeriodLabel(PayrollRekapPeriodDto p)
+    {
+        var label = p.PeriodCode;
+        if (p.IsFinalized) label += " (final)";
+        else if (p.MissingPriceCount > 0) label += $" - {p.MissingPriceCount} harga kosong";
+        return label;
+    }
+}

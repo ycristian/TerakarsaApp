@@ -27,9 +27,14 @@
 -- kolom lain (step Bundling implisit selalu 0 -- default kolom, tidak pernah diisi eksplisit
 -- di sini); SAVE menerima UnitPrice di JSON @Steps dan menolak nilai negatif. Harga adalah
 -- milik ARTIKEL sejak APPLY: mengubah harga template TIDAK merambat ke artikel yang sudah
--- ada, dan sebaliknya. Perubahan harga TIDAK dibatasi status log/lock -- harga tidak pernah
--- di-snapshot ke article_workflow_logs maupun workflow_lock_items, rekap selalu membaca
--- nilai yang berlaku sekarang.
+-- ada, dan sebaliknya. Perubahan harga TIDAK dibatasi status log/lock.
+--
+-- Prompt 83 MENGUBAH akibat dari kalimat terakhir itu: harga sekarang DI-SNAPSHOT ke
+-- workflow_lock_items.unit_price pada saat lock. Jadi mengubah unit_price di sini TIDAK
+-- lagi mengubah angka periode yang sudah di-lock (itu dibaca Rekap Gajian dari snapshot);
+-- yang terpengaruh hanya baris yang di-lock SESUDAH perubahan, plus rekap stasiun yang
+-- memang masih membaca harga berlaku. Karena itu harga tetap bebas diubah di sini.
+-- article_workflow_logs sendiri tetap TIDAK pernah menyimpan harga.
 --
 -- Fix: APPLY & SAVE sekarang menolak (RAISERROR) step dengan divisi kosong atau divisi yang
 -- sudah di-soft-delete (APPLY mengecek step template asal, SAVE mengecek DivisionId di JSON

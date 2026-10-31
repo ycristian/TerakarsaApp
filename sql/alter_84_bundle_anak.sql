@@ -74,9 +74,20 @@ IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_bundles_root')
 GO
 
 -- Anak ber-nomor urut unik per root (dipakai juga sebagai penjaga race pembuatan anak).
+-- Filter root_bundle_id <> 0 WAJIB: induk baru lahir dengan root_bundle_id = 0 (default
+-- kolom) dan baru di-UPDATE jadi dirinya sendiri sesudah INSERT, di transaksi yang sama.
+-- SIS_CuttingSpread_Manage meng-INSERT SEMUA bundle hamparan dalam satu statement
+-- set-based, jadi tanpa filter ini semua baris transit itu bertabrakan di (0,0):
+-- "Cannot insert duplicate key row ... UX_bundles_root_sequence ... (0, 0)".
+-- Versi pertama index ini (tanpa filter) di-DROP dulu kalau sudah ada di DB.
+IF EXISTS (SELECT 1 FROM sys.indexes
+           WHERE name = 'UX_bundles_root_sequence' AND object_id = OBJECT_ID('bundles')
+             AND ISNULL(filter_definition, '') NOT LIKE '%root_bundle_id%')
+    DROP INDEX UX_bundles_root_sequence ON bundles;
+GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_bundles_root_sequence')
     CREATE UNIQUE INDEX UX_bundles_root_sequence ON bundles(root_bundle_id, sequence_no)
-        WHERE deleted_at IS NULL;
+        WHERE deleted_at IS NULL AND root_bundle_id <> 0;
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_bundles_root')
     CREATE INDEX IX_bundles_root ON bundles(root_bundle_id) WHERE deleted_at IS NULL;

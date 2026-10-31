@@ -71,13 +71,14 @@
 
         <div class="flex-grow-1"></div>
 
-        @if (IsOutput)
-        {
-            <button type="button" class="btn btn-outline-primary" disabled="@(selectedPeriod is null)"
-                    @onclick="OpenNewNonPo">
-                + Output Non-PO
-            </button>
-        }
+        @* Prompt 83: tombol "+ Output Non-PO" DIRETIRE. Pencatatan output di luar bundle
+           sekarang lewat "Tambah Output Manual" di tab OUT (tabel manual_outputs), yang
+           ikut mekanisme lock dan harganya diisi admin produksi -- bukan PIC.
+
+           Yang dimatikan HANYA pembuatan baris BARU. Daftar + detail + edit/hapus baris
+           non_po_outputs LAMA sengaja dibiarkan hidup supaya data yang sudah tercatat
+           masih bisa dilihat dan dibereskan; tabelnya pun tidak dimigrasikan. Lihat
+           catatan di sql/alter_83_manual_output_harga.sql. *@
         <button type="button" class="btn btn-success" disabled="@(isExporting || selectedPeriod is null)"
                 @onclick="ExportExcel">
             @(isExporting ? "Menyiapkan..." : "Export Excel")
@@ -570,6 +571,10 @@
         showNonPoDetail = true;
     }
 
+    // Prompt 83: TIDAK ADA lagi pemanggil method ini -- tombol "+ Output Non-PO" diretire
+    // (lihat catatan di markup). Method-nya dibiarkan utuh, TIDAK dihapus: kalau ternyata
+    // alur non-PO perlu dihidupkan kembali, cukup kembalikan tombolnya. Form, edit, hapus
+    // dan daftar baris non-PO LAMA semuanya masih hidup.
     private async Task OpenNewNonPo()
     {
         editingNonPoId = null;
