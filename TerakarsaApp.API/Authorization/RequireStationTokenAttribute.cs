@@ -18,8 +18,13 @@ public class RequireStationTokenAttribute : Attribute, IAsyncAuthorizationFilter
             return;
         }
 
+        // alter_87: divisi pilihan sesi (stasiun allow_all_divisions). Divalidasi di SP;
+        // tanpa header / stasiun biasa = divisi stasiun seperti sebelumnya.
+        int? divisionId = int.TryParse(context.HttpContext.Request.Headers["X-Station-Division"].FirstOrDefault(), out var d) && d > 0
+            ? d : null;
+
         var stationService = context.HttpContext.RequestServices.GetRequiredService<StationService>();
-        var station = await stationService.GetByTokenAsync(token);
+        var station = await stationService.GetByTokenAsync(token, divisionId);
         if (station is null)
         {
             context.Result = new Microsoft.AspNetCore.Mvc.UnauthorizedResult();
@@ -27,5 +32,26 @@ public class RequireStationTokenAttribute : Attribute, IAsyncAuthorizationFilter
         }
 
         context.HttpContext.Items[HttpContextItemKey] = station;
+
+        // Prompt 85: catat kehadiran perangkat (last_seen_at) + adopsi perangkat lama, maks
+        // 1x/menit/stasiun. Header perangkat boleh tidak ada (client lama). Gagal di sini tidak
+        // boleh menggagalkan request stasiun.
+        var tracker = context.HttpContext.RequestServices.GetRequiredService<StationPresenceTracker>();
+        if (tracker.ShouldTouch(station.StationId))
+        {
+            var headers = context.HttpContext.Request.Headers;
+            var deviceId = StationDeviceIdentity.CleanId(headers["X-Station-Device-Id"].FirstOrDefault());
+            var deviceName = StationDeviceIdentity.CleanHeaderName(headers["X-Station-Device-Name"].FirstOrDefault());
+
+            try
+            {
+                await stationService.TouchAsync(station.StationId, deviceId, deviceName);
+            }
+            catch (Exception ex)
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<RequireStationTokenAttribute>>();
+                logger.LogWarning(ex, "TOUCH stasiun {StationId} gagal.", station.StationId);
+            }
+        }
     }
 }

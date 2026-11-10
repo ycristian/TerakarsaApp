@@ -178,6 +178,14 @@
                                     @(isReprinting ? "Mencetak..." : "Cetak Ulang")
                                 </button>
                             </div>
+                            @* Prompt 88: printer tujuan cetak ulang (dropdown hanya kalau >1 printer). *@
+                            <div class="mt-2">
+                                <PrinterPicker JobType="BUNDLE_LABEL" @bind-Value="reprintPrinterId" />
+                            </div>
+                            @if (!string.IsNullOrEmpty(reprintError))
+                            {
+                                <div class="text-danger small">@reprintError</div>
+                            }
                         }
                     }
                 </div>
@@ -312,6 +320,8 @@
     private string bundleLoadError = string.Empty;
     private bool offerReprint = false;
     private bool isReprinting = false;
+    private int? reprintPrinterId;
+    private string reprintError = string.Empty;
 
     public async Task OpenEditBundleAsync(int id)
     {
@@ -409,8 +419,17 @@
     private async Task ReprintBundle()
     {
         isReprinting = true;
-        await SuperAdminApi.ReprintBundleAsync(bundleId);
+        reprintError = string.Empty;
+        var (success, error) = await SuperAdminApi.ReprintBundleAsync(bundleId, 1, reprintPrinterId);
         isReprinting = false;
+
+        // Prompt 88: gagal (mis. 'Pilih printer tujuan.') -- tetap di modal supaya bisa dipilih.
+        if (!success)
+        {
+            reprintError = error;
+            return;
+        }
+
         offerReprint = false;
         showBundleModal = false;
     }

@@ -36,7 +36,8 @@ public class PrintController : ControllerBase
     public async Task<IActionResult> Claim([FromBody] PrintJobClaimRequest request)
     {
         var batchSize = request.BatchSize <= 0 ? 5 : request.BatchSize;
-        var result = await _printJobService.ClaimAsync(batchSize, request.JobTypes, request.DryRun, this.PrintDeviceId());
+        var result = await _printJobService.ClaimAsync(batchSize, request.JobTypes, request.DryRun, this.PrintDeviceId(),
+            request.DeviceCodes);
         return Ok(result);
     }
 

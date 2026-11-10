@@ -26,9 +26,16 @@ public class PrintApiClient
 
     // dryRun sama dengan PrintWorkerOptions.DryRun (ad hoc lanjutan Prompt 48) -- kalau true,
     // API mengklaim dari print_jobs_dryrun (SIS_PrintJobDryRun_Claim), bukan antrian live.
-    public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun, CancellationToken ct)
+    public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun,
+        string[] deviceCodes, CancellationToken ct)
     {
-        var response = await _http.PostAsJsonAsync("api/print/claim", new PrintJobClaimRequest { BatchSize = batchSize, JobTypes = jobTypes, DryRun = dryRun }, ct);
+        var response = await _http.PostAsJsonAsync("api/print/claim", new PrintJobClaimRequest
+        {
+            BatchSize = batchSize,
+            JobTypes = jobTypes,
+            DryRun = dryRun,
+            DeviceCodes = deviceCodes.ToList()
+        }, ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<List<PrintJobClaimedDto>>(cancellationToken: ct) ?? new();
     }

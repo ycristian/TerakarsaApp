@@ -99,7 +99,7 @@ GO
 -- CETAK -- buat print job + tandai printed_at
 -- ============================================================
 -- Berlaku untuk personel berstatus APA PUN (dipakai juga untuk cetak ulang).
--- Satu transaksi, urut kode_ref.
+-- Satu transaksi, urut size celana lalu size kemeja (kecil -> besar), lalu kode_ref.
 -- payload dirakit dengan FOR JSON PATH, bentuknya TniKartuPayload.
 CREATE OR ALTER PROCEDURE tni.SIS_Personel_Cetak
     @PersonelIds NVARCHAR(MAX),      -- JSON array id, mis. '[1,2,3]'
@@ -147,6 +147,49 @@ BEGIN
         FROM tni.v_personel v
         JOIN #ids i ON i.personel_id = v.personel_id
         WHERE v.order_id = @OrderId;
+
+        -- REKAP SIZE (2026-11-09): satu struk ringkasan jumlah per size SEBELUM kartu,
+        -- supaya staff mengambil barang per size dulu baru disatukan dengan kartunya.
+        -- Total per size saja (tidak per satuan). job_type tetap TNI_KARTU supaya
+        -- printernya persis sama dengan kartu (route yang sama); dibedakan lewat
+        -- payload jenis = 'REKAP'. ref_id 0: bukan milik satu personel.
+        -- Di-insert SEBELUM kartu -> print_job_id paling kecil -> tercetak paling awal.
+        -- Hanya kalau kartu > 1 (cetak ulang satu kartu tidak perlu rekap).
+        -- JOIN pola sama dengan INSERT kartu di bawah supaya jumlahnya pasti cocok.
+        SELECT pc.kode AS celana_kode, pc.size_angka, pk.kode AS kemeja_kode, pk.lingkar_dada_acuan
+        INTO #pola
+        FROM tni.v_personel v
+        JOIN #cetak c ON c.personel_id = v.personel_id
+        JOIN tni.pola_celana pc ON pc.pola_celana_id = v.pola_celana_id
+        JOIN tni.pola_kemeja pk ON pk.pola_kemeja_id = v.pola_kemeja_id;
+
+        DECLARE @TotalKartu INT = (SELECT COUNT(*) FROM #pola);
+
+        IF @TotalKartu > 1
+            INSERT INTO dbo.print_jobs (job_type, ref_id, payload, created_by)
+            SELECT 'TNI_KARTU',
+                   0,
+                   (
+                       SELECT 'REKAP'                                      AS jenis,
+                              @Judul                                       AS judulOrder,
+                              FORMAT(SYSDATETIME(), 'dd/MM/yyyy HH:mm')    AS waktu,
+                              (SELECT nama_petugas FROM tni.perangkat
+                                WHERE perangkat_id = @PerangkatId)         AS petugas,
+                              @TotalKartu                                  AS totalKartu,
+                              -- urutan sama dengan urutan cetak kartu: celana dulu, kecil -> besar
+                              (SELECT x.celana_kode AS kode, COUNT(*) AS jumlah
+                                 FROM #pola x
+                                GROUP BY x.celana_kode
+                                ORDER BY MIN(x.size_angka), x.celana_kode
+                                FOR JSON PATH)                             AS celana,
+                              (SELECT x.kemeja_kode AS kode, COUNT(*) AS jumlah
+                                 FROM #pola x
+                                GROUP BY x.kemeja_kode
+                                ORDER BY MIN(x.lingkar_dada_acuan), x.kemeja_kode
+                                FOR JSON PATH)                             AS kemeja
+                       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+                   ),
+                   @UserId;
 
         INSERT INTO dbo.print_jobs (job_type, ref_id, payload, created_by)
         SELECT 'TNI_KARTU',
@@ -196,7 +239,11 @@ BEGIN
                @UserId
         FROM tni.v_personel v
         JOIN #cetak c ON c.personel_id = v.personel_id
-        ORDER BY v.kode_ref;
+        JOIN tni.pola_celana pc ON pc.pola_celana_id = v.pola_celana_id
+        JOIN tni.pola_kemeja pk ON pk.pola_kemeja_id = v.pola_kemeja_id
+        -- Urutan cetak: size celana kecil -> besar, lalu size kemeja kecil -> besar.
+        -- print_job_id ikut urutan ini; worker klaim urut print_job_id.
+        ORDER BY pc.size_angka, pc.kode, pk.lingkar_dada_acuan, pk.kode, v.kode_ref;
 
         SET @N = @@ROWCOUNT;
 

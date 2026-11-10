@@ -14,9 +14,19 @@ public class StationDto
     public bool AllowResourceChange { get; set; } = true;
     // Prompt 25: stasiun ini boleh membuka modul packing (tab "Packing" di /station).
     public bool EnablePacking { get; set; }
+    // alter_87: boleh pindah divisi per sesi di layar "Pilih Operator" /station.
+    public bool AllowAllDivisions { get; set; }
     // Prompt 20: status pairing untuk admin -- station_token sendiri tidak pernah dikembalikan.
     public DateTime? PairedAt { get; set; }
     public DateTime? PairingCodeExpiresAt { get; set; }
+    // Prompt 85: kode login terkunci (permanen, 10 karakter). LoginCode hanya terisi kalau
+    // terkunci -- kode pairing sekali pakai tetap tidak pernah dikembalikan.
+    public bool PairingCodeLocked { get; set; }
+    public string? LoginCode { get; set; }
+    // Prompt 85: perangkat pemegang token (NULL + PairedAt terisi = perangkat lama yang belum
+    // teradopsi) dan kapan terakhir memanggil API.
+    public string? PairedDeviceName { get; set; }
+    public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public int CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -32,6 +42,7 @@ public class StationCreateRequest
     public int? DefaultResourceId { get; set; }
     public bool AllowResourceChange { get; set; } = true;
     public bool EnablePacking { get; set; }
+    public bool AllowAllDivisions { get; set; }
 }
 
 public class StationUpdateRequest
@@ -44,6 +55,7 @@ public class StationUpdateRequest
     public int? DefaultResourceId { get; set; }
     public bool AllowResourceChange { get; set; } = true;
     public bool EnablePacking { get; set; }
+    public bool AllowAllDivisions { get; set; }
 }
 
 public class StationPagedRequest
@@ -62,6 +74,9 @@ public class StationPagedResult
     public int PageNumber { get; set; }
     public int PageSize { get; set; }
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+    // Prompt 85: alamat web publik (AppOptions.PublicBaseUrl) untuk merakit link/QR kode login
+    // "{PublicBaseUrl}/station/{LoginCode}" -- sama dengan Link hasil LockLoginCode.
+    public string PublicBaseUrl { get; set; } = string.Empty;
 }
 
 // Dikembalikan sekali saja saat CREATE/CLAIM_PAIRING — token penuh tidak pernah
@@ -82,11 +97,25 @@ public class StationPairingResult
     public string Link { get; set; } = string.Empty;
 }
 
-// Prompt 20: body POST api/station-device/claim -- endpoint ANONIM, kode 5 karakter
-// sekali pakai + kedaluwarsa 15 menit adalah satu-satunya lapisan keamanannya.
+// Prompt 85: hasil "Kunci Kode Login"/"Refresh Kode" -- kode permanen 10 karakter + link
+// /station/{kode} (isi QR yang juga bisa dipindai dari Pengaturan app Android).
+public class StationLoginCodeResult
+{
+    public string Code { get; set; } = string.Empty;
+    public string Link { get; set; } = string.Empty;
+}
+
+// Prompt 20: body POST api/station-device/claim -- endpoint ANONIM. Lapisan keamanannya:
+// kode sekali pakai 15 menit, atau kode terkunci 10 karakter (Prompt 85), plus rate limit
+// policy "station-claim".
 public class StationClaimRequest
 {
     public string Code { get; set; } = string.Empty;
+    // Prompt 85: identitas perangkat yang klaim. DeviceId kosong = client lama -> tanpa
+    // peringatan ambil alih. Force = true setelah operator mengonfirmasi "DIPAKAI|".
+    public string? DeviceId { get; set; }
+    public string? DeviceName { get; set; }
+    public bool Force { get; set; }
 }
 
 // Info stasiun untuk perangkat yang sudah membawa X-Station-Token (dipakai Prompt 9b).
@@ -102,6 +131,9 @@ public class StationMeDto
     public bool AllowResourceChange { get; set; } = true;
     // Prompt 25: gate tab "Packing" di /station.
     public bool EnablePacking { get; set; }
+    // alter_87: tampilkan pilihan divisi di layar "Pilih Operator". DivisionId/DivisionName di
+    // atas sudah divisi sesi (hasil header X-Station-Division), bukan selalu divisi stasiun.
+    public bool AllowAllDivisions { get; set; }
 }
 
 // Prompt 42: tab "Rekap Produksi" di /station (menggantikan Rekap Penjahit Prompt 41) -- lihat

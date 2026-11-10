@@ -20,6 +20,25 @@ public class TniBerandaSummaryDto
     public int PersenKirim => Total == 0 ? 0 : (int)Math.Round(Terkirim * 100.0 / Total);
 }
 
+// Kartu Kemeja / Celana / Set di beranda (2026-11-10), dari tni.SIS_Beranda_Stok.
+// Tersedia = stok fisik yang belum di-set jadi = Lock + Unlock.
+public class TniBerandaStokJenisDto
+{
+    public int Masuk { get; set; }       // masuk bersih: MASUK + RUSAK/KOREKSI
+    public int Lock { get; set; }        // stok yang sudah dijatah kartu DICETAK
+    public int Unlock { get; set; }      // stok bebas, belum dijatah kartu
+    public int Tersedia => Lock + Unlock;
+}
+
+public class TniBerandaStokDto
+{
+    public TniBerandaStokJenisDto Kemeja { get; set; } = new();
+    public TniBerandaStokJenisDto Celana { get; set; } = new();
+    public int BisaDisetLock { get; set; }    // personel DICETAK yang kemeja+celananya ada
+    public int BisaDisetUnlock { get; set; }  // personel BELUM_CETAK dari stok unlock (greedy)
+    public int BisaDiset => BisaDisetLock + BisaDisetUnlock;
+}
+
 public class TniPersonelListItemDto
 {
     public int PersonelId { get; set; }

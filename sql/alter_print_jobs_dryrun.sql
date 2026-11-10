@@ -37,15 +37,20 @@ GO
 -- Salin SATU baris dari print_jobs (job_type/ref_id/payload apa adanya, sumber TIDAK
 -- diubah) ke print_jobs_dryrun sebagai baris PENDING baru -- cara utama mengisi antrian
 -- testing dengan data nyata (mis. kupon borongan yang benar-benar pernah tercetak).
+--
+-- Prompt 88: @PrintDeviceId (opsional) = printer tujuan, aturan sama dengan jalur live
+-- (SIS_PrintJob_ResolveDevice -- job type dengan >1 route wajib diisi). TEST_PRINT
+-- menyalin device job sumbernya (test print memang tanpa route).
 CREATE OR ALTER PROCEDURE SIS_PrintJobDryRun_Seed
-    @PrintJobId INT,
-    @UserId     INT
+    @PrintJobId    INT,
+    @UserId        INT,
+    @PrintDeviceId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @JobType VARCHAR(30), @RefId INT, @Payload NVARCHAR(MAX);
-    SELECT @JobType = job_type, @RefId = ref_id, @Payload = payload
+    DECLARE @JobType VARCHAR(30), @RefId INT, @Payload NVARCHAR(MAX), @SourceDeviceId INT;
+    SELECT @JobType = job_type, @RefId = ref_id, @Payload = payload, @SourceDeviceId = print_device_id
     FROM print_jobs WHERE print_job_id = @PrintJobId AND deleted_at IS NULL;
 
     IF @JobType IS NULL
@@ -54,8 +59,15 @@ BEGIN
         RETURN;
     END
 
-    INSERT INTO print_jobs_dryrun (job_type, ref_id, payload, [status], created_at, created_by)
-    VALUES (@JobType, @RefId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+    DECLARE @FinalDeviceId INT;
+    IF @JobType = 'TEST_PRINT'
+        SET @FinalDeviceId = ISNULL(@PrintDeviceId, @SourceDeviceId);
+    ELSE
+        EXEC SIS_PrintJob_ResolveDevice @JobType = @JobType, @RequestedDeviceId = @PrintDeviceId,
+             @DeviceId = @FinalDeviceId OUTPUT;
+
+    INSERT INTO print_jobs_dryrun (job_type, ref_id, payload, [status], print_device_id, created_at, created_by)
+    VALUES (@JobType, @RefId, @Payload, 'PENDING', @FinalDeviceId, SYSDATETIME(), @UserId);
 
     SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewDryRunPrintJobId;
 END;
@@ -81,7 +93,8 @@ GO
 -- dengan jalur live -- yang dipisah cuma antrian jobnya, bukan konfigurasi printernya.
 CREATE OR ALTER PROCEDURE SIS_PrintJobDryRun_Claim
     @BatchSize INT = 5,
-    @JobTypesCsv NVARCHAR(500) = NULL
+    @JobTypesCsv NVARCHAR(500) = NULL,
+    @DeviceCodesCsv NVARCHAR(500) = NULL     -- sama dengan SIS_PrintJob_Claim (setting DeviceCodes)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -102,19 +115,41 @@ BEGIN
         PrintDeviceId INT
     );
 
-    ;WITH cte AS (
-        SELECT TOP (@BatchSize) pj.*, pjr.print_device_id AS RouteDeviceId
+    -- Prompt 88: aturan device final sama persis dengan SIS_PrintJob_Claim (lihat
+    -- komentar di sql/sp_PrintJob_Manage.sql). Dryrun hanya dipakai PrintService PC,
+    -- jadi selalu dibatasi ke transport WINDOWS/TCP.
+    ;WITH single_route AS (
+        SELECT r.job_type, MIN(r.print_device_id) AS print_device_id
+        FROM print_job_routes r
+        INNER JOIN print_devices d ON d.print_device_id = r.print_device_id
+            AND d.deleted_at IS NULL AND d.is_active = 1
+        WHERE r.deleted_at IS NULL
+        GROUP BY r.job_type
+        HAVING COUNT(*) = 1
+    ),
+    cte AS (
+        SELECT TOP (@BatchSize) pj.*, pd.print_device_id AS FinalDeviceId
         FROM print_jobs_dryrun pj WITH (UPDLOCK, READPAST, ROWLOCK)
-        INNER JOIN print_job_routes pjr ON pjr.job_type = pj.job_type AND pjr.deleted_at IS NULL
-        INNER JOIN print_devices pd ON pd.print_device_id = pjr.print_device_id
+        LEFT JOIN single_route sr ON sr.job_type = pj.job_type
+        INNER JOIN print_devices pd ON pd.print_device_id = ISNULL(pj.print_device_id, sr.print_device_id)
             AND pd.deleted_at IS NULL AND pd.is_active = 1
         WHERE pj.[status] = 'PENDING' AND pj.deleted_at IS NULL
+          AND (
+                (pj.job_type = 'TEST_PRINT' AND pj.print_device_id IS NOT NULL)
+             OR EXISTS (SELECT 1 FROM print_job_routes r2
+                         WHERE r2.job_type = pj.job_type
+                           AND r2.print_device_id = pd.print_device_id
+                           AND r2.deleted_at IS NULL)
+          )
+          AND pd.transport IN ('WINDOWS','TCP')
           AND pj.job_type IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@JobTypesCsv, ','))
+          AND (@DeviceCodesCsv IS NULL OR LTRIM(RTRIM(@DeviceCodesCsv)) = ''
+               OR pd.device_code IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@DeviceCodesCsv, ',')))
         ORDER BY pj.created_at ASC
     )
     UPDATE cte
     SET [status] = 'PRINTING',
-        print_device_id = RouteDeviceId,
+        print_device_id = FinalDeviceId,
         updated_at = SYSDATETIME()
     OUTPUT
         inserted.print_job_id,
@@ -135,7 +170,10 @@ BEGIN
         pd.printer_name AS PrinterName,
         pd.render_mode AS RenderMode,
         pd.chars_per_line AS CharsPerLine,
-        pd.chars_per_line_small AS CharsPerLineSmall
+        pd.chars_per_line_small AS CharsPerLineSmall,
+        pd.transport AS Transport,
+        pd.host AS Host,
+        pd.port AS Port
     FROM @Claimed c
     INNER JOIN print_devices pd ON pd.print_device_id = c.PrintDeviceId;
 END;

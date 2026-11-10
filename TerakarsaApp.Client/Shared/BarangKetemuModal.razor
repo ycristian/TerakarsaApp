@@ -165,6 +165,12 @@
                     </div>
                 }
 
+                @* Prompt 88: barang ketemu selalu mencetak stiker anak -- printer tujuan. *@
+                <div class="mt-2">
+                    <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="printerId"
+                                   CanPrintChanged="v => printerOk = v" />
+                </div>
+
                 @if (!string.IsNullOrEmpty(error))
                 {
                     <div class="alert alert-danger mt-2 mb-0">@error</div>
@@ -200,16 +206,30 @@
     private bool busy;
     private string error = string.Empty;
     private int loadedArticleId;
+    // Prompt 88: printer stiker anak (PrinterPicker).
+    private int? printerId;
+    private bool printerOk = true;
 
     protected override async Task OnParametersSetAsync()
     {
         if (loadedArticleId == ArticleId) return;
         loadedArticleId = ArticleId;
         sizes = await StationApi.GetMissingSizesAsync(ArticleId, ResourceId);
-        // qty NULL = daftar saja, tanpa alokasi.
-        missingList = await StationApi.GetMissingBundlesAsync(null, null, ResourceId, ArticleId);
         selectedSizeId = sizes.Count == 1 ? sizes[0].ArticleSizeId : 0;
         if (selectedSizeId > 0) await ReloadCandidates();
+
+        // Daftar informasi dimuat PALING AKHIR dan dibungkus try/catch: isinya cuma
+        // pelengkap, jadi kegagalannya tidak boleh sampai menahan render form -- dropdown
+        // Size harus tetap terisi walau panggilan ini bermasalah.
+        try
+        {
+            // qty NULL = daftar saja, tanpa alokasi.
+            missingList = await StationApi.GetMissingBundlesAsync(null, null, ResourceId, ArticleId);
+        }
+        catch
+        {
+            missingList = new();
+        }
     }
 
     private async Task OnSizeChanged(ChangeEventArgs e)
@@ -269,7 +289,8 @@
     private bool SubmitDisabled =>
         busy || selectedSizeId <= 0 || qtyFound <= 0
         || (condition != "OK" && string.IsNullOrWhiteSpace(reason))
-        || (manual && ManualTotal != qtyFound);
+        || (manual && ManualTotal != qtyFound)
+        || !printerOk;
 
     private Task Close() => OnClose.InvokeAsync();
 
@@ -290,7 +311,8 @@
             Allocations = manual
                 ? manualQty.Where(kv => kv.Value > 0)
                     .Select(kv => new BundleFoundAllocationRequest { BundleId = kv.Key, Qty = kv.Value }).ToList()
-                : new()
+                : new(),
+            PrintDeviceId = printerId
         });
 
         busy = false;

@@ -164,3 +164,74 @@ PrintService Windows, jadi label dari HP identik byte per byte dengan label dari
   HP ini, sehingga job type label baru tidak butuh update app.
 - Job struk (`render_mode = TOKEN`) tidak bisa diarahkan ke HP: app hanya merakit TSPL.
   Server menolaknya di `SIS_PrintJobRoute_Manage`, dan dropdown web tidak menawarkannya.
+
+---
+
+# Mode Stasiun (Prompt 86)
+
+Untuk tablet/HP stasiun di lantai produksi (1 stasiun = 1 perangkat tetap). Di mode ini app
+langsung membuka halaman `/station` **tanpa login user** dan tanpa layar pilih tujuan.
+Butuh server dengan Prompt 85 terpasang.
+
+## Mengisi kode
+
+1. Di web: **Kelola Stasiun** → tombol gembok **Kunci Kode Login** pada stasiun ybs (atau
+   tombol kunci **Kode Login** kalau sudah terkunci). Muncul kode 10 karakter + QR.
+2. Di app: **Pengaturan** (dari layar login: "Pengaturan server") → bagian **Mode Stasiun**:
+   - nyalakan **Aktifkan Mode Stasiun**;
+   - isi **Kode login stasiun**: ketik, atau **Scan QR kode login** (hasil scan hanya
+     mengisi isian — belum tersimpan);
+   - isi **Nama perangkat**, mis. "Tablet Sewing 1";
+   - tekan **Simpan**. App langsung pindah ke Mode Stasiun dan membuka stasiun.
+
+Kode pairing 5 huruf (sekali pakai, 15 menit) **ditolak** di sini — hanya kode login
+terkunci yang bisa dipakai berulang.
+
+## Arti nama perangkat
+
+Nama ini muncul di perangkat lain yang mencoba memakai stasiun yang sama ("Stasiun ini
+sedang dipakai oleh Tablet Sewing 1 … Ambil alih?") dan di kolom Status Perangkat di
+Kelola Stasiun. Perangkat ini sendiri dikenali dari **ID perangkat** (tampil 8 karakter
+pertamanya di Pengaturan), jadi login ulang di perangkat yang sama tidak memunculkan
+peringatan.
+
+## Kalau kode di-refresh admin
+
+Perangkat yang sedang jalan **tetap jalan**. Begitu tokennya hilang (mis. diambil perangkat
+lain, atau storage WebView terhapus), kode lama ditolak dan app **langsung
+membuka pemindai QR**: scan QR Kode Login yang baru → kode langsung tersimpan → stasiun
+dimuat ulang. Kalau pemindai dibatalkan, halaman stasiun menampilkan tombol **Scan QR kode
+baru** (pemindai tidak membuka sendiri lagi sampai halaman dibuka ulang).
+
+Hal yang sama berlaku kalau kode belum ada: menyalakan Mode Stasiun di Pengaturan atau
+menekan Buka Stasiun tanpa kode langsung membuka pemindai.
+
+Teknis: halaman web meminta pemindai lewat link `terakarsa://scan-station` (otomatis:
+`?auto=1`), yang ditangkap `TerakarsaWebViewClient.ShouldOverrideUrlLoading` dan tidak
+pernah dinavigasikan.
+
+## Perilaku
+
+- Tidak ada tombol "Keluar" di stasiun. Kalau stasiun diambil perangkat lain/diputus admin,
+  muncul kartu "Perangkat ini sudah keluar dari stasiun" dengan tombol **Sambungkan ulang**
+  (login lagi dengan kode yang sama; tetap lewat peringatan "Ambil alih?" kalau stasiun
+  masih dipakai perangkat lain).
+- Pindah jaringan (Lokal ↔ Internet) memuat ulang halaman di alamat baru dan login ulang
+  sendiri tanpa peringatan.
+- Tombol back di halaman awal web kembali ke layar **Mode Stasiun** (Buka Stasiun /
+  Masuk Admin / Pengaturan).
+- **Masuk Admin** membuka login biasa (atau langsung Pilih tujuan kalau token login masih
+  berlaku) tanpa mematikan Mode Stasiun. Keluar/ganti akun kembali ke layar Mode Stasiun.
+- Pengaturan tidak dikunci PIN.
+
+## Keluar dari Mode Stasiun
+
+Pengaturan → matikan **Aktifkan Mode Stasiun** → **Simpan**. App kembali ke layar login
+biasa.
+
+## Catatan teknis
+
+- App hanya menyuntik `stationLockCode`, `stationDeviceId`, `stationDeviceName` ke
+  localStorage WebView (lihat `WebPage` mode stasiun). Klaim, peringatan `DIPAKAI|`, dan
+  login ulang otomatis dikerjakan web; app tidak pernah menyimpan `stationToken`.
+- Pemindai QR: paket `ZXing.Net.Maui.Controls` 0.10.4 (`StationScanPage`).

@@ -52,7 +52,8 @@ else if (Jenis is not null)
             }
 
             <div class="tni-k">Alasan (wajib)</div>
-            <input class="tni-inp" @bind="alasan" @bind:event="oninput"
+            @* data-wedge-ignore (Prompt 90): kolom ketikan manusia, bukan tembakan scanner. *@
+            <input class="tni-inp" @bind="alasan" @bind:event="oninput" data-wedge-ignore
                    placeholder="@(Jenis == "BOX" ? "Salah ambil box" : "Celana salah ukuran")"
                    maxlength="500" />
 

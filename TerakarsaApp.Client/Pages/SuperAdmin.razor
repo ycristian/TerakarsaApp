@@ -314,7 +314,12 @@ else
     <Message>
         <p class="mb-2">Cetak ulang label "@detail?.Bundle.Serial"?</p>
         <label class="form-label">Jumlah Label</label>
-        <input type="number" min="1" class="form-control" @bind="reprintCopies" />
+        <input type="number" min="1" class="form-control mb-2" @bind="reprintCopies" />
+        @if (showReprintModal)
+        {
+            @* Prompt 88: printer tujuan (dropdown hanya kalau >1 printer). *@
+            <PrinterPicker JobType="BUNDLE_LABEL" @bind-Value="reprintPrinterId" />
+        }
         @if (!string.IsNullOrEmpty(reprintModalError))
         {
             <div class="text-danger mt-2">@reprintModalError</div>
@@ -374,6 +379,7 @@ else
     // Fix: modal konfirmasi Cetak Ulang -- user input jumlah label (default 1).
     private bool showReprintModal = false;
     private int reprintCopies = 1;
+    private int? reprintPrinterId;
     private string reprintModalError = string.Empty;
 
     private bool showDeleteBundleModal = false;
@@ -491,7 +497,7 @@ else
 
         isReprinting = true;
         reprintModalError = string.Empty;
-        var result = await SuperAdminApi.ReprintBundleAsync(selectedBundleId.Value, reprintCopies);
+        var result = await SuperAdminApi.ReprintBundleAsync(selectedBundleId.Value, reprintCopies, reprintPrinterId);
         isReprinting = false;
 
         if (!result.Success)

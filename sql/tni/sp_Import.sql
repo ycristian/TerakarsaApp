@@ -494,9 +494,11 @@ BEGIN
         SELECT c.staging_id,
                c.satuan_id,
                c.satuan_code,
-               -- Urutan pemberian nomor: submitted_at lalu baris_ke.
+               -- Urutan pemberian nomor: abjad nama (laporan per satuan jadi urut nama),
+               -- seri submitted_at lalu baris_ke. Personel baru tetap MENYAMBUNG setelah
+               -- nomor terbesar satuan -- nomor lama tidak pernah digeser (fix_79).
                ROW_NUMBER() OVER (PARTITION BY c.satuan_id
-                                  ORDER BY c.submittedAt, c.baris_ke) AS urut_dalam_batch
+                                  ORDER BY c.nama, c.submittedAt, c.baris_ke) AS urut_dalam_batch
         INTO #baru
         FROM #c c
         WHERE c.aksi = 'BARU' AND c.satuan_id IS NOT NULL;

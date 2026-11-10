@@ -23,17 +23,36 @@ namespace TerakarsaApp.Mobile.Platforms.Android;
 // (halaman memakai event di kelas ini). Source tetap diatur lewat MAUI WebView.
 public class TerakarsaWebViewClient : WebViewClient
 {
-    private readonly Action<string> _onPageFinished;
+    // Prompt 86: skema link web -> app (mis. "terakarsa://scan-station" dari /station).
+    public const string SkemaPerintahApp = "terakarsa";
 
-    public TerakarsaWebViewClient(Action<string> onPageFinished)
+    private readonly Action<string> _onPageFinished;
+    private readonly Action<string>? _onPerintahApp;
+
+    public TerakarsaWebViewClient(Action<string> onPageFinished, Action<string>? onPerintahApp = null)
     {
         _onPageFinished = onPageFinished;
+        _onPerintahApp = onPerintahApp;
     }
 
     public override void OnPageFinished(AWebView? view, string? url)
     {
         base.OnPageFinished(view, url);
         if (!string.IsNullOrEmpty(url)) _onPageFinished(url!);
+    }
+
+    // Prompt 86: link "terakarsa://..." TIDAK dinavigasikan (WebView akan menampilkan halaman
+    // error skema tak dikenal) -- diteruskan ke halaman app sebagai perintah.
+    public override bool ShouldOverrideUrlLoading(AWebView? view, IWebResourceRequest? request)
+    {
+        var uri = request?.Url;
+        if (uri is not null && string.Equals(uri.Scheme, SkemaPerintahApp, StringComparison.OrdinalIgnoreCase))
+        {
+            _onPerintahApp?.Invoke(uri.ToString() ?? string.Empty);
+            return true;
+        }
+
+        return base.ShouldOverrideUrlLoading(view, request);
     }
 
     // JANGAN pernah memanggil handler.Proceed() tanpa cek fingerprint.
@@ -117,16 +136,19 @@ public class TerakarsaWebChromeClient : WebChromeClient
             return;
         }
 
-        // Minta izin Android dulu, lalu jawab permintaan web di thread UI.
-        _ = Task.Run(async () =>
+        // Minta izin Android dulu, lalu jawab permintaan web.
+        // WAJIB di thread UI: Permissions.RequestAsync MAUI melempar "Permission request
+        // must be invoked on main thread" kalau dipanggil dari Task.Run -- dulu error itu
+        // tertelan, permintaan web tidak pernah dijawab, dan kotak kamera gelap selamanya.
+        // Permintaan web juga HARUS selalu dijawab (Grant/Deny), apa pun yang terjadi.
+        MainThread.BeginInvokeOnMainThread(async () =>
         {
-            var diberi = await _mintaIzinKamera();
+            bool diberi;
+            try { diberi = await _mintaIzinKamera(); }
+            catch (Exception) { diberi = false; }
 
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
-                if (diberi) request.Grant(new[] { PermissionRequest.ResourceVideoCapture });
-                else request.Deny();
-            });
+            if (diberi) request.Grant(new[] { PermissionRequest.ResourceVideoCapture });
+            else request.Deny();
         });
     }
 
@@ -143,7 +165,8 @@ public static class WebViewGlue
 {
     private static IValueCallback? _fileCallback;
 
-    public static void Pasang(AWebView view, Context context, Action<string> onPageFinished)
+    public static void Pasang(AWebView view, Context context, Action<string> onPageFinished,
+        Action<string>? onPerintahApp = null)
     {
         var pengaturan = view.Settings;
         pengaturan.JavaScriptEnabled = true;
@@ -151,7 +174,7 @@ public static class WebViewGlue
         pengaturan.MediaPlaybackRequiresUserGesture = false;   // kamera scan boleh mulai sendiri
         pengaturan.AllowFileAccess = true;
 
-        view.SetWebViewClient(new TerakarsaWebViewClient(onPageFinished));
+        view.SetWebViewClient(new TerakarsaWebViewClient(onPageFinished, onPerintahApp));
         view.SetWebChromeClient(new TerakarsaWebChromeClient(context, MintaIzinKameraAsync, BukaPemilihFile));
     }
 

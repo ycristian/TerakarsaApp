@@ -313,6 +313,9 @@ public class CuttingBundleTakeRequest
     public int TargetResourceId { get; set; }    // Line/penjahit tujuan
     public int EmployeeId { get; set; }          // penjahit dari master (opsional)
     public int PrintCopies { get; set; } = 1;    // 0 = tidak cetak label
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }
 
 // Hasil mentah dari SIS_CuttingBundle_Take -- dipetakan EF, jadi setiap properti HARUS

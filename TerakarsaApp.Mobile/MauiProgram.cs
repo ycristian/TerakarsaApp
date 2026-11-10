@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using TerakarsaApp.Mobile.Services;
+using ZXing.Net.Maui.Controls;
 
 namespace TerakarsaApp.Mobile;
 
@@ -10,6 +11,8 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            // Prompt 86: pemindai QR kode login stasiun di Pengaturan (StationScanPage).
+            .UseBarcodeReader()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

@@ -673,7 +673,7 @@ CREATE TABLE print_devices(
  print_device_id int primary key identity(1,1),
  device_code varchar(30) not null,          -- 'THERMAL', 'LABEL', 'THERMAL_FINISHING', dst
  device_name varchar(150) not null,         -- nama untuk manusia, mis. 'Struk Lantai 1'
- printer_name varchar(255) not null,        -- nama printer Windows PERSIS
+ printer_name varchar(255) not null,        -- nama printer Windows PERSIS (TCP: 'TCP host:port', informasi saja)
  render_mode varchar(20) not null           -- 'TOKEN' (dirender SP) | 'RAW_TSPL' (dirakit C#)
    constraint CK_print_devices_render_mode check (render_mode in ('TOKEN','RAW_TSPL')),
  chars_per_line int not null default 48,    -- lebar font A
@@ -681,8 +681,14 @@ CREATE TABLE print_devices(
  is_active bit not null default 1,
  -- Prompt 77 (sql/inv/alter_77_print_devices_mobile.sql): pencetak bisa berupa HP
  -- Android (printer Bluetooth) selain PC Windows.
- transport varchar(20) not null default 'WINDOWS'   -- WINDOWS | ANDROID_BT
-   constraint CK_print_devices_transport check (transport in ('WINDOWS','ANDROID_BT')),
+ -- Prompt 88 (sql/alter_88_print_multi_route.sql): + TCP = printer jaringan, dikirim
+ -- PrintService PC lewat socket host:port tanpa didaftarkan di Windows.
+ transport varchar(20) not null default 'WINDOWS'   -- WINDOWS | TCP | ANDROID_BT
+   constraint CK_print_devices_transport check (transport in ('WINDOWS','TCP','ANDROID_BT')),
+ host varchar(100) null,                    -- Prompt 88: TCP saja, mis. '192.168.8.51'
+ port int null,                             -- Prompt 88: TCP saja, umumnya 9100
+ device_group varchar(30) not null          -- Prompt 88: LABEL_BUNDLE | LABEL_BENANG | STRUK_80
+   constraint DF_print_devices_device_group default 'LABEL_BUNDLE',
  device_token varchar(64) null,             -- ANDROID_BT saja; header X-Print-Device-Token
  last_seen_at datetime2 null,               -- terakhir HP mengklaim/melapor job
  last_seen_info varchar(200) null,          -- nama printer BT + versi app
@@ -691,10 +697,13 @@ CREATE TABLE print_devices(
  updated_at datetime2 null,
  updated_by int null,
  deleted_at datetime2 null,
- deleted_by int null
+ deleted_by int null,
+ constraint CK_print_devices_tcp_host check (transport <> 'TCP' or (host is not null and port is not null and port between 1 and 65535))
 );
 
 -- Prompt 48: pemetaan job_type -> printer tujuan.
+-- Prompt 88: satu job_type boleh punya BANYAK device tujuan (unique job_type + device).
+-- >1 device = user wajib memilih printer saat cetak (SIS_PrintJob_ResolveDevice).
 CREATE TABLE print_job_routes(
  print_job_route_id int primary key identity(1,1),
  job_type varchar(30) not null,
@@ -737,6 +746,8 @@ CREATE TABLE print_jobs(
  retry_count int not null default 0,
  printed_at datetime2 null,
  print_device_id int null                   -- Prompt 48: diisi SAAT KLAIM (bukan saat dibuat) --
+                                            -- Prompt 88: ATAU saat dibuat, kalau user memilih
+                                            -- printer (job type >1 route) / TEST_PRINT;
    constraint FK_print_jobs_print_devices    -- catatan printer mana yang benar-benar dipakai;
    foreign key references print_devices(print_device_id),
  created_at datetime2 not null default sysdatetime(),
@@ -936,6 +947,12 @@ CREATE TABLE stations(
  pairing_code_expires_at datetime2 null,
  paired_at datetime2 null,                  -- kapan terakhir perangkat berhasil klaim
  enable_packing bit not null default 0,     -- Prompt 25: stasiun ini boleh membuka modul packing
+ allow_all_divisions bit not null default 0, -- alter_87: boleh pindah divisi per sesi (header X-Station-Division)
+ pairing_code_locked bit not null
+   constraint DF_stations_pairing_code_locked default 0, -- alter_88: 1 = pairing_code permanen (kode login terkunci)
+ paired_device_id varchar(64) null,         -- alter_88: perangkat yang terakhir klaim (peringatan DIPAKAI|)
+ paired_device_name nvarchar(100) null,
+ last_seen_at datetime2 null,               -- alter_88: terakhir perangkat pemegang token memanggil API
  created_at datetime2 not null default sysdatetime(),
  created_by int not null,
  updated_at datetime2 null,
@@ -1188,6 +1205,12 @@ CREATE TABLE manual_outputs(
                                             -- mengubah fakta qty)
    constraint FK_mo_articles foreign key references articles(article_id),
  work_description nvarchar(300) not null,   -- wajib, mis. 'kaos polos hitam pak Budi'
+ output_date date not null                  -- alter_86: TANGGAL KERJAANNYA TERJADI, diisi PIC
+                                            -- di form (bawaan = tanggal yang sedang dipilih di
+                                            -- tab OUT). BEDA dari created_at, yang cuma stempel
+                                            -- kapan barisnya diketik. TIDAK menentukan periode
+                                            -- gajian -- itu tetap dari lock.
+   constraint DF_mo_output_date default (cast(sysdatetime() as date)),
  size_name varchar(50) null,                -- teks bebas, BUKAN FK ke size_pack_details
  qty int not null default 0,                -- boleh 0 ATAU MINUS. Baris minus = CATATAN
                                             -- POTONGAN: PIC menulis kronologi + usulan
@@ -1584,7 +1607,7 @@ CREATE UNIQUE INDEX UX_drp_plan_resource       ON daily_resource_plans(daily_div
 CREATE UNIQUE INDEX UX_dashboard_tokens_token  ON dashboard_tokens(dashboard_token) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_dashboard_tokens_name   ON dashboard_tokens(token_name) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_print_devices_code      ON print_devices(device_code) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX UX_print_job_routes_type   ON print_job_routes(job_type) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_print_job_routes_type_device ON print_job_routes(job_type, print_device_id) WHERE deleted_at IS NULL; -- Prompt 88
 CREATE UNIQUE INDEX UX_print_kupon_job_types_job_type ON print_kupon_job_types(job_type) WHERE deleted_at IS NULL;
 -- Prompt 55.
 CREATE UNIQUE INDEX UX_payroll_periods_year_no ON payroll_periods(period_year, period_no) WHERE deleted_at IS NULL;
@@ -1675,6 +1698,8 @@ CREATE INDEX IX_wli_lock_id         ON workflow_lock_items(lock_id) WHERE delete
 CREATE INDEX IX_mo_division_lock    ON manual_outputs(division_id, lock_id) INCLUDE (resource_id, article_id, qty) WHERE deleted_at IS NULL;
 CREATE INDEX IX_mo_lock_id          ON manual_outputs(lock_id)    WHERE deleted_at IS NULL;
 CREATE INDEX IX_mo_article_id       ON manual_outputs(article_id) WHERE deleted_at IS NULL;
+-- alter_86: tab OUT mengambil per divisi lalu mengurutkan tanggal transaksi.
+CREATE INDEX IX_mo_division_date    ON manual_outputs(division_id, output_date DESC) INCLUDE (resource_id, qty, lock_id) WHERE deleted_at IS NULL;
 
 -- Prompt 83: TEPAT SATU dari workflow_log_id / manual_output_id terisi, sesuai source.
 ALTER TABLE workflow_lock_items ADD CONSTRAINT CK_wli_source CHECK (

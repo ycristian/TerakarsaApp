@@ -104,7 +104,11 @@ BEGIN
         ReceivedAt DATETIME2 NULL, ReceivedByResourceId INT NULL, ReceivedByResourceName VARCHAR(255) NULL, ReceivedRemark VARCHAR(500) NULL,
         -- Prompt 82: rantai qty bertanda + jenis baris, supaya timeline kartu scan bisa
         -- membaca '-5 (Split)' / 'Hilang 3 pcs' tanpa menebak dari kolom reject lama.
-        LogKind VARCHAR(15) NULL, QtyDelta INT NULL, QtyAfter INT NULL, Reason VARCHAR(500) NULL
+        LogKind VARCHAR(15) NULL, QtyDelta INT NULL, QtyAfter INT NULL, Reason VARCHAR(500) NULL,
+        -- Ad hoc (2026-11-02): split yang melahirkan/berasal dari baris ini -- dasar
+        -- SplitChildrenJson & SplitMissingQty di result set timeline. Kolom WAJIB terakhir:
+        -- INSERT di bawah tanpa daftar kolom, jadi urutannya harus sama persis.
+        SplitId INT NULL
     );
 
     INSERT INTO @Timeline
@@ -117,7 +121,8 @@ BEGIN
            awl.target_division_id, td.division_name,
            awl.created_at,
            awl.received_at, awl.received_by_resource_id, rr.resource_name, awl.received_remark,
-           awl.log_kind, awl.qty_delta, awl.qty_after, awl.reason
+           awl.log_kind, awl.qty_delta, awl.qty_after, awl.reason,
+           awl.split_id
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     LEFT JOIN divisions d ON d.division_id = awl.division_id
@@ -584,12 +589,20 @@ BEGIN
         b.parent_bundle_id AS ParentBundleId,
         b.root_bundle_id AS RootBundleId,
         rb.bundle_no AS RootBundleNo,
+        -- Ad hoc (2026-11-02): identitas INDUK LANGSUNG -- dasar tautan "ke K-562" di kartu
+        -- bundle anak. Serial-nya yang dipakai, karena rute halamannya /b/{serial}.
+        -- ParentSequenceNo > 0 berarti induknya sendiri bundle anak (pohon bertingkat), jadi
+        -- labelnya ikut '-{seq}'. NULL kalau bundle ini induk utama.
+        pb.serial AS ParentSerial,
+        pb.sequence_no AS ParentSequenceNo,
         b.[status] AS BundleStatus,
         b.reject_category AS RejectCategory,
         b.reject_reason AS RejectReason,
         b.missing_qty AS MissingQty
     FROM bundles b
     INNER JOIN bundles rb ON rb.bundle_id = b.root_bundle_id
+    -- Induk langsung. LEFT: induk utama tidak punya parent_bundle_id.
+    LEFT JOIN bundles pb ON pb.bundle_id = b.parent_bundle_id AND pb.deleted_at IS NULL
     INNER JOIN article_sizes asz ON asz.article_size_id = b.article_size_id
     INNER JOIN size_pack_details spd ON spd.size_pack_detail_id = asz.size_pack_detail_id
     INNER JOIN articles a ON a.article_id = b.article_id
@@ -599,12 +612,53 @@ BEGIN
     WHERE b.bundle_id = @BundleId;
 
     -- 2. Timeline lengkap
-    SELECT Id, StepName, SortOrder, SizeName, DivisionName, ResourceName,
-           QtyOk, QtyRejectPrint, QtyRejectFabric, QtyRejectSewing, QtyRejectRework, QtyLost, LogType,
-           TargetDivisionName, CreatedAt, ReceivedAt, ReceivedByResourceName, ReceivedRemark,
-           LogKind, QtyDelta, QtyAfter, Reason
-    FROM @Timeline
-    ORDER BY SortOrder ASC, CreatedAt ASC;
+    --
+    -- Ad hoc (2026-11-02): tiap baris membawa INFO PEMECAHAN -- bundle anak yang lahir dari
+    -- pernyataan Kirim Hasil baris itu (SplitChildrenJson, dipakai client jadi tautan ke
+    -- /b/{serial} anak) + pcs yang dinyatakan hilang (SplitMissingQty). Rumus keduanya SAMA
+    -- PERSIS dengan SIS_Station_PendingHandover supaya angka di /b/{serial} dan tab OUT tidak
+    -- pernah berbeda.
+    --
+    -- SYARAT PENTING `s.source_bundle_id = @BundleId`: satu split_id dipakai bersama oleh
+    -- baris Kirim induk DAN baris 'Creation' tiap anaknya. Tanpa syarat ini, halaman sebuah
+    -- bundle ANAK akan menampilkan saudara-saudaranya seolah anak dari dirinya sendiri, dan
+    -- SplitMissingQty-nya jadi angka ngawur (qty_after anak dipakai sebagai OK induk).
+    SELECT t.Id, t.StepName, t.SortOrder, t.SizeName, t.DivisionName, t.ResourceName,
+           t.QtyOk, t.QtyRejectPrint, t.QtyRejectFabric, t.QtyRejectSewing, t.QtyRejectRework, t.QtyLost, t.LogType,
+           t.TargetDivisionName, t.CreatedAt, t.ReceivedAt, t.ReceivedByResourceName, t.ReceivedRemark,
+           t.LogKind, t.QtyDelta, t.QtyAfter, t.Reason,
+           (
+               SELECT ch.bundle_id AS BundleId, ch.serial AS Serial,
+                      rbc.bundle_no AS RootBundleNo, pc.bundle_letter AS BundleLetter,
+                      ch.sequence_no AS SequenceNo,
+                      spdc.size_name AS SizeName, ch.qty AS Qty,
+                      ch.[status] AS [Status], ch.reject_category AS RejectCategory,
+                      ch.reject_reason AS RejectReason
+               FROM bundle_splits s
+               INNER JOIN bundle_split_results sr ON sr.split_id = s.split_id
+               INNER JOIN bundles ch ON ch.bundle_id = sr.bundle_id AND ch.deleted_at IS NULL
+               INNER JOIN bundles rbc ON rbc.bundle_id = ch.root_bundle_id
+               INNER JOIN articles ac ON ac.article_id = ch.article_id
+               INNER JOIN projects pc ON pc.project_id = ac.project_id
+               INNER JOIN article_sizes aszc ON aszc.article_size_id = ch.article_size_id
+               INNER JOIN size_pack_details spdc ON spdc.size_pack_detail_id = aszc.size_pack_detail_id
+               WHERE s.split_id = t.SplitId AND s.source_bundle_id = @BundleId
+               ORDER BY ch.sequence_no
+               FOR JSON PATH
+           ) AS SplitChildrenJson,
+           -- Hilang = Masuk - QtyOK - Sigma anak. Boleh NEGATIF pada baris koreksi (edit yang
+           -- mengembalikan selisih). Angkanya memang tidak disimpan di mana pun: baris log
+           -- 'Hilang' penyertanya ber-qty 0 dan hanya menulis jumlahnya sebagai teks di reason.
+           ISNULL((
+               SELECT s.source_qty_before - t.QtyAfter
+                      - ISNULL((SELECT SUM(sr.qty) FROM bundle_split_results sr
+                                WHERE sr.split_id = s.split_id), 0)
+               FROM bundle_splits s
+               WHERE s.split_id = t.SplitId AND s.kind = 'split'
+                 AND s.source_bundle_id = @BundleId
+           ), 0) AS SplitMissingQty
+    FROM @Timeline t
+    ORDER BY t.SortOrder ASC, t.CreatedAt ASC;
 
     -- Prompt 28: allowed_adjust + saldo per step ber-bundle milik @DivisionId (untuk tombol +
     -- prefill panel Penyesuaian di BundleScanCard) -- dihitung terpisah dari @AllowedAction di

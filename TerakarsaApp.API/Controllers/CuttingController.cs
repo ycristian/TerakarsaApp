@@ -92,10 +92,12 @@ public class CuttingController : ControllerBase
         => Hasil(await _cutting.DeleteSpreadAsync(id, CurrentUserId));
 
     // bundleIds kosong = cetak semua bundle hamparan (sekalian MARK_PRINTED).
+    // Prompt 88: printDeviceId = printer pilihan user (wajib kalau CUTTING_BUNDLE_LABEL
+    // punya >1 printer -- SP menolak sebelum ada job dibuat).
     [HttpPost("spreads/{id:int}/print")]
-    public async Task<IActionResult> PrintSpread(int id, [FromBody] List<int>? bundleIds)
+    public async Task<IActionResult> PrintSpread(int id, [FromBody] List<int>? bundleIds, [FromQuery] int? printDeviceId)
     {
-        var (success, error, jobs) = await _cutting.PrintAsync(id, bundleIds, CurrentUserId);
+        var (success, error, jobs) = await _cutting.PrintAsync(id, bundleIds, CurrentUserId, printDeviceId);
         return success ? Ok(new { jobCount = jobs }) : BadRequest(new { message = error });
     }
 

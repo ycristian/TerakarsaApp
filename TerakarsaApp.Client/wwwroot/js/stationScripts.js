@@ -38,3 +38,22 @@ window.scrollElementIntoView = (elementId) => {
     const el = document.getElementById(elementId);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
 };
+
+// Prompt 85: nama perangkat default untuk /station di browser biasa (app Android menyuntik
+// namanya sendiri). Model HP tidak tersedia -- Chrome sengaja menyembunyikannya dari user agent.
+window.stationDeviceLabel = () => {
+    const ua = navigator.userAgent || "";
+    const browser = /Edg\//.test(ua) ? "Edge"
+        : /SamsungBrowser\//.test(ua) ? "Samsung Internet"
+        : /Firefox\//.test(ua) ? "Firefox"
+        : /Chrome\//.test(ua) ? "Chrome"
+        : /Safari\//.test(ua) ? "Safari"
+        : "Browser";
+    const os = /Android/.test(ua) ? "Android"
+        : /iPhone|iPad|iPod/.test(ua) ? "iOS"
+        : /Windows/.test(ua) ? "Windows"
+        : /Mac OS X/.test(ua) ? "macOS"
+        : /Linux/.test(ua) ? "Linux"
+        : "";
+    return os ? `${browser} · ${os}` : browser;
+};

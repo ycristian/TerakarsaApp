@@ -41,3 +41,25 @@ public class TniKartuUkuran
     public string Label { get; set; } = string.Empty;
     public decimal? Nilai { get; set; }
 }
+
+// 2026-11-09: struk REKAP SIZE yang tercetak sebelum kartu-kartu satu kali cetak.
+// job_type tetap TNI_KARTU (printer sama); dibedakan dari kartu lewat Jenis = "REKAP".
+// Kartu biasa tidak punya properti jenis sama sekali.
+public class TniKartuRekapPayload
+{
+    public const string JenisRekap = "REKAP";
+
+    public string Jenis { get; set; } = JenisRekap;
+    public string JudulOrder { get; set; } = string.Empty;
+    public string? Waktu { get; set; }                         // 'dd/MM/yyyy HH:mm'
+    public string? Petugas { get; set; }
+    public int TotalKartu { get; set; }
+    public List<TniKartuRekapItem> Celana { get; set; } = new();
+    public List<TniKartuRekapItem> Kemeja { get; set; } = new();
+}
+
+public class TniKartuRekapItem
+{
+    public string Kode { get; set; } = string.Empty;           // kode pola, mis. '34_P'
+    public int Jumlah { get; set; }
+}

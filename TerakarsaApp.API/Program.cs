@@ -53,6 +53,16 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0
         }));
 
+    // Prompt 85: claim stasiun anonim + kode login terkunci permanen -> batasi tebakan kode.
+    options.AddPolicy("station-claim", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 10,
+            QueueLimit = 0
+        }));
+
     options.OnRejected = async (context, cancellationToken) =>
     {
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -83,6 +93,7 @@ builder.Services.AddScoped<ArticlePhotoService>();
 builder.Services.AddScoped<WorkflowTemplateService>();
 builder.Services.AddScoped<ArticleWorkflowService>();
 builder.Services.AddScoped<StationService>();
+builder.Services.AddSingleton<StationPresenceTracker>();
 builder.Services.AddScoped<WorkflowLogService>();
 builder.Services.AddScoped<WorkflowLockService>();
 builder.Services.AddScoped<BundleService>();
@@ -118,12 +129,18 @@ builder.Services.AddScoped<TniPerintahKerjaService>();
 builder.Services.AddScoped<TniScanService>();
 builder.Services.AddScoped<TniBoxService>();
 builder.Services.AddScoped<TniBoxPdfService>();
+builder.Services.AddScoped<TniLaporanPersonelPdfService>();   // Prompt 89
 builder.Services.AddScoped<TniPembatalanService>();
 builder.Services.AddScoped<TniDashboardService>();
 // Perangkat TNI tanpa login (pairing, seperti stasiun) + petugas per sesi.
 builder.Services.AddScoped<TniPerangkatService>();
 builder.Services.AddScoped<TniKomplainService>();
 builder.Services.Configure<TniOptions>(builder.Configuration.GetSection("Tni"));
+// Audit log lokal TNI (file di Tni:AuditLog:Folder): jurnal request tulis +
+// snapshot/diff berkala yang menandai perubahan TANPA LOG.
+builder.Services.Configure<TniAuditLogOptions>(builder.Configuration.GetSection("Tni:AuditLog"));
+builder.Services.AddSingleton<TniAuditJurnal>();
+builder.Services.AddHostedService<TniAuditSnapshotService>();
 // Prompt 70: absensi RFID. GateService dipakai perangkat gate (tanpa login, X-Gate-Api-Key),
 // AttendanceService dipakai halaman admin /attendance (JWT + module HR_ATTENDANCE).
 builder.Services.AddScoped<GateService>();
@@ -175,6 +192,8 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 
 app.UseCors("AllowBlazor");
 app.UseAuthentication();
+// Setelah Authentication (user JWT terbaca), sebelum Authorization (401/403 ikut tercatat).
+app.UseMiddleware<TniAuditJurnalMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();

@@ -18,6 +18,10 @@ public class PrintJobClaimRequest
     // Prompt 77: info device yang dicatat ke print_devices.last_seen_info saat app
     // Android mengklaim (nama printer Bluetooth + versi app). Diabaikan jalur lama.
     public string? DeviceInfo { get; set; }
+
+    // Setting DeviceCodes PrintService: hanya klaim job untuk device_code ini.
+    // Kosong = semua printer PC (WINDOWS/TCP).
+    public List<string> DeviceCodes { get; set; } = new();
 }
 
 public class PrintJobClaimedDto
@@ -38,6 +42,13 @@ public class PrintJobClaimedDto
     public string RenderMode { get; set; } = string.Empty;
     public int CharsPerLine { get; set; }
     public int CharsPerLineSmall { get; set; }
+
+    // Prompt 88: cara kirim ke printer. WINDOWS = nama printer Windows (PrinterName, winspool);
+    // TCP = socket langsung ke Host:Port (printer jaringan, tanpa didaftarkan di Windows);
+    // ANDROID_BT = HP (app Android). Diisi SP klaim dari print_devices.transport.
+    public string Transport { get; set; } = "WINDOWS";
+    public string? Host { get; set; }
+    public int? Port { get; set; }
 }
 
 public class PrintJobReportRequest
@@ -482,7 +493,11 @@ public class PrintDeviceDto
     public string DeviceName { get; set; } = string.Empty;
     public string PrinterName { get; set; } = string.Empty;
     public string RenderMode { get; set; } = string.Empty;
-    public string Transport { get; set; } = string.Empty;   // WINDOWS | ANDROID_BT
+    public string Transport { get; set; } = string.Empty;   // WINDOWS | TCP | ANDROID_BT
+    // Prompt 88: printer jaringan (TCP) + grup ukuran/jenis.
+    public string? Host { get; set; }
+    public int? Port { get; set; }
+    public string DeviceGroup { get; set; } = string.Empty; // LABEL_BUNDLE | LABEL_BENANG | STRUK_80
     public bool IsActive { get; set; }
     public DateTime? LastSeenAt { get; set; }
     public string? LastSeenInfo { get; set; }
@@ -490,6 +505,9 @@ public class PrintDeviceDto
     public string? JobTypes { get; set; }                   // "BUNDLE_LABEL, PACK_LABEL"
 
     public bool IsAndroid => Transport == "ANDROID_BT";
+    public bool IsTcp => Transport == "TCP";
+
+    public string TransportLabel => PrintDeviceLabels.Transport(Transport);
 
     public string Label => $"{DeviceName} ({DeviceCode})";
 }
@@ -503,8 +521,15 @@ public class PrintJobRouteDto
     public string DeviceName { get; set; } = string.Empty;
     public string Transport { get; set; } = string.Empty;
     public string RenderMode { get; set; } = string.Empty;
+    public string DeviceGroup { get; set; } = string.Empty;
     public bool DeviceAktif { get; set; }
+
+    // Hitungan per job_type (sama di semua baris job_type yang sama).
     public int JobMenunggu { get; set; }
+    // Prompt 88: job PENDING yang TIDAK BISA diklaim (lihat SIS_PrintJob_Claim).
+    public int TertahanNonaktif { get; set; }      // printer pilihan job nonaktif/dihapus
+    public int TertahanBukanRoute { get; set; }    // printer pilihan job sudah dilepas dari routing
+    public int TertahanTanpaPilihan { get; set; }  // job tanpa printer, padahal job type >1 printer
 }
 
 public class PrintDeviceRegisterRequest
@@ -523,10 +548,74 @@ public class PrintDeviceRegisterResult
     public string DeviceToken { get; set; } = string.Empty;
 }
 
+// Prompt 88: daftar LENGKAP device tujuan job_type (route lain di-soft-delete).
 public class PrintJobRouteSetRequest
 {
     public string JobType { get; set; } = string.Empty;
+    public List<int> PrintDeviceIds { get; set; } = new();
+}
+
+// Prompt 88: tambah/ubah device cetak PC dari halaman /admin/printer.
+public class PrintDeviceSaveRequest
+{
+    public string DeviceCode { get; set; } = string.Empty;   // hanya dipakai saat tambah
+    public string DeviceName { get; set; } = string.Empty;
+    public string Transport { get; set; } = "TCP";          // WINDOWS | TCP
+    public string? PrinterName { get; set; }                 // WINDOWS saja
+    public string? Host { get; set; }                        // TCP saja
+    public int? Port { get; set; } = 9100;                   // TCP saja
+    public string RenderMode { get; set; } = "RAW_TSPL";
+    public string DeviceGroup { get; set; } = "LABEL_BUNDLE";
+    public bool IsActive { get; set; } = true;
+}
+
+// Prompt 88: satu pilihan di PrinterPicker (SIS_PrintDevice_ListForJobType).
+public class PrintDeviceOptionDto
+{
     public int PrintDeviceId { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+    public string DeviceGroup { get; set; } = string.Empty;
+    public string Transport { get; set; } = string.Empty;
+
+    public string TransportLabel => PrintDeviceLabels.Transport(Transport);
+}
+
+// Prompt 88: payload job TEST_PRINT (SIS_PrintDevice_Manage @Action = 'TEST_PRINT').
+public class TestPrintPayload
+{
+    [JsonPropertyName("device_code")]
+    public string DeviceCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("device_name")]
+    public string DeviceName { get; set; } = string.Empty;
+
+    [JsonPropertyName("requested_at")]
+    public DateTime RequestedAt { get; set; }
+
+    [JsonPropertyName("text")]
+    public string Text { get; set; } = string.Empty;
+}
+
+public static class PrintDeviceLabels
+{
+    public const string TestPrintJobType = "TEST_PRINT";
+
+    public static readonly string[] Groups = { "LABEL_BUNDLE", "LABEL_BENANG", "STRUK_80" };
+
+    public static string Transport(string? transport) => transport switch
+    {
+        "ANDROID_BT" => "HP Bluetooth",
+        "TCP" => "PC Jaringan",
+        _ => "PC Windows"
+    };
+
+    public static string Group(string? group) => group switch
+    {
+        "LABEL_BUNDLE" => "Label bundle 10x5",
+        "LABEL_BENANG" => "Label benang 30x20",
+        "STRUK_80" => "Struk 80 mm",
+        _ => group ?? string.Empty
+    };
 }
 
 // Prompt 79: payload job_type CUTTING_BUNDLE_LABEL -- stiker bundle yang dibentuk

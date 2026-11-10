@@ -45,27 +45,32 @@ public class PrintJobService
     // SP lalu membatasi klaim ke job yang route-nya mengarah ke device itu. Jalur API key
     // (PrintService Windows) tetap mengirim @DeviceId NULL, jadi perilakunya tidak berubah.
     // Jalur dryrun TIDAK punya device: dryrun hanya dipakai PrintService Windows.
+    // deviceCodes: setting DeviceCodes PrintService -- worker hanya mengklaim job untuk
+    // device_code ini. Kosong = semua printer PC.
     public async Task<List<PrintJobClaimedDto>> ClaimAsync(int batchSize, List<string> jobTypes, bool dryRun,
-        int? deviceId = null)
+        int? deviceId = null, List<string>? deviceCodes = null)
     {
         var effectiveDryRun = _options.DryRun || dryRun;
         var batchSizeParam = new SqlParameter("@BatchSize", batchSize);
         var jobTypesCsvParam = new SqlParameter("@JobTypesCsv", (object?)(jobTypes.Count > 0 ? string.Join(',', jobTypes) : null) ?? DBNull.Value);
+        var codes = deviceCodes?.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).ToList() ?? new();
+        var deviceCodesCsvParam = new SqlParameter("@DeviceCodesCsv", codes.Count > 0 ? string.Join(',', codes) : DBNull.Value);
 
         if (effectiveDryRun)
         {
             return await _db.Database
                 .SqlQueryRaw<PrintJobClaimedDto>(
-                    "EXEC SIS_PrintJobDryRun_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv",
-                    batchSizeParam, jobTypesCsvParam)
+                    "EXEC SIS_PrintJobDryRun_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv, @DeviceCodesCsv = @DeviceCodesCsv",
+                    batchSizeParam, jobTypesCsvParam, deviceCodesCsvParam)
                 .ToListAsync();
         }
 
         return await _db.Database
             .SqlQueryRaw<PrintJobClaimedDto>(
-                "EXEC SIS_PrintJob_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv, @DeviceId = @DeviceId",
+                "EXEC SIS_PrintJob_Claim @BatchSize = @BatchSize, @JobTypesCsv = @JobTypesCsv, @DeviceId = @DeviceId, @DeviceCodesCsv = @DeviceCodesCsv",
                 batchSizeParam, jobTypesCsvParam,
-                new SqlParameter("@DeviceId", deviceId ?? (object)DBNull.Value))
+                new SqlParameter("@DeviceId", deviceId ?? (object)DBNull.Value),
+                deviceCodesCsvParam)
             .ToListAsync();
     }
 

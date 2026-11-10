@@ -123,7 +123,8 @@ public class BundleSplitService
             new SqlParameter("@ActingDivisionId", (object?)actingDivisionId ?? DBNull.Value),
             new SqlParameter("@ActingAllowResourceChange", allowResourceChange),
             new SqlParameter("@PublicBaseUrl", _publicBaseUrl),
-            new SqlParameter("@UserId", userId)
+            new SqlParameter("@UserId", userId),
+            new SqlParameter("@PrintDeviceId", (object?)request.PrintDeviceId ?? DBNull.Value)
         };
 
         try
@@ -133,7 +134,8 @@ public class BundleSplitService
                     "EXEC SIS_BundleSplit_Manage @Action = @Action, @BundleId = @BundleId, @ArticleWorkflowId = @ArticleWorkflowId, "
                     + "@QtyOk = @QtyOk, @ResultsJson = @ResultsJson, @AutoReceiveResourceId = @AutoReceiveResourceId, "
                     + "@ResourceId = @ResourceId, @ActingDivisionId = @ActingDivisionId, "
-                    + "@ActingAllowResourceChange = @ActingAllowResourceChange, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
+                    + "@ActingAllowResourceChange = @ActingAllowResourceChange, @PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId, "
+                    + "@PrintDeviceId = @PrintDeviceId",
                     parameters)
                 .ToListAsync();
 
@@ -163,7 +165,8 @@ public class BundleSplitService
             new SqlParameter("@ResourceId", resourceId),
             new SqlParameter("@ActingDivisionId", (object?)actingDivisionId ?? DBNull.Value),
             new SqlParameter("@PublicBaseUrl", _publicBaseUrl),
-            new SqlParameter("@UserId", userId)
+            new SqlParameter("@UserId", userId),
+            new SqlParameter("@PrintDeviceId", (object?)request.PrintDeviceId ?? DBNull.Value)
         };
 
         try
@@ -173,7 +176,7 @@ public class BundleSplitService
                     "EXEC SIS_BundleSplit_Manage @Action = @Action, @ArticleSizeId = @ArticleSizeId, @QtyFound = @QtyFound, "
                     + "@Condition = @Condition, @Reason = @Reason, @AllocationJson = @AllocationJson, "
                     + "@ResourceId = @ResourceId, @ActingDivisionId = @ActingDivisionId, "
-                    + "@PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
+                    + "@PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId",
                     parameters)
                 .ToListAsync();
 

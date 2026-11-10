@@ -161,7 +161,7 @@ CREATE TABLE tni.box(
    constraint FK_tni_box_satuan foreign key references tni.satuan(satuan_id),
  urut int not null,                         -- urut dalam pemiliknya (per satuan; per area untuk gabungan)
  box_code varchar(30) not null,             -- BDG-DTJ-01, gabungan BDG-GAB-01
- kapasitas int not null default 50,
+ kapasitas int not null default 52,         -- acuan saja, isi boleh melebihi (alter_79)
  packed_at datetime2 null,                  -- box ditutup
  packed_by int null,
  shipped_at datetime2 null,                 -- box terkirim
@@ -593,8 +593,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_tni_perangkat_menu' AN
     CREATE UNIQUE INDEX UX_tni_perangkat_menu ON tni.perangkat_menu(perangkat_id, menu_code) WHERE deleted_at IS NULL;
 GO
 
--- 2026-10-07 (alter_76): header SETORAN stok -- satu setoran per
--- (order, tanggal, supplier); setoran kedua dengan kunci sama digabung.
+-- 2026-10-07 (alter_76): header SETORAN stok.
+-- 2026-11-09 (alter_80): satu header per INPUT (tidak digabung per tanggal &
+-- supplier lagi) -- unique index (order, tanggal, supplier) dibongkar.
 -- stok_mutasi.tanggal/supplier tetap diisi & disinkronkan SIS_Stok_Manage.
 IF OBJECT_ID('tni.stok_setoran','U') IS NULL
 CREATE TABLE tni.stok_setoran(
@@ -613,9 +614,12 @@ CREATE TABLE tni.stok_setoran(
  deleted_by int null
 );
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_tni_stok_setoran_kunci' AND object_id = OBJECT_ID('tni.stok_setoran'))
-    CREATE UNIQUE INDEX UX_tni_stok_setoran_kunci
-        ON tni.stok_setoran(order_id, tanggal, supplier) WHERE deleted_at IS NULL;
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_tni_stok_setoran_kunci' AND object_id = OBJECT_ID('tni.stok_setoran'))
+    DROP INDEX UX_tni_stok_setoran_kunci ON tni.stok_setoran;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_tni_stok_setoran_tanggal' AND object_id = OBJECT_ID('tni.stok_setoran'))
+    CREATE INDEX IX_tni_stok_setoran_tanggal
+        ON tni.stok_setoran(order_id, tanggal) WHERE deleted_at IS NULL;
 GO
 IF COL_LENGTH('tni.stok_mutasi','setoran_id') IS NULL
     ALTER TABLE tni.stok_mutasi ADD setoran_id int null
@@ -659,4 +663,17 @@ IF COL_LENGTH('tni.stok_mutasi','keluar_id') IS NULL
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_tni_stok_mutasi_keluar' AND object_id = OBJECT_ID('tni.stok_mutasi'))
     CREATE INDEX IX_tni_stok_mutasi_keluar ON tni.stok_mutasi(keluar_id) WHERE deleted_at IS NULL;
+GO
+
+-- 2026-11-09 (alter_78): bintang PRIORITAS satuan di Perintah Kerja.
+-- prioritas_at terisi = berbintang; diubah hanya lewat tni.SIS_Satuan_Manage (sp_Satuan.sql).
+IF COL_LENGTH('tni.satuan','prioritas_at') IS NULL
+    ALTER TABLE tni.satuan ADD prioritas_at datetime2 null;
+GO
+IF COL_LENGTH('tni.satuan','prioritas_by') IS NULL
+    ALTER TABLE tni.satuan ADD prioritas_by int null;
+GO
+IF COL_LENGTH('tni.satuan','prioritas_perangkat_id') IS NULL
+    ALTER TABLE tni.satuan ADD prioritas_perangkat_id int null
+        constraint FK_tni_satuan_prioritas_perangkat foreign key references tni.perangkat(perangkat_id);
 GO

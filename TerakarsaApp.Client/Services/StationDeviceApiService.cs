@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Cutting;
@@ -6,6 +7,7 @@ using TerakarsaApp.Shared.Employees;
 using TerakarsaApp.Shared.ManualOutputs;
 using TerakarsaApp.Shared.Packs;
 using TerakarsaApp.Shared.Positions;
+using TerakarsaApp.Shared.PrintJobs;
 using TerakarsaApp.Shared.Payroll;
 using TerakarsaApp.Shared.Projects;
 using TerakarsaApp.Shared.Resources;
@@ -13,6 +15,8 @@ using TerakarsaApp.Shared.Stations;
 using TerakarsaApp.Shared.WorkflowLogs;
 
 namespace TerakarsaApp.Client.Services;
+
+public enum StationMeStatus { Ok, Unauthorized, Unreachable }
 
 // Dipakai khusus oleh halaman /station (perangkat, tanpa login). HttpClient-nya
 // disuntikkan lewat typed client "StationDeviceAPI" yang memakai StationTokenHandler,
@@ -33,18 +37,60 @@ public class StationDeviceApiService
         return await response.Content.ReadFromJsonAsync<StationMeDto>();
     }
 
+    // Prompt 84: seperti GetMeAsync, tapi membedakan "token ditolak" (401) dari "server tidak
+    // terjangkau" (503 saat API restart, 500, jaringan putus). Hanya Unauthorized yang boleh
+    // membuat halaman menghapus token -- token tetap sah di DB selama API sekadar restart.
+    public async Task<(StationMeStatus Status, StationMeDto? Station)> CheckMeAsync()
+    {
+        try
+        {
+            var response = await _http.GetAsync("api/station/me");
+            if (response.StatusCode == HttpStatusCode.Unauthorized) return (StationMeStatus.Unauthorized, null);
+            if (!response.IsSuccessStatusCode) return (StationMeStatus.Unreachable, null);
+
+            var me = await response.Content.ReadFromJsonAsync<StationMeDto>();
+            return me is null ? (StationMeStatus.Unreachable, null) : (StationMeStatus.Ok, me);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return (StationMeStatus.Unreachable, null);
+        }
+    }
+
     // Prompt 20: tukar kode pairing dengan station_token baru. Endpoint anonim di sisi
     // server -- StationTokenHandler cukup tidak mengirim header saat belum ada token tersimpan.
-    public async Task<(bool Success, string Error, StationTokenResult? Result)> ClaimAsync(string code)
+    // Prompt 85: + identitas perangkat & Force (ambil alih setelah konfirmasi "DIPAKAI|").
+    // Unreachable = server tidak menjawab (5xx/jaringan putus) -- beda penanganan dari kode
+    // yang memang ditolak.
+    public async Task<(bool Success, string Error, StationTokenResult? Result, bool Unreachable)> ClaimAsync(
+        string code, string? deviceId = null, string? deviceName = null, bool force = false)
     {
-        var response = await _http.PostAsJsonAsync("api/station-device/claim", new StationClaimRequest { Code = code });
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.PostAsJsonAsync("api/station-device/claim", new StationClaimRequest
+            {
+                Code = code,
+                DeviceId = deviceId,
+                DeviceName = deviceName,
+                Force = force
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return (false, "Server tidak terjangkau.", null, true);
+        }
+
         if (response.IsSuccessStatusCode)
         {
             var result = await response.Content.ReadFromJsonAsync<StationTokenResult>();
-            return (true, string.Empty, result);
+            return (true, string.Empty, result, false);
         }
+        if ((int)response.StatusCode >= 500)
+            return (false, "Server tidak terjangkau.", null, true);
+
         var error = await response.Content.ReadAsStringAsync();
-        return (false, string.IsNullOrWhiteSpace(error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : error.Trim('"'), null);
+        return (false, string.IsNullOrWhiteSpace(error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : error.Trim('"'), null, false);
     }
 
     // Prompt 20: logout perangkat -- hanguskan token di server (UNPAIR), localStorage
@@ -122,9 +168,9 @@ public class StationDeviceApiService
 
     // Prompt 24: Cetak Ulang label -- dipakai semua kartu bundle di station + BundleScanCard.
     // Fix: copies (default 1) -- jumlah label yang dicetak, diisi user lewat modal konfirmasi.
-    public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId, int copies = 1)
+    public async Task<(bool Success, string Error)> ReprintBundleAsync(int bundleId, int copies = 1, int? printDeviceId = null)
     {
-        var response = await _http.PostAsync($"api/station/bundles/{bundleId}/reprint?copies={copies}", null);
+        var response = await _http.PostAsync($"api/station/bundles/{bundleId}/reprint?copies={copies}" + (printDeviceId.HasValue ? $"&printDeviceId={printDeviceId.Value}" : ""), null);
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));
@@ -132,9 +178,9 @@ public class StationDeviceApiService
 
     // Prompt: "Print Label Cacat" -- reprint label bundle N lembar, remark di-override dengan
     // catatan + ringkasan qty cacat.
-    public async Task<(bool Success, string Error)> PrintDefectLabelAsync(int bundleId, int copies, string? remark)
+    public async Task<(bool Success, string Error)> PrintDefectLabelAsync(int bundleId, int copies, string? remark, int? printDeviceId = null)
     {
-        var response = await _http.PostAsJsonAsync($"api/station/bundles/{bundleId}/print-defect-label", new BundlePrintDefectLabelRequest { Copies = copies, Remark = remark });
+        var response = await _http.PostAsJsonAsync($"api/station/bundles/{bundleId}/print-defect-label", new BundlePrintDefectLabelRequest { Copies = copies, Remark = remark, PrintDeviceId = printDeviceId });
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak label cacat." : error.Trim('"'));
@@ -280,9 +326,12 @@ public class StationDeviceApiService
 
     // ---- Prompt 83: output manual di tab OUT ----
     // Divisi diambil server dari token perangkat. TIDAK ADA harga di sisi stasiun.
-    public async Task<List<ManualOutputRowDto>> GetManualOutputsAsync()
+    // alter_86: date = tanggal yang sedang dipilih di filter "Tanggal Kirim" tab OUT.
+    // 2026-11-02: resourceId = Line sesi -- baris manual disaring per Line.
+    public async Task<List<ManualOutputRowDto>> GetManualOutputsAsync(DateTime date, int? resourceId)
     {
-        var response = await _http.GetAsync("api/station/manual-outputs");
+        var response = await _http.GetAsync(
+            $"api/station/manual-outputs?date={date:yyyy-MM-dd}&resourceId={resourceId}");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<ManualOutputRowDto>>() ?? new();
     }
@@ -380,6 +429,14 @@ public class StationDeviceApiService
 
     // Submit modal "Kirim Hasil" model pemecahan (dipakai juga untuk EDIT kiriman -- server
     // yang memutuskan mode-nya, lihat SIS_BundleSplit_Manage).
+    // Prompt 88: daftar printer aktif untuk job type (PrinterPicker mode station).
+    public async Task<List<PrintDeviceOptionDto>> GetPrintersAsync(string jobType)
+    {
+        var response = await _http.GetAsync($"api/station/printers?jobType={Uri.EscapeDataString(jobType)}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PrintDeviceOptionDto>>() ?? new();
+    }
+
     public async Task<(bool Success, string Error, List<BundleSplitResultDto> Children)> SplitAsync(BundleSplitRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/station/split", request);
@@ -760,7 +817,8 @@ public class StationDeviceApiService
     // Prompt 81: targetResourceId WAJIB (> 0) -- SP menolak pengambilan tanpa Line.
     // Tab Stok Cutting memanggil ini satu bundle sekali proses.
     public async Task<(bool Success, string Error, CuttingBundleClaimResultDto? Hasil)> TakeCuttingBundlesAsync(
-        List<int> bundleIds, int? resourceId, int targetResourceId = 0, int employeeId = 0, int printCopies = 1)
+        List<int> bundleIds, int? resourceId, int targetResourceId = 0, int employeeId = 0, int printCopies = 1,
+        int? printDeviceId = null)
     {
         var response = await _http.PostAsJsonAsync("api/station/cutting-stock/take",
             new CuttingBundleTakeRequest
@@ -769,7 +827,9 @@ public class StationDeviceApiService
                 ResourceId = resourceId ?? 0,
                 TargetResourceId = targetResourceId,
                 EmployeeId = employeeId,
-                PrintCopies = printCopies
+                PrintCopies = printCopies,
+                // Prompt 88: divalidasi server SEBELUM bundle diklaim.
+                PrintDeviceId = printCopies >= 1 ? printDeviceId : null
             });
 
         if (response.IsSuccessStatusCode)

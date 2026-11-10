@@ -43,6 +43,43 @@ END;
 GO
 
 -- ============================================================
+-- BERANDA STOK -- kartu Kemeja / Celana / Set di beranda (2026-11-10)
+-- ============================================================
+-- Dua result set (dibaca API dengan reader, bukan SqlQueryRaw):
+--   (1) angka stok per pola dari tni.v_stok_pola (hanya pola yang ada geraknya)
+--       Masuk + KeluarLain = barang masuk bersih (rusak sudah dikurangi).
+--       Saldo = stok fisik belum di-set jadi = Lock (dijatah kartu DICETAK) + Unlock.
+--   (2) personel yang belum dapat set (DICETAK lalu BELUM_CETAK), urutan yang
+--       dipakai greedy "bisa di-set sekarang" di API -- DICETAK didahulukan karena
+--       stoknya sudah dijatah; BELUM_CETAK urut seperti Perintah Kerja.
+CREATE OR ALTER PROCEDURE tni.SIS_Beranda_Stok
+    @OrderId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT s.jenis_item  AS JenisItem,
+           s.pola_id     AS PolaId,
+           s.masuk       AS Masuk,
+           s.keluar_lain AS KeluarLain,
+           s.saldo       AS Saldo,
+           s.dijatah     AS Dijatah
+    FROM tni.v_stok_pola s
+    WHERE s.order_id = @OrderId
+      AND (s.masuk <> 0 OR s.keluar_lain <> 0 OR s.saldo <> 0 OR s.dijatah <> 0);
+
+    SELECT v.pola_kemeja_id AS PolaKemejaId,
+           v.pola_celana_id AS PolaCelanaId,
+           CAST(CASE WHEN v.status_progres = 'DICETAK' THEN 1 ELSE 0 END AS BIT) AS Dicetak
+    FROM tni.v_personel v
+    WHERE v.order_id = @OrderId
+      AND v.status_progres IN ('BELUM_CETAK', 'DICETAK')
+    ORDER BY CASE WHEN v.status_progres = 'DICETAK' THEN 0 ELSE 1 END,
+             v.satuan_code, v.kode_ref;
+END;
+GO
+
+-- ============================================================
 -- LIST -- paging + cari + filter
 -- ============================================================
 -- @Search dicocokkan ke kode_ref (AWALAN), nrp (AWALAN), atau nama (LIKE).
@@ -54,7 +91,10 @@ CREATE OR ALTER PROCEDURE tni.SIS_Personel_List
     @Status      VARCHAR(20) = NULL,
     @PerluReview BIT = 0,
     @PageNumber  INT = 1,
-    @PageSize    INT = 30
+    @PageSize    INT = 30,
+    -- filter pola kemeja / celana yang dipakai personel (NULL = semua)
+    @PolaKemejaId INT = NULL,
+    @PolaCelanaId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -69,6 +109,8 @@ BEGIN
           AND (@SatuanId IS NULL OR v.satuan_id = @SatuanId)
           AND (@Status   IS NULL OR v.status_progres = @Status)
           AND (@PerluReview = 0 OR v.status_data = 'PERLU_REVIEW')
+          AND (@PolaKemejaId IS NULL OR v.pola_kemeja_id = @PolaKemejaId)
+          AND (@PolaCelanaId IS NULL OR v.pola_celana_id = @PolaCelanaId)
           AND (@Search IS NULL
                OR v.kode_ref LIKE @Search + '%'
                OR v.nrp      LIKE @Search + '%'

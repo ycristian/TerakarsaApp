@@ -23,6 +23,12 @@ Dirakit di C# dari payload (`TniKartuPayload`), BUKAN lewat token SP, jadi:
 - diklaim hanya saat `PrinterThermalOn: true` (printer fisiknya sama dengan struk);
 - routing-nya tetap lewat `print_job_routes` (`job_type = 'TNI_KARTU'`), jadi bisa dipindah
   ke printer 80mm lain lewat SQL tanpa restart — lihat `sql/tni/seed_65_print_route_tni_kartu.sql`.
+- **Struk REKAP SIZE** (2026-11-09): kalau satu kali cetak berisi > 1 kartu,
+  `tni.SIS_Personel_Cetak` menambah satu job `TNI_KARTU` lagi (ref_id 0, payload
+  `jenis = "REKAP"`, `TniKartuRekapPayload`) yang di-insert lebih dulu, jadi tercetak
+  paling awal: total kartu + jumlah per size celana & kemeja. Worker membedakannya lewat
+  `TniKartuEscPosBuilder.IsRekap`. PrintService versi lama akan mencetaknya sebagai kartu
+  kosong — deploy PrintService SEBELUM menjalankan SP baru.
 
 QR di kartu digenerate sendiri lewat **QRCoder** lalu dicetak sebagai **raster bit image**
 (`GS v 0`), sama dengan `EscPosRenderer.EmitQr` — **bukan** command QR native (`GS ( k`),
@@ -83,6 +89,49 @@ sekaligus; worker mengambil `printer_name`/`chars_per_line`/`render_mode` dari h
   tidak berubah) atau `TOKEN` (struk thermal, isi dirakit stored procedure lalu diterjemahkan
   `EscPosRenderer.cs` -- ubah layout struk cukup `CREATE OR ALTER PROCEDURE` di SQL, tanpa
   build/publish ulang service ini).
+
+## Printer jaringan (TCP) & pilih printer saat cetak (Prompt 88)
+
+Selain printer Windows (USB, nama printer di Windows), service ini bisa mengirim langsung ke
+**printer jaringan** lewat socket TCP `host:port` (port RAW umumnya `9100`) -- printernya
+**tidak perlu didaftarkan di Windows**. Satu worker di satu PC menangani semua printer PC
+(USB Windows maupun TCP); jangan pasang service kedua.
+
+- Jenis device = kolom `print_devices.transport`: `WINDOWS` (winspool, `printer_name`), `TCP`
+  (`host` + `port`, dikirim `TcpRawPrinter.cs`), `ANDROID_BT` (HP, bukan urusan service ini).
+  Service ini hanya mengklaim job yang device finalnya `WINDOWS`/`TCP`.
+- Isi label/struk sama persis untuk kedua jalur (`TsplBuilder`/`EscPosRenderer` tidak tahu
+  printernya lewat apa) -- `RAW_TSPL` maupun `TOKEN` bisa lewat TCP.
+- Printer mati / IP salah -> job gagal dengan pesan jelas, mis.
+  `TCP 192.168.8.51:9100: connection timeout (5 detik) -- printer mati atau IP salah.` atau
+  `... connection refused ...`, lalu ikut retry 3x yang sudah ada sebelum jadi `ERROR`. Job
+  ke printer lain tetap jalan.
+- DryRun: job ke device TCP ditulis ke `./dryrun/{print_job_id}_{device_code}.tspl` (suffix
+  kode device), device Windows tetap `./dryrun/{print_job_id}.tspl`.
+- Saklar `PrinterLabelOn` berlaku untuk SEMUA printer label PC (TSC USB maupun printer
+  jaringan) -- device mana yang dipakai ditentukan SP klaim, bukan config ini.
+- `DeviceCodes` (appsettings, mis. `["LABEL_ATAS"]`): batasi worker ini hanya mengerjakan
+  printer dengan kode tersebut (kode = kolom kode di `/admin/printer`). Kosong `[]` = semua
+  printer PC. Job printer lain tidak disentuh -- tetap PENDING untuk worker lain. Berguna
+  untuk testing dari PC developer tanpa berebut job dengan PrintService di NUC.
+
+**Menambah printer jaringan baru** (tanpa deploy / restart service):
+
+1. Pasang printer di jaringan dengan IP tetap (reservasi DHCP atau IP statis).
+2. Buka `/admin/printer` -> **+ Tambah printer PC** -> tipe **PC Jaringan (TCP)**, isi nama
+   (lokasi, mis. "Label Lantai Atas"), kode, host/IP, port 9100, render mode `RAW_TSPL`, grup
+   `LABEL_BUNDLE`.
+3. Klik **Test print** pada device itu -> harus keluar label kecil "TEST PRINT".
+4. Di **Routing job cetak**, centang device itu pada job type yang diinginkan (mis.
+   `BUNDLE_LABEL`, `CUTTING_BUNDLE_LABEL`).
+
+**Satu job type, banyak printer**: kalau job type punya lebih dari satu device tujuan aktif,
+user **wajib memilih printer saat mencetak** (dropdown + tombol "Jadikan default", disimpan per
+perangkat di browser). Pilihan itu langsung ditulis ke `print_jobs.print_device_id` saat job
+dibuat (`SIS_PrintJob_ResolveDevice`); tanpa pilihan, server menolak `Pilih printer tujuan.`
+dan tidak ada job dibuat. Job type dengan satu device tetap otomatis seperti sebelumnya.
+Job yang printernya dinonaktifkan tetap PENDING (tampil "tertahan" di halaman admin) dan
+tercetak sendiri begitu device diaktifkan lagi.
 
 ## Menjalankan sebagai console (development / DryRun)
 

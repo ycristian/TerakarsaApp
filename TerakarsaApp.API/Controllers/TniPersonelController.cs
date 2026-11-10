@@ -18,15 +18,18 @@ public class TniPersonelController : ControllerBase
     private readonly TniPersonelService _personelService;
     private readonly TniOrderService _orderService;
     private readonly TniScanService _scanService;
+    private readonly TniLaporanPersonelPdfService _laporanPdfService;
 
     public TniPersonelController(
         TniPersonelService personelService,
         TniOrderService orderService,
-        TniScanService scanService)
+        TniScanService scanService,
+        TniLaporanPersonelPdfService laporanPdfService)
     {
         _personelService = personelService;
         _orderService = orderService;
         _scanService = scanService;
+        _laporanPdfService = laporanPdfService;
     }
 
     // created_by: user login bila ada, kalau tidak user sistem tni_system.
@@ -43,6 +46,15 @@ public class TniPersonelController : ControllerBase
         return Ok(await _personelService.GetSummaryAsync(orderId.Value) ?? new TniBerandaSummaryDto());
     }
 
+    [HttpGet("beranda-stok")]
+    public async Task<IActionResult> GetBerandaStok()
+    {
+        var orderId = await OrderIdAsync();
+        if (orderId is null) return Ok(new TniBerandaStokDto());
+
+        return Ok(await _personelService.GetBerandaStokAsync(orderId.Value));
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetList(
         [FromQuery] string? search = null,
@@ -51,7 +63,9 @@ public class TniPersonelController : ControllerBase
         [FromQuery] string? status = null,
         [FromQuery] bool perluReview = false,
         [FromQuery] int pageNumber = 1,
-        [FromQuery] int pageSize = 30)
+        [FromQuery] int pageSize = 30,
+        [FromQuery] int? polaKemejaId = null,
+        [FromQuery] int? polaCelanaId = null)
     {
         var orderId = await OrderIdAsync();
         if (orderId is null) return Ok(new TniPersonelListResult());
@@ -60,9 +74,53 @@ public class TniPersonelController : ControllerBase
         if (pageSize is < 1 or > 200) pageSize = 30;
 
         var result = await _personelService.GetListAsync(
-            orderId.Value, search, areaId, satuanId, status, perluReview, pageNumber, pageSize);
+            orderId.Value, search, areaId, satuanId, status, perluReview, pageNumber, pageSize,
+            polaKemejaId, polaCelanaId);
 
         return Ok(result);
+    }
+
+    // Prompt 89: batas baris laporan PDF -- konstanta, bukan setting.
+    private const int LaporanMaxBaris = 2000;
+
+    // Prompt 89: PDF A4 landscape "Laporan Personel & Box" dari daftar yang
+    // sedang difilter. Query string SAMA dengan GetList (tanpa paging).
+    // Hanya diunduh: tidak lewat print job, tidak disimpan ke disk.
+    [HttpGet("laporan-pdf")]
+    public async Task<IActionResult> GetLaporanPdf(
+        [FromQuery] string? search = null,
+        [FromQuery] int? areaId = null,
+        [FromQuery] int? satuanId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] bool perluReview = false,
+        [FromQuery] int? polaKemejaId = null,
+        [FromQuery] int? polaCelanaId = null)
+    {
+        var orderId = await OrderIdAsync();
+        if (orderId is null) return BadRequest("Tidak ada order aktif.");
+
+        var data = await _personelService.GetLaporanAsync(
+            orderId.Value, search, areaId, satuanId, status, perluReview, polaKemejaId, polaCelanaId);
+
+        if (data.Header is null) return BadRequest("Order tidak ditemukan.");
+
+        var n = data.Header.TotalBaris;
+        if (n == 0) return BadRequest("Tidak ada personel yang cocok dengan filter.");
+        if (n > LaporanMaxBaris)
+            return BadRequest($"Terlalu banyak baris ({n:N0}). Persempit filter (satuan/rawatan/status/pola).");
+
+        data.DicetakPada = DateTime.Now;
+        var bytes = _laporanPdfService.Build(data);
+
+        var stamp = data.DicetakPada.ToString("yyyyMMdd-HHmm");
+        var kode = satuanId.HasValue ? data.Header.SatuanCode
+                 : areaId.HasValue ? data.Header.AreaCode
+                 : null;
+        var nama = string.IsNullOrWhiteSpace(kode)
+            ? $"Laporan_Personel_{stamp}.pdf"
+            : $"Laporan_{kode}_{stamp}.pdf";
+
+        return File(bytes, "application/pdf", nama);
     }
 
     [HttpGet("wilayah")]

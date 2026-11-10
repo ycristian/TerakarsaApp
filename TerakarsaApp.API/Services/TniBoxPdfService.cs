@@ -71,10 +71,7 @@ public class TniBoxPdfService
                 }
 
                 var (from, count) = pages[p];
-                y = DrawTabel(canvas, kolom, rows.GetRange(from, count), y);
-
-                // Blok bawah (rekap + tanda tangan) hanya di halaman TERAKHIR.
-                if (p == pages.Count - 1) DrawBawah(canvas, detail, y);
+                DrawTabel(canvas, kolom, rows.GetRange(from, count), y);
 
                 DrawKaki(canvas, h, p + 1, pages.Count);
                 doc.EndPage();
@@ -166,9 +163,9 @@ public class TniBoxPdfService
 
         list.Add(new("Pangkat", pangkat));
         list.Add(new("Nama", nama));
-        list.Add(new("NRP", nrp));
-        list.Add(new("Kemeja", kemeja, Bold: true));
-        list.Add(new("Celana", celana, Bold: true));
+        list.Add(new("NRP", nrp, Center: true));
+        list.Add(new("Kemeja", kemeja, Center: true, Bold: true));
+        list.Add(new("Celana", celana, Center: true, Bold: true));
         list.Add(new("Diterima", diterima));
 
         return list;
@@ -176,7 +173,8 @@ public class TniBoxPdfService
 
     // ---------------- paginasi ----------------
 
-    // 50 baris wajib muat di satu halaman (bersama blok bawah).
+    // 2026-11-09: kotak "Diterima oleh" dihapus -- tidak ada lagi ruang yang disisakan
+    // di halaman terakhir.
     private static List<(int From, int Count)> Paginate(int total)
     {
         var pages = new List<(int, int)>();
@@ -184,19 +182,10 @@ public class TniBoxPdfService
 
         const float kepalaH = 50f;   // judul + garis tebal
         const float metaH = 28f;     // baris info 4 kolom
-        const float bawahH = 150f;   // rekap + tanda tangan
         const float kakiH = 18f;
 
         var tinggiHal1 = PageH - MarginY * 2 - kepalaH - metaH - HeadRowH - kakiH;
         var tinggiHalN = PageH - MarginY * 2 - 26f - HeadRowH - kakiH;
-
-        // Coba muat semuanya di satu halaman (termasuk blok bawah).
-        var muatSatuHalaman = (int)Math.Floor((tinggiHal1 - bawahH) / RowH);
-        if (total <= muatSatuHalaman)
-        {
-            pages.Add((0, total));
-            return pages;
-        }
 
         var sisa = total;
         var mulai = 0;
@@ -206,13 +195,6 @@ public class TniBoxPdfService
         {
             var tinggi = hal == 0 ? tinggiHal1 : tinggiHalN;
             var muat = Math.Max(1, (int)Math.Floor(tinggi / RowH));
-
-            // Kalau ini halaman terakhir, sisakan ruang untuk blok bawah.
-            if (sisa <= muat)
-            {
-                var muatDenganBawah = (int)Math.Floor((tinggi - bawahH) / RowH);
-                if (sisa > muatDenganBawah && muatDenganBawah > 0) muat = muatDenganBawah;
-            }
 
             var ambil = Math.Min(muat, sisa);
             pages.Add((mulai, ambil));
@@ -268,14 +250,14 @@ public class TniBoxPdfService
         using var label = new Txt(8.5f);
         using var nilai = new Txt(10f, bold: true);
 
-        var colW = (PageW - MarginX * 2) / 4f;
+        // 2026-11-09: kolom "Ditutup" dihapus atas permintaan owner.
+        var colW = (PageW - MarginX * 2) / 3f;
 
         var items = new (string Label, string Nilai)[]
         {
             ("Rawatan", h.AreaName),
             ("Satuan", h.Gabungan ? "Gabungan" : h.SatuanName),
-            ("Isi", $"{h.Isi} set"),
-            ("Ditutup", h.PackedAt?.ToString("dd/MM/yyyy HH:mm") ?? "-")
+            ("Isi", $"{h.Isi} set")
         };
 
         for (var i = 0; i < items.Length; i++)
@@ -415,87 +397,14 @@ public class TniBoxPdfService
         };
     }
 
-    // Tiga kotak: rekap kemeja, rekap celana, tanda tangan.
-    private static void DrawBawah(SKCanvas canvas, TniBoxDetailDto detail, float y)
-    {
-        using var h3 = new Txt(8.5f, bold: true);
-        using var kecil = new Txt(7.4f);
-        using var f8 = new Txt(8f);
-        using var border = Line(new SKColor(0x55, 0x55, 0x55), 0.6f);
-        using var garis = Line(SKColors.Black, 0.6f);
-
-        var usable = PageW - MarginX * 2;
-        const float gap = 8.5f;
-
-        // proporsi mockup: 1.5fr / 1.15fr / 1fr
-        const float total = 1.5f + 1.15f + 1f;
-        var w1 = (usable - gap * 2) * (1.5f / total);
-        var w2 = (usable - gap * 2) * (1.15f / total);
-        var w3 = (usable - gap * 2) * (1f / total);
-
-        var tinggi = Math.Min(140f, PageH - MarginY - 18f - y);
-        if (tinggi < 60f) tinggi = 60f;
-
-        var x1 = MarginX;
-        var x2 = x1 + w1 + gap;
-        var x3 = x2 + w2 + gap;
-
-        DrawRekapBox(canvas, x1, y, w1, tinggi, "Rekap kemeja", detail.RekapKemeja, h3, kecil, border);
-        DrawRekapBox(canvas, x2, y, w2, tinggi, "Rekap celana", detail.RekapCelana, h3, kecil, border);
-
-        // ---- kotak tanda tangan
-        canvas.DrawRect(new SKRect(x3, y, x3 + w3, y + tinggi), border);
-
-        var ty = y + 11f;
-        Draw(canvas, "Dipacking oleh", x3 + 4f, ty, h3);
-        canvas.DrawLine(x3 + 4f, ty + 24f, x3 + w3 - 4f, ty + 24f, garis);
-        Draw(canvas, "Nama:", x3 + 4f, ty + 33f, f8);
-
-        ty += 52f;
-        Draw(canvas, "Diterima oleh", x3 + 4f, ty, h3);
-        canvas.DrawLine(x3 + 4f, ty + 24f, x3 + w3 - 4f, ty + 24f, garis);
-        Draw(canvas, "Nama / tgl:", x3 + 4f, ty + 33f, f8);
-    }
-
-    private static void DrawRekapBox(
-        SKCanvas canvas, float x, float y, float w, float tinggi, string judul,
-        List<TniBoxRekapDto> items, Txt h3, Txt kecil, SKPaint border)
-    {
-        canvas.DrawRect(new SKRect(x, y, x + w, y + tinggi), border);
-        Draw(canvas, judul, x + 4f, y + 11f, h3);
-
-        if (items.Count == 0)
-        {
-            Draw(canvas, "-", x + 4f, y + 24f, kecil);
-            return;
-        }
-
-        // grid 3 kolom seperti mockup
-        const int cols = 3;
-        var colW = (w - 8f) / cols;
-        var startY = y + 22f;
-        const float lineH = 9.2f;
-        var maxRows = Math.Max(1, (int)Math.Floor((tinggi - 26f) / lineH));
-
-        for (var i = 0; i < items.Count; i++)
-        {
-            var col = i / maxRows;
-            if (col >= cols) break;   // melebihi kapasitas kotak (sangat tidak mungkin)
-            var row = i % maxRows;
-
-            Draw(canvas, $"{items[i].Kode} {items[i].Jumlah}",
-                 x + 4f + colW * col, startY + lineH * row, kecil);
-        }
-    }
-
+    // 2026-11-09: rekap kemeja/celana, "Dipacking oleh", "Ditutup oleh", kotak
+    // "Diterima oleh", dan teks "dicetak dari Terakarsa" dihapus atas permintaan owner --
+    // kaki halaman tinggal nomor box + halaman di kanan.
     private static void DrawKaki(SKCanvas canvas, TniBoxHeaderDto h, int hal, int totalHal)
     {
         using var f = new Txt(7f, color: new SKColor(0x44, 0x44, 0x44));
 
         var y = PageH - MarginY + 4f;
-
-        Draw(canvas, $"Ditutup oleh: {h.PackedByNama ?? "-"} · dicetak dari Terakarsa",
-             MarginX, y, f);
 
         var kanan = $"No. {h.BoxNo} · {h.BoxCode} · hal {hal}/{totalHal}";
         Draw(canvas, kanan, PageW - MarginX - f.Measure(kanan), y, f);

@@ -66,11 +66,11 @@ public class SuperAdminController : ControllerBase
     }
 
     [HttpPost("bundles/{id:int}/reprint")]
-    public async Task<IActionResult> ReprintBundle(int id, [FromQuery] int copies = 1)
+    public async Task<IActionResult> ReprintBundle(int id, [FromQuery] int copies = 1, [FromQuery] int? printDeviceId = null)
     {
         if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
-        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, CurrentUserId);
+        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, CurrentUserId, printDeviceId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }

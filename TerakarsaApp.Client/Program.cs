@@ -46,6 +46,7 @@ builder.Services.AddHttpClient("API", client =>
 builder.Services.AddScoped(sp =>
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("API"));
 
+builder.Services.AddSingleton<TerakarsaApp.Client.Auth.StationAuthNotifier>();
 builder.Services.AddScoped<TerakarsaApp.Client.Auth.StationTokenHandler>();
 
 builder.Services.AddHttpClient<TerakarsaApp.Client.Services.StationDeviceApiService>(client =>

@@ -28,14 +28,47 @@ public class PrintAdminApiService
         return await response.Content.ReadFromJsonAsync<List<PrintJobRouteDto>>() ?? new();
     }
 
-    public async Task<(bool Success, string Error)> SetRouteAsync(string jobType, int printDeviceId)
+    // Prompt 88: daftar LENGKAP device tujuan job type (multi-pilih).
+    public async Task<(bool Success, string Error)> SetRouteAsync(string jobType, List<int> printDeviceIds)
     {
         var response = await _http.PutAsJsonAsync("api/print/routes",
-            new PrintJobRouteSetRequest { JobType = jobType, PrintDeviceId = printDeviceId });
+            new PrintJobRouteSetRequest { JobType = jobType, PrintDeviceIds = printDeviceIds });
 
         if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await ErrorAsync(response, "Gagal menyimpan routing."));
+    }
 
+    // ==================== Prompt 88 ====================
+
+    // PrinterPicker untuk user login (JWT). Station memakai StationDeviceApiService.GetPrintersAsync.
+    public async Task<List<PrintDeviceOptionDto>> GetForJobTypeAsync(string jobType)
+    {
+        var response = await _http.GetAsync($"api/print/devices/for-job?jobType={Uri.EscapeDataString(jobType)}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<PrintDeviceOptionDto>>() ?? new();
+    }
+
+    // id null = tambah device baru.
+    public async Task<(bool Success, string Error)> SaveDeviceAsync(int? id, PrintDeviceSaveRequest request)
+    {
+        var response = id.HasValue
+            ? await _http.PutAsJsonAsync($"api/print/devices/{id.Value}", request)
+            : await _http.PostAsJsonAsync("api/print/devices", request);
+
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await ErrorAsync(response, "Gagal menyimpan device."));
+    }
+
+    public async Task<(bool Success, string Error)> TestPrintAsync(int id)
+    {
+        var response = await _http.PostAsync($"api/print/devices/{id}/test-print", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        return (false, await ErrorAsync(response, "Gagal membuat test print."));
+    }
+
+    private static async Task<string> ErrorAsync(HttpResponseMessage response, string fallback)
+    {
         var error = (await response.Content.ReadAsStringAsync()).Trim().Trim('"');
-        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal memindahkan route." : error);
+        return string.IsNullOrWhiteSpace(error) ? fallback : error;
     }
 }

@@ -30,34 +30,35 @@ public class TniPerintahKerjaController : ControllerBase
 
     private async Task<int?> OrderIdAsync() => (await _orderService.GetAktifAsync())?.OrderId;
 
+    // kemeja / celana = filter size prioritas perangkat, daftar pola_id dipisah koma (opsional).
     [HttpGet("rawatan")]
-    public async Task<IActionResult> GetRawatan()
+    public async Task<IActionResult> GetRawatan([FromQuery] string? kemeja = null, [FromQuery] string? celana = null)
     {
         var orderId = await OrderIdAsync();
         if (orderId is null) return Ok(new { rawatan = new List<TniRawatanDto>(), stokBebasKemeja = 0, stokBebasCelana = 0 });
 
-        var rawatan = await _pkService.GetRawatanAsync(orderId.Value);
-        var (kemeja, celana) = await _pkService.GetTotalStokBebasAsync(orderId.Value);
+        var rawatan = await _pkService.GetRawatanAsync(orderId.Value, TniSizePrioritas.Parse(kemeja, celana));
+        var (totalKemeja, totalCelana) = await _pkService.GetTotalStokBebasAsync(orderId.Value);
 
-        return Ok(new { rawatan, stokBebasKemeja = kemeja, stokBebasCelana = celana });
+        return Ok(new { rawatan, stokBebasKemeja = totalKemeja, stokBebasCelana = totalCelana });
     }
 
     [HttpGet("rawatan/{areaId:int}/satuan")]
-    public async Task<IActionResult> GetSatuan(int areaId)
+    public async Task<IActionResult> GetSatuan(int areaId, [FromQuery] string? kemeja = null, [FromQuery] string? celana = null)
     {
         var orderId = await OrderIdAsync();
         if (orderId is null) return Ok(new List<TniSatuanSaranDto>());
 
-        return Ok(await _pkService.GetSatuanAsync(orderId.Value, areaId));
+        return Ok(await _pkService.GetSatuanAsync(orderId.Value, areaId, TniSizePrioritas.Parse(kemeja, celana)));
     }
 
     [HttpGet("satuan/{satuanId:int}")]
-    public async Task<IActionResult> GetSatuanDetail(int satuanId)
+    public async Task<IActionResult> GetSatuanDetail(int satuanId, [FromQuery] string? kemeja = null, [FromQuery] string? celana = null)
     {
         var orderId = await OrderIdAsync();
         if (orderId is null) return Ok(new TniSatuanDetailDto());
 
-        return Ok(await _pkService.GetSatuanDetailAsync(orderId.Value, satuanId));
+        return Ok(await _pkService.GetSatuanDetailAsync(orderId.Value, satuanId, TniSizePrioritas.Parse(kemeja, celana)));
     }
 
     [HttpGet("satuan/{satuanId:int}/dijatah")]
@@ -67,6 +68,16 @@ public class TniPerintahKerjaController : ControllerBase
         if (orderId is null) return Ok(new List<TniDijatahDto>());
 
         return Ok(await _pkService.GetDijatahAsync(orderId.Value, satuanId));
+    }
+
+    // Bintang prioritas satuan: berbintang selalu tampil paling atas di daftar satuan.
+    [HttpPost("satuan/{satuanId:int}/prioritas")]
+    public async Task<IActionResult> SetPrioritas(int satuanId, [FromBody] TniSatuanPrioritasRequest request)
+    {
+        var (success, error) = await _pkService.SetPrioritasAsync(
+            satuanId, request.Prioritas, CurrentUserId, this.TniPerangkatId());
+        if (!success) return BadRequest(error);
+        return Ok();
     }
 
     [HttpPost("cetak")]

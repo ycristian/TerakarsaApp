@@ -1,3 +1,5 @@
+using TerakarsaApp.Shared.WorkflowLogs;
+
 namespace TerakarsaApp.Shared.Bundles;
 
 public class BundleDto
@@ -67,6 +69,9 @@ public class BundleCreateRequest
     // dicetak (default 1; admin /bundles tidak mengirim field ini sehingga tetap cetak 1x
     // seperti perilaku lama). 0 = tidak cetak.
     public int PrintCopies { get; set; } = 1;
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }
 
 // Prompt: "Print Label Cacat" -- muncul di BundleScanCard setelah Kirim Hasil dengan reject
@@ -76,6 +81,9 @@ public class BundlePrintDefectLabelRequest
 {
     public int Copies { get; set; } = 1;
     public string? Remark { get; set; }
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }
 
 public class BundleUpdateRequest
@@ -123,6 +131,9 @@ public class StationBundleCreateRequest
     public int PrintCopies { get; set; } = 1;
     // Prompt 35: catatan bebas bundle, diisi opsional di modal "Buat Bundle" station.
     public string? Remarks { get; set; }
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }
 
 // Prompt 24: Edit bundle dari tab OUT station Bundling.
@@ -177,6 +188,10 @@ public class BundleScanBundleDto
     // negatif = lebih.
     public int SequenceNo { get; set; }
     public int? ParentBundleId { get; set; }
+    // Ad hoc (2026-11-02): identitas induk LANGSUNG -- dasar tautan "ke {induk}" di kartu
+    // bundle anak. NULL = bundle ini induk utama (tidak ada yang bisa dituju).
+    public string? ParentSerial { get; set; }
+    public int ParentSequenceNo { get; set; }
     public int RootBundleId { get; set; }
     public int RootBundleNo { get; set; }
     public string BundleStatus { get; set; } = "OK";
@@ -215,6 +230,13 @@ public class BundleScanTimelineDto
     public int QtyDelta { get; set; }
     public int QtyAfter { get; set; }
     public string? Reason { get; set; }
+    // Ad hoc (2026-11-02): info PEMECAHAN baris ini -- bundle anak yang lahir dari pernyataan
+    // Kirim Hasil ini (dirender sebagai tautan ke /b/{serial} anak) + pcs yang dinyatakan
+    // hilang. Dipakai ulang StationSplitChildDto supaya bentuknya identik dengan tab OUT.
+    // Kosong untuk baris yang bukan pemecahan (mis. 'Creation' bundle ini sendiri).
+    public List<StationSplitChildDto> SplitChildren { get; set; } = new();
+    // Masuk - QtyOK - Sigma anak. Negatif = koreksi saat edit Kirim Hasil.
+    public int SplitMissingQty { get; set; }
 }
 
 public class BundleScanActionDto

@@ -179,6 +179,15 @@
                         </div>
                     }
 
+                    @* Prompt 88: stiker hanya dicetak kalau ada anak lahir / qty induk berubah --
+                       printer cuma ditanyakan saat itu (atau kalau server memintanya). *@
+                    @if (TampilPrinter)
+                    {
+                        <div class="mt-2">
+                            <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="printerId" />
+                        </div>
+                    }
+
                     @if (!string.IsNullOrEmpty(error))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@StripPrefix(error)</div>
@@ -224,6 +233,15 @@
     private int initialQtyOk;
     private int loadedBundleId;
     private int loadedStepId;
+    // Prompt 88: printer stiker (PrinterPicker). printerDiminta = server menolak karena
+    // printer belum dipilih -> picker tetap ditampilkan.
+    private int? printerId;
+    private bool printerDiminta;
+
+    // Sama dengan syarat cetak di SIS_BundleSplit_Manage: ada baris masalah (anak lahir) atau
+    // qty induk berubah.
+    private bool TampilPrinter =>
+        printerDiminta || rows.Count > 0 || (info?.Header is { } hh && qtyOk > 0 && qtyOk != hh.QtyNow);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -305,7 +323,8 @@
                 Reason = r.Reason.Trim(),
                 Qty = r.Qty
             }).ToList(),
-            AutoReceiveResourceId = receiverResourceId > 0 ? receiverResourceId : null
+            AutoReceiveResourceId = receiverResourceId > 0 ? receiverResourceId : null,
+            PrintDeviceId = printerId
         });
 
         busy = false;
@@ -313,6 +332,7 @@
         if (!success)
         {
             error = err;
+            if (err.Contains("printer", StringComparison.OrdinalIgnoreCase)) printerDiminta = true;
             return;
         }
 

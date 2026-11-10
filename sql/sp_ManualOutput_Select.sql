@@ -18,10 +18,28 @@ GO
 -- baris BELUM lock (bisa dipilih untuk di-lock) dan baris SUDAH lock (ditampilkan
 -- dengan gembok + kode periode). Jendela @DaysBack default 90 hari -- sama dengan
 -- filter tanggal tab OUT sejak Prompt 56.
+--
+-- alter_86: @OutputDate = tanggal yang sedang dipilih di filter "Tanggal Kirim" tab OUT.
+-- Diisi -> HANYA baris bertanggal itu (kartu Output Manual ikut berpindah tanggal seperti
+-- kartu artikel di sebelahnya). NULL -> perilaku lama (semua, dibatasi @DaysBack).
+--
+-- PENGAMAN: baris BELUM lock di tanggal lain jadi tidak terlihat dari tanggal ini. Itu
+-- sengaja dikompensasi di SIS_Station_UnlockedDates, yang sejak alter_86 ikut menghitung
+-- manual_outputs -- jadi tanggalnya tetap muncul sebagai chip "Belum lock" dan tunggakan
+-- tidak bisa hilang diam-diam. Kalau salah satu dari keduanya diubah, ubah yang lain juga.
+--
+-- @ResourceId (2026-11-02): Line sesi stasiun. Prompt 83 sengaja TIDAK menyaring per resource
+-- -- akibatnya tiap operator sedivisi melihat baris milik operator lain (mis. baris Line A3
+-- tampil di sesi Line A5) dan bisa mengunci upah orang lain. Sekarang disaring, selaras dengan
+-- baris log di kartu sebelahnya (@ResourceId di SIS_Station_PendingHandover).
+-- Pola IS NULL-nya DIBUAT SAMA dengan SP itu: baris tanpa resource tetap ikut, supaya baris
+-- data lama/manual tidak terkunci dari semua layar.
 -- ===========================================================================
 CREATE OR ALTER PROCEDURE SIS_ManualOutput_StationList
     @DivisionId INT,
-    @DaysBack   INT = 90
+    @DaysBack   INT = 90,
+    @OutputDate DATE = NULL,
+    @ResourceId INT = NULL      -- NULL = semua Line (admin/laporan)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -42,6 +60,7 @@ BEGIN
            mo.article_id       AS ArticleId,
            a.article_name      AS ArticleName,
            p.no_po             AS NoPo,
+           mo.output_date      AS OutputDate,
            mo.work_description AS WorkDescription,
            mo.size_name        AS SizeName,
            mo.qty              AS Qty,
@@ -60,10 +79,16 @@ BEGIN
     LEFT JOIN payroll_periods pp ON pp.payroll_period_id = wl.payroll_period_id
     WHERE mo.deleted_at IS NULL
       AND mo.division_id = @DivisionId
-      -- Baris belum lock SELALU ikut walau tua: kalau tidak, tunggakan lock bisa hilang
-      -- dari layar tanpa pernah dibereskan.
-      AND (mo.lock_id IS NULL OR mo.created_at >= @Since)
-    ORDER BY mo.created_at DESC, mo.manual_output_id DESC;
+      -- alter_86: kalau tanggal dikirim, DIA yang menentukan isi kartu -- termasuk untuk
+      -- baris belum lock. Tunggakannya tetap terjaga lewat chip "Belum lock" (lihat
+      -- catatan di header SP ini).
+      AND (@OutputDate IS NULL OR mo.output_date = @OutputDate)
+      -- Jalur @OutputDate NULL (perilaku lama): baris belum lock SELALU ikut walau tua,
+      -- kalau tidak, tunggakan lock bisa hilang dari layar tanpa pernah dibereskan.
+      -- Jendela ini diukur dari created_at (kapan barisnya dicatat), bukan output_date.
+      AND (@OutputDate IS NOT NULL OR mo.lock_id IS NULL OR mo.created_at >= @Since)
+      AND (@ResourceId IS NULL OR mo.resource_id IS NULL OR mo.resource_id = @ResourceId)
+    ORDER BY mo.output_date DESC, mo.created_at DESC, mo.manual_output_id DESC;
 END;
 GO
 
@@ -100,6 +125,7 @@ BEGIN
            a.article_name      AS ArticleName,
            p.no_po             AS NoPo,
            p.project_name      AS ProjectName,
+           mo.output_date      AS OutputDate,
            mo.work_description AS WorkDescription,
            mo.size_name        AS SizeName,
            mo.qty              AS Qty,
@@ -134,6 +160,6 @@ BEGIN
            OR mo.work_description LIKE '%' + @Search + '%'
            OR mo.note LIKE '%' + @Search + '%'
            OR a.article_name LIKE '%' + @Search + '%')
-    ORDER BY mo.created_at DESC, mo.manual_output_id DESC;
+    ORDER BY mo.output_date DESC, mo.created_at DESC, mo.manual_output_id DESC;
 END;
 GO

@@ -59,39 +59,37 @@ else
         </div>
     </div>
 
-    @* ---------- progres masuk box ---------- *@
+    @* ---------- progres personel ----------
+       Satu batang bertumpuk (warna sama dengan kartu satuan di Perintah Kerja):
+       terkirim (hijau) -> masuk box (navy) -> sudah set (emas) -> sedang dikerjakan (biru muda).
+       Legenda sekaligus pintu ke daftar Personel (menggantikan chip "set belum masuk box"
+       dan "kartu belum di-scan" yang isinya sama). *@
     <div class="tni-card">
         <div class="tni-row">
             <span class="tni-k">Progres masuk box</span>
             <span class="tni-b">@s.PersenBox%</span>
         </div>
-        <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
-            <div style="height:100%;width:@(s.PersenBox)%;background:var(--tni-navy2)"></div>
+        <div class="tni-prog">
+            <span style="width:@Lebar(s.Terkirim, s.Total);background:var(--tni-ok)"></span>
+            <span style="width:@Lebar(s.MasukBox - s.Terkirim, s.Total);background:var(--tni-navy)"></span>
+            <span style="width:@Lebar(s.SetBelumBox, s.Total);background:var(--tni-gold)"></span>
+            <span style="width:@Lebar(s.KartuBelumScan, s.Total);background:@WarnaDicetak"></span>
         </div>
-        <div class="tni-note" style="margin-top:5px">
-            @s.MasukBox.ToString("N0") dari @s.Total.ToString("N0") personel
+        <div class="tni-leg tni-leg-link">
+            @if (s.Terkirim > 0)
+            {
+                <span @onclick="@(() => KePersonel("status=TERKIRIM"))"><i style="background:var(--tni-ok)"></i>Terkirim <b>@s.Terkirim.ToString("N0")</b></span>
+            }
+            <span @onclick="@(() => KePersonel("status=MASUK_BOX"))"><i style="background:var(--tni-navy)"></i>Masuk box <b>@((s.MasukBox - s.Terkirim).ToString("N0"))</b></span>
+            <span @onclick="@(() => KePersonel("status=SET_JADI"))"><i style="background:var(--tni-gold)"></i>Sudah set <b>@s.SetBelumBox.ToString("N0")</b></span>
+            <span @onclick="@(() => KePersonel("status=DICETAK"))"><i style="background:@WarnaDicetak"></i>Sedang dikerjakan <b>@s.KartuBelumScan.ToString("N0")</b></span>
         </div>
-
-        @* chip menuju daftar Personel -- hanya bila perangkat boleh membuka Personel *@
-        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;@(Sesi.BolehMenu("PERSONEL") ? "" : "display:none")">
-            @if (s.SetBelumBox > 0)
-            {
-                <span class="tni-chip tni-chip-warn" style="cursor:pointer"
-                      @onclick="@(() => Nav.NavigateTo("/tni/personel?status=SET_JADI"))">
-                    @s.SetBelumBox set belum masuk box
-                </span>
-            }
-            @if (s.KartuBelumScan > 0)
-            {
-                <span class="tni-chip tni-chip-mut" style="cursor:pointer"
-                      @onclick="@(() => Nav.NavigateTo("/tni/personel?status=DICETAK"))">
-                    @s.KartuBelumScan kartu belum di-scan
-                </span>
-            }
-            @if (s.PerluReview > 0)
+        <div class="tni-row" style="margin-top:6px">
+            <span class="tni-note">@s.MasukBox.ToString("N0") dari @s.Total.ToString("N0") personel masuk box</span>
+            @if (s.PerluReview > 0 && Sesi.BolehMenu("PERSONEL"))
             {
                 <span class="tni-chip tni-chip-bad" style="cursor:pointer"
-                      @onclick="@(() => Nav.NavigateTo("/tni/personel?review=1"))">
+                      @onclick="@(() => KePersonel("review=1"))">
                     @s.PerluReview perlu review
                 </span>
             }
@@ -120,6 +118,51 @@ else
             </div>
         }
     </div>
+
+    <div class="tni-sec">Barang &amp; stok</div>
+    @* ---------- barang & stok (2026-11-10) ----------
+       Kartu Kemeja/Celana: masuk bersih vs kebutuhan (1 per personel), lalu stok
+       tersedia = belum di-set jadi = lock (dijatah kartu yang sudah dicetak) + unlock.
+       Kartu Set: berapa personel yang bisa di-set dari stok itu sekarang. *@
+    <div class="tni-grid3">
+        @foreach (var (label, j) in new[] { ("Kemeja", st.Kemeja), ("Celana", st.Celana) })
+        {
+            var pct = Persen(j.Masuk, s.Total);
+            <div class="tni-card">
+                <div class="tni-row">
+                    <span class="tni-b">@label</span>
+                    <span class="tni-b" style="color:var(--tni-navy2)">@pct%</span>
+                </div>
+                <div class="tni-prog"><span style="width:@(pct)%;background:var(--tni-navy2)"></span></div>
+                <div class="tni-note">@j.Masuk.ToString("N0") / @s.Total.ToString("N0") masuk</div>
+
+                <div class="tni-grid3-sep">
+                    <span class="tni-k">Stok tersedia</span>
+                    <b class="tni-big">@j.Tersedia.ToString("N0")</b>
+                    <div class="tni-leg" style="margin-top:4px">
+                        <span><i style="background:@WarnaDicetak"></i>Lock @j.Lock.ToString("N0")</span>
+                        <span><i style="background:@WarnaUnlock"></i>Unlock @j.Unlock.ToString("N0")</span>
+                    </div>
+                </div>
+            </div>
+        }
+        <div class="tni-card">
+            <span class="tni-b">Set</span>
+            <div style="margin-top:6px">
+                <span class="tni-k">Bisa di-set sekarang</span>
+                <b class="tni-big" style="color:var(--tni-ok)">@st.BisaDiset.ToString("N0")</b>
+                <div class="tni-note">personel, dari stok tersedia</div>
+            </div>
+            <div class="tni-grid3-sep">
+                <div class="tni-leg" style="flex-direction:column;gap:3px">
+                    <span><i style="background:@WarnaDicetak"></i>@st.BisaDisetLock.ToString("N0") dari lock</span>
+                    <span><i style="background:@WarnaUnlock"></i>@st.BisaDisetUnlock.ToString("N0") dari unlock</span>
+                </div>
+                <div class="tni-note" style="margin-top:4px">Lock = stok yang sudah dijatah ke kartu tercetak.</div>
+            </div>
+        </div>
+    </div>
+
 </div>
 }
 
@@ -128,6 +171,26 @@ else
     private bool bolehApprove;      // module TNI_PDH_APPROVE -- tile Pembatalan
     private bool isLoading;
     private TniBerandaSummaryDto s = new();
+    private TniBerandaStokDto st = new();
+
+    // persen dibulatkan ke bawah & dibatasi 0..100 (masuk bisa melebihi kebutuhan)
+    private static int Persen(int nilai, int total) =>
+        total <= 0 ? 0 : Math.Clamp((int)(nilai * 100L / total), 0, 100);
+
+    // lebar segmen batang bertumpuk (pecahan, titik desimal invariant untuk CSS)
+    private static string Lebar(int nilai, int total) =>
+        (total <= 0 ? 0 : Math.Clamp(nilai * 100.0 / total, 0, 100))
+            .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    // "dicetak / sedang dikerjakan" & stok lock -- sama dengan WarnaDicetak di PerintahKerja
+    private const string WarnaDicetak = "#9DB8D6";
+    private const string WarnaUnlock = "#F08A24";   // stok bebas (unlock) -- oranye
+
+    // legenda progres -> daftar Personel, hanya bila perangkat boleh membuka Personel
+    private void KePersonel(string query)
+    {
+        if (Sesi.BolehMenu("PERSONEL")) Nav.NavigateTo("/tni/personel?" + query);
+    }
 
     private record Tile(string Label, string Route, string Icon, int Badge = 0);
 
@@ -156,7 +219,10 @@ else
         isLoading = true;
         // Akses menu bisa diubah admin kapan saja -- muat ulang identitas perangkat.
         await Sesi.EnsureLoadedAsync(paksa: true);
-        s = await PersonelApi.GetSummaryAsync();
+        var tSummary = PersonelApi.GetSummaryAsync();
+        var tStok = PersonelApi.GetBerandaStokAsync();
+        s = await tSummary;
+        st = await tStok;
         await OrderState.RefreshAsync();
         BuildTiles();
         isLoading = false;

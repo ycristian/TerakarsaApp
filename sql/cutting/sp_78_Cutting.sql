@@ -968,12 +968,17 @@ GO
 
    @BundleIdsJson NULL/kosong = semua bundle hidup di hamparan ini.
    Mereset needs_reprint = 0 untuk bundle yang dicetak.
+
+   Prompt 88: @PrintDeviceId = printer pilihan user (PrinterPicker). Divalidasi lewat
+   SIS_PrintJob_ResolveDevice SEBELUM transaksi -- job type dengan >1 route tanpa pilihan
+   ditolak 'Pilih printer tujuan.' dan tidak ada job yang dibuat.
    ============================================================ */
 CREATE OR ALTER PROCEDURE SIS_CuttingBundle_Print
     @SpreadId       INT,
     @BundleIdsJson  NVARCHAR(MAX) = NULL,
     @PublicBaseUrl  VARCHAR(255) = NULL,
-    @UserId         INT = NULL
+    @UserId         INT = NULL,
+    @PrintDeviceId  INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -990,9 +995,13 @@ BEGIN
 
     DECLARE @HasFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #ids) THEN 1 ELSE 0 END;
 
+    DECLARE @FinalDeviceId INT;
+    EXEC SIS_PrintJob_ResolveDevice @JobType = 'CUTTING_BUNDLE_LABEL',
+         @RequestedDeviceId = @PrintDeviceId, @DeviceId = @FinalDeviceId OUTPUT;
+
     BEGIN TRAN;
     BEGIN TRY
-        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], print_device_id, created_at, created_by)
         SELECT 'CUTTING_BUNDLE_LABEL', b.bundle_id,
             (SELECT
                 b.cutting_code                                   AS cutting_code,
@@ -1013,7 +1022,7 @@ BEGIN
                 s.spread_code                                    AS spread_code,
                 s.spread_date                                    AS spread_date
              FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
-            'PENDING', SYSDATETIME(), @UserId
+            'PENDING', @FinalDeviceId, SYSDATETIME(), @UserId
         FROM bundles b
         INNER JOIN spreads s ON s.spread_id = b.spread_id
         INNER JOIN articles a ON a.article_id = b.article_id

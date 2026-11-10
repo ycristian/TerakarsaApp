@@ -5,12 +5,12 @@
 @using TerakarsaApp.Shared.PrintJobs
 @inject PrintAdminApiService PrintAdminApi
 
-@* Prompt 77: routing antrian cetak. Owner memindahkan satu job_type ke device lain
-   lewat dropdown -- termasuk memindahkan THREAD_SKU_LABEL / THREAD_SPLIT_LABEL dari
-   printer PC (TSC) ke HP admin gudang (Xprinter Bluetooth) tanpa SQL.
-
-   Device HP didaftarkan DARI APP (Setting > Print Service), bukan dari halaman ini:
-   token device hanya boleh lahir di HP yang bersangkutan. *@
+@* Prompt 77: routing antrian cetak (PC vs HP Bluetooth).
+   Prompt 88: printer jaringan (TCP) + satu job type -> banyak device tujuan.
+   - Device PC (Windows / Jaringan) ditambah & diubah di sini; HP tetap didaftarkan DARI APP
+     (token device hanya boleh lahir di HP itu) -- di sini HP hanya bisa diganti nama/grup/aktif.
+   - Routing multi-pilih: job type dengan >1 device = user memilih printer saat cetak
+     (PrinterPicker). Hanya job type di PickerJobTypes yang layarnya punya pilihan printer. *@
 
 <PageTitle>Printer &amp; Routing</PageTitle>
 
@@ -18,7 +18,7 @@
     <div>
         <h1 class="page-title">Printer &amp; Routing</h1>
         <p class="text-muted mb-0">
-            Menentukan job cetak mana dikerjakan printer PC dan mana dikerjakan HP (Bluetooth).
+            Daftar printer (PC Windows, printer jaringan, HP Bluetooth) dan job cetak mana dikerjakan printer mana.
         </p>
     </div>
 </div>
@@ -43,14 +43,14 @@
                 {
                     <p class="text-muted mb-0">Memuat...</p>
                 }
-                else if (routes.Count == 0)
+                else if (JobTypes.Count == 0)
                 {
                     <p class="text-muted mb-0">Belum ada routing.</p>
                 }
                 else
                 {
                     <div class="table-responsive">
-                        <table class="table table-vcenter text-nowrap">
+                        <table class="table table-vcenter">
                             <thead>
                                 <tr>
                                     <th>Job type</th>
@@ -59,39 +59,74 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var r in routes)
+                                @foreach (var jt in JobTypes)
                                 {
+                                    var rute = RoutesOf(jt);
+                                    var first = rute[0];
+                                    var aktifCount = rute.Count(r => r.DeviceAktif);
+                                    var tertahan = first.TertahanNonaktif + first.TertahanBukanRoute + first.TertahanTanpaPilihan;
                                     <tr>
-                                        <td>
-                                            <strong>@r.JobType</strong>
-                                            <div class="text-muted" style="font-size:12px">@r.RenderMode</div>
+                                        <td style="min-width:150px">
+                                            <strong>@jt</strong>
+                                            <div class="text-muted" style="font-size:12px">@first.RenderMode</div>
                                         </td>
                                         <td>
-                                            <select class="form-select" value="@r.PrintDeviceId"
-                                                    disabled="@isSaving"
-                                                    @onchange="@(e => PindahAsync(r, e))">
-                                                @foreach (var d in DevicesUntuk(r))
-                                                {
-                                                    <option value="@d.PrintDeviceId">
-                                                        @d.DeviceName (@(d.IsAndroid ? "HP" : "PC"))
-                                                    </option>
-                                                }
-                                            </select>
-                                            @if (!r.DeviceAktif)
+                                            @foreach (var d in DevicesUntuk(jt))
+                                            {
+                                                var dipilih = rute.Any(r => r.PrintDeviceId == d.PrintDeviceId);
+                                                var deviceId = d.PrintDeviceId;
+                                                <div class="form-check mb-1">
+                                                    <input class="form-check-input" type="checkbox" id="@($"rt-{jt}-{deviceId}")"
+                                                           checked="@dipilih" disabled="@isSaving"
+                                                           @onchange="@(e => UbahRouteAsync(jt, deviceId, e))" />
+                                                    <label class="form-check-label" for="@($"rt-{jt}-{deviceId}")">
+                                                        @d.DeviceName
+                                                        <span class="badge bg-secondary ms-1">@PrintDeviceLabels.Group(d.DeviceGroup)</span>
+                                                        <span class="badge bg-light text-dark ms-1">@d.TransportLabel</span>
+                                                        @if (!d.IsActive)
+                                                        {
+                                                            <span class="badge bg-danger ms-1">Nonaktif</span>
+                                                        }
+                                                    </label>
+                                                </div>
+                                            }
+                                            @if (aktifCount == 0)
                                             {
                                                 <div class="text-danger" style="font-size:12px">
-                                                    Device nonaktif — job akan menunggu.
+                                                    Semua device tujuan nonaktif — job akan menunggu.
                                                 </div>
+                                            }
+                                            else if (aktifCount > 1)
+                                            {
+                                                @if (PickerJobTypes.Contains(jt))
+                                                {
+                                                    <div class="text-primary" style="font-size:12px">User memilih printer saat cetak.</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="text-danger" style="font-size:12px">
+                                                        Layar cetak @jt belum punya pilihan printer — job baru akan tertahan.
+                                                        Pakai satu device saja.
+                                                    </div>
+                                                }
                                             }
                                         </td>
                                         <td class="text-center">
-                                            @if (r.JobMenunggu > 0)
+                                            @if (first.JobMenunggu > 0)
                                             {
-                                                <span class="badge bg-warning">@r.JobMenunggu</span>
+                                                <span class="badge bg-warning">@first.JobMenunggu</span>
                                             }
                                             else
                                             {
                                                 <span class="text-muted">0</span>
+                                            }
+                                            @if (tertahan > 0)
+                                            {
+                                                <div class="mt-1">
+                                                    <span class="badge bg-danger" style="cursor:help" title="@TertahanTooltip(first)">
+                                                        @tertahan tertahan
+                                                    </span>
+                                                </div>
                                             }
                                         </td>
                                     </tr>
@@ -100,8 +135,9 @@
                         </table>
                     </div>
                     <p class="text-muted mb-0" style="font-size:12px">
-                        Job struk (render mode TOKEN) hanya bisa diarahkan ke printer PC —
-                        app HP merakit label TSPL saja.
+                        Hanya device dengan render mode yang sama dengan job type yang bisa dipilih.
+                        Job struk (TOKEN) hanya bisa ke printer PC — app HP merakit label TSPL saja.
+                        "Tertahan" = job menunggu yang tidak bisa diambil printer mana pun (arahkan kursor untuk penyebabnya).
                     </p>
                 }
             </div>
@@ -110,8 +146,9 @@
 
     <div class="col-xl-5 col-12">
         <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Device cetak</h3>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="card-title mb-0">Device cetak</h3>
+                <button class="btn btn-primary btn-sm" @onclick="BukaTambah">+ Tambah printer PC</button>
             </div>
             <div class="card-body">
                 @if (devices.Count == 0)
@@ -124,14 +161,15 @@
                         @foreach (var d in devices)
                         {
                             <div class="list-group-item">
-                                <div class="d-flex justify-content-between">
+                                <div class="d-flex justify-content-between gap-2">
                                     <div>
                                         <strong>@d.DeviceName</strong>
-                                        <span class="badge @(d.IsAndroid ? "bg-primary" : "bg-secondary") ms-1">
-                                            @(d.IsAndroid ? "HP Bluetooth" : "PC Windows")
-                                        </span>
+                                        <span class="badge @TransportBadge(d) ms-1">@d.TransportLabel</span>
+                                        <span class="badge bg-secondary ms-1">@PrintDeviceLabels.Group(d.DeviceGroup)</span>
                                         <div class="text-muted" style="font-size:12px">
-                                            @d.DeviceCode · @d.PrinterName · @d.RenderMode
+                                            @d.DeviceCode ·
+                                            @(d.IsTcp ? $"{d.Host}:{d.Port}" : d.PrinterName) ·
+                                            @d.RenderMode
                                         </div>
                                         @if (!string.IsNullOrWhiteSpace(d.JobTypes))
                                         {
@@ -150,28 +188,149 @@
                                             </div>
                                         }
                                     </div>
-                                    <div>
+                                    <div class="text-end text-nowrap">
                                         <span class="badge @(d.IsActive ? "bg-success" : "bg-secondary")">
                                             @(d.IsActive ? "Aktif" : "Nonaktif")
                                         </span>
+                                        <div class="mt-2 d-flex gap-1 justify-content-end">
+                                            <button class="btn btn-outline-secondary btn-sm" disabled="@isSaving"
+                                                    @onclick="() => BukaEdit(d)">Edit</button>
+                                            @if (!d.IsAndroid)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm" disabled="@(isSaving || !d.IsActive)"
+                                                        title="@(d.IsActive ? "Kirim label/struk test ke printer ini" : "Aktifkan dulu")"
+                                                        @onclick="() => TestPrintAsync(d)">Test print</button>
+                                            }
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         }
                     </div>
-
-                    <p class="text-muted mt-3 mb-0" style="font-size:12px">
-                        HP didaftarkan dari app Terakarsa: <b>Pengaturan → Print Service →
-                        Daftarkan HP ini</b>. Token device dibuat di sana dan hanya
-                        ditampilkan sekali di HP itu.
-                    </p>
                 }
+
+                <p class="text-muted mt-3 mb-0" style="font-size:12px">
+                    <b>PC Jaringan</b>: printer WiFi/LAN dikirim langsung ke IP:port (umumnya 9100) oleh
+                    PrintService di PC — tidak perlu didaftarkan di Windows.
+                    <b>HP</b> didaftarkan dari app Terakarsa: Pengaturan → Print Service → Daftarkan HP ini.
+                </p>
             </div>
         </div>
     </div>
 </div>
 
+@if (form is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(formId is null ? "Tambah printer PC" : "Edit device")</h5>
+                    <button type="button" class="btn-close" @onclick="TutupForm"></button>
+                </div>
+                <div class="modal-body">
+                    @if (formIsAndroid)
+                    {
+                        <div class="alert alert-info py-2" style="font-size:13px">
+                            Device HP Bluetooth: hanya nama, grup, dan status aktif yang bisa diubah di sini.
+                        </div>
+                    }
+
+                    <div class="mb-2">
+                        <label class="form-label">Nama (lokasi)</label>
+                        <input class="form-control" maxlength="150" @bind="form.DeviceName" placeholder="mis. Label Lantai Atas" />
+                    </div>
+
+                    @if (formId is null)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Kode device</label>
+                            <input class="form-control" maxlength="30" @bind="form.DeviceCode" placeholder="mis. LABEL_ATAS" />
+                            <div class="text-muted" style="font-size:12px">Huruf besar, unik, tidak bisa diubah setelah disimpan.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Kode device</label>
+                            <input class="form-control" value="@form.DeviceCode" readonly onfocus="this.select()" />
+                            <div class="text-muted" style="font-size:12px">Tidak bisa diubah. Salin persis ke <code>DeviceCodes</code> di appsettings PrintService.</div>
+                        </div>
+                    }
+
+                    @if (!formIsAndroid)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Tipe koneksi</label>
+                            <select class="form-select" @bind="form.Transport">
+                                <option value="WINDOWS">PC Windows (nama printer Windows)</option>
+                                <option value="TCP">PC Jaringan (TCP, IP:port)</option>
+                            </select>
+                        </div>
+
+                        @if (form.Transport == "WINDOWS")
+                        {
+                            <div class="mb-2">
+                                <label class="form-label">Nama printer Windows</label>
+                                <input class="form-control" maxlength="255" @bind="form.PrinterName" placeholder="persis seperti di Windows" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="row g-2 mb-2">
+                                <div class="col-8">
+                                    <label class="form-label">Host / IP</label>
+                                    <input class="form-control" maxlength="100" @bind="form.Host" placeholder="192.168.8.51" />
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label">Port</label>
+                                    <input type="number" min="1" max="65535" class="form-control" @bind="form.Port" />
+                                </div>
+                            </div>
+                        }
+
+                        <div class="mb-2">
+                            <label class="form-label">Render mode</label>
+                            <select class="form-select" @bind="form.RenderMode">
+                                <option value="RAW_TSPL">RAW_TSPL (label TSPL)</option>
+                                <option value="TOKEN">TOKEN (struk ESC/POS)</option>
+                            </select>
+                        </div>
+                    }
+
+                    <div class="mb-2">
+                        <label class="form-label">Grup</label>
+                        <select class="form-select" @bind="form.DeviceGroup">
+                            @foreach (var g in GroupOptions)
+                            {
+                                <option value="@g">@g — @PrintDeviceLabels.Group(g)</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="dev-active" @bind="form.IsActive" />
+                        <label class="form-check-label" for="dev-active">Aktif</label>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@formError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" @onclick="TutupForm">Batal</button>
+                    <button class="btn btn-primary" disabled="@isSaving" @onclick="SimpanDeviceAsync">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
+    // Job type yang semua layar cetaknya sudah memakai PrinterPicker (Prompt 88).
+    private static readonly HashSet<string> PickerJobTypes = new() { "BUNDLE_LABEL", "CUTTING_BUNDLE_LABEL" };
+
     private List<PrintJobRouteDto> routes = new();
     private List<PrintDeviceDto> devices = new();
 
@@ -179,6 +338,27 @@
     private bool isSaving;
     private string? error;
     private string? pesan;
+
+    // form tambah/edit device
+    private PrintDeviceSaveRequest? form;
+    private int? formId;
+    private bool formIsAndroid;
+    private string formError = string.Empty;
+
+    private List<string> JobTypes => routes.Select(r => r.JobType).Distinct().OrderBy(j => j).ToList();
+
+    private List<PrintJobRouteDto> RoutesOf(string jobType) => routes.Where(r => r.JobType == jobType).ToList();
+
+    private List<string> GroupOptions
+    {
+        get
+        {
+            var list = PrintDeviceLabels.Groups.ToList();
+            if (form is not null && !string.IsNullOrWhiteSpace(form.DeviceGroup) && !list.Contains(form.DeviceGroup))
+                list.Add(form.DeviceGroup);
+            return list;
+        }
+    }
 
     protected override Task OnInitializedAsync() => MuatAsync();
 
@@ -190,32 +370,136 @@
         isLoading = false;
     }
 
-    // Device HP hanya boleh menerima job RAW_TSPL; untuk route TOKEN, dropdown hanya
-    // menampilkan device PC (aturan yang sama ditegakkan ulang di SP).
-    private List<PrintDeviceDto> DevicesUntuk(PrintJobRouteDto route) =>
-        devices.Where(d => route.RenderMode == "RAW_TSPL" || !d.IsAndroid).ToList();
-
-    private async Task PindahAsync(PrintJobRouteDto route, ChangeEventArgs e)
+    // Pilihan device untuk satu job type: render mode sama dengan route yang ada; device
+    // nonaktif hanya tampil kalau masih terpasang (supaya bisa dilepas). HP hanya untuk TSPL.
+    private List<PrintDeviceDto> DevicesUntuk(string jobType)
     {
-        if (!int.TryParse(e.Value?.ToString(), out var deviceId) || deviceId == route.PrintDeviceId) return;
+        var rute = RoutesOf(jobType);
+        var mode = rute[0].RenderMode;
+        return devices
+            .Where(d => d.RenderMode == mode)
+            .Where(d => mode == "RAW_TSPL" || !d.IsAndroid)
+            .Where(d => d.IsActive || rute.Any(r => r.PrintDeviceId == d.PrintDeviceId))
+            .OrderBy(d => d.DeviceName)
+            .ToList();
+    }
+
+    private async Task UbahRouteAsync(string jobType, int deviceId, ChangeEventArgs e)
+    {
+        var centang = e.Value is bool b && b;
+        var ids = RoutesOf(jobType).Select(r => r.PrintDeviceId).ToList();
+        if (centang) { if (!ids.Contains(deviceId)) ids.Add(deviceId); }
+        else ids.Remove(deviceId);
 
         isSaving = true;
         error = null;
         pesan = null;
 
-        var (success, err) = await PrintAdminApi.SetRouteAsync(route.JobType, deviceId);
+        var (success, err) = await PrintAdminApi.SetRouteAsync(jobType, ids);
+        isSaving = false;
 
+        if (!success) error = err;
+        else
+        {
+            var nama = devices.Where(d => ids.Contains(d.PrintDeviceId)).Select(d => d.DeviceName);
+            pesan = $"{jobType} → {string.Join(", ", nama)}.";
+        }
+
+        await MuatAsync();
+    }
+
+    private static string TertahanTooltip(PrintJobRouteDto r)
+    {
+        var bagian = new List<string>();
+        if (r.TertahanNonaktif > 0) bagian.Add($"{r.TertahanNonaktif} job: printer pilihannya nonaktif/dihapus (aktifkan lagi → otomatis tercetak)");
+        if (r.TertahanBukanRoute > 0) bagian.Add($"{r.TertahanBukanRoute} job: printer pilihannya sudah dilepas dari routing ini");
+        if (r.TertahanTanpaPilihan > 0) bagian.Add($"{r.TertahanTanpaPilihan} job: menunggu pilihan printer (job lama tanpa tujuan, routing kini >1 printer)");
+        return string.Join("\n", bagian);
+    }
+
+    private static string TransportBadge(PrintDeviceDto d) => d.Transport switch
+    {
+        "ANDROID_BT" => "bg-primary",
+        "TCP" => "bg-info",
+        _ => "bg-dark"
+    };
+
+    // ---------- device ----------
+
+    private void BukaTambah()
+    {
+        formId = null;
+        formIsAndroid = false;
+        formError = string.Empty;
+        form = new PrintDeviceSaveRequest
+        {
+            Transport = "TCP",
+            Port = 9100,
+            RenderMode = "RAW_TSPL",
+            DeviceGroup = "LABEL_BUNDLE",
+            IsActive = true
+        };
+    }
+
+    private void BukaEdit(PrintDeviceDto d)
+    {
+        formId = d.PrintDeviceId;
+        formIsAndroid = d.IsAndroid;
+        formError = string.Empty;
+        form = new PrintDeviceSaveRequest
+        {
+            DeviceCode = d.DeviceCode,
+            DeviceName = d.DeviceName,
+            Transport = d.IsAndroid ? "ANDROID_BT" : d.Transport,
+            PrinterName = d.IsTcp ? null : d.PrinterName,
+            Host = d.Host,
+            Port = d.Port ?? 9100,
+            RenderMode = d.RenderMode,
+            DeviceGroup = d.DeviceGroup,
+            IsActive = d.IsActive
+        };
+    }
+
+    private void TutupForm()
+    {
+        form = null;
+        formId = null;
+    }
+
+    private async Task SimpanDeviceAsync()
+    {
+        if (form is null) return;
+
+        isSaving = true;
+        formError = string.Empty;
+
+        var (success, err) = await PrintAdminApi.SaveDeviceAsync(formId, form);
         isSaving = false;
 
         if (!success)
         {
-            error = err;
-            await MuatAsync();
+            formError = err;
             return;
         }
 
-        var device = devices.FirstOrDefault(d => d.PrintDeviceId == deviceId);
-        pesan = $"{route.JobType} sekarang dicetak {device?.DeviceName}.";
+        pesan = $"Device {form.DeviceName} disimpan.";
+        error = null;
+        TutupForm();
+        await MuatAsync();
+    }
+
+    private async Task TestPrintAsync(PrintDeviceDto d)
+    {
+        isSaving = true;
+        error = null;
+        pesan = null;
+
+        var (success, err) = await PrintAdminApi.TestPrintAsync(d.PrintDeviceId);
+        isSaving = false;
+
+        if (!success) error = err;
+        else pesan = $"Test print ke {d.DeviceName} masuk antrian — tunggu beberapa detik. Kalau gagal, lihat log PrintService / kolom error job.";
+
         await MuatAsync();
     }
 }

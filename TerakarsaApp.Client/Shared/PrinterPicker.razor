@@ -1,0 +1,177 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.PrintJobs
+@inject PrintAdminApiService PrintAdminApi
+@inject StationDeviceApiService StationApi
+@inject IJSRuntime JS
+
+@* Prompt 88: pilih printer tujuan saat cetak label. Dipakai di semua layar yang membuat job
+   label bundle (web biasa, tablet Admin Cutting, station, WebView app Android).
+
+   - 0 printer  -> peringatan, CanPrint = false (tombol cetak induk dinonaktifkan).
+   - 1 printer  -> tidak ada pilihan (Value = null, server memakai satu-satunya printer);
+                   hanya teks kecil "Cetak ke: ...".
+   - >1 printer -> dropdown + tombol "Jadikan default". Default disimpan di localStorage per
+                   perangkat (tmos.printer.default.{JobType}); pilihan terakhir tanpa default
+                   diingat sampai halaman di-reload (static di memori WASM).
+
+   Station = true memakai endpoint station (header X-Station-Token), selain itu JWT. *@
+
+@if (isLoading)
+{
+    <div class="text-muted mb-2" style="font-size:12px">Memuat printer...</div>
+}
+else if (devices.Count == 0)
+{
+    <div class="alert alert-warning py-2 mb-2" style="font-size:13px">
+        Belum ada printer untuk @JobType. Atur di halaman Printer &amp; Routing.
+    </div>
+}
+else if (devices.Count == 1)
+{
+    @if (ShowSingle)
+    {
+        <div class="text-muted mb-2" style="font-size:12px">
+            Cetak ke: <strong>@devices[0].DeviceName</strong>
+        </div>
+    }
+}
+else
+{
+    <div class="mb-3">
+        <label class="form-label mb-1">Printer tujuan <span class="text-danger">*</span></label>
+        <div class="d-flex gap-2 align-items-center">
+            <select class="form-select" value="@(Value?.ToString() ?? string.Empty)" @onchange="PilihAsync"
+                    style="@(Value is null ? "border-color:#f59e0b" : null)">
+                <option value="">— Pilih printer —</option>
+                @foreach (var d in devices)
+                {
+                    <option value="@d.PrintDeviceId">@d.DeviceName (@PrintDeviceLabels.Group(d.DeviceGroup))</option>
+                }
+            </select>
+            <button type="button" class="btn btn-outline-secondary text-nowrap"
+                    disabled="@(Value is null || Value == defaultId)"
+                    @onclick="JadikanDefaultAsync">
+                Jadikan default
+            </button>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center mt-1" style="font-size:12px">
+            @if (Terpilih is { } t)
+            {
+                <span class="badge bg-secondary">@PrintDeviceLabels.Group(t.DeviceGroup)</span>
+                <span class="badge bg-light text-dark">@t.TransportLabel</span>
+            }
+            @if (Value is not null && Value == defaultId)
+            {
+                <span class="text-success">Default perangkat ini</span>
+            }
+            else if (Value is null)
+            {
+                <span class="text-warning">Wajib pilih printer sebelum mencetak.</span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string JobType { get; set; } = string.Empty;
+
+    // true = perangkat station (X-Station-Token), false = user login (JWT).
+    [Parameter] public bool Station { get; set; }
+
+    // Printer terpilih; null = otomatis (satu printer) atau belum dipilih (>1 printer).
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+
+    // false kalau belum ada printer sama sekali, atau >1 printer dan belum dipilih.
+    [Parameter] public EventCallback<bool> CanPrintChanged { get; set; }
+
+    // Tampilkan "Cetak ke: X" saat hanya ada satu printer.
+    [Parameter] public bool ShowSingle { get; set; } = true;
+
+    // Pilihan terakhir per job type -- bertahan antar layar sampai halaman di-reload.
+    private static readonly Dictionary<string, int> PilihanTerakhir = new();
+
+    private List<PrintDeviceOptionDto> devices = new();
+    private bool isLoading = true;
+    private int? defaultId;
+    private string? loadedFor;
+
+    private string StorageKey => $"tmos.printer.default.{JobType}";
+
+    private PrintDeviceOptionDto? Terpilih => devices.FirstOrDefault(d => d.PrintDeviceId == Value);
+
+    public bool CanPrint => !isLoading && (devices.Count == 1 || (devices.Count > 1 && Value is not null));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == JobType) return;
+        loadedFor = JobType;
+        await MuatAsync();
+    }
+
+    private async Task MuatAsync()
+    {
+        isLoading = true;
+
+        devices = Station
+            ? await StationApi.GetPrintersAsync(JobType)
+            : await PrintAdminApi.GetForJobTypeAsync(JobType);
+
+        defaultId = await BacaDefaultAsync();
+
+        int? pilihan = null;
+        if (devices.Count > 1)
+        {
+            if (PilihanTerakhir.TryGetValue(JobType, out var terakhir) && devices.Any(d => d.PrintDeviceId == terakhir))
+                pilihan = terakhir;
+            else if (defaultId is int def && devices.Any(d => d.PrintDeviceId == def))
+                pilihan = def;
+        }
+
+        isLoading = false;
+
+        Value = pilihan;
+        await ValueChanged.InvokeAsync(pilihan);
+        await CanPrintChanged.InvokeAsync(CanPrint);
+    }
+
+    private async Task PilihAsync(ChangeEventArgs e)
+    {
+        int? pilihan = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+
+        if (pilihan is int p) PilihanTerakhir[JobType] = p;
+        else PilihanTerakhir.Remove(JobType);
+
+        Value = pilihan;
+        await ValueChanged.InvokeAsync(pilihan);
+        await CanPrintChanged.InvokeAsync(CanPrint);
+    }
+
+    private async Task JadikanDefaultAsync()
+    {
+        if (Value is not int id) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, id.ToString());
+            defaultId = id;
+        }
+        catch (JSException)
+        {
+            // localStorage diblokir (mode privat) -- pilihan tetap berlaku sampai reload.
+        }
+    }
+
+    private async Task<int?> BacaDefaultAsync()
+    {
+        try
+        {
+            var nilai = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKey);
+            return int.TryParse(nilai, out var id) ? id : null;
+        }
+        catch (JSException)
+        {
+            return null;
+        }
+    }
+}

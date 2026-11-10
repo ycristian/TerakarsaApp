@@ -19,6 +19,7 @@ public class ManualOutputRowDto
     public int? ArticleId { get; set; }          // opsional -- boleh ditempel admin belakangan
     public string? ArticleName { get; set; }
     public string? NoPo { get; set; }
+    public DateTime OutputDate { get; set; }     // alter_86: tanggal kerjaannya terjadi (bukan created_at)
     public string WorkDescription { get; set; } = string.Empty;
     public string? SizeName { get; set; }
     public int Qty { get; set; }                 // boleh 0 atau MINUS (minus = potongan)
@@ -42,6 +43,7 @@ public class ManualOutputAdminRowDto
     public string? ArticleName { get; set; }
     public string? NoPo { get; set; }
     public string? ProjectName { get; set; }
+    public DateTime OutputDate { get; set; }     // alter_86: tanggal kerjaannya terjadi (bukan created_at)
     public string WorkDescription { get; set; } = string.Empty;
     public string? SizeName { get; set; }
     public int Qty { get; set; }
@@ -67,6 +69,10 @@ public class ManualOutputSaveRequest
 {
     public int? ManualOutputId { get; set; }     // null = baru
     public int? ArticleId { get; set; }          // opsional
+    // alter_86: tanggal kerjaannya terjadi. Bawaannya hari ini -- BUKAN default(DateTime),
+    // supaya request yang (karena versi client lama) tidak mengisi field ini tidak mengirim
+    // 0001-01-01, yang lolos validasi "tidak boleh di masa depan" di SP.
+    public DateTime OutputDate { get; set; } = DateTime.Today;
     public string WorkDescription { get; set; } = string.Empty;
     public string? SizeName { get; set; }
     public int Qty { get; set; }

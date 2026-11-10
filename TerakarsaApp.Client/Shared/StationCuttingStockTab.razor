@@ -117,6 +117,14 @@
                         <input type="number" min="0" class="form-control" @bind="jumlahLabel" />
                     </div>
                 </div>
+                @* Prompt 88: printer label bundle (dropdown hanya kalau >1 printer). *@
+                @if (jumlahLabel >= 1)
+                {
+                    <div class="mt-2">
+                        <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="printerId"
+                                       CanPrintChanged="v => printerOk = v" />
+                    </div>
+                }
             }
         </div>
 
@@ -125,7 +133,7 @@
                 Batal
             </button>
             <button type="button" class="btn btn-success"
-                    disabled="@(sedangProses || ResourceId <= 0 || lineId <= 0)"
+                    disabled="@(sedangProses || ResourceId <= 0 || lineId <= 0 || (jumlahLabel >= 1 && !printerOk))"
                     title="@ClaimTitle"
                     @onclick="ClaimAsync">
                 @(sedangProses ? "Memproses…" : "Claim & cetak label")
@@ -159,6 +167,9 @@
     private int lineId;
     private int employeeId;
     private int jumlahLabel = 1;
+    // Prompt 88: printer pilihan (PrinterPicker).
+    private int? printerId;
+    private bool printerOk = true;
 
     private string ClaimTitle => ResourceId <= 0
         ? "Pilih operator dulu"
@@ -248,7 +259,7 @@
 
         var (success, error, hasil) = await StationApi.TakeCuttingBundlesAsync(
             new List<int> { bundleAktif.BundleId }, ResourceId,
-            lineId, employeeId, jumlahLabel < 0 ? 0 : jumlahLabel);
+            lineId, employeeId, jumlahLabel < 0 ? 0 : jumlahLabel, printerId);
 
         sedangProses = false;
 

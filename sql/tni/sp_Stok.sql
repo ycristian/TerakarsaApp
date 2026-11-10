@@ -13,6 +13,7 @@
 --
 -- 2026-10-07 (alter_76): setoran punya header tni.stok_setoran, satu per
 -- (order, tanggal, supplier). SETORAN dengan kunci yang sama DIGABUNG;
+-- 2026-11-09 (alter_80): TIDAK digabung lagi -- satu header per input.
 -- SETORAN_EDIT mengubah master + isi; SETORAN_HAPUS menghapus seluruhnya.
 -- 2026-10-07 (alter_77): pengeluaran (RUSAK/KOREKSI) juga punya header
 -- tni.stok_keluar, banyak pola per pengeluaran, TANPA penggabungan;
@@ -122,46 +123,15 @@ BEGIN
         BEGIN TRY
             BEGIN TRANSACTION;
 
-            -- 2026-10-07 (alter_76): satu header per (order, tanggal, supplier).
-            -- Sudah ada -> DIGABUNG: pola yang sama ditambah qty-nya, pola baru
-            -- jadi baris baru.
+            -- 2026-11-09 (alter_80): SETIAP simpan = satu header baru, walau
+            -- tanggal & supplier sama dengan setoran lain -- Riwayat per input.
+            -- (alter_76 dulu menggabung ke header (order, tanggal, supplier).)
+            -- @Digabung tetap dikembalikan (selalu 0) demi kompatibilitas DTO.
             DECLARE @Digabung BIT = 0;
 
-            SELECT @SetoranId = setoran_id
-            FROM tni.stok_setoran WITH (UPDLOCK, HOLDLOCK)
-            WHERE order_id = @OrderId
-              AND tanggal = @Tanggal
-              AND (supplier = @Supplier OR (supplier IS NULL AND @Supplier IS NULL))
-              AND deleted_at IS NULL;
-
-            IF @SetoranId IS NULL
-            BEGIN
-                INSERT INTO tni.stok_setoran (order_id, tanggal, supplier, perangkat_id, created_by)
-                VALUES (@OrderId, @Tanggal, @Supplier, @PerangkatId, @UserId);
-                SET @SetoranId = CAST(SCOPE_IDENTITY() AS INT);
-            END
-            ELSE
-            BEGIN
-                SET @Digabung = 1;
-                UPDATE tni.stok_setoran
-                SET updated_at = SYSDATETIME(), updated_by = @UserId
-                WHERE setoran_id = @SetoranId;
-            END
-
-            -- pola yang sudah ada di setoran ini: tambah ke baris pertamanya
-            UPDATE sm
-            SET qty = sm.qty + s.qty,
-                updated_at = SYSDATETIME(),
-                updated_by = @UserId
-            FROM tni.stok_mutasi sm
-            JOIN #s s ON s.jenisItem = sm.jenis_item
-                     AND s.polaId = COALESCE(sm.pola_kemeja_id, sm.pola_celana_id)
-            WHERE sm.mutasi_id = (SELECT MIN(x.mutasi_id) FROM tni.stok_mutasi x
-                                  WHERE x.setoran_id = @SetoranId
-                                    AND x.deleted_at IS NULL
-                                    AND x.jenis_item = sm.jenis_item
-                                    AND COALESCE(x.pola_kemeja_id, x.pola_celana_id)
-                                        = COALESCE(sm.pola_kemeja_id, sm.pola_celana_id));
+            INSERT INTO tni.stok_setoran (order_id, tanggal, supplier, perangkat_id, created_by)
+            VALUES (@OrderId, @Tanggal, @Supplier, @PerangkatId, @UserId);
+            SET @SetoranId = CAST(SCOPE_IDENTITY() AS INT);
 
             INSERT INTO tni.stok_mutasi
                 (order_id, jenis_item, pola_kemeja_id, pola_celana_id,
@@ -177,12 +147,7 @@ BEGIN
                    @UserId,
                    @PerangkatId,
                    @SetoranId
-            FROM #s s
-            WHERE NOT EXISTS (SELECT 1 FROM tni.stok_mutasi x
-                              WHERE x.setoran_id = @SetoranId
-                                AND x.deleted_at IS NULL
-                                AND x.jenis_item = s.jenisItem
-                                AND COALESCE(x.pola_kemeja_id, x.pola_celana_id) = s.polaId);
+            FROM #s s;
 
             COMMIT TRANSACTION;
 
@@ -206,7 +171,7 @@ BEGIN
     --   pola sama   -> qty diubah (baris pertama; baris dobel lama dihapus)
     --   pola baru   -> baris baru (harus pola aktif)
     --   pola hilang -> baris dihapus (soft)
-    -- Tanggal/supplier baru yang sudah dipakai setoran LAIN ditolak (kunci unik).
+    -- (alter_80: tanggal/supplier kembar dengan setoran lain boleh.)
     -- Saldo boleh jadi minus sesudahnya (aturan stok: tidak pernah diblok).
     -- ========================================================
     IF @Action = 'SETORAN_EDIT'
@@ -278,18 +243,8 @@ BEGIN
 
         SET @Supplier = NULLIF(LTRIM(RTRIM(ISNULL(@Supplier, ''))), '');
 
-        IF EXISTS (SELECT 1 FROM tni.stok_setoran
-                   WHERE order_id = @OrderId
-                     AND setoran_id <> @SetoranId
-                     AND tanggal = @Tanggal
-                     AND (supplier = @Supplier OR (supplier IS NULL AND @Supplier IS NULL))
-                     AND deleted_at IS NULL)
-        BEGIN
-            DECLARE @TglTeks VARCHAR(10) = CONVERT(VARCHAR(10), @Tanggal, 103);
-            DECLARE @SupTeks VARCHAR(150) = ISNULL(@Supplier, '(tanpa supplier)');
-            RAISERROR('Sudah ada setoran lain tanggal %s supplier %s -- ubah isi setoran itu saja.', 16, 1, @TglTeks, @SupTeks);
-            RETURN;
-        END
+        -- 2026-11-09 (alter_80): tanggal/supplier kembar dengan setoran lain
+        -- TIDAK ditolak lagi -- setoran memang satu header per input.
 
         BEGIN TRY
             BEGIN TRANSACTION;

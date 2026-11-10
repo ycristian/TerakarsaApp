@@ -49,6 +49,7 @@ public class PrintAdminController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Routes() => Ok(await _deviceService.GetRoutesAsync());
 
+    // Prompt 88: request membawa daftar LENGKAP device tujuan (multi-pilih).
     [HttpPut("routes")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> SetRoute([FromBody] PrintJobRouteSetRequest request)
@@ -56,5 +57,44 @@ public class PrintAdminController : ControllerBase
         var (success, error) = await _deviceService.SetRouteAsync(request, CurrentUserId);
         if (!success) return BadRequest(error);
         return Ok();
+    }
+
+    // ==================== Prompt 88 ====================
+
+    // PrinterPicker untuk user login biasa (Kelola Bundle, Admin Cutting, Super Admin).
+    // Perangkat station memakai GET api/station/printers (header X-Station-Token).
+    [HttpGet("devices/for-job")]
+    public async Task<IActionResult> DevicesForJob([FromQuery] string jobType)
+    {
+        if (string.IsNullOrWhiteSpace(jobType)) return BadRequest("jobType wajib diisi.");
+        return Ok(await _deviceService.GetForJobTypeAsync(jobType));
+    }
+
+    [HttpPost("devices")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateDevice([FromBody] PrintDeviceSaveRequest request)
+    {
+        var (success, error, id) = await _deviceService.SaveDeviceAsync(null, request, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintDeviceId = id });
+    }
+
+    [HttpPut("devices/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateDevice(int id, [FromBody] PrintDeviceSaveRequest request)
+    {
+        var (success, error, _) = await _deviceService.SaveDeviceAsync(id, request, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Job TEST_PRINT langsung ke device PC ini (tanpa route).
+    [HttpPost("devices/{id:int}/test-print")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> TestPrint(int id)
+    {
+        var (success, error, printJobId) = await _deviceService.TestPrintAsync(id, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(new { PrintJobId = printJobId });
     }
 }

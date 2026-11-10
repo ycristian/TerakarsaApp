@@ -128,9 +128,11 @@ public class CuttingApiService
         => await HasilAsync(await _http.DeleteAsync($"api/cutting/spreads/{id}"));
 
     // bundleIds null/kosong = cetak semua bundle hamparan (sekalian tandai sudah dicetak).
-    public async Task<(bool Success, string Error, int JobCount)> PrintAsync(int id, List<int>? bundleIds = null)
+    // Prompt 88: printDeviceId = pilihan PrinterPicker (null = otomatis, satu printer).
+    public async Task<(bool Success, string Error, int JobCount)> PrintAsync(int id, List<int>? bundleIds = null, int? printDeviceId = null)
     {
-        var response = await _http.PostAsJsonAsync($"api/cutting/spreads/{id}/print", bundleIds ?? new List<int>());
+        var url = $"api/cutting/spreads/{id}/print" + (printDeviceId.HasValue ? $"?printDeviceId={printDeviceId.Value}" : "");
+        var response = await _http.PostAsJsonAsync(url, bundleIds ?? new List<int>());
 
         if (response.IsSuccessStatusCode)
         {

@@ -42,6 +42,8 @@ public class StationDeviceController : ControllerBase
     // Prompt 83: output manual di tab OUT (manual_outputs) + pencarian artikel untuk formnya.
     private readonly ManualOutputService _manualOutputService;
     private readonly ArticleService _articleService;
+    // Prompt 88: daftar printer per job type (PrinterPicker) + validasi printer sebelum aksi.
+    private readonly PrintDeviceService _printDeviceService;
     private readonly int _systemUserId;
 
     public StationDeviceController(
@@ -61,6 +63,7 @@ public class StationDeviceController : ControllerBase
         CuttingService cuttingService,
         ManualOutputService manualOutputService,
         ArticleService articleService,
+        PrintDeviceService printDeviceService,
         IOptions<StationOptions> stationOptions)
     {
         _workflowLogService = workflowLogService;
@@ -79,6 +82,7 @@ public class StationDeviceController : ControllerBase
         _cuttingService = cuttingService;
         _manualOutputService = manualOutputService;
         _articleService = articleService;
+        _printDeviceService = printDeviceService;
         _systemUserId = stationOptions.Value.SystemUserId;
     }
 
@@ -212,7 +216,8 @@ public class StationDeviceController : ControllerBase
             EmployeeId = request.TailorEmployeeId,
             BundlingResourceId = operatorResourceId,
             PrintCopies = request.PrintCopies,
-            Remarks = request.Remarks
+            Remarks = request.Remarks,
+            PrintDeviceId = request.PrintDeviceId
         }, _systemUserId);
 
         if (!success) return BadRequest(error);
@@ -291,6 +296,16 @@ public class StationDeviceController : ControllerBase
         if (operatorResourceId <= 0) return BadRequest("Operator wajib dipilih.");
         if (request.BundleIds.Count == 0) return BadRequest("Belum ada bundle yang discan.");
 
+        // Prompt 88: label dicetak SETELAH claim (di bawah) dan kegagalan cetak tidak
+        // membatalkan claim -- jadi printer divalidasi DULU, sebelum bundle diambil, supaya
+        // tidak ada bundle yang jadi milik Line tapi labelnya tidak tercetak.
+        var akanCetak = request.TargetResourceId > 0 && request.PrintCopies >= 1;
+        if (akanCetak)
+        {
+            var printerError = await _printDeviceService.ValidateAsync("BUNDLE_LABEL", request.PrintDeviceId);
+            if (printerError is not null) return BadRequest(printerError);
+        }
+
         var (success, error, hasil) = await _cuttingService.TakeBundlesAsync(
             new CuttingBundleTakeRequest
             {
@@ -309,12 +324,12 @@ public class StationDeviceController : ControllerBase
             TotalPcs = hasil?.TotalPcs ?? 0
         };
 
-        if (request.TargetResourceId > 0 && request.PrintCopies >= 1)
+        if (akanCetak)
         {
             foreach (var bundleId in request.BundleIds)
             {
                 var (printOk, printError, _) =
-                    await _bundleService.ReprintAsync(bundleId, request.PrintCopies, _systemUserId);
+                    await _bundleService.ReprintAsync(bundleId, request.PrintCopies, _systemUserId, request.PrintDeviceId);
 
                 if (printOk) result.LabelsQueued += request.PrintCopies;
                 else result.LabelError ??= printError;
@@ -328,13 +343,21 @@ public class StationDeviceController : ControllerBase
     // token perangkat valid. Fix: @copies (default 1) -- jumlah label yang dicetak, diisi user
     // lewat modal konfirmasi Cetak Ulang.
     [HttpPost("bundles/{id:int}/reprint")]
-    public async Task<IActionResult> ReprintBundle(int id, [FromQuery] int copies = 1)
+    public async Task<IActionResult> ReprintBundle(int id, [FromQuery] int copies = 1, [FromQuery] int? printDeviceId = null)
     {
         if (copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
-        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, _systemUserId);
+        var (success, error, printJobId) = await _bundleService.ReprintAsync(id, copies, _systemUserId, printDeviceId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
+    }
+
+    // Prompt 88: daftar printer aktif untuk job type (PrinterPicker di perangkat station).
+    [HttpGet("printers")]
+    public async Task<IActionResult> GetPrinters([FromQuery] string jobType)
+    {
+        if (string.IsNullOrWhiteSpace(jobType)) return BadRequest("jobType wajib diisi.");
+        return Ok(await _printDeviceService.GetForJobTypeAsync(jobType));
     }
 
     // Prompt: "Print Label Cacat" -- popup di BundleScanCard setelah Kirim Hasil dengan
@@ -344,7 +367,7 @@ public class StationDeviceController : ControllerBase
     {
         if (request.Copies < 1) return BadRequest("Jumlah label harus minimal 1.");
 
-        var (success, error, printJobId) = await _bundleService.PrintDefectLabelAsync(id, request.Copies, request.Remark, _systemUserId);
+        var (success, error, printJobId) = await _bundleService.PrintDefectLabelAsync(id, request.Copies, request.Remark, _systemUserId, request.PrintDeviceId);
         if (!success) return BadRequest(error);
         return Ok(new { PrintJobId = printJobId });
     }
@@ -442,10 +465,15 @@ public class StationDeviceController : ControllerBase
     // Divisi SELALU dari token perangkat; operator dari sesi stasiun; created_by = user
     // sistem station_system. TIDAK ADA endpoint harga di sisi stasiun dan tidak boleh ada --
     // PIC tidak pernah melihat atau mengisi harga (koreksi harga ada di module PAYROLL_REKAP).
+    // alter_86: date = tanggal yang sedang dipilih di filter "Tanggal Kirim" tab OUT.
+    // 2026-11-02: resourceId = Line sesi -- baris manual disaring per Line, sama seperti
+    // baris log di kartu sebelahnya. Lewat EffectiveResourceId supaya stasiun yang terkunci
+    // ke satu Line tidak bisa dialihkan dari query string.
     [HttpGet("manual-outputs")]
-    public async Task<IActionResult> GetManualOutputs()
+    public async Task<IActionResult> GetManualOutputs([FromQuery] DateTime? date, [FromQuery] int? resourceId)
     {
-        var result = await _manualOutputService.GetStationListAsync(CurrentStation.DivisionId);
+        var result = await _manualOutputService.GetStationListAsync(
+            CurrentStation.DivisionId, outputDate: date, resourceId: EffectiveResourceId(resourceId));
         return Ok(result);
     }
 

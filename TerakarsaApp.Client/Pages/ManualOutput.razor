@@ -184,7 +184,14 @@ else
                                            checked="@selectedIds.Contains(row.ManualOutputId)"
                                            @onchange="@(e => ToggleRow(row.ManualOutputId, e))" />
                                 </td>
-                                <td class="text-nowrap">@row.CreatedAt.ToString("dd/MM/yy HH:mm")</td>
+                                @* alter_86: kolom Tanggal = TANGGAL TRANSAKSI (kapan dikerjakan).
+                                   Stempel catat ditaruh di bawahnya sebagai baris kecil supaya
+                                   selisih "dikerjakan vs dicatat" tetap kelihatan admin. *@
+                                <td class="text-nowrap">
+                                    <div>@row.OutputDate.ToString("dd/MM/yy")</div>
+                                    <div class="text-muted" style="font-size: 0.7rem;"
+                                         title="Dicatat di stasiun">dicatat @row.CreatedAt.ToString("dd/MM/yy HH:mm")</div>
+                                </td>
                                 <td>@row.DivisionName</td>
                                 <td>@row.ResourceName</td>
                                 <td>

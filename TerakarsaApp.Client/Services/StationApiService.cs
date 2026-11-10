@@ -64,4 +64,25 @@ public class StationApiService
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal memutuskan perangkat." : error.Trim('"'));
     }
+
+    // Prompt 85: "Kunci Kode Login" / "Refresh Kode" -- kode permanen untuk app Android.
+    public async Task<(bool Success, string Error, StationLoginCodeResult? Result)> LockLoginCodeAsync(int id)
+    {
+        var response = await _http.PostAsync($"api/station/{id}/login-code/lock", null);
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<StationLoginCodeResult>();
+            return (true, string.Empty, result);
+        }
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuat kode login." : error.Trim('"'), null);
+    }
+
+    public async Task<(bool Success, string Error)> UnlockLoginCodeAsync(int id)
+    {
+        var response = await _http.PostAsync($"api/station/{id}/login-code/unlock", null);
+        if (response.IsSuccessStatusCode) return (true, string.Empty);
+        var error = await response.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(error) ? "Gagal membuka kunci kode login." : error.Trim('"'));
+    }
 }

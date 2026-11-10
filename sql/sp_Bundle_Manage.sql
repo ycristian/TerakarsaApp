@@ -98,6 +98,9 @@
 --      - Tambahan UPDATE: begitu step berikutnya punya baris hidup, HANYA qty yang boleh
 --        berubah -- ukuran dan line/penjahit ditolak ('Bundle sudah diproses step berikutnya,
 --        hanya qty yang bisa diubah.') karena sudah melekat pada hasil kerja di step itu.
+--   20. Prompt 88 -- @PrintDeviceId (CREATE & SIS_Bundle_ReprintLabel): printer tujuan pilihan
+--      user, divalidasi SIS_PrintJob_ResolveDevice SEBELUM transaksi dan langsung ditulis ke
+--      print_jobs.print_device_id. BUNDLE_LABEL dengan >1 route wajib diisi.
 
 SET ANSI_NULLS ON;
 GO
@@ -117,7 +120,8 @@ CREATE OR ALTER PROCEDURE SIS_Bundle_Manage
     @BundlingResourceId  INT = NULL,
     @PrintCopies         INT = 1,
     @UserId              INT = NULL,
-    @DeleteReason        VARCHAR(255) = NULL
+    @DeleteReason        VARCHAR(255) = NULL,
+    @PrintDeviceId       INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -219,6 +223,15 @@ BEGIN
         ORDER BY sort_order ASC;
 
         DECLARE @LockResource_Article VARCHAR(60) = 'article_workflow_restructure_' + CAST(@ArticleId AS VARCHAR(20));
+
+        -- Prompt 88: printer tujuan label divalidasi SEBELUM transaksi -- kalau BUNDLE_LABEL
+        -- punya >1 route dan user belum memilih, bundle TIDAK dibuat sama sekali (THROW
+        -- 'Pilih printer tujuan.' menghentikan batch di sini). Tanpa label (@PrintCopies 0)
+        -- tidak perlu printer.
+        DECLARE @PrintDeviceFinal INT = NULL;
+        IF ISNULL(@PrintCopies, 0) >= 1
+            EXEC SIS_PrintJob_ResolveDevice @JobType = 'BUNDLE_LABEL',
+                 @RequestedDeviceId = @PrintDeviceId, @DeviceId = @PrintDeviceFinal OUTPUT;
 
         BEGIN TRAN;
         BEGIN TRY
@@ -343,8 +356,8 @@ BEGIN
                 DECLARE @PrintCopy INT = 0;
                 WHILE @PrintCopy < @PrintCopies
                 BEGIN
-                    INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-                    VALUES ('BUNDLE_LABEL', @NewBundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+                    INSERT INTO print_jobs (job_type, ref_id, payload, [status], print_device_id, created_at, created_by)
+                    VALUES ('BUNDLE_LABEL', @NewBundleId, @Payload, 'PENDING', @PrintDeviceFinal, SYSDATETIME(), @UserId);
 
                     SET @NewPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
                     SET @PrintCopy += 1;
@@ -693,7 +706,8 @@ CREATE OR ALTER PROCEDURE SIS_Bundle_ReprintLabel
     @PublicBaseUrl  VARCHAR(255) = NULL,
     @Copies         INT = 1,
     @RemarkOverride VARCHAR(255) = NULL,
-    @UserId         INT
+    @UserId         INT,
+    @PrintDeviceId  INT = NULL           -- Prompt 88: printer pilihan user (PrinterPicker)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -709,6 +723,12 @@ BEGIN
         RAISERROR('Jumlah label harus minimal 1.', 16, 1);
         RETURN;
     END
+
+    -- Prompt 88: cetak ulang selalu job BARU dengan printer pilihan saat ini (job lama tidak
+    -- disentuh). >1 route tanpa pilihan -> 'Pilih printer tujuan.', tidak ada job dibuat.
+    DECLARE @PrintDeviceFinal INT;
+    EXEC SIS_PrintJob_ResolveDevice @JobType = 'BUNDLE_LABEL',
+         @RequestedDeviceId = @PrintDeviceId, @DeviceId = @PrintDeviceFinal OUTPUT;
 
     DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + (SELECT serial FROM bundles WHERE bundle_id = @BundleId);
 
@@ -753,8 +773,8 @@ BEGIN
     DECLARE @LastPrintJobId INT;
     WHILE @Copy < @Copies
     BEGIN
-        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-        VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], print_device_id, created_at, created_by)
+        VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', @PrintDeviceFinal, SYSDATETIME(), @UserId);
 
         SET @LastPrintJobId = CAST(SCOPE_IDENTITY() AS INT);
         SET @Copy += 1;

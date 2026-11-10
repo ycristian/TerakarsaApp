@@ -182,8 +182,10 @@ public class CuttingService
     }
 
     // Enqueue stiker + MARK_PRINTED. bundleIds null/kosong = semua bundle hamparan.
+    // Prompt 88: printDeviceId = printer pilihan user (PrinterPicker); SP menolak
+    // 'Pilih printer tujuan.' sebelum ada job dibuat kalau wajib tapi kosong.
     public async Task<(bool Success, string Error, int JobCount)> PrintAsync(
-        int spreadId, List<int>? bundleIds, int userId)
+        int spreadId, List<int>? bundleIds, int userId, int? printDeviceId = null)
     {
         var idsJson = JsonSerializer.Serialize(bundleIds ?? new List<int>());
 
@@ -192,11 +194,12 @@ public class CuttingService
             var rows = await _db.Database
                 .SqlQueryRaw<JobCountRow>(
                     "EXEC SIS_CuttingBundle_Print @SpreadId = @SpreadId, @BundleIdsJson = @BundleIdsJson, " +
-                    "@PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId",
+                    "@PublicBaseUrl = @PublicBaseUrl, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId",
                     new SqlParameter("@SpreadId", spreadId),
                     new SqlParameter("@BundleIdsJson", idsJson),
                     new SqlParameter("@PublicBaseUrl", _publicBaseUrl),
-                    new SqlParameter("@UserId", userId))
+                    new SqlParameter("@UserId", userId),
+                    new SqlParameter("@PrintDeviceId", (object?)printDeviceId ?? DBNull.Value))
                 .ToListAsync();
 
             var jobs = rows.FirstOrDefault()?.JobCount ?? 0;

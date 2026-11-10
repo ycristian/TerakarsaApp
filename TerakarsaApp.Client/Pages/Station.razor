@@ -50,6 +50,11 @@ else
     </div>
 </div>
 
+@if (!string.IsNullOrEmpty(listError))
+{
+    <div class="alert alert-danger">@listError</div>
+}
+
 @if (isLoading)
 {
     <p>Memuat data...</p>
@@ -85,13 +90,25 @@ else
                             <tr>
                                 <td>@s.StationCode</td>
                                 <td>@s.StationName</td>
-                                <td>@s.DivisionName</td>
+                                <td>
+                                    @s.DivisionName
+                                    @if (s.AllowAllDivisions)
+                                    {
+                                        <span class="badge bg-info text-light ms-1" title="Boleh pindah ke semua divisi">Semua divisi</span>
+                                    }
+                                </td>
                                 <td>
                                     <span class="badge @(s.IsActive ? "bg-success" : "bg-secondary")">
                                         @(s.IsActive ? "Aktif" : "Nonaktif")
                                     </span>
                                 </td>
-                                <td>@DeviceStatus(s)</td>
+                                <td>
+                                    @DeviceStatus(s)
+                                    @if (s.PairingCodeLocked)
+                                    {
+                                        <span class="badge bg-dark text-light ms-1" title="Kode login permanen untuk app Android">Kode terkunci</span>
+                                    }
+                                </td>
                                 <td>
                                     @(string.IsNullOrEmpty(s.DefaultResourceName) ? "-" : s.DefaultResourceName)
                                     @if (!s.AllowResourceChange && !string.IsNullOrEmpty(s.DefaultResourceName))
@@ -111,7 +128,15 @@ else
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-primary me-1" title="Edit" @onclick="() => OpenEditForm(s)"><i class="fe fe-edit"></i></button>
-                                    <button class="btn btn-sm btn-warning me-1" title="Buat Kode Pairing" disabled="@isGeneratingPairing" @onclick="() => GeneratePairing(s)"><i class="fe fe-link"></i></button>
+                                    @if (s.PairingCodeLocked)
+                                    {
+                                        <button class="btn btn-sm btn-dark me-1" title="Kode Login" @onclick="() => OpenLoginCodeModal(s)"><i class="fe fe-key"></i></button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-warning me-1" title="Buat Kode Pairing" disabled="@isGeneratingPairing" @onclick="() => GeneratePairing(s)"><i class="fe fe-link"></i></button>
+                                        <button class="btn btn-sm btn-outline-dark me-1" title="Kunci Kode Login" disabled="@isLockingCode" @onclick="() => LockLoginCode(s)"><i class="fe fe-lock"></i></button>
+                                    }
                                     <button class="btn btn-sm btn-outline-danger me-1" title="Putuskan Perangkat" disabled="@(s.PairedAt is null)" @onclick="() => HandleUnpair(s)"><i class="fe fe-unlock"></i></button>
                                     <button class="btn btn-sm btn-danger" title="Hapus" @onclick="() => HandleDelete(s)"><i class="fe fe-trash-2"></i></button>
                                 </td>
@@ -172,8 +197,13 @@ else
                             }
                         </div>
                         <div class="mb-3 form-check">
-                            <input class="form-check-input" type="checkbox" id="lockToDefaultCheck" disabled="@(formModel.DefaultResourceId <= 0)" @bind="formModel.LockToDefault" />
+                            <input class="form-check-input" type="checkbox" id="lockToDefaultCheck" disabled="@(formModel.DefaultResourceId <= 0 || formModel.AllowAllDivisions)" @bind="formModel.LockToDefault" />
                             <label class="form-check-label" for="lockToDefaultCheck">Kunci ke resource bawaan</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" id="allowAllDivisionsCheck" @bind-Value="formModel.AllowAllDivisions" />
+                            <label class="form-check-label" for="allowAllDivisionsCheck">Boleh pindah ke semua divisi</label>
+                            <div class="form-text">Operator memilih divisi di layar "Pilih Operator". Divisi di atas jadi divisi awal.</div>
                         </div>
                         <div class="mb-3 form-check">
                             <InputCheckbox class="form-check-input" @bind-Value="formModel.IsActive" />
@@ -227,6 +257,53 @@ else
     </div>
 }
 
+@* Prompt 85: kode login terkunci -- permanen, untuk Pengaturan app Android (ketik/scan QR). *@
+@if (loginCodeTarget is not null && loginCodeValue is not null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Kode Login &middot; @loginCodeTarget.StationName</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseLoginCodeModal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <p class="text-muted">Isi kode ini di Pengaturan app Android (ketik atau scan QR). Kode permanen dan bisa dipakai berulang; perangkat lain yang memakainya diminta konfirmasi dulu sebelum mengambil alih stasiun.</p>
+                    <div id="loginQrCode" class="d-flex justify-content-center mb-3"></div>
+                    <div class="display-6 fw-bold mb-3" style="font-family: monospace; letter-spacing: 0.15em;">@loginCodeValue</div>
+                    <div class="input-group mb-2">
+                        <input class="form-control" readonly value="@loginCodeLink" />
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyLoginCodeLink">
+                            @(loginCopied ? "Tersalin!" : "Salin Link")
+                        </button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(loginCodeError))
+                    {
+                        <div class="alert alert-danger text-start mb-0">@loginCodeError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning me-auto" disabled="@isRefreshingCode" @onclick="() => showRefreshConfirm = true">Refresh Kode</button>
+                    <button type="button" class="btn btn-outline-danger" disabled="@isUnlockingCode" @onclick="() => showUnlockConfirm = true">Buka Kunci</button>
+                    <button type="button" class="btn btn-primary" @onclick="CloseLoginCodeModal">Selesai</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDeleteModal Show="showRefreshConfirm" IsBusy="isRefreshingCode" Title="Refresh Kode Login"
+                     ConfirmText="Ya, Refresh" BusyText="Memproses..." ConfirmButtonClass="btn-warning"
+                     OnConfirm="ConfirmRefreshCode" OnCancel="() => showRefreshConfirm = false">
+    <Message>Kode lama langsung tidak berlaku. Perangkat yang sedang jalan tetap jalan, tapi kode di app Android harus diganti. Kalau tidak, perangkat tidak bisa masuk lagi begitu ter-logout.</Message>
+</ConfirmDeleteModal>
+
+<ConfirmDeleteModal Show="showUnlockConfirm" IsBusy="isUnlockingCode" Title="Buka Kunci Kode Login"
+                     ConfirmText="Ya, Buka Kunci" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
+                     OnConfirm="ConfirmUnlockCode" OnCancel="() => showUnlockConfirm = false">
+    <Message>Kode login dihapus. Perangkat yang sedang jalan tetap jalan, tapi app Android tidak bisa login ulang otomatis sampai stasiun dikunci lagi dan kodenya diperbarui.</Message>
+</ConfirmDeleteModal>
+
 <ConfirmDeleteModal Show="showDeleteConfirm" IsBusy="isDeleting" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
     <Message>Yakin ingin menghapus stasiun "@stationPendingDelete?.StationName"?</Message>
 </ConfirmDeleteModal>
@@ -234,7 +311,13 @@ else
 <ConfirmDeleteModal Show="showUnpairConfirm" IsBusy="isUnpairing" Title="Putuskan Perangkat"
                      ConfirmText="Ya, Putuskan" BusyText="Memutuskan..." ConfirmButtonClass="btn-warning"
                      OnConfirm="ConfirmUnpair" OnCancel="CancelUnpair">
-    <Message>Yakin ingin memutuskan perangkat stasiun "@unpairTarget?.StationName"? Perangkat yang sedang aktif akan tertendang dan harus minta kode pairing baru untuk masuk lagi.</Message>
+    <Message>
+        Yakin ingin memutuskan perangkat stasiun "@unpairTarget?.StationName"? Perangkat yang sedang aktif akan tertendang dan harus minta kode pairing baru untuk masuk lagi.
+        @if (unpairTarget?.PairingCodeLocked == true)
+        {
+            <text> Perangkat dengan kode login terkunci bisa masuk lagi memakai kode yang sama &mdash; refresh kode kalau ingin menutup aksesnya.</text>
+        }
+    </Message>
 </ConfirmDeleteModal>
 }
 
@@ -260,6 +343,20 @@ else
     private bool showUnpairConfirm = false;
     private bool isUnpairing = false;
     private StationDto? unpairTarget;
+    private string listError = string.Empty;
+
+    // Prompt 85: kode login terkunci.
+    private bool isLockingCode = false;
+    private StationDto? loginCodeTarget;
+    private string? loginCodeValue;
+    private string loginCodeLink = string.Empty;
+    private string loginCodeError = string.Empty;
+    private bool pendingLoginQrRender = false;
+    private bool loginCopied = false;
+    private bool showRefreshConfirm = false;
+    private bool isRefreshingCode = false;
+    private bool showUnlockConfirm = false;
+    private bool isUnlockingCode = false;
 
     private string searchTerm = string.Empty;
     private int currentPage = 1;
@@ -356,7 +453,8 @@ else
             IsActive = station.IsActive,
             DefaultResourceId = station.DefaultResourceId ?? 0,
             AllowResourceChange = station.AllowResourceChange,
-            EnablePacking = station.EnablePacking
+            EnablePacking = station.EnablePacking,
+            AllowAllDivisions = station.AllowAllDivisions
         };
         errorMessage = string.Empty;
         await LoadResourceOptions();
@@ -404,7 +502,8 @@ else
                 IsActive = formModel.IsActive,
                 DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
                 AllowResourceChange = formModel.AllowResourceChange,
-                EnablePacking = formModel.EnablePacking
+                EnablePacking = formModel.EnablePacking,
+                AllowAllDivisions = formModel.AllowAllDivisions
             });
 
             isSaving = false;
@@ -429,7 +528,8 @@ else
                 IsActive = formModel.IsActive,
                 DefaultResourceId = formModel.DefaultResourceId > 0 ? formModel.DefaultResourceId : null,
                 AllowResourceChange = formModel.AllowResourceChange,
-                EnablePacking = formModel.EnablePacking
+                EnablePacking = formModel.EnablePacking,
+                AllowAllDivisions = formModel.AllowAllDivisions
             });
 
             isSaving = false;
@@ -473,6 +573,101 @@ else
             pendingQrRender = false;
             await JS.InvokeVoidAsync("qrCodeRenderer.render", "pairingQrCode", pairingResult.Link);
         }
+
+        if (pendingLoginQrRender && loginCodeValue is not null)
+        {
+            pendingLoginQrRender = false;
+            await JS.InvokeVoidAsync("qrCodeRenderer.render", "loginQrCode", loginCodeLink);
+        }
+    }
+
+    // Prompt 85: kunci kode login (tanpa konfirmasi -- tidak menendang siapa pun).
+    private async Task LockLoginCode(StationDto station)
+    {
+        listError = string.Empty;
+        isLockingCode = true;
+        var result = await StationApi.LockLoginCodeAsync(station.Id);
+        isLockingCode = false;
+
+        if (!result.Success || result.Result is null)
+        {
+            listError = result.Error;
+            return;
+        }
+
+        await LoadStations();
+        ShowLoginCode(station, result.Result.Code, result.Result.Link);
+    }
+
+    private void OpenLoginCodeModal(StationDto station)
+    {
+        if (string.IsNullOrEmpty(station.LoginCode)) return;
+        ShowLoginCode(station, station.LoginCode, $"{pagedResult.PublicBaseUrl}/station/{station.LoginCode}");
+    }
+
+    private void ShowLoginCode(StationDto station, string code, string link)
+    {
+        loginCodeTarget = station;
+        loginCodeValue = code;
+        loginCodeLink = link;
+        loginCodeError = string.Empty;
+        loginCopied = false;
+        pendingLoginQrRender = true;
+    }
+
+    private async Task CloseLoginCodeModal()
+    {
+        loginCodeTarget = null;
+        loginCodeValue = null;
+        await JS.InvokeVoidAsync("qrCodeRenderer.clear", "loginQrCode");
+    }
+
+    private async Task CopyLoginCodeLink()
+    {
+        await JS.InvokeVoidAsync("copyToClipboard", loginCodeLink);
+        loginCopied = true;
+    }
+
+    private async Task ConfirmRefreshCode()
+    {
+        if (loginCodeTarget is null) return;
+
+        isRefreshingCode = true;
+        var result = await StationApi.LockLoginCodeAsync(loginCodeTarget.Id);
+        isRefreshingCode = false;
+        showRefreshConfirm = false;
+
+        if (!result.Success || result.Result is null)
+        {
+            loginCodeError = result.Error;
+            return;
+        }
+
+        loginCodeValue = result.Result.Code;
+        loginCodeLink = result.Result.Link;
+        loginCodeError = string.Empty;
+        loginCopied = false;
+        pendingLoginQrRender = true;
+        await LoadStations();
+    }
+
+    private async Task ConfirmUnlockCode()
+    {
+        if (loginCodeTarget is null) return;
+
+        isUnlockingCode = true;
+        var result = await StationApi.UnlockLoginCodeAsync(loginCodeTarget.Id);
+        isUnlockingCode = false;
+        showUnlockConfirm = false;
+
+        if (!result.Success)
+        {
+            loginCodeError = result.Error;
+            return;
+        }
+
+        await CloseLoginCodeModal();
+        await LoadStations();
     }
 
     private async Task CopyPairingLink()
@@ -518,7 +713,10 @@ else
 
     private static string DeviceStatus(StationDto s)
     {
-        if (s.PairedAt is not null) return $"Terhubung sejak {s.PairedAt:dd/MM/yyyy HH:mm}";
+        // Prompt 85: nama perangkat pemegang token (NULL = perangkat lama yang belum teradopsi)
+        // + kapan terakhir memanggil API.
+        if (s.PairedAt is not null || s.LastSeenAt is not null)
+            return $"Dipakai: {s.PairedDeviceName ?? "Perangkat lama"} · aktif {StationDisplay.FormatLastSeen(s.LastSeenAt ?? s.PairedAt)}";
         if (s.PairingCodeExpiresAt is not null) return $"Kode aktif s.d. {s.PairingCodeExpiresAt:HH:mm}";
         return "Belum terhubung";
     }
@@ -570,6 +768,19 @@ else
         public int DefaultResourceId { get; set; }
         public bool AllowResourceChange { get; set; } = true;
         public bool EnablePacking { get; set; }
+
+        // alter_87: stasiun semua divisi tidak boleh dikunci ke resource bawaan (SP menolak),
+        // jadi kunci otomatis dilepas saat flag ini dicentang.
+        private bool allowAllDivisions;
+        public bool AllowAllDivisions
+        {
+            get => allowAllDivisions;
+            set
+            {
+                allowAllDivisions = value;
+                if (value) AllowResourceChange = true;
+            }
+        }
 
         // Kebalikan AllowResourceChange, khusus untuk binding checkbox "Kunci ke resource bawaan".
         public bool LockToDefault

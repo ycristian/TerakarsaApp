@@ -4,6 +4,10 @@
 -- pairing (paired_at/pairing_code_expires_at); station_token hanya dikembalikan oleh
 -- SIS_Station_Manage saat CREATE/CLAIM_PAIRING.
 --
+-- Prompt 85 (alter_88): GetAll/GetById mengembalikan LoginCode = pairing_code HANYA kalau
+-- terkunci (admin perlu melihatnya lagi untuk diisi ke app Android); kode pairing sekali
+-- pakai tetap tidak dikembalikan. GetByToken TIDAK pernah mengembalikan kode login.
+--
 -- Fix: @SearchTerm kini pencarian antar-atribut (tiap kata dipisah spasi dicek independen ke
 -- SEMUA kolom via STRING_SPLIT) -- lihat komentar sama di sp_Employee_Select.sql.
 
@@ -59,8 +63,13 @@ BEGIN
                    s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
                    s.allow_resource_change AS AllowResourceChange,
                    s.enable_packing AS EnablePacking,
+                   s.allow_all_divisions AS AllowAllDivisions,
                    s.paired_at AS PairedAt,
                    CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
+                   s.pairing_code_locked AS PairingCodeLocked,
+                   CASE WHEN s.pairing_code_locked = 1 THEN s.pairing_code END AS LoginCode,
+                   s.paired_device_name AS PairedDeviceName,
+                   s.last_seen_at AS LastSeenAt,
                    s.created_at AS CreatedAt, s.created_by AS CreatedBy,
                    s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
             FROM stations s
@@ -99,8 +108,13 @@ BEGIN
            s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
            s.allow_resource_change AS AllowResourceChange,
            s.enable_packing AS EnablePacking,
+           s.allow_all_divisions AS AllowAllDivisions,
            s.paired_at AS PairedAt,
            CASE WHEN s.pairing_code_expires_at > SYSDATETIME() THEN s.pairing_code_expires_at ELSE NULL END AS PairingCodeExpiresAt,
+           s.pairing_code_locked AS PairingCodeLocked,
+           CASE WHEN s.pairing_code_locked = 1 THEN s.pairing_code END AS LoginCode,
+           s.paired_device_name AS PairedDeviceName,
+           s.last_seen_at AS LastSeenAt,
            s.created_at AS CreatedAt, s.created_by AS CreatedBy,
            s.updated_at AS UpdatedAt, s.updated_by AS UpdatedBy
     FROM stations s
@@ -112,19 +126,34 @@ GO
 
 -- Autentikasi perangkat stasiun: cari stasiun hidup + aktif berdasarkan token mentah
 -- yang dikirim lewat header X-Station-Token. Dipakai oleh RequireStationTokenAttribute.
+--
+-- alter_87: @DivisionId = divisi pilihan sesi (header X-Station-Division). Hanya dipakai kalau
+-- stasiun allow_all_divisions = 1 dan divisinya masih hidup; selain itu diabaikan dan
+-- DivisionId tetap divisi stasiun. Semua endpoint station membaca divisi dari hasil SP ini,
+-- jadi pindah divisi cukup ditegakkan di sini.
+-- Resource bawaan milik divisi stasiun sendiri: saat sesi di divisi lain, DefaultResource*
+-- dikosongkan supaya kiosk tidak otomatis memilih resource beda divisi.
 CREATE OR ALTER PROCEDURE SIS_Station_GetByToken
-    @Token VARCHAR(64)
+    @Token      VARCHAR(64),
+    @DivisionId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT s.station_id AS StationId, s.station_name AS StationName,
-           s.division_id AS DivisionId, d.division_name AS DivisionName,
-           s.default_resource_id AS DefaultResourceId, r.resource_name AS DefaultResourceName,
-           s.allow_resource_change AS AllowResourceChange,
-           s.enable_packing AS EnablePacking
+           COALESCE(od.division_id, s.division_id) AS DivisionId,
+           COALESCE(od.division_name, d.division_name) AS DivisionName,
+           CASE WHEN od.division_id IS NULL THEN s.default_resource_id END AS DefaultResourceId,
+           CASE WHEN od.division_id IS NULL THEN r.resource_name END AS DefaultResourceName,
+           CASE WHEN od.division_id IS NULL THEN s.allow_resource_change ELSE CAST(1 AS BIT) END AS AllowResourceChange,
+           s.enable_packing AS EnablePacking,
+           s.allow_all_divisions AS AllowAllDivisions
     FROM stations s
     INNER JOIN divisions d ON d.division_id = s.division_id
+    LEFT JOIN divisions od ON s.allow_all_divisions = 1
+                          AND od.division_id = @DivisionId
+                          AND od.division_id <> s.division_id
+                          AND od.deleted_at IS NULL
     LEFT JOIN resources r ON r.resource_id = s.default_resource_id
     WHERE s.station_token = @Token AND s.is_active = 1 AND s.deleted_at IS NULL;
 END;

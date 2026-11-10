@@ -1,7 +1,8 @@
 -- Box & scan "Masuk Box" PDH TNI AD (Prompt 67).
 --
 -- Box DIMILIKI SATUAN; sisa yang sedikit boleh digabung ke BOX GABUNGAN lintas
--- satuan dalam satu rawatan (satuan_id NULL). Isi 44-50 set, kapasitas default 50.
+-- satuan dalam satu rawatan (satuan_id NULL). Kapasitas default 52, hanya acuan
+-- tampilan -- tidak ada batas maksimal isi box (alter_79).
 --
 -- TIDAK ADA KOLOM STATUS: Terbuka / Tertutup / Terkirim diturunkan dari
 -- packed_at dan shipped_at. Kode box TIDAK PERNAH diganti atau didaur ulang.
@@ -74,7 +75,7 @@ BEGIN
             END
         END
 
-        IF @Kapasitas IS NULL OR @Kapasitas <= 0 SET @Kapasitas = 50;
+        IF @Kapasitas IS NULL OR @Kapasitas <= 0 SET @Kapasitas = 52;
 
         DECLARE @NewId INT, @NewCode VARCHAR(30), @Urut INT;
 
@@ -418,8 +419,7 @@ BEGIN
                                                  FORMAT(@PBoxedAt, 'HH:mm'), '.');
     ELSE IF @PBoxedAt IS NOT NULL
         SELECT @Hasil = 'DITOLAK', @Pesan = CONCAT('Sudah di box ', @PBoxCodeLama, '.');
-    ELSE IF @Isi >= @Kapasitas
-        SELECT @Hasil = 'DITOLAK', @Pesan = CONCAT('Box ', @BoxCode, ' penuh (', @Isi, '/', @Kapasitas, ').');
+    -- 2026-11-09 (alter_79): kapasitas hanya acuan -- box TIDAK ditolak saat isi >= kapasitas.
     -- 2026-10-07: beda satuan / rawatan DIIZINKAN setelah konfirmasi (@Paksa = 1).
     ELSE IF @Paksa = 0
          AND ((@BoxSatuanId IS NOT NULL AND @BoxSatuanId <> @PSatuanId)

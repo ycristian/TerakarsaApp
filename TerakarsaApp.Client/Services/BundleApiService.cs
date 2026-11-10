@@ -48,9 +48,9 @@ public class BundleApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus bundle." : error.Trim('"'));
     }
 
-    public async Task<(bool Success, string Error)> ReprintAsync(int id, int copies = 1)
+    public async Task<(bool Success, string Error)> ReprintAsync(int id, int copies = 1, int? printDeviceId = null)
     {
-        var response = await _http.PostAsync($"api/bundles/{id}/reprint?copies={copies}", null);
+        var response = await _http.PostAsync($"api/bundles/{id}/reprint?copies={copies}" + (printDeviceId.HasValue ? $"&printDeviceId={printDeviceId.Value}" : ""), null);
         if (response.IsSuccessStatusCode) return (true, string.Empty);
         var error = await response.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal mencetak ulang label." : error.Trim('"'));

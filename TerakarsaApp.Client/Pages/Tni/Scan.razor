@@ -7,6 +7,7 @@
 @inject TniScanApiService ScanApi
 @inject TniBoxApiService BoxApi
 @inject TniPersonelApiService PersonelApi
+@inject TniPerintahKerjaApiService PkApi
 @inject TniOrderState OrderState
 @inject TniPerangkatState Sesi
 @inject IJSRuntime JS
@@ -42,6 +43,11 @@ else
             <div>
                 <div class="tni-t"><i class="fe fe-maximize"></i> Scan</div>
                 <div class="tni-s">@namaUser · sesi ini <b>@jumlahSesi</b> set</div>
+                @if (wedgeAktif)
+                {
+                    @* Prompt 90: tembakan scanner Bluetooth sudah tertangkap minimal sekali. *@
+                    <div class="tni-s" style="margin-top:2px"><i class="fe fe-bluetooth"></i> Scanner siap</div>
+                }
             </div>
             <TniBackButton />
         </div>
@@ -50,7 +56,19 @@ else
     <div class="tni-seg">
         <button class="@(mode == "SET" ? "on" : "")" @onclick="@(() => GantiMode("SET"))">Set Jadi</button>
         <button class="@(mode == "BOX" ? "on" : "")" @onclick="@(() => GantiMode("BOX"))">Masuk Box</button>
+        <button class="@(mode == "BATAL" ? "on" : "")" @onclick="@(() => GantiMode("BATAL"))">Batal Print</button>
     </div>
+
+    @if (mode == "BATAL")
+    {
+        <div class="tni-card" style="border:1.5px solid var(--tni-bad)">
+            <div class="tni-k" style="color:var(--tni-bad);font-weight:700">Mode batalkan print</div>
+            <div class="tni-note" style="margin-top:3px">
+                Scan kartu yang tidak jadi dikerjakan. Tiap kartu dikonfirmasi dulu sebelum
+                dibatalkan — kartu kembali ke <b>Belum Cetak</b> dan stoknya bebas lagi.
+            </div>
+        </div>
+    }
 
     @* ---------- mode Masuk Box: pilih box dulu ---------- *@
     @if (mode == "BOX")
@@ -102,7 +120,7 @@ else
                     <span class="tni-k">Isi <b>@isiBox</b> / @boxAktif.Kapasitas</span>
                     @if (isiBox >= boxAktif.Kapasitas)
                     {
-                        <span class="tni-chip tni-chip-bad">penuh</span>
+                        <span class="tni-chip tni-chip-bad">kapasitas tercapai</span>
                     }
                 </div>
                 <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
@@ -111,7 +129,7 @@ else
                 @if (isiBox >= boxAktif.Kapasitas)
                 {
                     <div style="font-size:11.5px;color:var(--tni-coral);margin-top:5px;font-weight:600">
-                        Box penuh — tutup box di menu Box.
+                        Kapasitas tercapai — scan tetap bisa; tutup box di menu Box bila sudah selesai.
                     </div>
                 }
             </div>
@@ -121,10 +139,8 @@ else
     @if (!string.IsNullOrEmpty(kameraError))
     {
         <div class="alert alert-warning">
-            @kameraError
-            <div class="tni-note" style="margin-top:4px">
-                Kamera butuh HTTPS. Kode masih bisa diketik manual di bawah.
-            </div>
+            Kamera tidak tersedia — scanner Bluetooth tetap bisa dipakai, atau ketik kode di kotak bawah.
+            <div class="tni-note" style="margin-top:4px">@kameraError</div>
         </div>
     }
 
@@ -159,18 +175,24 @@ else
         </div>
     }
 
-    @* ---------- input manual ---------- *@
+    @* ---------- input manual / scanner Bluetooth (Prompt 90) ----------
+       data-wedge-ignore: kalau scanner menembak saat kotak ini fokus, isinya masuk
+       lewat kotak (Enter) -- wedge global tidak ikut memproses (tidak dobel). *@
     <div class="tni-card">
-        <div class="tni-k">Input manual (QR rusak)</div>
+        <div class="tni-k">Kode manual / scanner Bluetooth</div>
         <div style="display:flex;gap:6px;margin-top:5px">
             <input class="tni-inp" style="flex:1" placeholder="kode personel / token"
+                   data-wedge-ignore autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
                    @bind="kodeManual" @bind:event="oninput"
-                   @onkeydown="@(async e => { if (e.Key == "Enter") await ScanManualAsync(); })" />
+                   @onkeydown="@(async e => { if (e.Key == "Enter") await EnterKotakManualAsync(); })" />
             <button class="tni-btn tni-btn-p" style="flex:0 0 auto"
                     disabled="@(string.IsNullOrWhiteSpace(kodeManual) || isBusy)"
                     @onclick="ScanManualAsync">
                 Catat
             </button>
+        </div>
+        <div class="tni-note" style="margin-top:5px">
+            Keyboard layar hilang? Tekan tombol keyboard di scanner.
         </div>
     </div>
 
@@ -363,6 +385,71 @@ else
     </div>
 }
 
+@* ---------- pop up Batal Print (2026-11-09) ----------
+   Satu konfirmasi: scan langsung membuka "Yakin batalkan print?" + isi kartu.
+   Hanya kartu berstatus DICETAK yang bisa dibatalkan (SIS_Personel_LepasCetak).
+   Backdrop tidak menutup -- harus lewat tombol. *@
+@if (batalPrint is not null)
+{
+    var p = batalPrint;
+    <div class="tni-sheet-backdrop">
+        <div class="tni-sheet tni">
+            <div style="text-align:center;padding-bottom:8px;border-bottom:2px solid var(--tni-line)">
+                <div class="tni-k" style="font-weight:700">Batalkan print</div>
+                <div class="tni-pola-lg" style="font-size:24px">@p.KodeRef</div>
+                <div class="tni-note">@p.SatuanName — @p.AreaName</div>
+            </div>
+
+            <table class="tni-mini" style="margin:6px 0">
+                <tr><td class="tni-k">Nama</td><td class="tni-n">@p.Pangkat @p.Nama</td></tr>
+                <tr><td class="tni-k">Pola</td><td class="tni-n">@p.PolaKemejaKode · @p.PolaCelanaKode</td></tr>
+                <tr><td class="tni-k">Status</td><td class="tni-n">@p.StatusProgres.Replace('_', ' ')</td></tr>
+                @if (p.PrintedAt.HasValue)
+                {
+                    <tr>
+                        <td class="tni-k">Dicetak</td>
+                        <td class="tni-n">
+                            @p.PrintedAt.Value.ToString("dd/MM HH:mm")
+                            @if (!string.IsNullOrEmpty(p.PrintedByNama)) { <text> oleh @p.PrintedByNama</text> }
+                            @if (p.PrintCount > 1) { <text> · @(p.PrintCount)x</text> }
+                        </td>
+                    </tr>
+                }
+            </table>
+
+            <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+                @if (p.StatusProgres != "DICETAK")
+                {
+                    <div style="border-radius:8px;padding:8px 10px;background:var(--tni-warnbg);color:#7a5210;font-size:12.5px">
+                        @(p.StatusProgres == "BELUM_CETAK"
+                            ? "Kartu ini belum dicetak — tidak ada print yang dibatalkan."
+                            : "Kartu sudah set lengkap — print tidak bisa dibatalkan. Batalkan set dulu lewat mode Set Jadi.")
+                    </div>
+                }
+                else
+                {
+                    <div style="border-radius:8px;padding:8px 10px;background:var(--tni-badbg);color:#8a2318;font-size:12.5px">
+                        <b>Yakin batalkan print kartu @p.KodeRef?</b>
+                        <div style="margin-top:2px">
+                            Kartu kembali ke Belum Cetak dan stok bebasnya dikembalikan.
+                            Kartu fisik ini tidak dipakai lagi.
+                        </div>
+                    </div>
+                    <button class="tni-btn tni-btn-r" style="width:100%;padding:14px;font-size:15px"
+                            disabled="@menyimpanBatalPrint" @onclick="BatalkanPrintAsync">
+                        @(menyimpanBatalPrint ? "Memproses..." : "Ya, batalkan print")
+                    </button>
+                }
+
+                <button class="tni-btn tni-btn-o" style="width:100%" disabled="@menyimpanBatalPrint"
+                        @onclick="TutupBatalPrint">
+                    @(p.StatusProgres == "DICETAK" ? "Tidak jadi" : "Tutup")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ---------- sheet aksi item riwayat (Prompt 68) ---------- *@
 @if (sheetAksi is not null)
 {
@@ -500,6 +587,13 @@ else
         // Elemen kamera baru ada setelah render pertama yang lolos cek akses.
         kameraJalan = true;
         selfRef = DotNetObjectReference.Create(this);
+
+        // Prompt 90: scanner Bluetooth (keyboard wedge) dipasang SEBELUM kamera --
+        // tniScanner.start menunggu izin kamera, dan di iPad wedge justru jalur utama.
+        // Tetap jalan meski kamera gagal.
+        try { await JS.InvokeVoidAsync("tniScanner.startKeyboard", selfRef, nameof(OnWedgeScanned)); }
+        catch { /* script belum termuat -- kotak manual tetap bisa dipakai */ }
+
         try
         {
             await JS.InvokeVoidAsync("tniScanner.start", "tni-cam", selfRef);
@@ -521,6 +615,21 @@ else
         var kode = AmbilToken(decodedText);
         antrean.Enqueue(kode);
         await ProsesAntreanAsync();
+    }
+
+    // Prompt 90: tembakan scanner Bluetooth lewat wedge -- jalur proses SAMA dengan
+    // kamera, hanya menyalakan indikator "Scanner siap".
+    private bool wedgeAktif;
+
+    [JSInvokable]
+    public async Task OnWedgeScanned(string text)
+    {
+        if (!wedgeAktif)
+        {
+            wedgeAktif = true;
+            StateHasChanged();
+        }
+        await OnScanned(text);
     }
 
     [JSInvokable]
@@ -562,6 +671,16 @@ else
                     continue;
                 }
 
+                // Mode BATAL PRINT: sama seperti SET -- scan membuka pop up, belum menulis apa pun.
+                if (mode == "BATAL")
+                {
+                    if (batalPrint is not null) continue;
+                    if (kode == kodeDitutup && DateTime.Now - ditutupAt < JedaSetelahTutup) continue;
+
+                    await BukaBatalPrintAsync(kode);
+                    continue;
+                }
+
                 // 2026-10-07: selama pop up "beda satuan" terbuka, scan lain diabaikan;
                 // kartu yang barusan dibatalkan diberi jeda (kamera terus membacanya).
                 if (bedaSatuan is not null) continue;
@@ -586,7 +705,7 @@ else
                         bedaSatuan = jawab;
                         kodeBeda = kode;
                         isBusy = false;
-                        await Umpan("SUDAH");   // bunyi peringatan, bukan gagal
+                        await Umpan("KONFIRMASI");   // bunyi khusus: pop up menunggu jawaban
                         StateHasChanged();
                         continue;
                     }
@@ -721,12 +840,87 @@ else
         await CatatHasilAsync();
     }
 
+    // ---------- pop up Batal Print (2026-11-09) ----------
+    // Memakai tni.SIS_Personel_LepasCetak (sama dengan "Lepas kartu" di Perintah Kerja),
+    // satu kartu per konfirmasi.
+    private TniPersonelDetailDto? batalPrint;
+    private string kodeBatalPrint = string.Empty;
+    private bool menyimpanBatalPrint;
+
+    private async Task BukaBatalPrintAsync(string kode)
+    {
+        isBusy = true;
+        StateHasChanged();
+
+        var (ok, detail, error) = await ScanApi.LookupAsync(kode);
+
+        isBusy = false;
+
+        if (!ok || detail is null)
+        {
+            hasil = string.IsNullOrEmpty(error)
+                ? new TniScanHasilDto { Hasil = "TIDAK_DIKENAL", Pesan = $"Kode \"{kode}\" tidak dikenal." }
+                : new TniScanHasilDto { Hasil = "DITOLAK", Pesan = error };
+
+            await CatatHasilAsync();
+            StateHasChanged();
+            return;
+        }
+
+        hasil = null;
+        batalPrint = detail;
+        kodeBatalPrint = kode;
+        await Umpan(detail.StatusProgres == "DICETAK" ? "KONFIRMASI" : "SUDAH");
+        StateHasChanged();
+    }
+
+    private void TutupBatalPrint()
+    {
+        kodeDitutup = kodeBatalPrint;
+        ditutupAt = DateTime.Now;
+        batalPrint = null;
+        kodeBatalPrint = string.Empty;
+    }
+
+    private async Task BatalkanPrintAsync()
+    {
+        if (batalPrint is null) return;
+        var p = batalPrint;
+
+        menyimpanBatalPrint = true;
+        var (ok, err, res) = await PkApi.LepasAsync(new List<int> { p.PersonelId });
+        menyimpanBatalPrint = false;
+
+        // PersonelId sengaja tidak diisi: riwayat batal print tidak punya tombol "Batal".
+        if (!ok)
+            hasil = new TniScanHasilDto { Hasil = "DITOLAK", KodeRef = p.KodeRef, Nama = p.Nama, Pesan = err };
+        else if ((res?.JumlahDilepas ?? 0) == 0)
+            hasil = new TniScanHasilDto
+            {
+                Hasil = "DITOLAK", KodeRef = p.KodeRef, Nama = p.Nama,
+                Pesan = string.IsNullOrEmpty(res?.DilewatiKodeRef)
+                    ? $"Print {p.KodeRef} tidak dibatalkan — kartu sudah tidak berstatus dicetak."
+                    : $"Print {p.KodeRef} tidak dibatalkan — kartu sudah set lengkap."
+            };
+        else
+            hasil = new TniScanHasilDto
+            {
+                Hasil = "OK", KodeRef = p.KodeRef, Nama = p.Nama,
+                PolaKemejaKode = p.PolaKemejaKode, PolaCelanaKode = p.PolaCelanaKode,
+                Pesan = "Print dibatalkan."
+            };
+
+        TutupBatalPrint();
+        await CatatHasilAsync();
+    }
+
     // Banner + riwayat sesi + bunyi untuk satu hasil scan.
     private async Task CatatHasilAsync()
     {
         if (hasil is null) return;
 
-        if (hasil.Ok) jumlahSesi++;
+        // Hitungan "sesi ini N set" hanya untuk set / masuk box, bukan batal print.
+        if (hasil.Ok && mode != "BATAL") jumlahSesi++;
 
         riwayat.Insert(0, new TniScanRiwayatItem
         {
@@ -755,11 +949,30 @@ else
         {
             "OK" => "ok",
             "SUDAH" => "sudah",
+            "KONFIRMASI" => "konfirmasi",
             _ => "gagal"
         };
 
         try { await JS.InvokeVoidAsync("tniScanner.feedback", jenis); }
         catch { /* perangkat tanpa audio -- abaikan */ }
+    }
+
+    // Prompt 90: Enter di kotak manual. Bisa berasal dari ketikan staff ATAU scanner
+    // yang menembak saat kotak fokus -- jadi diperlakukan seperti scan biasa (dedupe
+    // 3 detik + jeda pop up tetap berlaku), BUKAN seperti tombol "Catat" yang
+    // sengaja melewati dedupe.
+    private async Task EnterKotakManualAsync()
+    {
+        if (string.IsNullOrWhiteSpace(kodeManual)) return;
+
+        var teks = kodeManual.Trim();
+        kodeManual = string.Empty;
+
+        var lolos = true;
+        try { lolos = await JS.InvokeAsync<bool>("tniScanner.cekDedupe", teks); } catch { }
+        if (!lolos) return;
+
+        await OnScanned(teks);
     }
 
     private async Task ScanManualAsync()
@@ -797,6 +1010,8 @@ else
     {
         "OK" when mode == "BOX" =>
             $"{hasil.PolaKemejaKode} · {hasil.PolaCelanaKode} — masuk {hasil.BoxCode} ({hasil.Isi}/{hasil.Kapasitas})",
+        "OK" when mode == "BATAL" =>
+            $"{hasil.PolaKemejaKode} · {hasil.PolaCelanaKode} — print dibatalkan, kembali ke Belum Cetak",
         "OK" => $"{hasil.PolaKemejaKode} · {hasil.PolaCelanaKode} — set tercatat",
         "SUDAH" => hasil.Pesan,
         _ => hasil?.Pesan ?? string.Empty
@@ -826,6 +1041,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        try { await JS.InvokeVoidAsync("tniScanner.stopKeyboard"); } catch { }
         try { await JS.InvokeVoidAsync("tniScanner.stop"); } catch { }
         selfRef?.Dispose();
     }

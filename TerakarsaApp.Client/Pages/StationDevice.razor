@@ -16,6 +16,7 @@
 @inject StationDeviceApiService StationApi
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject TerakarsaApp.Client.Auth.StationAuthNotifier StationAuthNotifier
 @implements IDisposable
 
 <PageTitle>Stasiun</PageTitle>
@@ -30,14 +31,78 @@
 {
     <p class="text-center fs-4 mt-5">Memuat...</p>
 }
+else if (tokenRejected)
+{
+    @* Prompt 85: token ditolak saat halaman jalan. Sengaja TIDAK klaim otomatis di sini --
+       operator yang memutuskan, supaya dua perangkat tidak saling tendang tanpa henti. *@
+    <div class="card mt-5">
+        <div class="card-body text-center">
+            <h3 class="card-title mb-2">Perangkat ini sudah keluar dari stasiun</h3>
+            <p class="text-muted mb-3">Diambil perangkat lain atau diputus admin.</p>
+            @if (IsAppMode)
+            {
+                <button class="btn btn-primary" disabled="@isLoggingOut" @onclick="ReconnectStationAsync">Sambungkan ulang</button>
+            }
+            else
+            {
+                <button class="btn btn-primary" @onclick="AfterTokenRejectedAsync">Masukkan kode pairing</button>
+            }
+        </div>
+    </div>
+}
+else if (station is null && serverUnreachable)
+{
+    <div class="card mt-5">
+        <div class="card-body text-center">
+            <h3 class="card-title mb-2">Server tidak terjangkau</h3>
+            <p class="text-muted mb-3">Mencoba lagi... Perangkat tetap terdaftar di stasiun ini.</p>
+            <button class="btn btn-primary" @onclick="RetryReconnectNow">Coba sekarang</button>
+        </div>
+    </div>
+}
+else if (station is null && IsAppMode)
+{
+    @* Prompt 85: mode app Android -- kode login terkunci dari Pengaturan app, input manual
+       disembunyikan. *@
+    <div class="card mt-5">
+        <div class="card-body text-center">
+            <h3 class="card-title mb-3">Menyambungkan Stasiun</h3>
+            @if (isValidatingToken)
+            {
+                <p class="text-muted mb-0">Menyambungkan ke stasiun...</p>
+            }
+            else if (lockCodeInvalid)
+            {
+                @* Prompt 86: link terakarsa:// ditangkap app Android -> pemindai QR native. *@
+                <div class="alert alert-danger text-start">Kode stasiun di app tidak berlaku (mungkin sudah di-refresh admin). Scan QR kode login terbaru dari menu Kelola Stasiun.</div>
+                <a class="btn btn-primary me-2" href="@AppScanStationUrl">Scan QR kode baru</a>
+                <button class="btn btn-outline-secondary" @onclick="RetryLockCodeClaimAsync">Coba lagi</button>
+            }
+            else if (takeoverDeclined)
+            {
+                <p class="mb-3">Stasiun ini sedang dipakai oleh <strong>@takeoverHolder</strong> (aktif @StationDisplay.FormatLastSeen(takeoverLastSeen)).</p>
+                <button class="btn btn-warning me-2" @onclick="() => showTakeoverConfirm = true">Ambil alih</button>
+                <button class="btn btn-outline-secondary" @onclick="RetryLockCodeClaimAsync">Coba lagi</button>
+            }
+            else
+            {
+                @if (!string.IsNullOrEmpty(setupError))
+                {
+                    <div class="alert alert-danger text-start">@setupError</div>
+                }
+                <button class="btn btn-primary" @onclick="RetryLockCodeClaimAsync">Coba lagi</button>
+            }
+        </div>
+    </div>
+}
 else if (station is null)
 {
     <div class="card mt-5">
         <div class="card-body">
             <h3 class="card-title mb-3">Setup Perangkat Stasiun</h3>
-            <p class="text-muted">Masukkan kode pairing 5 karakter yang diberikan admin untuk mengaktifkan perangkat ini.</p>
+            <p class="text-muted">Masukkan kode pairing 5 huruf atau kode login stasiun 10 karakter yang diberikan admin untuk mengaktifkan perangkat ini.</p>
             <div class="mb-3">
-                <input class="form-control text-uppercase" maxlength="5" placeholder="Kode pairing..." @bind="tokenInput" @bind:event="oninput" />
+                <input class="form-control text-uppercase" maxlength="10" placeholder="Kode pairing..." @bind="tokenInput" @bind:event="oninput" />
             </div>
             @if (!string.IsNullOrEmpty(setupError))
             {
@@ -55,9 +120,39 @@ else if (currentOperatorId is null)
         <div class="card-body text-center">
             <h3 class="mb-0">@station.StationName</h3>
             <p class="text-muted mb-2">@station.DivisionName</p>
-            <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
+            @* Mode app (Mode Stasiun Android): tanpa tombol keluar -- keluar = matikan Mode Stasiun di Pengaturan app. *@
+            @if (!IsAppMode)
+            {
+                <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
+            }
         </div>
     </div>
+
+    @* alter_87: stasiun "semua divisi" -- pilih divisi dulu, daftar operator di bawah ikut
+       divisi terpilih. Divisi disimpan di localStorage dan dikirim sebagai X-Station-Division. *@
+    @if (station.AllowAllDivisions)
+    {
+        <div class="card mb-3">
+            <div class="card-header">
+                <h3 class="card-title">Pilih Divisi</h3>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var d in stationDivisions)
+                    {
+                        <button class="btn @(d.Id == station.DivisionId ? "btn-primary" : "btn-outline-secondary")"
+                                disabled="@isSwitchingDivision" @onclick="() => SelectDivision(d.Id)">
+                            @d.DivisionName
+                        </button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(divisionSwitchError))
+                {
+                    <div class="alert alert-warning mt-3 mb-0">@divisionSwitchError</div>
+                }
+            </div>
+        </div>
+    }
 
     <div class="card">
         <div class="card-header">
@@ -97,6 +192,24 @@ else
                         <i class="fe fe-lock ms-1" title="Terkunci ke resource bawaan"></i>
                     }
                 </p>
+                @* Ad hoc (2026-11-02): ringkasan absen HARI INI untuk Line sesi ini -- angka yang
+                   sama dengan kotak ringkasan di tab Absen (SIS_StationAttendance_List result 2),
+                   ditarik ke header supaya kepala line tahu jumlah orangnya tanpa pindah tab.
+                   Masuk = status H. Tidak masuk = I + S + A + C (izin/sakit/alpa/cuti).
+                   "belum" ditampilkan terpisah kalau ada: itu yang membuat kedua angka di atas
+                   tidak berjumlah sama dengan jumlah anggota line -- tanpa keterangan ini
+                   angkanya terbaca seperti salah hitung. *@
+                @if (absenToday is not null)
+                {
+                    <p class="mb-0" style="font-size: 0.8rem;">
+                        <span class="text-success">Masuk: <strong>@absenToday.HadirCount</strong></span>
+                        <span class="text-danger ms-2">Tidak masuk: <strong>@AbsenTidakMasuk</strong></span>
+                        @if (absenToday.BelumCount > 0)
+                        {
+                            <span class="text-muted ms-2" title="Belum diisi di tab Absen">belum @absenToday.BelumCount</span>
+                        }
+                    </p>
+                }
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-primary btn-sm" @onclick="() => showQrScanner = true">
@@ -107,9 +220,12 @@ else
                 </button>
                 @if (!IsLocked)
                 {
-                    <button class="btn btn-outline-danger btn-sm" @onclick="ChangeOperator">Ganti Operator</button>
+                    <button class="btn btn-outline-danger btn-sm" @onclick="ChangeOperator">@(station.AllowAllDivisions ? "Ganti Divisi/Operator" : "Ganti Operator")</button>
                 }
-                <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
+                @if (!IsAppMode)
+                {
+                    <button class="btn btn-outline-danger btn-sm" @onclick="() => showLogoutConfirm = true">Keluar</button>
+                }
             </div>
         </div>
     </div>
@@ -753,6 +869,10 @@ else
                                                     </td>
                                                     <td>
                                                         <div class="fw-bold">
+                                                            @* alter_86: tanggal transaksi di depan deskripsi -- ini
+                                                               fakta kapan dikerjakan, beda dari stempel catat di
+                                                               kolom kanan. *@
+                                                            <span class="badge bg-secondary me-1">@m.OutputDate.ToString("dd/MM")</span>
                                                             @m.WorkDescription
                                                             @if (m.IsPotongan)
                                                             {
@@ -864,18 +984,32 @@ else
                                             </div>
                                             <i class="fe @(outExpanded ? "fe-chevron-up" : "fe-chevron-down") text-muted ms-2"></i>
                                         </div>
+                                    @* Kolom Hilang: TOTAL TANGGAL ITU SAJA, persis selingkup Qty & Reject
+                                       di sebelahnya -- dijumlah dari baris yang sedang tampil, bukan dari
+                                       saldo missing_qty. Dua sumber dijumlah supaya angkanya SAMA dengan
+                                       teks "Hilang : N" di baris-barisnya (lihat RejectLines): QtyLost
+                                       (model lama, pra-Prompt 82) + SplitMissingQty (model pemecahan).
+                                       Bisa NEGATIF kalau ada baris koreksi edit Kirim Hasil.
+                                       TERPISAH PENUH dari kolom Reject sejak 2026-11-02 (lihat
+                                       RejectTotal): reject masih ada barangnya, hilang tidak -- jadi
+                                       keduanya tidak pernah lagi dijumlah jadi satu angka.
+                                       Saldo hilang lintas-riwayat (yang bisa ditutup "Barang ketemu")
+                                       tetap hanya di kartu tab WIP, karena di situ pintu penutupannya. *@
+                                    @{
+                                        var outMissingQty = rows.Sum(MissingTotal);
+                                    }
                                         <div class="row g-2 text-center @(outExpanded ? "mb-2" : "mb-0")">
-                                            <div class="col-3">
+                                            <div class="col">
                                                 @* Label "Bundle" hanya benar kalau kartu ini murni bundle --
                                                    kartu yang memuat baris non-bundle memakai "Baris". *@
                                                 <div class="text-muted" style="font-size: 0.65rem;">@(rows.Any(r => r.BundleId is null) ? "Baris" : "Bundle")</div>
                                                 <div class="fw-bold">@rows.Count</div>
                                             </div>
-                                            <div class="col-3">
+                                            <div class="col">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Qty</div>
                                                 <div class="fw-bold">@rows.Sum(x => x.QtyOk)</div>
                                             </div>
-                                            <div class="col-3">
+                                            <div class="col">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Reject</div>
                                                 <div class="fw-bold @(rows.Sum(RejectTotal) > 0 ? "text-danger" : "")">@rows.Sum(RejectTotal)</div>
                                                 @* Ad hoc (2026-10-31): reject bundle-bundle ini yang dinyatakan
@@ -888,7 +1022,14 @@ else
                                                     </div>
                                                 }
                                             </div>
-                                            <div class="col-3">
+                                            <div class="col">
+                                                <div class="text-muted" style="font-size: 0.65rem;">Hilang</div>
+                                                <div class="fw-bold @(outMissingQty > 0 ? "text-danger" : outMissingQty < 0 ? "text-warning" : "text-muted")"
+                                                     title="Pcs yang dinyatakan hilang pada kiriman tanggal ini -- barangnya tidak ada fisiknya. Terpisah dari Reject.">
+                                                    @outMissingQty
+                                                </div>
+                                            </div>
+                                            <div class="col">
                                                 <div class="text-muted" style="font-size: 0.65rem;">Lock</div>
                                                 @if (cardUnlocked > 0)
                                                 {
@@ -900,6 +1041,22 @@ else
                                                 }
                                             </div>
                                         </div>
+
+                                        @* Rincian angka Reject di atas, per kategori. Selingkup SAMA
+                                           dengan angka itu (baris tanggal yang sedang dibuka saja), jadi
+                                           jumlah semua barisnya persis = angka Reject. Tampil juga saat
+                                           kartu terlipat -- justru di situ gunanya, supaya operator tahu
+                                           reject apa tanpa membuka daftar. *@
+                                        @{ var rejectDetail = RejectBreakdown(rows); }
+                                        @if (rejectDetail.Count > 0)
+                                        {
+                                            <div class="text-danger" style="font-size: 0.65rem;">
+                                                @foreach (var d in rejectDetail)
+                                                {
+                                                    <div>@d.Label : @d.Qty</div>
+                                                }
+                                            </div>
+                                        }
                                     </div>
                                 </div>
                                 @if (outExpanded)
@@ -1066,13 +1223,14 @@ else
                                                 {
                                                     var chReject = ch.Status == "Reject";
                                                     <tr style="background-color: var(--bs-tertiary-bg);">
+                                                        @* Kode anak RATA dengan checkbox baris induk: spacer selebar
+                                                           checkbox + gap dibuang, panah turunan yang menempati slot itu.
+                                                           text-nowrap supaya kode seperti K-224-1 tidak pecah dua baris
+                                                           (kolomnya sempit; tanpa ini '-1' turun sendiri). *@
                                                         <td class="align-middle">
-                                                            <div class="d-flex align-items-center gap-2">
-                                                                <span class="flex-shrink-0" style="width: 1em;"></span>
-                                                                <div style="font-size: 0.65rem;">
-                                                                    <span class="text-muted">&#8627;</span>
-                                                                    @BundleDisplay.Format(ch.BundleLetter, ch.RootBundleNo)@(ch.SequenceNo > 0 ? $"-{ch.SequenceNo}" : "")
-                                                                </div>
+                                                            <div class="d-flex align-items-center text-nowrap" style="font-size: 0.65rem;">
+                                                                <span class="text-muted flex-shrink-0 me-1">&#8627;</span>
+                                                                @BundleDisplay.Format(ch.BundleLetter, ch.RootBundleNo)@(ch.SequenceNo > 0 ? $"-{ch.SequenceNo}" : "")
                                                             </div>
                                                         </td>
                                                         <td class="align-middle" style="font-size: 0.9rem;">@(ch.SizeName ?? "-")</td>
@@ -1127,6 +1285,12 @@ else
                                 @(OutSelectedRows.Count + ManualSelectedRows.Count) baris
                                 &middot; @(OutSelectedRows.Sum(x => x.QtyOk) + ManualSelectedRows.Sum(m => m.Qty)) pcs
                                 &middot; reject @(OutSelectedRows.Sum(RejectTotal) + ManualSelectedRows.Sum(m => m.RejectQty))
+                                @* Hilang dipisah dari reject (lihat RejectTotal). Hanya baris log yang
+                                   punya konsep hilang -- output manual cuma punya reject_qty. *@
+                                @if (OutSelectedRows.Sum(MissingTotal) != 0)
+                                {
+                                    <text>&middot; hilang @OutSelectedRows.Sum(MissingTotal)</text>
+                                }
                                 @if (ManualSelectedRows.Count > 0)
                                 {
                                     <span class="badge bg-info ms-1">@ManualSelectedRows.Count manual</span>
@@ -1791,6 +1955,7 @@ else
                                     <th class="text-end">Baris</th>
                                     <th class="text-end">Pcs</th>
                                     <th class="text-end">Reject</th>
+                                    <th class="text-end">Hilang</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1801,6 +1966,7 @@ else
                                         <td class="text-end">@g.Count()</td>
                                         <td class="text-end">@g.Sum(x => x.QtyOk)</td>
                                         <td class="text-end @(g.Sum(RejectTotal) > 0 ? "text-danger" : "")">@g.Sum(RejectTotal)</td>
+                                        <td class="text-end @(g.Sum(MissingTotal) > 0 ? "text-danger" : g.Sum(MissingTotal) < 0 ? "text-warning" : "")">@g.Sum(MissingTotal)</td>
                                     </tr>
                                 }
                                 @* Prompt 83: baris output manual dirangkum jadi SATU baris --
@@ -1813,6 +1979,8 @@ else
                                         <td class="text-end">@ManualSelectedRows.Count</td>
                                         <td class="text-end">@ManualSelectedRows.Sum(m => m.Qty)</td>
                                         <td class="text-end @(ManualSelectedRows.Sum(m => m.RejectQty) > 0 ? "text-danger" : "")">@ManualSelectedRows.Sum(m => m.RejectQty)</td>
+                                        @* Output manual tidak punya konsep "hilang" -- hanya reject_qty. *@
+                                        <td class="text-end text-muted">-</td>
                                     </tr>
                                 }
                             </tbody>
@@ -2010,6 +2178,13 @@ else
                         </div>
                     </div>
 
+                    @* Prompt 88: printer tujuan label (dropdown hanya kalau >1 printer). *@
+                    @if (buatBundlePrintCopies >= 1)
+                    {
+                        <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="buatBundlePrinterId"
+                                       CanPrintChanged="v => buatBundlePrinterOk = v" />
+                    }
+
                     @if (!string.IsNullOrEmpty(buatBundleError))
                     {
                         <div class="alert alert-danger mb-0">@buatBundleError</div>
@@ -2017,7 +2192,7 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseBuatBundleModal">Tutup</button>
-                    <button class="btn btn-primary" disabled="@isBusy" @onclick="ConfirmBuatBundle">Simpan</button>
+                    <button class="btn btn-primary" disabled="@(isBusy || (buatBundlePrintCopies >= 1 && !buatBundlePrinterOk))" @onclick="ConfirmBuatBundle">Simpan</button>
                 </div>
             </div>
         </div>
@@ -2132,7 +2307,9 @@ else
                 <div class="modal-body">
                     <p class="mb-2">Cetak ulang label @reprintBundleSerial.</p>
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control" @bind="reprintBundleCopies" />
+                    <input type="number" min="1" class="form-control mb-2" @bind="reprintBundleCopies" />
+                    <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="reprintBundlePrinterId"
+                                   CanPrintChanged="v => reprintBundlePrinterOk = v" />
                     @if (!string.IsNullOrEmpty(reprintBundleError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@reprintBundleError</div>
@@ -2140,7 +2317,7 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseReprintBundleModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@(isBusy || reprintBundleCopies < 1)" @onclick="ConfirmReprintBundle">Cetak</button>
+                    <button class="btn btn-primary" disabled="@(isBusy || reprintBundleCopies < 1 || !reprintBundlePrinterOk)" @onclick="ConfirmReprintBundle">Cetak</button>
                 </div>
             </div>
         </div>
@@ -2321,6 +2498,26 @@ else
                     <button type="button" class="btn-close" @onclick="CloseManualForm"></button>
                 </div>
                 <div class="modal-body">
+                    @* alter_86: TANGGAL TRANSAKSI -- tanggal kerjaannya terjadi, bukan kapan
+                       barisnya diketik. Bawaannya mengikuti tanggal yang sedang dipilih di tab
+                       OUT (lihat OpenManualForm), jadi PIC yang sedang menelusuri 30/11 langsung
+                       dapat 30/11 tanpa mengubah apa-apa. Masa depan ditolak (SP & max di sini). *@
+                    <div class="mb-3">
+                        <label class="form-label">Tanggal transaksi <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control"
+                               max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                               value="@manualForm.OutputDate.ToString("yyyy-MM-dd")"
+                               @onchange="HandleManualOutputDateChanged" />
+                        @if (manualForm.OutputDate.Date != DateTime.Today)
+                        {
+                            <div class="form-text text-warning">
+                                <i class="fe fe-alert-triangle"></i>
+                                Bukan hari ini &mdash; pastikan memang kerjaan tanggal
+                                @manualForm.OutputDate.ToString("dd/MM/yyyy").
+                            </div>
+                        }
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">Deskripsi kerjaan <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" maxlength="300"
@@ -2411,6 +2608,13 @@ else
     <Message>Perangkat akan keluar dan token saat ini tidak berlaku lagi. Untuk masuk kembali, minta kode pairing baru ke admin.</Message>
 </ConfirmDeleteModal>
 
+@* Prompt 85: stasiun sedang dipegang perangkat lain ("DIPAKAI|" dari SP). *@
+<ConfirmDeleteModal Show="showTakeoverConfirm" IsBusy="isTakingOver" Title="Stasiun Sedang Dipakai"
+                     ConfirmText="Ambil alih" BusyText="Mengambil alih..." ConfirmButtonClass="btn-warning"
+                     OnConfirm="ConfirmTakeoverAsync" OnCancel="CancelTakeover">
+    <Message>Stasiun ini sedang dipakai oleh <strong>@takeoverHolder</strong> (aktif @StationDisplay.FormatLastSeen(takeoverLastSeen)). Ambil alih? Perangkat itu akan keluar dari stasiun.</Message>
+</ConfirmDeleteModal>
+
 @* Prompt 58: keluar dari tab Absen sementara masih ada perubahan absen yang belum disimpan. *@
 <ConfirmDeleteModal Show="showAbsenLeaveConfirm" Title="Perubahan Absen Belum Disimpan"
                      ConfirmText="Ya, Buang" BusyText="Memproses..." ConfirmButtonClass="btn-danger"
@@ -2431,10 +2635,48 @@ else
     private string setupError = string.Empty;
     private bool isValidatingToken = false;
 
+    // Prompt 84: token tersimpan tapi API tidak menjawab (restart/503/500/jaringan putus).
+    // Token TIDAK dihapus; halaman mencoba GetMe lagi tiap 5 detik sampai sukses atau 401.
+    private bool serverUnreachable = false;
+    private System.Threading.Timer? reconnectTimer;
+    private bool isReconnecting = false;
+    // Prompt 85: terisi = yang dicoba ulang adalah KLAIM kode ini (mode app, belum punya token),
+    // bukan GetMe.
+    private string? reconnectClaimCode;
+
     private bool showLogoutConfirm = false;
     private bool isLoggingOut = false;
 
+    // Prompt 85: identitas perangkat (localStorage; di app Android disuntik app) dan kode login
+    // terkunci. stationLockCode terisi = MODE APP: klaim otomatis saat halaman dimuat, input
+    // manual disembunyikan, "Keluar" jadi "Sambungkan ulang".
+    private const string LockCodeKey = "stationLockCode";
+    private const string LockCodeUsedKey = "stationLockCodeUsed";
+    private string deviceId = string.Empty;
+    private string deviceName = string.Empty;
+    private string? lockCode;
+    private bool IsAppMode => !string.IsNullOrWhiteSpace(lockCode);
+    private bool lockCodeInvalid = false;
+    // Prompt 86: perintah ke app Android (ditangkap WebViewClient app, tidak dinavigasikan) --
+    // buka pemindai QR kode login. Hanya dipakai di mode app.
+    private const string AppScanStationUrl = "terakarsa://scan-station";
+
+    // Prompt 85: token ditolak saat halaman jalan (StationAuthNotifier).
+    private bool tokenRejected = false;
+
+    // Prompt 85: konfirmasi ambil alih ("DIPAKAI|nama|terakhir aktif").
+    private bool showTakeoverConfirm = false;
+    private bool isTakingOver = false;
+    private bool takeoverDeclined = false;
+    private string? takeoverCode;
+    private string takeoverHolder = string.Empty;
+    private DateTime? takeoverLastSeen;
+
     private List<ResourceLookupDto> operators = new();
+    // alter_87: pilihan divisi untuk stasiun "semua divisi" (station.AllowAllDivisions).
+    private List<DivisionDto> stationDivisions = new();
+    private bool isSwitchingDivision = false;
+    private string divisionSwitchError = string.Empty;
     private int? currentOperatorId;
     private string? currentOperatorName;
 
@@ -2712,7 +2954,7 @@ else
 
     private async Task RefreshManualOutputs()
     {
-        manualOutputs = await StationApi.GetManualOutputsAsync();
+        manualOutputs = await StationApi.GetManualOutputsAsync(outboundDate.Date, currentOperatorId);
         manualSelected.RemoveWhere(id =>
             !manualOutputs.Any(r => r.ManualOutputId == id && IsManualRowSelectable(r)));
         StateHasChanged();
@@ -2726,7 +2968,11 @@ else
 
         if (row is null)
         {
-            manualForm = new ManualOutputSaveRequest();
+            // alter_86: baris baru mengikuti tanggal yang sedang dibuka di tab OUT -- PIC yang
+            // sedang menelusuri 30/11 hampir pasti sedang mencatat kerjaan 30/11. outboundDate
+            // sendiri tidak pernah melewati hari ini (lihat HandleOutboundDateChanged), jadi
+            // bawaan ini tidak bisa jatuh di masa depan.
+            manualForm = new ManualOutputSaveRequest { OutputDate = outboundDate.Date };
         }
         else
         {
@@ -2734,6 +2980,9 @@ else
             {
                 ManualOutputId = row.ManualOutputId,
                 ArticleId = row.ArticleId,
+                // Saat mengubah, tanggal baris itu sendiri yang dipakai -- BUKAN outboundDate,
+                // supaya edit kecil (mis. ralat qty) tidak diam-diam memindahkan tanggalnya.
+                OutputDate = row.OutputDate.Date,
                 WorkDescription = row.WorkDescription,
                 SizeName = row.SizeName,
                 Qty = row.Qty,
@@ -2755,6 +3004,15 @@ else
         showManualForm = true;
     }
 
+    // alter_86: input date dibaca manual (bukan @bind) supaya tanggal kosong / tidak valid
+    // tidak menimpa isian jadi 01/01/0001, dan tanggal masa depan dipotong ke hari ini.
+    private void HandleManualOutputDateChanged(ChangeEventArgs e)
+    {
+        if (!DateTime.TryParse(e.Value?.ToString(), out var parsed)) return;
+
+        manualForm.OutputDate = parsed.Date > DateTime.Today ? DateTime.Today : parsed.Date;
+    }
+
     private void CloseManualForm()
     {
         showManualForm = false;
@@ -2774,6 +3032,12 @@ else
         if (currentOperatorId is null)
         {
             manualFormError = "Operator wajib dipilih.";
+            return;
+        }
+
+        if (manualForm.OutputDate.Date > DateTime.Today)
+        {
+            manualFormError = "Tanggal transaksi tidak boleh di masa depan.";
             return;
         }
 
@@ -2805,7 +3069,16 @@ else
         }
 
         showManualForm = false;
-        outToast = manualForm.ManualOutputId is null ? "Output manual disimpan" : "Output manual diubah";
+
+        // alter_86: kartu sekarang disaring per tanggal, jadi baris yang disimpan dengan
+        // tanggal LAIN akan langsung hilang dari layar. Tanpa keterangan ini PIC akan mengira
+        // simpanannya gagal dan mengetik ulang.
+        var savedDate = manualForm.OutputDate.Date;
+        var verb = manualForm.ManualOutputId is null ? "disimpan" : "diubah";
+        outToast = savedDate == outboundDate.Date
+            ? $"Output manual {verb}"
+            : $"Output manual {verb} di tanggal {savedDate:dd/MM} -- buka tanggal itu untuk melihatnya.";
+
         await RefreshManualOutputs();
     }
 
@@ -2887,6 +3160,9 @@ else
     private int buatBundleTailorResourceId;
     private int buatBundleTailorEmployeeId;
     private int buatBundlePrintCopies = 1;
+    // Prompt 88: printer pilihan untuk label bundle (PrinterPicker).
+    private int? buatBundlePrinterId;
+    private bool buatBundlePrinterOk = true;
     // Prompt 35: catatan bebas bundle, diisi opsional saat "Buat Bundle" di station.
     private string? buatBundleRemarks;
     private string buatBundleError = string.Empty;
@@ -2920,6 +3196,8 @@ else
     private int? reprintBundleId;
     private string? reprintBundleSerial;
     private int reprintBundleCopies = 1;
+    private int? reprintBundlePrinterId;
+    private bool reprintBundlePrinterOk = true;
     private string reprintBundleError = string.Empty;
 
     private bool showBatalTerimaModal = false;
@@ -2964,23 +3242,38 @@ else
     protected override async Task OnInitializedAsync()
     {
         isLoadingSetup = true;
+        StationAuthNotifier.TokenRejected += OnTokenRejected;
+
+        await LoadDeviceIdentityAsync();
 
         var existingToken = await JS.InvokeAsync<string?>("localStorage.getItem", TokenKey);
-        if (!string.IsNullOrWhiteSpace(existingToken) && !string.IsNullOrWhiteSpace(PairingCode))
+        if (IsAppMode)
         {
-            // Sudah punya token aktif tapi scan kode pairing baru -- logout otomatis dari
-            // stasiun lama, lalu login ke stasiun hasil scan terakhir.
-            await StationApi.LogoutAsync();
-            await ReleaseToken();
+            await InitAppModeAsync(existingToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(existingToken) && !string.IsNullOrWhiteSpace(PairingCode))
+        {
+            // Sudah punya token aktif tapi scan kode pairing baru -- pindah ke stasiun hasil
+            // scan terakhir. Prompt 85: klaim dulu; token lama baru dilepas kalau klaim berhasil
+            // (lihat ClaimAsync), jadi scan kode yang sudah hangus tidak membuat perangkat yatim.
             await ClaimAsync(PairingCode.Trim());
         }
         else if (!string.IsNullOrWhiteSpace(existingToken))
         {
-            station = await StationApi.GetMeAsync();
-            if (station is null)
+            // Prompt 84: token hanya dihapus kalau server benar-benar menolaknya (401).
+            var (status, me) = await StationApi.CheckMeAsync();
+            if (status == StationMeStatus.Ok)
+            {
+                station = me;
+            }
+            else if (status == StationMeStatus.Unauthorized)
             {
                 await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
                 setupError = "Token perangkat sudah tidak berlaku. Minta kode pairing baru ke admin.";
+            }
+            else
+            {
+                StartReconnect();
             }
         }
         else if (!string.IsNullOrWhiteSpace(PairingCode))
@@ -2988,41 +3281,346 @@ else
             await ClaimAsync(PairingCode.Trim());
         }
 
+        ClearPairingCodeFromUrl();
         isLoadingSetup = false;
 
         if (station is not null)
             await LoadOperatorSessionAsync();
     }
 
-    // Prompt 20: tukar kode pairing (dari URL /station/{kode} atau input manual) dengan
-    // station_token baru, simpan ke localStorage, lalu muat info stasiun.
-    private async Task ClaimAsync(string code)
+    // Prompt 85: identitas perangkat. Browser: ID dibuat sekali + nama dari user agent. App
+    // Android menyuntik ketiga key (ID, nama, kode login) sebelum halaman ini dimuat.
+    private async Task LoadDeviceIdentityAsync()
+    {
+        deviceId = await JS.InvokeAsync<string?>("localStorage.getItem", TerakarsaApp.Client.Auth.StationTokenHandler.DeviceIdKey) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            deviceId = Guid.NewGuid().ToString("N");
+            await JS.InvokeVoidAsync("localStorage.setItem", TerakarsaApp.Client.Auth.StationTokenHandler.DeviceIdKey, deviceId);
+        }
+
+        deviceName = await JS.InvokeAsync<string?>("localStorage.getItem", TerakarsaApp.Client.Auth.StationTokenHandler.DeviceNameKey) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            // js/stationScripts.js tidak ber-fingerprint: sesaat setelah deploy browser bisa masih
+            // memakai versi lama dari cache (tanpa stationDeviceLabel). Jangan sampai halaman
+            // stasiun error karenanya -- pakai nama sementara dan JANGAN disimpan, supaya
+            // pemuatan berikutnya (JS sudah baru) mengisi nama yang benar.
+            try
+            {
+                deviceName = await JS.InvokeAsync<string>("stationDeviceLabel");
+                await JS.InvokeVoidAsync("localStorage.setItem", TerakarsaApp.Client.Auth.StationTokenHandler.DeviceNameKey, deviceName);
+            }
+            catch (JSException)
+            {
+                deviceName = "Browser";
+            }
+        }
+
+        var storedLockCode = await JS.InvokeAsync<string?>("localStorage.getItem", LockCodeKey);
+        lockCode = string.IsNullOrWhiteSpace(storedLockCode) ? null : storedLockCode.Trim().ToUpperInvariant();
+    }
+
+    // Prompt 85: mode app -- token yang masih sah dipakai apa adanya. Klaim otomatis (sekali)
+    // dengan kode login hanya kalau belum punya token, kode di Pengaturan app sudah diganti
+    // (stationLockCodeUsed beda), atau token ditolak (401).
+    private async Task InitAppModeAsync(string? existingToken)
+    {
+        var usedCode = await JS.InvokeAsync<string?>("localStorage.getItem", LockCodeUsedKey);
+        if (!string.IsNullOrWhiteSpace(existingToken) && usedCode == lockCode)
+        {
+            var (status, me) = await StationApi.CheckMeAsync();
+            if (status == StationMeStatus.Ok)
+            {
+                station = me;
+                return;
+            }
+            if (status == StationMeStatus.Unreachable)
+            {
+                StartReconnect();
+                return;
+            }
+
+            await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+        }
+
+        await ClaimAsync(lockCode!);
+    }
+
+    // Prompt 20: tukar kode pairing (dari URL /station/{kode}, input manual, atau kode login
+    // terkunci mode app) dengan station_token baru, simpan ke localStorage, lalu muat info stasiun.
+    //
+    // Prompt 85: klaim dulu, logout belakangan. Token lama (kalau masih sah) baru dilepas
+    // setelah klaim berhasil, dan hanya kalau stasiunnya berbeda -- UNPAIR stasiun yang sama
+    // akan mematikan token yang baru didapat. Klaim gagal = tetap di stasiun lama.
+    // Error "DIPAKAI|" -> dialog ambil alih; ulangi dengan force = true.
+    // true = klaim berhasil (station bisa masih null kalau server sesaat tidak menjawab GetMe).
+    private async Task<bool> ClaimAsync(string code, bool force = false)
     {
         isValidatingToken = true;
         setupError = string.Empty;
+        lockCodeInvalid = false;
+        takeoverDeclined = false;
 
-        var claim = await StationApi.ClaimAsync(code);
-        if (!claim.Success || claim.Result is null)
+        StationMeDto? oldStation = null;
+        var oldToken = await JS.InvokeAsync<string?>("localStorage.getItem", TokenKey);
+        if (!string.IsNullOrWhiteSpace(oldToken))
         {
-            setupError = string.IsNullOrEmpty(claim.Error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : claim.Error;
-            isValidatingToken = false;
-            return;
+            var (oldStatus, oldMe) = await StationApi.CheckMeAsync();
+            if (oldStatus == StationMeStatus.Ok) oldStation = oldMe;
         }
 
-        await JS.InvokeVoidAsync("localStorage.setItem", TokenKey, claim.Result.Token);
+        var isLockCode = IsAppMode && code == lockCode;
+        var claim = await StationApi.ClaimAsync(code, deviceId, deviceName, force);
+        if (!claim.Success || claim.Result is null)
+        {
+            isValidatingToken = false;
+            station ??= oldStation;
 
-        station = await StationApi.GetMeAsync();
+            if (StationDisplay.TryParseTakeover(claim.Error, out var holder, out var lastSeen))
+            {
+                StopReconnect();
+                takeoverCode = code;
+                takeoverHolder = holder;
+                takeoverLastSeen = lastSeen;
+                showTakeoverConfirm = true;
+                return false;
+            }
+
+            // Mode app tanpa stasiun: server sesaat tidak menjawab -> coba klaim lagi tiap 5 detik.
+            if (claim.Unreachable && isLockCode && station is null)
+            {
+                StartReconnect(code);
+                return false;
+            }
+
+            StopReconnect();
+            if (isLockCode && claim.Error.StartsWith("Kode pairing tidak valid", StringComparison.Ordinal))
+            {
+                lockCodeInvalid = true;
+                // Prompt 86: langsung minta app membuka pemindai QR (sekali per pemuatan; app
+                // mengabaikannya kalau operator sudah membatalkan pemindai).
+                Nav.NavigateTo(AppScanStationUrl + "?auto=1");
+            }
+            else if (claim.Unreachable)
+                setupError = "Server tidak terjangkau. Coba lagi sebentar lagi.";
+            else
+                setupError = string.IsNullOrEmpty(claim.Error) ? "Kode pairing tidak valid atau sudah kedaluwarsa." : claim.Error;
+            return false;
+        }
+
+        var sameStation = oldStation is not null && oldStation.StationId == claim.Result.Id;
+        if (oldStation is not null && !sameStation)
+        {
+            // Handler masih mengirim token lama -- belum ditimpa token baru.
+            try { await StationApi.LogoutAsync(); }
+            catch (HttpRequestException) { }
+        }
+
+        // Sesi operator stasiun lama (kalau halaman sedang jalan) diganti sesi stasiun baru.
+        StopPolling();
+        station = null;
+        currentOperatorId = null;
+        currentOperatorName = null;
+        stationDivisions = new();
+        activeTab = "kerja";
+
+        await JS.InvokeVoidAsync("localStorage.setItem", TokenKey, claim.Result.Token);
+        // Divisi sesi stasiun lama tidak ikut terbawa ke stasiun hasil pairing baru.
+        if (!sameStation)
+            await JS.InvokeVoidAsync("localStorage.removeItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey);
+        if (isLockCode)
+            await JS.InvokeVoidAsync("localStorage.setItem", LockCodeUsedKey, lockCode);
+
+        StopReconnect();
+        var (status, me) = await StationApi.CheckMeAsync();
         isValidatingToken = false;
 
-        if (station is null)
+        if (status == StationMeStatus.Unauthorized)
         {
             setupError = "Gagal mengaktifkan perangkat. Minta kode pairing baru ke admin.";
             await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
-            return;
+            return false;
         }
 
+        // Prompt 84: klaim sudah sukses, token baru sah di DB -- kalau server sesaat tidak
+        // menjawab, simpan token dan coba lagi, jangan buang.
+        if (status == StationMeStatus.Unreachable)
+            StartReconnect();
+        else
+            station = me;
+
+        return true;
+    }
+
+    // Kode pairing di URL dibuang begitu dicoba (berhasil atau tidak) supaya reload tidak
+    // mencoba klaim kode yang sama lagi. Kode untuk dialog ambil alih disimpan di takeoverCode.
+    private void ClearPairingCodeFromUrl()
+    {
         if (!string.IsNullOrWhiteSpace(PairingCode))
             Nav.NavigateTo("/station", replace: true);
+    }
+
+    // Prompt 84: coba GetMe lagi tiap 5 detik selama server tidak terjangkau. Berhenti saat
+    // sukses (lanjut normal ke sesi operator) atau 401 (perilaku lama: hapus token).
+    // Prompt 85: claimCode terisi = yang dicoba ulang adalah klaim kode login (mode app).
+    private void StartReconnect(string? claimCode = null)
+    {
+        reconnectClaimCode = claimCode;
+        serverUnreachable = true;
+        reconnectTimer?.Dispose();
+        reconnectTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await TryReconnectAsync();
+                StateHasChanged();
+            });
+        }, null, 5000, 5000);
+    }
+
+    private void StopReconnect()
+    {
+        reconnectTimer?.Dispose();
+        reconnectTimer = null;
+        reconnectClaimCode = null;
+        serverUnreachable = false;
+    }
+
+    private async Task RetryReconnectNow()
+    {
+        await TryReconnectAsync();
+    }
+
+    private async Task TryReconnectAsync()
+    {
+        if (!serverUnreachable || isReconnecting) return;
+
+        isReconnecting = true;
+        try
+        {
+            // Prompt 85: mode app tanpa token -- yang dicoba ulang klaimnya. Kartu "server tidak
+            // terjangkau" tetap tampil selama percobaan (serverUnreachable belum dimatikan);
+            // ClaimAsync menjadwalkan percobaan berikutnya kalau masih gagal.
+            if (reconnectClaimCode is not null)
+            {
+                var code = reconnectClaimCode;
+                reconnectTimer?.Dispose();
+                reconnectTimer = null;
+                reconnectClaimCode = null;
+
+                if (await ClaimAsync(code) && station is not null)
+                    await LoadOperatorSessionAsync();
+                return;
+            }
+
+            var (status, me) = await StationApi.CheckMeAsync();
+            if (status == StationMeStatus.Unreachable) return;
+
+            StopReconnect();
+
+            if (status == StationMeStatus.Unauthorized)
+            {
+                await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+
+                // Prompt 85: sama seperti saat halaman dimuat -- mode app klaim otomatis sekali.
+                if (IsAppMode)
+                {
+                    if (await ClaimAsync(lockCode!) && station is not null)
+                        await LoadOperatorSessionAsync();
+                    return;
+                }
+
+                setupError = "Token perangkat sudah tidak berlaku. Minta kode pairing baru ke admin.";
+                return;
+            }
+
+            station = me;
+            await LoadOperatorSessionAsync();
+        }
+        finally
+        {
+            isReconnecting = false;
+        }
+    }
+
+    // Prompt 85: StationTokenHandler melaporkan 401 pada request yang membawa token. Hanya
+    // relevan kalau halaman sedang memegang stasiun -- 401 saat setup/klaim/logout sudah
+    // ditangani alurnya masing-masing. Tidak ada klaim otomatis di sini (cegah saling tendang).
+    private void OnTokenRejected()
+    {
+        if (station is null || tokenRejected || isValidatingToken || isLoggingOut) return;
+
+        _ = InvokeAsync(() =>
+        {
+            tokenRejected = true;
+            StopPolling();
+            StateHasChanged();
+        });
+    }
+
+    // Mode browser: token sudah mati, kembali ke layar setup untuk kode pairing baru.
+    private async Task AfterTokenRejectedAsync()
+    {
+        tokenRejected = false;
+        await ReleaseToken();
+        setupError = "Perangkat ini sudah keluar dari stasiun. Masukkan kode pairing baru dari admin.";
+    }
+
+    // Prompt 85: mode app -- token dilepas lalu langsung diklaim ulang dengan kode login
+    // terkunci. Pilihan operator di localStorage tetap. Tombol di header sudah dihapus
+    // (keputusan owner 2026-11-03); tinggal dipakai kartu "Perangkat ini sudah keluar".
+    private async Task ReconnectStationAsync()
+    {
+        if (!IsAppMode) return;
+
+        isLoggingOut = true;
+        StopPolling();
+        try { await StationApi.LogoutAsync(); }
+        catch (HttpRequestException) { }
+
+        await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+        station = null;
+        currentOperatorId = null;
+        currentOperatorName = null;
+        tokenRejected = false;
+        isLoggingOut = false;
+
+        if (await ClaimAsync(lockCode!) && station is not null)
+            await LoadOperatorSessionAsync();
+    }
+
+    private async Task RetryLockCodeClaimAsync()
+    {
+        if (!IsAppMode) return;
+
+        if (await ClaimAsync(lockCode!) && station is not null)
+            await LoadOperatorSessionAsync();
+    }
+
+    private async Task ConfirmTakeoverAsync()
+    {
+        if (takeoverCode is null) return;
+
+        isTakingOver = true;
+        var ok = await ClaimAsync(takeoverCode, force: true);
+        isTakingOver = false;
+        showTakeoverConfirm = false;
+        takeoverCode = null;
+
+        if (ok && station is not null)
+            await LoadOperatorSessionAsync();
+    }
+
+    private void CancelTakeover()
+    {
+        showTakeoverConfirm = false;
+        if (station is not null) return;
+
+        if (IsAppMode)
+            takeoverDeclined = true;
+        else
+            setupError = $"Stasiun sedang dipakai oleh {takeoverHolder}. Tidak diambil alih.";
     }
 
     private async Task HandleSetupSubmit()
@@ -3055,6 +3653,8 @@ else
     private async Task LoadOperatorSessionAsync()
     {
         operators = await StationApi.GetResourcesAsync();
+        if (station!.AllowAllDivisions && stationDivisions.Count == 0)
+            stationDivisions = await StationApi.GetStationDivisionsAsync();
 
         // Prompt 16: stasiun terkunci selalu memakai resource bawaan, abaikan sesi lama
         // yang mungkin tersimpan sebelum stasiun dikunci admin.
@@ -3092,6 +3692,53 @@ else
         await StartSessionAsync();
     }
 
+    // alter_87: pindah divisi sesi. Info stasiun dimuat ulang (server sudah memakai divisi
+    // baru lewat header), lalu daftar operator ikut divisi baru. Data per divisi lain
+    // dimuat ulang oleh StartSessionAsync begitu operator dipilih.
+    private async Task SelectDivision(int divisionId)
+    {
+        if (station is null || divisionId == station.DivisionId) return;
+
+        isSwitchingDivision = true;
+        divisionSwitchError = string.Empty;
+        var previousDivision = await JS.InvokeAsync<string?>("localStorage.getItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey);
+        await JS.InvokeVoidAsync("localStorage.setItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey, divisionId.ToString());
+
+        var (status, refreshed) = await StationApi.CheckMeAsync();
+        if (status == StationMeStatus.Unauthorized)
+        {
+            // Prompt 85: token ditolak saat halaman jalan -> kartu "sudah keluar dari stasiun"
+            // (StationAuthNotifier biasanya sudah menyalakannya lewat OnTokenRejected).
+            isSwitchingDivision = false;
+            if (!tokenRejected)
+            {
+                tokenRejected = true;
+                StopPolling();
+            }
+            return;
+        }
+
+        // Prompt 84: server sesaat tidak menjawab -- token tetap, divisi kembali ke pilihan
+        // sebelumnya supaya header yang dikirim tetap cocok dengan data yang tampil.
+        if (status == StationMeStatus.Unreachable)
+        {
+            if (string.IsNullOrWhiteSpace(previousDivision))
+                await JS.InvokeVoidAsync("localStorage.removeItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey);
+            else
+                await JS.InvokeVoidAsync("localStorage.setItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey, previousDivision);
+
+            isSwitchingDivision = false;
+            divisionSwitchError = "Server tidak terjangkau, divisi belum berpindah. Coba lagi sebentar lagi.";
+            return;
+        }
+
+        station = refreshed;
+        operators = await StationApi.GetResourcesAsync();
+        activeTab = "kerja";
+        packingProjects = new();
+        isSwitchingDivision = false;
+    }
+
     private async Task ChangeOperator()
     {
         StopPolling();
@@ -3108,8 +3755,10 @@ else
         await JS.InvokeVoidAsync("localStorage.removeItem", TokenKey);
         await JS.InvokeVoidAsync("localStorage.removeItem", OperatorIdKey);
         await JS.InvokeVoidAsync("localStorage.removeItem", OperatorNameKey);
+        await JS.InvokeVoidAsync("localStorage.removeItem", TerakarsaApp.Client.Auth.StationTokenHandler.DivisionKey);
 
         station = null;
+        stationDivisions = new();
         currentOperatorId = null;
         currentOperatorName = null;
         tokenInput = string.Empty;
@@ -3197,10 +3846,17 @@ else
 
         await LoadOutboundDatePeriodAsync();
         await RefreshMissing();
-        // Prompt 83: baris output manual divisi ini. TIDAK ikut filter outboundDate -- baris
-        // manual yang belum lock harus selalu terlihat sampai dibereskan (sama alasannya
-        // dengan chip "Belum lock").
+        // Prompt 83: baris output manual divisi ini.
+        // alter_86: SEKARANG ikut filter outboundDate (sebelumnya tidak, karena baris manual
+        // belum punya tanggal sendiri). Baris belum lock di tanggal lain tetap tidak bisa
+        // terlupakan: SIS_Station_UnlockedDates ikut menghitung manual_outputs, jadi tanggalnya
+        // muncul sebagai chip "Belum lock" di atas daftar.
+        // 2026-11-02: ikut filter Line sesi juga -- baris milik Line lain di divisi yang sama
+        // tidak lagi tampil (apalagi bisa di-lock) dari sesi ini.
         await RefreshManualOutputs();
+        // Ringkasan "Masuk / Tidak masuk" di header. Ber-penjaga sendiri, jadi polling 15 detik
+        // tidak ikut memanggil API-nya berulang kali.
+        await LoadAbsenToday();
     }
 
     // Prompt 82: angka Hilang / Lebih kartu artikel. Diambil sekali untuk semua artikel yang
@@ -3322,11 +3978,47 @@ else
     private int AbsenTodayPendingCount =>
         absenPendingDates.FirstOrDefault(p => p.AttendanceDate.Date == DateTime.Today)?.PendingCount ?? 0;
 
+    // Ad hoc (2026-11-02): ringkasan absen hari ini untuk teks "Masuk / Tidak masuk" di header.
+    // Memakai ULANG SIS_StationAttendance_List (lewat endpoint yang sama dengan tab Absen) --
+    // sengaja tidak membuat SP/endpoint ringkasan sendiri supaya angka header dan angka tab
+    // tidak bisa berbeda. Hasil Rows-nya memang tidak dipakai di sini; jumlah pegawai satu
+    // Line kecil, jadi lebih murah daripada memelihara dua definisi.
+    private StationAttendanceScheduleDto? absenToday;
+
+    private int AbsenTidakMasuk => absenToday is null
+        ? 0
+        : absenToday.IzinCount + absenToday.SakitCount + absenToday.AlpaCount + absenToday.CutiCount;
+
     private async Task LoadAbsenPendingDates()
     {
         absenPendingDates = currentOperatorId is int resourceId && resourceId > 0
             ? await StationApi.GetAttendancePendingDatesAsync(resourceId)
             : new();
+    }
+
+    // Dimuat SEKALI per (tanggal, Line), bukan tiap polling 15 detik: absen hanya berubah
+    // lewat tab Absen di perangkat ini sendiri, dan panggilan ini ikut membawa daftar pegawai
+    // yang tidak dipakai header. Penjaganya sekaligus menangani ganti operator dan pergantian
+    // hari -- dua-duanya mengubah kunci, jadi otomatis dimuat ulang.
+    private DateTime? absenTodayLoadedDate;
+    private int? absenTodayLoadedResourceId;
+
+    private async Task LoadAbsenToday(bool force = false)
+    {
+        if (currentOperatorId is not int resourceId || resourceId <= 0)
+        {
+            absenToday = null;
+            absenTodayLoadedDate = null;
+            absenTodayLoadedResourceId = null;
+            return;
+        }
+
+        if (!force && absenTodayLoadedDate == DateTime.Today && absenTodayLoadedResourceId == resourceId)
+            return;
+
+        absenToday = (await StationApi.GetAttendanceAsync(resourceId, DateTime.Today))?.Schedule;
+        absenTodayLoadedDate = DateTime.Today;
+        absenTodayLoadedResourceId = resourceId;
     }
 
     private void HandleAbsenDirtyCountChanged(int count) => absenDirtyCount = count;
@@ -3337,6 +4029,8 @@ else
     private async Task HandleAbsenDataChanged()
     {
         await LoadAbsenPendingDates();
+        // force: absen baru saja diubah, penjaga "sudah dimuat hari ini" harus dilewati.
+        await LoadAbsenToday(force: true);
 
         if (buatBundleTailorResourceId > 0)
             buatBundleTailorEmployeeOptions = await StationApi.GetEmployeesByResourceAsync(buatBundleTailorResourceId);
@@ -3771,11 +4465,71 @@ else
     private static int RejectChildQty(StationPendingHandoverDto item) =>
         item.SplitChildren.Where(c => c.Status == "Reject").Sum(c => c.Qty);
 
-    // SplitMissingQty ikut: kolom qty_lost lama pun selalu ikut di sini, jadi "hilang"
-    // memang bagian dari angka Reject kartu OUT -- bukan hal baru, cuma sumbernya pindah.
+    // RejectTotal = REJECT MURNI. Sampai 2026-11-02 angka ini ikut memuat "hilang"
+    // (QtyLost + SplitMissingQty); sekarang hilang punya kolomnya sendiri di tab OUT, jadi
+    // keduanya DIPISAH -- barang reject masih ada fisiknya (lahir bundle anak, bisa dicetak
+    // ulang stikernya), barang hilang tidak ada sama sekali. Menjumlahkan dua hal itu membuat
+    // operator tidak bisa tahu mana yang masih bisa ditindaklanjuti.
+    // Konsekuensi yang DISENGAJA: angka Reject di kartu OUT, bar aksi bawah, dan tabel
+    // ringkasan modal Lock semuanya TURUN sebanyak pcs hilangnya. Tidak ada angka yang
+    // menghilang -- pindah ke kolom Hilang di sebelahnya.
     private static int RejectTotal(StationPendingHandoverDto item) =>
-        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework + item.QtyLost
-        + RejectChildQty(item) + item.SplitMissingQty;
+        item.QtyRejectPrint + item.QtyRejectFabric + item.QtyRejectSewing + item.QtyRejectRework
+        + RejectChildQty(item);
+
+    // Pcs yang dinyatakan HILANG pada kiriman baris ini -- barang yang tidak ketemu fisiknya,
+    // jadi tidak lahir bundle anak dan tidak punya barisnya sendiri. Dua sumber: QtyLost
+    // (model lama, pra-Prompt 82) + SplitMissingQty (model pemecahan). Bisa NEGATIF kalau
+    // baris itu koreksi hasil edit Kirim Hasil.
+    private static int MissingTotal(StationPendingHandoverDto item) =>
+        item.QtyLost + item.SplitMissingQty;
+
+    // Urutan tampil rincian reject. Dikunci (bukan ikut urutan data) supaya baris yang sama
+    // selalu ada di posisi yang sama antar kartu dan antar tanggal -- operator membacanya
+    // sekilas, jadi posisi yang lompat-lompat lebih mahal daripada urutan "paling banyak dulu".
+    private static readonly string[] RejectLabelOrder =
+    {
+        "Reject Print", "Reject Bahan", "Reject Jahit", "Reject Rework"
+    };
+
+    // Rincian angka Reject kartu OUT per kategori. Selingkupnya SAMA dengan RejectTotal
+    // (baris yang sedang tampil), jadi jumlah semua barisnya pasti = angka Reject di atasnya.
+    // Dua sumber digabung ke label yang sama: kolom qty_reject_* gaya lama (pra-Prompt 82)
+    // dan bundle ANAK ber-status Reject -- satu artikel bisa punya campuran keduanya kalau
+    // ada kiriman sebelum dan sesudah migrasi. "Hilang" TIDAK ikut di sini: sejak dipisah,
+    // ia punya kolomnya sendiri.
+    private static List<(string Label, int Qty)> RejectBreakdown(IEnumerable<StationPendingHandoverDto> items)
+    {
+        var total = new Dictionary<string, int>();
+
+        void Add(string label, int qty)
+        {
+            if (qty == 0) return;
+            total[label] = total.GetValueOrDefault(label) + qty;
+        }
+
+        foreach (var item in items)
+        {
+            Add("Reject Print", item.QtyRejectPrint);
+            Add("Reject Bahan", item.QtyRejectFabric);
+            Add("Reject Jahit", item.QtyRejectSewing);
+            Add("Reject Rework", item.QtyRejectRework);
+
+            foreach (var g in item.SplitChildren.Where(c => c.Status == "Reject")
+                                  .GroupBy(c => c.RejectCategory ?? c.Status))
+            {
+                Add(BundleRejectCategory.Label(g.Key), g.Sum(c => c.Qty));
+            }
+        }
+
+        // Kategori di luar daftar urutan (mis. kategori baru) tetap ikut tampil, ditaruh
+        // paling belakang -- lebih baik muncul tanpa urutan daripada hilang diam-diam.
+        return total
+            .OrderBy(kv => Array.IndexOf(RejectLabelOrder, kv.Key) is var i && i >= 0 ? i : int.MaxValue)
+            .ThenBy(kv => kv.Key)
+            .Select(kv => (kv.Key, kv.Value))
+            .ToList();
+    }
 
     private static List<string> RejectLines(StationPendingHandoverDto item)
     {
@@ -4393,7 +5147,8 @@ else
             TailorResourceId = buatBundleTailorResourceId > 0 ? buatBundleTailorResourceId : null,
             TailorEmployeeId = buatBundleTailorEmployeeId > 0 ? buatBundleTailorEmployeeId : null,
             PrintCopies = buatBundlePrintCopies,
-            Remarks = buatBundleRemarks
+            Remarks = buatBundleRemarks,
+            PrintDeviceId = buatBundlePrintCopies >= 1 ? buatBundlePrinterId : null
         });
 
         isBusy = false;
@@ -4581,7 +5336,7 @@ else
         reprintBundleError = string.Empty;
         reprintFeedback = string.Empty;
 
-        var (success, error) = await StationApi.ReprintBundleAsync(reprintBundleId.Value, reprintBundleCopies);
+        var (success, error) = await StationApi.ReprintBundleAsync(reprintBundleId.Value, reprintBundleCopies, reprintBundlePrinterId);
 
         isBusy = false;
 
@@ -4940,5 +5695,7 @@ else
     public void Dispose()
     {
         pollTimer?.Dispose();
+        reconnectTimer?.Dispose();
+        StationAuthNotifier.TokenRejected -= OnTokenRejected;
     }
 }

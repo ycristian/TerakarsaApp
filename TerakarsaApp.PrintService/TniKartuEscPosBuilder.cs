@@ -115,11 +115,6 @@ public static class TniKartuEscPosBuilder
         Line(new string('=', Width));
         EmitQr(ms, p.QrContent);
 
-        Center();
-        Line(Cut(StripScheme(p.QrContent), Width));
-        Line("Scan QR untuk cek status & komplain ukuran");
-        Left();
-
         // ---------- 6. feed + potong ----------
         W(ESC, 0x64, 0x04);   // ESC d 4 : feed 4 baris
         W(GS, 0x56, 66, 0x00); // GS V 66 0 : partial cut
@@ -169,13 +164,140 @@ public static class TniKartuEscPosBuilder
 
         L(new string('=', Width));
         L(CenterText($"[QR: {p.QrContent}]", Width));
-        L(CenterText(Cut(StripScheme(p.QrContent), Width), Width));
-        L(CenterText("Scan QR untuk cek status & komplain ukuran", Width));
         L();
         L("----- CUT -----");
 
         return sb.ToString();
     }
+
+    // ---------------- rekap size (2026-11-09) ----------------
+    // Struk ringkasan yang tercetak SEBELUM kartu-kartu satu kali cetak: total per
+    // size celana & kemeja, supaya staff mengambil barang per size dulu. Job_type-nya
+    // tetap TNI_KARTU; dibedakan lewat payload jenis = "REKAP".
+
+    public static bool IsRekap(string payloadJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "jenis", StringComparison.OrdinalIgnoreCase))
+                    return prop.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
+                           string.Equals(prop.Value.GetString(), TniKartuRekapPayload.JenisRekap,
+                                         StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Biarkan ParsePayload kartu yang melaporkan payload rusak.
+            return false;
+        }
+    }
+
+    public static TniKartuRekapPayload ParseRekapPayload(string payloadJson)
+    {
+        var payload = System.Text.Json.JsonSerializer.Deserialize<TniKartuRekapPayload>(
+            payloadJson,
+            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        return payload ?? throw new InvalidOperationException("Payload rekap TNI_KARTU kosong.");
+    }
+
+    public static byte[] BuildRekap(TniKartuRekapPayload p)
+    {
+        using var ms = new MemoryStream();
+        void W(params byte[] b) => ms.Write(b, 0, b.Length);
+        void Line(string s = "") { W(Encoding.ASCII.GetBytes(Ascii(s))); W(0x0A); }
+
+        void Center() => W(ESC, 0x61, 0x01);
+        void Left() => W(ESC, 0x61, 0x00);
+        void Bold(bool on) => W(ESC, 0x45, (byte)(on ? 1 : 0));
+
+        // Semua ukuran font NORMAL (permintaan owner 2026-11-09) -- tidak ada GS ! besar.
+        W(ESC, 0x40);
+
+        // ---------- kepala ----------
+        Center();
+        Line(Cut(p.JudulOrder, Width));
+        Bold(true);
+        Line("REKAP SIZE");
+        Bold(false);
+        Line(Cut(RekapSubjudul(p), Width));
+        Left();
+        Line(new string('=', Width));
+
+        var kolom = RekapKolom(p);
+
+        Bold(true);
+        Line(KodeQty("TOTAL KARTU", p.TotalKartu, kolom));
+        Bold(false);
+
+        // ---------- celana lalu kemeja (urutan sama dengan urutan cetak kartu) ----------
+        void Bagian(string judul, List<TniKartuRekapItem> items)
+        {
+            Line(new string('-', Width));
+            Bold(true);
+            Line(judul);
+            Bold(false);
+
+            foreach (var it in items)
+                Line(KodeQty(it.Kode, it.Jumlah, kolom));
+        }
+
+        Bagian("CELANA", p.Celana);
+        Bagian("KEMEJA", p.Kemeja);
+
+        Line(new string('=', Width));
+
+        W(ESC, 0x64, 0x04);    // feed 4 baris
+        W(GS, 0x56, 66, 0x00); // partial cut
+
+        return ms.ToArray();
+    }
+
+    public static string BuildRekapPlainText(TniKartuRekapPayload p)
+    {
+        var sb = new StringBuilder();
+        void L(string s = "") => sb.AppendLine(s);
+
+        L(CenterText(Cut(p.JudulOrder, Width), Width));
+        L(CenterText("REKAP SIZE", Width) + "   [tebal]");
+        L(CenterText(Cut(RekapSubjudul(p), Width), Width));
+        L(new string('=', Width));
+        var kolom = RekapKolom(p);
+        L(KodeQty("TOTAL KARTU", p.TotalKartu, kolom) + "   [tebal]");
+
+        foreach (var (judul, items) in new[] { ("CELANA", p.Celana), ("KEMEJA", p.Kemeja) })
+        {
+            L(new string('-', Width));
+            L(judul + "   [tebal]");
+            foreach (var it in items)
+                L(KodeQty(it.Kode, it.Jumlah, kolom));
+        }
+
+        L(new string('=', Width));
+        L();
+        L("----- CUT -----");
+
+        return sb.ToString();
+    }
+
+    private static string RekapSubjudul(TniKartuRekapPayload p) =>
+        Join(" - ", p.Waktu, p.Petugas);
+
+    // Qty DEKAT dengan size ('33_P        : 2'), bukan rata kanan di ujung kertas --
+    // supaya mata tidak perlu menyeberang 48 kolom. Lebar kolom size = kode terpanjang
+    // (min. selebar 'TOTAL KARTU') + 1, sama untuk semua baris supaya ':' sejajar.
+    private static int RekapKolom(TniKartuRekapPayload p) =>
+        p.Celana.Concat(p.Kemeja)
+                .Select(x => Ascii(x.Kode).Length)
+                .Append("TOTAL KARTU".Length)
+                .Max() + 1;
+
+    private static string KodeQty(string kode, int jumlah, int kolom) =>
+        Pad(kode, Math.Min(kolom, Width - 8)) + ": " + jumlah.ToString(CultureInfo.InvariantCulture);
 
     // ---------------- format ----------------
 
@@ -216,9 +338,6 @@ public static class TniKartuEscPosBuilder
         var bb = p.BeratBadan.HasValue ? $"{p.BeratBadan} kg" : "-";
         return $"{tb} / {bb}";
     }
-
-    private static string StripScheme(string? url) =>
-        (url ?? string.Empty).Replace("https://", string.Empty).Replace("http://", string.Empty);
 
     private static string Join(string sep, params string?[] parts) =>
         string.Join(sep, parts.Where(x => !string.IsNullOrWhiteSpace(x)));

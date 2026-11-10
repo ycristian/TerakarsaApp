@@ -11,6 +11,11 @@
 --   * IKUT mekanisme lock Prompt 55: lock_id terisi -> qty beku di semua jalur.
 --   * periode gajian datang dari lock, bukan dari tanggal baris.
 --
+-- alter_86: baris punya TANGGAL TRANSAKSI sendiri (@OutputDate -> output_date), yaitu
+-- tanggal kerjaannya terjadi. Ini TIDAK mengubah poin di atas: periode gajian TETAP dari
+-- lock, output_date cuma fakta kapan dikerjakan (dipakai urutan tampil & laporan).
+-- created_at tetap stempel audit kapan barisnya diketik, dan sengaja tidak disamakan.
+--
 -- Prefix pesan error yang dikenali UI: 'LOCKED|' (sama dengan SIS_Bundle_Manage /
 -- SIS_WorkflowLog_Manage, supaya UI bisa menawarkan pengajuan unlock).
 --
@@ -83,6 +88,8 @@ CREATE OR ALTER PROCEDURE SIS_ManualOutput_Manage
     @ManualOutputId  INT = NULL,
     @ResourceId      INT = NULL,            -- operator sesi stasiun; pemilik baris
     @ArticleId       INT = NULL,            -- opsional
+    @OutputDate      DATE = NULL,           -- alter_86: tanggal kerjaannya terjadi.
+                                            -- NULL -> hari ini (CREATE) / tidak diubah (UPDATE)
     @WorkDescription NVARCHAR(300) = NULL,
     @SizeName        VARCHAR(50) = NULL,
     @Qty             INT = NULL,            -- boleh 0 atau minus
@@ -224,6 +231,16 @@ BEGIN
             RETURN;
         END
 
+        -- alter_86: tanggal transaksi. Masa depan DITOLAK (kerjaan yang belum terjadi
+        -- tidak bisa dicatat), masa lalu dibiarkan tanpa batas: baris susulan dan koreksi
+        -- baris tua harus tetap bisa disimpan selama barisnya belum lock. Batas "jangan
+        -- jauh-jauh ke belakang" sudah dipegang lock + periode final, bukan di sini.
+        IF @OutputDate IS NOT NULL AND @OutputDate > CAST(SYSDATETIME() AS DATE)
+        BEGIN
+            RAISERROR('Tanggal transaksi tidak boleh di masa depan.', 16, 1);
+            RETURN;
+        END
+
         -- Qty TIDAK divalidasi > 0: 0 dan minus keduanya sah (minus = catatan potongan).
         IF @Qty IS NULL
         BEGIN
@@ -286,9 +303,11 @@ BEGIN
 
     IF @Action = 'CREATE'
     BEGIN
-        INSERT INTO manual_outputs (resource_id, division_id, article_id, work_description,
-                                    size_name, qty, reject_qty, note, created_at, created_by)
-        VALUES (@ResourceId, @DivisionId, @ArticleId, @WorkDescription,
+        INSERT INTO manual_outputs (resource_id, division_id, article_id, output_date,
+                                    work_description, size_name, qty, reject_qty, note,
+                                    created_at, created_by)
+        VALUES (@ResourceId, @DivisionId, @ArticleId,
+                ISNULL(@OutputDate, CAST(SYSDATETIME() AS DATE)), @WorkDescription,
                 @SizeName, @Qty, ISNULL(@RejectQty, 0), @Note, SYSDATETIME(), @UserId);
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewId;
@@ -302,6 +321,9 @@ BEGIN
         SET resource_id = @ResourceId,
             division_id = @DivisionId,
             article_id = @ArticleId,
+            -- @OutputDate NULL = pemanggil lama yang belum kirim tanggal -> jangan ditimpa
+            -- jadi hari ini, biarkan tanggal yang sudah tersimpan.
+            output_date = ISNULL(@OutputDate, output_date),
             work_description = @WorkDescription,
             size_name = @SizeName,
             qty = @Qty,

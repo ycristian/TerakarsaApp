@@ -84,13 +84,16 @@
          mounts, so they're loaded dynamically by dashboardScripts.js instead. -->
     <script src="js/dashboardScripts.js"></script>
     <script src="js/fileDownload.js"></script>
-    <script src="js/stationScripts.js"></script>
+    <!-- ?v= = cache-busting manual (file di js/ tidak ber-fingerprint). Naikkan setiap kali
+         stationScripts.js menambah fungsi yang dipanggil client baru. -->
+    <script src="js/stationScripts.js?v=85"></script>
     <script src="lib/qrcodejs/qrcode.min.js"></script>
     <script src="js/qrCode.js"></script>
     <script src="lib/html5-qrcode/html5-qrcode.min.js"></script>
     <script src="js/qrScanner.js"></script>
     <!-- Prompt 66: pemindai beruntun module PDH TNI AD (kamera tidak berhenti per hasil) -->
-    <script src="js/tniScanner.js"></script>
+    <!-- ?v= naikkan tiap tniScanner.js berubah (2026-11-09: bunyi konfirmasi + buka audio HP) -->
+    <script src="js/tniScanner.js?v=2"></script>
     <script src="js/modalInterop.js"></script>
     <script src="js/lineDetailCharts.js"></script>
     <!-- Prompt 71: deteksi lebar layar halaman /gudang/benang (satu kolom vs dua panel) -->

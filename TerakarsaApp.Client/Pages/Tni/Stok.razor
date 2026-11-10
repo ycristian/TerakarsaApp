@@ -20,6 +20,8 @@
    pop up, hapus satu setoran sekaligus.
    2026-10-07 (alter_77): Keluarkan SAMA PERSIS dengan Setoran -- input banyak
    baris, kartu riwayat + tabel size, edit pop up, hapus seluruh pengeluaran.
+   2026-11-09 (alter_80): setoran TIDAK digabung per tanggal & supplier lagi --
+   satu kartu Riwayat per input, dengan jam input.
    Baris input memakai komponen bersama Shared/TniStokBarisEditor. *@
 
 <PageTitle>Stok — PDH TNI AD</PageTitle>
@@ -278,7 +280,7 @@ else
             <button class="@(filterRiwayat == "RUSAK" ? "on" : "")" @onclick="@(() => GantiFilterRiwayat("RUSAK"))">Rusak</button>
         </div>
 
-        @* 2026-10-07: SATU bentuk kartu untuk setoran (per tanggal & supplier) dan
+        @* 2026-10-07: SATU bentuk kartu untuk setoran (per input sejak alter_80) dan
            pengeluaran (RUSAK / KOREKSI, alter_77): master di atas, tabel kecil isi
            size di bawah, tombol Edit (pop up) & Hapus (seluruh isi). *@
         @if (isLoading && entri.Count == 0)
@@ -322,6 +324,9 @@ else
                     </div>
                     <div class="tni-note" style="margin-top:2px">
                         @totalK kemeja · @totalC celana
+                        · input @(e.CreatedAt.Date == e.Tanggal.Date
+                                    ? e.CreatedAt.ToString("HH:mm")
+                                    : e.CreatedAt.ToString("dd/MM HH:mm"))
                         @if (!string.IsNullOrEmpty(e.CreatedByNama))
                         {
                             <text> · @e.CreatedByNama</text>
@@ -633,10 +638,9 @@ else
 
         if (!ok) { errorMessage = err; return; }
 
-        // 2026-10-07: tanggal & supplier sama -> masuk ke setoran yang sudah ada
+        // 2026-11-09 (alter_80): tiap simpan = satu setoran sendiri, tidak digabung lagi
         infoMessage = $"Setoran tersimpan: {hasil?.TotalKemeja ?? 0} kemeja, {hasil?.TotalCelana ?? 0} celana " +
-                      $"({hasil?.JumlahBaris ?? 0} pola)" +
-                      (hasil?.Digabung == true ? " — digabung ke setoran tanggal & supplier yang sama." : ".");
+                      $"({hasil?.JumlahBaris ?? 0} pola).";
 
         // form kosong lagi
         baris = new List<TniStokSetoranItem>();

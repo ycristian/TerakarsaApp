@@ -201,7 +201,7 @@ else
 
                 <div class="tni-k" style="margin-top:8px">Kapasitas</div>
                 <input class="tni-inp" type="number" inputmode="numeric" @bind="buatKapasitas" />
-                <div class="tni-note" style="margin-top:4px">Biasanya 50 set per kardus.</div>
+                <div class="tni-note" style="margin-top:4px">Biasanya 52 set per kardus. Hanya acuan — isi boleh melebihi.</div>
 
                 @if (!string.IsNullOrEmpty(sheetError))
                 {
@@ -248,7 +248,7 @@ else
     private bool? buatGabungan;
     private int buatSatuanId;
     private int buatAreaId;
-    private int buatKapasitas = 50;
+    private int buatKapasitas = 52;
     private string? kodeBaru;
     private int noBaru;
 
@@ -354,7 +354,7 @@ else
         sheetError = string.Empty;
         kodeBaru = null;
         buatGabungan = gabungan;
-        buatKapasitas = 50;
+        buatKapasitas = 52;
         buatSatuanId = satuanId;
         buatAreaId = gabungan && satuanId > 0
             ? satuanList.FirstOrDefault(x => x.SatuanId == satuanId)?.AreaId ?? 0
@@ -460,7 +460,7 @@ else
         @if (b.Penuh && b.Terbuka)
         {
             <div style="font-size:11.5px;color:var(--tni-coral);margin-top:4px;font-weight:600">
-                Box penuh — tutup box lewat detail.
+                Kapasitas tercapai — tutup box lewat detail bila sudah selesai.
             </div>
         }
     </a>;

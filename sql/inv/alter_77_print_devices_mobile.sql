@@ -11,6 +11,13 @@
    opsional @DeviceId. Tanpa @DeviceId perilakunya sama persis seperti sebelumnya.
 
    Idempotent; hanya ALTER TABLE ADD + CREATE OR ALTER (tanpa recreate table).
+
+   PERHATIAN (Prompt 88): versi terbaru SP di file ini ada di tempat lain --
+     SIS_PrintJob_Claim/_Report            -> sql/sp_PrintJob_Manage.sql
+     SIS_PrintDevice_RegisterMobile/ListMobile/ListAll,
+     SIS_PrintJobRoute_List/_Manage        -> sql/sp_PrintDevice_Manage.sql
+   JANGAN jalankan ulang file ini di DB yang sudah menjalankan Prompt 88 (versi lama di
+   bawah akan menimpa, dan CK_print_devices_transport di sini tidak mengenal 'TCP').
    ============================================================= */
 
 SET ANSI_NULLS ON;

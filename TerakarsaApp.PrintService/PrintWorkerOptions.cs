@@ -13,6 +13,8 @@ public class PrintWorkerOptions
     // terpasang. false = job_type printer itu TIDAK PERNAH diklaim dari API/DB (lihat
     // SIS_PrintJob_Claim @JobTypesCsv) -- job tetap PENDING murni sampai saklar dinyalakan,
     // tidak ditulis dryrun maupun dilaporkan sukses/gagal.
+    // Prompt 88: berlaku untuk SEMUA printer label milik PC -- TSC (USB Windows) maupun printer
+    // jaringan (TCP). Printer mana yang dipakai ditentukan SP klaim (print_devices), bukan di sini.
     public bool PrinterLabelOn { get; set; } = true;   // BUNDLE_LABEL/PACK_LABEL/REJECT_NOTE (TSC, TSPL)
     public bool PrinterThermalOn { get; set; } = true; // KUPON_BORONGAN/REKAP_PRODUKSI/REKAP_KARYAWAN/REKAP_WIP/REKAP_PENGAMBILAN (struk, ESC/POS)
 
@@ -25,4 +27,9 @@ public class PrintWorkerOptions
     // KUPON_BORONGAN diproses. Job TOKEN lain TIDAK ikut rangkap -- itu ringkasan/laporan,
     // bukan struk per-transaksi.
     public int KuponBoronganCopies { get; set; } = 2;
+
+    // Pilih printer yang dikerjakan worker ini: daftar print_devices.device_code (lihat
+    // /admin/printer), mis. ["LABEL_ATAS"]. Kosong = SEMUA printer PC (Windows & jaringan).
+    // Job untuk device lain tidak disentuh (tetap PENDING untuk worker lain).
+    public string[] DeviceCodes { get; set; } = Array.Empty<string>();
 }

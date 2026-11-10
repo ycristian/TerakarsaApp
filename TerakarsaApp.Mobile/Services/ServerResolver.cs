@@ -30,6 +30,12 @@ public class ServerResolver
 
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMilliseconds(1500);
 
+    // Tombol "Uji koneksi" di Pengaturan: diberi waktu lebih lama dari cek cepat mode Auto.
+    // 1,5 detik sering habis untuk koneksi PERTAMA lewat internet (DNS + TLS ke Cloudflare),
+    // dan di Android pembatalan karena timeout muncul sebagai "Socket closed" -- terbaca
+    // seperti server mati padahal hanya lambat.
+    public static readonly TimeSpan UjiManualTimeout = TimeSpan.FromSeconds(10);
+
     public event Action? Changed;
 
     // Alamat web yang sedang dipakai (tanpa garis miring di akhir).
@@ -73,22 +79,29 @@ public class ServerResolver
         return berubah;
     }
 
-    public async Task<(bool Ok, string Pesan)> UjiAsync(string webBaseUrl)
+    public async Task<(bool Ok, string Pesan)> UjiAsync(string webBaseUrl, TimeSpan? timeout = null)
     {
         if (string.IsNullOrWhiteSpace(webBaseUrl)) return (false, "Alamat belum diisi.");
+
+        var batas = timeout ?? HealthTimeout;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
             using var http = BuatHttpClient(webBaseUrl);
-            http.Timeout = HealthTimeout;
+            http.Timeout = batas;
 
             var hasil = await http.GetFromJsonAsync<HealthDto>("api/health");
             return hasil?.Status == "ok"
-                ? (true, $"OK — {hasil.Server}")
+                ? (true, $"OK — {hasil.Server} ({stopwatch.Elapsed.TotalSeconds:0.0} detik)")
                 : (false, "Server menjawab tapi bukan TMOS.");
         }
         catch (Exception ex)
         {
+            // Gagal tepat di batas waktu = timeout, apa pun pesan aslinya ("Socket closed",
+            // TaskCanceled, ...). Selain itu tampilkan pesan aslinya.
+            if (ex is TaskCanceledException || stopwatch.Elapsed >= batas - TimeSpan.FromMilliseconds(100))
+                return (false, $"tidak menjawab dalam {batas.TotalSeconds:0.#} detik");
             return (false, ex.Message);
         }
     }

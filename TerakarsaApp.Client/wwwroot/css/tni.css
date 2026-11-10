@@ -339,6 +339,23 @@
 /* angka besar persen di kanan nama rawatan */
 .tni-pct { font-size: 20px; font-weight: 800; color: var(--tni-navy); line-height: 1; }
 
+/* beranda: 3 kartu sebaris (kemeja / celana / set) */
+.tni-grid3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    margin-bottom: 10px;
+}
+.tni-grid3 > .tni-card { margin: 0; padding: 9px 10px; min-width: 0; }
+.tni-grid3 .tni-big { display: block; font-size: 19px; line-height: 1.2; margin-top: 1px; }
+.tni-grid3 .tni-prog { margin: 6px 0 4px; height: 7px; }
+.tni-grid3-sep { border-top: 1px solid var(--tni-line); margin-top: 8px; padding-top: 7px; }
+
+/* legenda yang bisa diklik (beranda: progres -> daftar Personel) */
+.tni-leg-link > span { cursor: pointer; }
+.tni-leg-link > span:hover { color: var(--tni-navy); }
+.tni-leg-link b { color: var(--tni-ink); }
+
 /* ---------- layar lebar: tetap enak dibaca, tidak melebar penuh ---------- */
 @media (min-width: 768px) {
     .tni { max-width: 760px; }

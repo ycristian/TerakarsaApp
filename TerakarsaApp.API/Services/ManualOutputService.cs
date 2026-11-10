@@ -25,18 +25,26 @@ public class ManualOutputService
         _db = db;
     }
 
-    // ---- Tab OUT stasiun: baris satu divisi (belum lock + yang sudah lock, 90 hari) ----
-    public async Task<List<ManualOutputRowDto>> GetStationListAsync(int divisionId, int daysBack = 90)
+    // ---- Tab OUT stasiun: baris satu divisi ----
+    // alter_86: outputDate = tanggal yang sedang dipilih di filter "Tanggal Kirim". Diisi ->
+    // hanya baris bertanggal itu. NULL -> perilaku lama (semua, dibatasi daysBack).
+    // 2026-11-02: resourceId = Line sesi stasiun -- tanpa ini tiap operator sedivisi melihat
+    // (dan bisa mengunci) baris milik operator lain.
+    public async Task<List<ManualOutputRowDto>> GetStationListAsync(
+        int divisionId, int daysBack = 90, DateTime? outputDate = null, int? resourceId = null)
     {
         var parameters = new[]
         {
             new SqlParameter("@DivisionId", divisionId),
-            new SqlParameter("@DaysBack", daysBack)
+            new SqlParameter("@DaysBack", daysBack),
+            new SqlParameter("@OutputDate", (object?)outputDate?.Date ?? DBNull.Value),
+            new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value)
         };
 
         return await _db.Database
             .SqlQueryRaw<ManualOutputRowDto>(
-                "EXEC SIS_ManualOutput_StationList @DivisionId = @DivisionId, @DaysBack = @DaysBack",
+                "EXEC SIS_ManualOutput_StationList @DivisionId = @DivisionId, @DaysBack = @DaysBack, " +
+                "@OutputDate = @OutputDate, @ResourceId = @ResourceId",
                 parameters)
             .ToListAsync();
     }
@@ -76,6 +84,9 @@ public class ManualOutputService
             new SqlParameter("@ManualOutputId", (object?)request.ManualOutputId ?? DBNull.Value),
             new SqlParameter("@ResourceId", resourceId),
             new SqlParameter("@ArticleId", (object?)request.ArticleId ?? DBNull.Value),
+            // alter_86: dikirim sebagai tanggal saja (SP menerima DATE) -- jam tidak pernah
+            // diminta di form dan tidak disimpan.
+            new SqlParameter("@OutputDate", request.OutputDate.Date),
             new SqlParameter("@WorkDescription", (object?)request.WorkDescription ?? DBNull.Value),
             new SqlParameter("@SizeName", (object?)request.SizeName ?? DBNull.Value),
             new SqlParameter("@Qty", request.Qty),
@@ -88,7 +99,8 @@ public class ManualOutputService
         {
             await _db.Database.ExecuteSqlRawAsync(
                 "EXEC SIS_ManualOutput_Manage @Action = @Action, @ManualOutputId = @ManualOutputId, " +
-                "@ResourceId = @ResourceId, @ArticleId = @ArticleId, @WorkDescription = @WorkDescription, " +
+                "@ResourceId = @ResourceId, @ArticleId = @ArticleId, @OutputDate = @OutputDate, " +
+                "@WorkDescription = @WorkDescription, " +
                 "@SizeName = @SizeName, @Qty = @Qty, @RejectQty = @RejectQty, @Note = @Note, @UserId = @UserId",
                 parameters);
             return (true, string.Empty);

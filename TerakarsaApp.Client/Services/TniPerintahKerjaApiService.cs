@@ -20,23 +20,36 @@ public class TniPerintahKerjaApiService
         public int StokBebasCelana { get; set; }
     }
 
-    public async Task<RawatanResponse> GetRawatanAsync()
+    // Filter size prioritas perangkat (pola_id -> qty di dekat, null = semua stok bebas)
+    // -> "?kemeja=12:20,15&celana=3:10" (kosong bila tidak ada).
+    private static string SizeQuery(IReadOnlyDictionary<int, int?>? kemeja, IReadOnlyDictionary<int, int?>? celana)
     {
-        var response = await _http.GetAsync("api/tni/perintah-kerja/rawatan");
+        static string Csv(IReadOnlyDictionary<int, int?> d) =>
+            string.Join(",", d.Select(x => x.Value is int q ? $"{x.Key}:{q}" : x.Key.ToString()));
+
+        var q = new List<string>();
+        if (kemeja?.Count > 0) q.Add("kemeja=" + Csv(kemeja));
+        if (celana?.Count > 0) q.Add("celana=" + Csv(celana));
+        return q.Count == 0 ? string.Empty : "?" + string.Join("&", q);
+    }
+
+    public async Task<RawatanResponse> GetRawatanAsync(IReadOnlyDictionary<int, int?>? kemeja = null, IReadOnlyDictionary<int, int?>? celana = null)
+    {
+        var response = await _http.GetAsync("api/tni/perintah-kerja/rawatan" + SizeQuery(kemeja, celana));
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<RawatanResponse>() ?? new();
     }
 
-    public async Task<List<TniSatuanSaranDto>> GetSatuanAsync(int areaId)
+    public async Task<List<TniSatuanSaranDto>> GetSatuanAsync(int areaId, IReadOnlyDictionary<int, int?>? kemeja = null, IReadOnlyDictionary<int, int?>? celana = null)
     {
-        var response = await _http.GetAsync($"api/tni/perintah-kerja/rawatan/{areaId}/satuan");
+        var response = await _http.GetAsync($"api/tni/perintah-kerja/rawatan/{areaId}/satuan" + SizeQuery(kemeja, celana));
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<TniSatuanSaranDto>>() ?? new();
     }
 
-    public async Task<TniSatuanDetailDto?> GetSatuanDetailAsync(int satuanId)
+    public async Task<TniSatuanDetailDto?> GetSatuanDetailAsync(int satuanId, IReadOnlyDictionary<int, int?>? kemeja = null, IReadOnlyDictionary<int, int?>? celana = null)
     {
-        var response = await _http.GetAsync($"api/tni/perintah-kerja/satuan/{satuanId}");
+        var response = await _http.GetAsync($"api/tni/perintah-kerja/satuan/{satuanId}" + SizeQuery(kemeja, celana));
         if (!response.IsSuccessStatusCode) return null;
         return await response.Content.ReadFromJsonAsync<TniSatuanDetailDto>();
     }
@@ -46,6 +59,20 @@ public class TniPerintahKerjaApiService
         var response = await _http.GetAsync($"api/tni/perintah-kerja/satuan/{satuanId}/dijatah");
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<TniDijatahDto>>() ?? new();
+    }
+
+    public async Task<(bool Success, string Error)> SetPrioritasAsync(int satuanId, bool prioritas)
+    {
+        var response = await _http.PostAsJsonAsync($"api/tni/perintah-kerja/satuan/{satuanId}/prioritas",
+            new TniSatuanPrioritasRequest { Prioritas = prioritas });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan prioritas." : error.Trim('"'));
+        }
+
+        return (true, string.Empty);
     }
 
     public async Task<(bool Success, string Error, TniCetakHasilDto? Hasil)> CetakAsync(List<int> personelIds)

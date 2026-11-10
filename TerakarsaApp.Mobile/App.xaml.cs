@@ -19,6 +19,15 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
+        // Prompt 86: Mode Stasiun -- tanpa login user; StationHomePage memeriksa alamat server
+        // lalu langsung membuka /station. Alur login di bawah tidak dijalankan.
+        if (AppPrefs.StationModeSiap)
+        {
+            var stasiun = new Window(new NavigationPage(new StationHomePage(_auth, _resolver)));
+            stasiun.Resumed += async (_, _) => await _resolver.RefreshAsync();
+            return stasiun;
+        }
+
         var login = new LoginPage(_auth, _resolver);
         var window = new Window(new NavigationPage(login));
 

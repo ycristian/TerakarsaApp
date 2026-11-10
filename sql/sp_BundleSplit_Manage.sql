@@ -73,7 +73,10 @@ CREATE OR ALTER PROCEDURE SIS_BundleSplit_Manage
     @ActingDivisionId          INT = NULL,
     @ActingAllowResourceChange BIT = NULL,
     @PublicBaseUrl             VARCHAR(255) = NULL,
-    @UserId                    INT = NULL
+    @UserId                    INT = NULL,
+    -- Prompt 88: printer stiker (PrinterPicker). Wajib kalau BUNDLE_LABEL punya >1 route
+    -- dan kiriman ini mencetak stiker.
+    @PrintDeviceId             INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -480,6 +483,14 @@ BEGIN
             BundleStatus VARCHAR(15), Category VARCHAR(20), DisplayCode VARCHAR(40)
         );
 
+        -- Prompt 88: kiriman yang akan mencetak stiker (ada anak lahir / qty induk berubah)
+        -- divalidasi printernya SEBELUM transaksi -- tanpa pilihan padahal wajib, tidak ada
+        -- yang ditulis sama sekali.
+        DECLARE @PrintDeviceFinal INT = NULL;
+        IF EXISTS (SELECT 1 FROM @Rows) OR (@QtyOk > 0 AND @QtyOk <> @SrcQty)
+            EXEC SIS_PrintJob_ResolveDevice @JobType = 'BUNDLE_LABEL',
+                 @RequestedDeviceId = @PrintDeviceId, @DeviceId = @PrintDeviceFinal OUTPUT;
+
         BEGIN TRAN;
         BEGIN TRY
             DECLARE @LockResult INT;
@@ -663,7 +674,7 @@ BEGIN
             -- jadi SETIAP Kirim Hasil mengeluarkan satu stiker identik dengan yang sudah
             -- menempel di bundle.
             IF @QtyOk > 0 AND @QtyOk <> @SrcQty
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId;
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId;
 
             DECLARE @PrintChildId INT;
             DECLARE child_cur CURSOR LOCAL FAST_FORWARD FOR SELECT BundleId FROM @Children;
@@ -671,7 +682,7 @@ BEGIN
             FETCH NEXT FROM child_cur INTO @PrintChildId;
             WHILE @@FETCH_STATUS = 0
             BEGIN
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @PrintChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId;
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @PrintChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @StepNameLabel, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId;
                 FETCH NEXT FROM child_cur INTO @PrintChildId;
             END
             CLOSE child_cur;
@@ -897,6 +908,11 @@ BEGIN
 
         DECLARE @FoundChildren TABLE (BundleId INT, Serial VARCHAR(20), SequenceNo INT, Qty INT);
 
+        -- Prompt 88: Barang ketemu selalu mencetak stiker anak -- printer divalidasi dulu.
+        DECLARE @FoundPrintDevice INT = NULL;
+        EXEC SIS_PrintJob_ResolveDevice @JobType = 'BUNDLE_LABEL',
+             @RequestedDeviceId = @PrintDeviceId, @DeviceId = @FoundPrintDevice OUTPUT;
+
         BEGIN TRAN;
         BEGIN TRY
             DECLARE @FoundLockResource VARCHAR(60) = 'article_workflow_restructure_' + CAST(@FoundArticleId AS VARCHAR(20));
@@ -998,7 +1014,7 @@ BEGIN
                 INSERT INTO @FoundChildren (BundleId, Serial, SequenceNo, Qty)
                 VALUES (@FChildId, @FChildSerial, @FNextSeq, @TgtQty);
 
-                EXEC SIS_BundleSplit_PrintLabel @BundleId = @FChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @FoundStepName, @UserId = @UserId;
+                EXEC SIS_BundleSplit_PrintLabel @BundleId = @FChildId, @PublicBaseUrl = @PublicBaseUrl, @StepName = @FoundStepName, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId;
 
                 SET @ARow += 1;
             END
@@ -1038,7 +1054,8 @@ CREATE OR ALTER PROCEDURE SIS_BundleSplit_PrintLabel
     @PublicBaseUrl VARCHAR(255) = NULL,
     @Copies        INT = 1,
     @StepName      VARCHAR(255) = NULL,
-    @UserId        INT = NULL
+    @UserId        INT = NULL,
+    @PrintDeviceId INT = NULL      -- Prompt 88: printer pilihan user (diteruskan SIS_BundleSplit_Manage)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1048,6 +1065,12 @@ BEGIN
     FROM bundles WHERE bundle_id = @BundleId AND deleted_at IS NULL;
 
     IF @Serial IS NULL RETURN;
+
+    -- Prompt 88: dipanggil di DALAM transaksi pemanggil -- kalau printer wajib dipilih tapi
+    -- kosong, THROW di sini membatalkan seluruh kiriman (rollback), tidak ada yang setengah jadi.
+    DECLARE @PrintDeviceFinal INT;
+    EXEC SIS_PrintJob_ResolveDevice @JobType = 'BUNDLE_LABEL',
+         @RequestedDeviceId = @PrintDeviceId, @DeviceId = @PrintDeviceFinal OUTPUT;
 
     DECLARE @QrContent VARCHAR(300) = ISNULL(@PublicBaseUrl, '') + '/b/' + @Serial;
 
@@ -1096,8 +1119,8 @@ BEGIN
     DECLARE @Copy INT = 0;
     WHILE @Copy < ISNULL(@Copies, 1)
     BEGIN
-        INSERT INTO print_jobs (job_type, ref_id, payload, [status], created_at, created_by)
-        VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', SYSDATETIME(), @UserId);
+        INSERT INTO print_jobs (job_type, ref_id, payload, [status], print_device_id, created_at, created_by)
+        VALUES ('BUNDLE_LABEL', @BundleId, @Payload, 'PENDING', @PrintDeviceFinal, SYSDATETIME(), @UserId);
         SET @Copy += 1;
     END
 END;

@@ -4,6 +4,8 @@ using Microsoft.Extensions.Options;
 using TerakarsaApp.API.Data;
 using TerakarsaApp.Shared.Bundles;
 using TerakarsaApp.Shared.Reports;
+using TerakarsaApp.Shared.WorkflowLogs;
+using System.Text.Json;
 
 namespace TerakarsaApp.API.Services;
 
@@ -94,13 +96,15 @@ public class BundleService
         var bundlingResourceIdParam = new SqlParameter("@BundlingResourceId", (object?)request.BundlingResourceId ?? DBNull.Value);
         var printCopiesParam = new SqlParameter("@PrintCopies", request.PrintCopies);
         var userIdParam = new SqlParameter("@UserId", userId);
+        // Prompt 88: printer pilihan user -- divalidasi SP sebelum bundle dibuat.
+        var printDeviceIdParam = new SqlParameter("@PrintDeviceId", (object?)request.PrintDeviceId ?? DBNull.Value);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<BundleCreateResultRow>(
-                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Remarks = @Remarks, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @PrintCopies = @PrintCopies, @UserId = @UserId",
-                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, employeeIdParam, remarksParam, publicBaseUrlParam, bundlingResourceIdParam, printCopiesParam, userIdParam)
+                    "EXEC SIS_Bundle_Manage @Action = @Action, @ArticleId = @ArticleId, @ArticleSizeId = @ArticleSizeId, @Qty = @Qty, @ResourceId = @ResourceId, @EmployeeId = @EmployeeId, @Remarks = @Remarks, @PublicBaseUrl = @PublicBaseUrl, @BundlingResourceId = @BundlingResourceId, @PrintCopies = @PrintCopies, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId",
+                    actionParam, articleIdParam, articleSizeIdParam, qtyParam, resourceIdParam, employeeIdParam, remarksParam, publicBaseUrlParam, bundlingResourceIdParam, printCopiesParam, userIdParam, printDeviceIdParam)
                 .ToListAsync();
 
             var row = result.First();
@@ -175,7 +179,19 @@ public class BundleService
             cmd.Parameters.Add(new SqlParameter("@DivisionId", (object?)divisionId ?? DBNull.Value));
             cmd.Parameters.Add(new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value));
 
-            using var reader = await cmd.ExecuteReaderAsync();
+            // SP melempar RAISERROR 'Bundle tidak ditemukan.' untuk serial tak dikenal / bundle
+            // yang sudah dihapus. Dijadikan null supaya controller membalas 404 -- kalau lolos
+            // jadi 500, browser melihatnya sebagai gagal jaringan ("Gagal memuat data bundle").
+            SqlDataReader reader;
+            try
+            {
+                reader = await cmd.ExecuteReaderAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 50000 && ex.Message == "Bundle tidak ditemukan.")
+            {
+                return null;
+            }
+            using var _reader = reader;
 
             if (!await reader.ReadAsync()) return null;
 
@@ -206,6 +222,9 @@ public class BundleService
                 // Prompt 82: pohon induk/anak + status + selisih.
                 SequenceNo = reader.GetInt32(reader.GetOrdinal("SequenceNo")),
                 ParentBundleId = reader.IsDBNull(reader.GetOrdinal("ParentBundleId")) ? null : reader.GetInt32(reader.GetOrdinal("ParentBundleId")),
+                // Ad hoc (2026-11-02): tautan "ke {induk}" di kartu bundle anak.
+                ParentSerial = reader.IsDBNull(reader.GetOrdinal("ParentSerial")) ? null : reader.GetString(reader.GetOrdinal("ParentSerial")),
+                ParentSequenceNo = reader.IsDBNull(reader.GetOrdinal("ParentSequenceNo")) ? 0 : reader.GetInt32(reader.GetOrdinal("ParentSequenceNo")),
                 RootBundleId = reader.GetInt32(reader.GetOrdinal("RootBundleId")),
                 RootBundleNo = reader.GetInt32(reader.GetOrdinal("RootBundleNo")),
                 BundleStatus = reader.GetString(reader.GetOrdinal("BundleStatus")),
@@ -243,6 +262,12 @@ public class BundleService
                     QtyDelta = reader.IsDBNull(reader.GetOrdinal("QtyDelta")) ? 0 : reader.GetInt32(reader.GetOrdinal("QtyDelta")),
                     QtyAfter = reader.IsDBNull(reader.GetOrdinal("QtyAfter")) ? 0 : reader.GetInt32(reader.GetOrdinal("QtyAfter")),
                     Reason = reader.IsDBNull(reader.GetOrdinal("Reason")) ? null : reader.GetString(reader.GetOrdinal("Reason")),
+                    // Ad hoc (2026-11-02): info pemecahan baris ini -- anak + pcs hilang.
+                    SplitChildren = reader.IsDBNull(reader.GetOrdinal("SplitChildrenJson"))
+                        ? new()
+                        : JsonSerializer.Deserialize<List<StationSplitChildDto>>(
+                              reader.GetString(reader.GetOrdinal("SplitChildrenJson"))) ?? new(),
+                    SplitMissingQty = reader.IsDBNull(reader.GetOrdinal("SplitMissingQty")) ? 0 : reader.GetInt32(reader.GetOrdinal("SplitMissingQty")),
                 });
             }
 
@@ -352,19 +377,24 @@ public class BundleService
         }).ToList();
     }
 
-    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int bundleId, int copies, int userId)
+    // Prompt 88: printDeviceId = printer pilihan user; NULL hanya sah kalau BUNDLE_LABEL
+    // punya satu printer (SP menolak 'Pilih printer tujuan.' kalau >1). Selalu job baru --
+    // job lama tidak disentuh.
+    public async Task<(bool Success, string Error, int PrintJobId)> ReprintAsync(int bundleId, int copies, int userId,
+        int? printDeviceId = null)
     {
         var bundleIdParam = new SqlParameter("@BundleId", bundleId);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
         var copiesParam = new SqlParameter("@Copies", copies);
         var userIdParam = new SqlParameter("@UserId", userId);
+        var printDeviceIdParam = new SqlParameter("@PrintDeviceId", (object?)printDeviceId ?? DBNull.Value);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @UserId = @UserId",
-                    bundleIdParam, publicBaseUrlParam, copiesParam, userIdParam)
+                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId",
+                    bundleIdParam, publicBaseUrlParam, copiesParam, userIdParam, printDeviceIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }
@@ -377,20 +407,22 @@ public class BundleService
     // Prompt: "Print Label Cacat" -- reprint label bundle (template sama, lihat
     // SIS_Bundle_ReprintLabel) sebanyak Copies lembar, remark di-override dengan catatan +
     // ringkasan qty cacat yang sudah dirakit di klien (BundleScanCard).
-    public async Task<(bool Success, string Error, int PrintJobId)> PrintDefectLabelAsync(int bundleId, int copies, string? remark, int userId)
+    public async Task<(bool Success, string Error, int PrintJobId)> PrintDefectLabelAsync(int bundleId, int copies, string? remark, int userId,
+        int? printDeviceId = null)
     {
         var bundleIdParam = new SqlParameter("@BundleId", bundleId);
         var publicBaseUrlParam = new SqlParameter("@PublicBaseUrl", (object?)_publicBaseUrl ?? DBNull.Value);
         var copiesParam = new SqlParameter("@Copies", copies);
         var remarkOverrideParam = new SqlParameter("@RemarkOverride", (object?)remark ?? DBNull.Value);
         var userIdParam = new SqlParameter("@UserId", userId);
+        var printDeviceIdParam = new SqlParameter("@PrintDeviceId", (object?)printDeviceId ?? DBNull.Value);
 
         try
         {
             var result = await _db.Database
                 .SqlQueryRaw<int>(
-                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @RemarkOverride = @RemarkOverride, @UserId = @UserId",
-                    bundleIdParam, publicBaseUrlParam, copiesParam, remarkOverrideParam, userIdParam)
+                    "EXEC SIS_Bundle_ReprintLabel @BundleId = @BundleId, @PublicBaseUrl = @PublicBaseUrl, @Copies = @Copies, @RemarkOverride = @RemarkOverride, @UserId = @UserId, @PrintDeviceId = @PrintDeviceId",
+                    bundleIdParam, publicBaseUrlParam, copiesParam, remarkOverrideParam, userIdParam, printDeviceIdParam)
                 .ToListAsync();
             return (true, string.Empty, result.FirstOrDefault());
         }

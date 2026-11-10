@@ -5,7 +5,9 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Tni
 @inject TniPerintahKerjaApiService PkApi
+@inject TniStokApiService StokApi
 @inject TniOrderState OrderState
+@inject IJSRuntime JS
 
 @* Prompt 65: Perintah Kerja (mockup layar 2-4). Tiga langkah dalam satu halaman:
    pilih rawatan -> daftar satuan (saran) -> detail satuan (cetak / lepas).
@@ -54,6 +56,44 @@ else
         <div class="alert alert-success">@infoMessage</div>
     }
 
+    @* ---------- filter size prioritas (per perangkat) ---------- *@
+    <div class="tni-card" style="padding:8px 12px;@(SizeAktif ? "border:1.5px solid var(--tni-gold)" : "")">
+        <div class="tni-row">
+            <span class="tni-k" style="font-weight:700"><i class="fe fe-target"></i> Size prioritas</span>
+            <span style="display:flex;gap:6px">
+                @if (SizeAktif)
+                {
+                    <button class="tni-btn tni-btn-r" style="padding:4px 9px;font-size:11.5px" @onclick="HapusSizeAsync">Hapus</button>
+                }
+                <button class="tni-btn tni-btn-o" style="padding:4px 10px;font-size:11.5px" @onclick="BukaSizeAsync">Atur</button>
+            </span>
+        </div>
+        @if (SizeAktif)
+        {
+            <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+                @foreach (var (id, qty) in sizeKemeja)
+                {
+                    <span class="tni-chip" style="@GayaChipSize">Kemeja @KodePola(daftarKemeja, id): @TeksQty(qty, StokPola(daftarKemeja, id))</span>
+                }
+                @foreach (var (id, qty) in sizeCelana)
+                {
+                    <span class="tni-chip" style="@GayaChipSize">Celana @KodePola(daftarCelana, id): @TeksQty(qty, StokPola(daftarCelana, id))</span>
+                }
+            </div>
+            <div class="tni-note" style="margin-top:4px">
+                Qty ini dihabiskan dulu: personel yang memakai size ini (kemeja & celana
+                sama-sama cocok paling depan) didahulukan sampai qty-nya terpakai,
+                setelah itu sisanya dibagi seperti biasa.
+            </div>
+        }
+        else
+        {
+            <div class="tni-note" style="margin-top:2px">
+                Belum ada. Tap <b>Atur</b> untuk memilih size kemeja/celana yang barangnya ada di dekat Anda.
+            </div>
+        }
+    </div>
+
     @if (isLoading)
     {
         <p class="tni-note">Memuat...</p>
@@ -84,10 +124,17 @@ else
                     <span class="tni-note">@r.PersenSelesai% selesai (masuk box)</span>
                     <span class="tni-k">Bisa dibuat dari stok: <b>@r.BisaDibuat set</b></span>
                 </div>
-                @if (r.SatuanBisaTuntas > 0)
+                @if (r.SatuanBisaTuntas > 0 || SizeAktif)
                 {
-                    <div style="margin-top:5px">
-                        <span class="tni-chip tni-chip-ok">@r.SatuanBisaTuntas satuan bisa tuntas</span>
+                    <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">
+                        @if (r.SatuanBisaTuntas > 0)
+                        {
+                            <span class="tni-chip tni-chip-ok">@r.SatuanBisaTuntas satuan bisa tuntas</span>
+                        }
+                        @if (SizeAktif)
+                        {
+                            @ChipSize(r.BisaSizePrioritas, r.PakaiSizePrioritas, r.StokSizePrioritas)
+                        }
                     </div>
                 }
             </div>
@@ -97,24 +144,26 @@ else
     @* ==================== LANGKAH 2: daftar satuan ==================== *@
     @if (langkah == 2 && !isLoading)
     {
-        var tuntas = satuanList.Where(x => x.BisaTuntas).ToList();
-        var lainnya = satuanList.Where(x => !x.BisaTuntas).ToList();
+        // Berbintang selalu di atas; sisanya tetap dibagi bisa tuntas / lainnya.
+        var prioritas = satuanList.Where(x => x.IsPrioritas).ToList();
+        var tuntas = satuanList.Where(x => !x.IsPrioritas && x.BisaTuntas).ToList();
+        var lainnya = satuanList.Where(x => !x.IsPrioritas && !x.BisaTuntas).ToList();
+
+        @if (prioritas.Count > 0)
+        {
+            <div class="tni-sec"><span style="color:var(--tni-gold)">★</span> Prioritas</div>
+            @foreach (var s in prioritas)
+            {
+                @KartuSatuan(s)
+            }
+        }
 
         @if (tuntas.Count > 0)
         {
             <div class="tni-sec">Saran — bisa tuntas</div>
             @foreach (var s in tuntas)
             {
-                <div class="tni-card tni-tap" style="border:1.5px solid var(--tni-ok)"
-                     @onclick="@(() => PilihSatuanAsync(s))">
-                    <div class="tni-row">
-                        <span class="tni-b">@s.SatuanName</span>
-                        <span class="tni-chip tni-chip-ok">Bisa tuntas</span>
-                    </div>
-                    <div class="tni-note" style="margin-top:3px">
-                        @s.SatuanCode · sisa <b>@s.Sisa</b> — stok cukup untuk semuanya
-                    </div>
-                </div>
+                @KartuSatuan(s)
             }
         }
 
@@ -125,25 +174,7 @@ else
         }
         @foreach (var s in lainnya)
         {
-            <div class="tni-card tni-tap" @onclick="@(() => PilihSatuanAsync(s))">
-                <div class="tni-row">
-                    <span class="tni-b">@s.SatuanName</span>
-                    @if (s.Sisa == 0)
-                    {
-                        <span class="tni-chip tni-chip-mut">Semua sudah dicetak</span>
-                    }
-                    else
-                    {
-                        <span class="tni-k">@s.BisaDibuat / @s.Sisa</span>
-                    }
-                </div>
-                <div class="tni-note" style="margin-top:3px">
-                    @s.SatuanCode · @s.PersenSelesai% selesai
-                </div>
-                <div style="height:6px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
-                    <div style="height:100%;width:@(s.PersenSelesai)%;background:var(--tni-navy2)"></div>
-                </div>
-            </div>
+            @KartuSatuan(s)
         }
 
         <div class="tni-note" style="margin-top:10px">
@@ -181,29 +212,45 @@ else
             }
             else
             {
-                <div class="tni-row" style="margin-bottom:8px">
-                    <button class="tni-btn tni-btn-o" @onclick="PilihSemua">
-                        @(dipilih.Count == detail.BisaDibuat.Count ? "Kosongkan pilihan" : "Pilih semua")
-                    </button>
+                var cocokSize = detail.BisaDibuat.Where(x => x.IsSizePrioritas).ToList();
+                var lainSize = detail.BisaDibuat.Where(x => !x.IsSizePrioritas).ToList();
+
+                <div class="tni-row" style="margin-bottom:8px;gap:6px">
+                    <span style="display:flex;gap:6px;flex-wrap:wrap">
+                        <button class="tni-btn tni-btn-o" @onclick="PilihSemua">
+                            @(dipilih.Count == detail.BisaDibuat.Count ? "Kosongkan pilihan" : "Pilih semua")
+                        </button>
+                        @if (SizeAktif && cocokSize.Count > 0)
+                        {
+                            <button class="tni-btn tni-btn-o" style="border-color:var(--tni-gold);color:#7A5A12"
+                                    @onclick="@(() => PilihSizePrioritas(cocokSize))">
+                                @(cocokSize.All(x => dipilih.Contains(x.PersonelId)) ? "Lepas size prioritas" : $"Pilih size prioritas ({cocokSize.Count})")
+                            </button>
+                        }
+                    </span>
                     <span class="tni-k">@dipilih.Count dipilih</span>
                 </div>
 
-                @foreach (var p in detail.BisaDibuat)
+                @if (SizeAktif)
                 {
-                    var id = p.PersonelId;
-                    <div class="tni-card tni-tap" @onclick="@(() => Toggle(id))">
-                        <div class="tni-row">
-                            <span>
-                                <input type="checkbox" checked="@dipilih.Contains(id)"
-                                       @onclick:stopPropagation="true" @onchange="@(() => Toggle(id))" />
-                                <span class="tni-pola-lg" style="font-size:15px;margin-left:6px">@p.KodeRef</span>
-                            </span>
-                            <span class="tni-pola" style="font-size:11.5px">
-                                @p.PolaKemejaKode · @p.PolaCelanaKode
-                            </span>
-                        </div>
-                        <div class="tni-note" style="margin-top:2px">@p.Pangkat @p.Nama</div>
-                    </div>
+                    <div class="tni-sec"><i class="fe fe-target" style="color:var(--tni-gold)"></i> Size prioritas (@cocokSize.Count)</div>
+                    <div style="margin:-2px 0 6px">@ChipSize(cocokSize.Count, detail.PakaiSizePrioritas, detail.StokSizePrioritas)</div>
+                    @if (cocokSize.Count == 0)
+                    {
+                        <div class="tni-card"><span class="tni-note">Tidak ada personel di satuan ini yang bisa dibuat dengan size prioritas.</span></div>
+                    }
+                    @foreach (var p in cocokSize)
+                    {
+                        @KartuBisa(p)
+                    }
+                    @if (lainSize.Count > 0)
+                    {
+                        <div class="tni-sec">Lainnya (@lainSize.Count)</div>
+                    }
+                }
+                @foreach (var p in lainSize)
+                {
+                    @KartuBisa(p)
                 }
             }
         }
@@ -234,9 +281,7 @@ else
                 <div class="tni-card">
                     <div class="tni-row">
                         <span class="tni-pola-lg" style="font-size:15px">@b.Personel.KodeRef</span>
-                        <span class="tni-pola" style="font-size:11.5px">
-                            @b.Personel.PolaKemejaKode · @b.Personel.PolaCelanaKode
-                        </span>
+                        @PolaPasangan(b.Personel)
                     </div>
                     <div class="tni-note" style="margin-top:2px">@b.Personel.Pangkat @b.Personel.Nama</div>
                     <div style="font-size:12px;color:var(--tni-bad);margin-top:3px">@b.Alasan</div>
@@ -295,21 +340,10 @@ else
         <div class="tni-bot">
             @if (tab == "BISA" && dipilih.Count > 0)
             {
-                @if (!konfirmCetak)
-                {
-                    <span class="tni-note" style="flex:1"><b>@dipilih.Count</b> dipilih</span>
-                    <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="@(() => konfirmCetak = true)">
-                        Cetak @dipilih.Count kartu
-                    </button>
-                }
-                else
-                {
-                    <span class="tni-note" style="flex:1">Cetak @dipilih.Count kartu sekarang?</span>
-                    <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmCetak = false)">Batal</button>
-                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CetakAsync">
-                        @(isSaving ? "Mengirim..." : "Ya, cetak")
-                    </button>
-                }
+                <span class="tni-note" style="flex:1"><b>@dipilih.Count</b> dipilih</span>
+                <button class="tni-btn tni-btn-p" disabled="@isSaving" @onclick="BukaKonfirmCetakAsync">
+                    Cetak @dipilih.Count kartu
+                </button>
             }
             else if (tab == "DIJATAH" && dipilihLepas.Count > 0)
             {
@@ -342,6 +376,133 @@ else
         </div>
     }
 </div>
+
+@* ---------------- sheet konfirmasi cetak + ringkasan per size ---------------- *@
+@if (konfirmCetak && langkah == 3 && detail is not null)
+{
+    var ringkasKemeja = RingkasCetak(true);
+    var ringkasCelana = RingkasCetak(false);
+
+    <div class="tni-sheet-backdrop" @onclick="@(() => { if (!isSaving) konfirmCetak = false; })">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-t" style="color:var(--tni-navy)">Cetak @dipilih.Count kartu?</div>
+                    <div class="tni-note">
+                        @satuanTerpilih?.SatuanName · barang yang perlu diambil per size.
+                        @if (SizeAktif)
+                        {
+                            <span>Size prioritas di atas, ditandai emas — catat yang terpakai.</span>
+                        }
+                    </div>
+                </div>
+                <button class="tni-btn" disabled="@isSaving" @onclick="@(() => konfirmCetak = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            @if (isLoadingSize)
+            {
+                <p class="tni-note">Memuat stok bebas...</p>
+            }
+
+            @TabelRingkas("Kemeja", ringkasKemeja)
+            @TabelRingkas("Celana", ringkasCelana)
+
+            <div class="tni-note" style="margin-top:8px">
+                <b>Sisa</b> = stok bebas setelah kartu ini dicetak.
+            </div>
+
+            <div class="tni-bot" style="position:sticky;bottom:-18px;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" disabled="@isSaving" @onclick="@(() => konfirmCetak = false)">Batal</button>
+                <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CetakAsync">
+                    @(isSaving ? "Mengirim..." : $"Ya, cetak {dipilih.Count} kartu")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- sheet pilih size prioritas ---------------- *@
+@if (showSize)
+{
+    <div class="tni-sheet-backdrop" @onclick="@(() => showSize = false)">
+        <div class="tni-sheet tni" @onclick:stopPropagation="true">
+            <div class="tni-sheet-h">
+                <div>
+                    <div class="tni-t" style="color:var(--tni-navy)">Size prioritas</div>
+                    <div class="tni-note">
+                        Centang size yang barangnya ada di dekat Anda, lalu isi qty yang ada
+                        di dekat (kosong = semua stok bebas). Yang tampil hanya size dengan stok bebas.
+                    </div>
+                </div>
+                <button class="tni-btn" @onclick="@(() => showSize = false)"><i class="fe fe-x"></i></button>
+            </div>
+
+            <div class="tni-seg">
+                <button class="@(jenisSize == "KEMEJA" ? "on" : "")" @onclick="@(() => jenisSize = "KEMEJA")">
+                    Kemeja (@draftKemeja.Count)
+                </button>
+                <button class="@(jenisSize == "CELANA" ? "on" : "")" @onclick="@(() => jenisSize = "CELANA")">
+                    Celana (@draftCelana.Count)
+                </button>
+            </div>
+
+            <input class="tni-inp tni-search" placeholder="Cari size, mis. 108" @bind="cariSize" @bind:event="oninput" />
+
+            @if (isLoadingSize)
+            {
+                <p class="tni-note">Memuat size...</p>
+            }
+            else
+            {
+                var draft = jenisSize == "KEMEJA" ? draftKemeja : draftCelana;
+                var baris = PilihanSize(jenisSize == "KEMEJA" ? daftarKemeja : daftarCelana, draft);
+                string? grupSebelum = null;
+
+                @if (baris.Count == 0)
+                {
+                    <p class="tni-note">Tidak ada size dengan stok bebas.</p>
+                }
+                @foreach (var x in baris)
+                {
+                    var polaId = x.PolaId;
+                    @if (x.GrupGender != grupSebelum)
+                    {
+                        grupSebelum = x.GrupGender;
+                        <div class="tni-sec">@x.GrupGender</div>
+                    }
+                    var dicentang = draft.TryGetValue(polaId, out var qtyDraft);
+                    <div class="tni-li" style="flex-wrap:wrap">
+                        <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;margin:0">
+                            <input type="checkbox" checked="@dicentang"
+                                   @onchange="@(() => ToggleDraft(draft, polaId))" />
+                            <span class="tni-pola" style="flex:1">@x.Kode</span>
+                            <span class="tni-k">stok bebas <b>@x.StokBebas</b></span>
+                        </label>
+                        @if (dicentang)
+                        {
+                            <input type="number" min="1" inputmode="numeric" placeholder="semua"
+                                   class="tni-inp" style="width:84px;padding:5px 8px;margin:0;text-align:right"
+                                   value="@qtyDraft" @onchange="@(e => SetQtyDraft(draft, polaId, e.Value))" />
+                            @if (qtyDraft > x.StokBebas)
+                            {
+                                <div class="tni-note" style="flex-basis:100%;color:var(--tni-warn)">
+                                    Lebih dari stok bebas di sistem — yang terpakai paling banyak @Math.Max(0, x.StokBebas).
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+            }
+
+            <div class="tni-bot" style="position:sticky;bottom:-18px;margin:14px -14px -18px">
+                <button class="tni-btn tni-btn-o" @onclick="KosongkanDraft">Kosongkan</button>
+                <button class="tni-btn tni-btn-p" @onclick="TerapkanSizeAsync">
+                    Terapkan (@(draftKemeja.Count + draftCelana.Count))
+                </button>
+            </div>
+        </div>
+    </div>
+}
 }
 
 @code {
@@ -365,6 +526,268 @@ else
 
     private HashSet<int> dipilih = new();
     private HashSet<int> dipilihLepas = new();
+    private HashSet<int> prioritasProses = new();
+
+    // ---------- filter size prioritas ----------
+    // Per perangkat (localStorage), karena "size yang ada di dekat kita" tergantung
+    // lokasi HP-nya. Hanya mengubah urutan saran -- tidak menyimpan apa pun ke DB.
+    private const string KunciSize = "tni.pk.sizePrioritas";
+    private const string GayaChipSize = "background:var(--tni-warnbg);color:#7A5A12";
+    private const string GayaPolaCocok = "background:var(--tni-warnbg);color:#7A5A12;border-radius:4px;padding:0 3px;font-weight:700";
+
+    // pola_id -> qty di dekat (null = semua stok bebas)
+    private Dictionary<int, int?> sizeKemeja = new();
+    private Dictionary<int, int?> sizeCelana = new();
+    private Dictionary<int, int?> draftKemeja = new();
+    private Dictionary<int, int?> draftCelana = new();
+    private List<TniStokSaldoDto> daftarKemeja = new();
+    private List<TniStokSaldoDto> daftarCelana = new();
+    private bool showSize;
+    private bool isLoadingSize;
+    private string jenisSize = "KEMEJA";
+    private string cariSize = string.Empty;
+
+    private bool SizeAktif => sizeKemeja.Count > 0 || sizeCelana.Count > 0;
+
+    private sealed class SizeSimpan
+    {
+        public Dictionary<int, int?> Kemeja { get; set; } = new();
+        public Dictionary<int, int?> Celana { get; set; } = new();
+    }
+
+    // "20 pcs" / "semua (12)"
+    private static string TeksQty(int? qty, int stokBebas) =>
+        qty is int q ? $"{q} pcs" : $"semua ({stokBebas})";
+
+    private static void SetQtyDraft(Dictionary<int, int?> draft, int polaId, object? nilai) =>
+        draft[polaId] = int.TryParse(nilai?.ToString(), out var q) && q > 0 ? q : null;
+
+    private static string KodePola(List<TniStokSaldoDto> daftar, int polaId) =>
+        daftar.FirstOrDefault(x => x.PolaId == polaId)?.Kode ?? $"#{polaId}";
+
+    private static int StokPola(List<TniStokSaldoDto> daftar, int polaId) =>
+        Math.Max(0, daftar.FirstOrDefault(x => x.PolaId == polaId)?.StokBebas ?? 0);
+
+    // "Size prioritas: 8 set · pakai 12/12 stok" -- hijau bila stok size terpilih habis terpakai.
+    private RenderFragment ChipSize(int set, int pakai, int stok) =>
+        @<span class="tni-chip" style="@(stok > 0 && pakai >= stok ? "background:var(--tni-okbg);color:var(--tni-ok)" : GayaChipSize)">
+            Size prioritas: @set set · pakai @pakai/@stok stok@(stok > 0 && pakai >= stok ? " — habis" : "")
+        </span>;
+
+    // Size dengan stok bebas > 0, plus yang sudah dicentang (walau stoknya habis,
+    // supaya tetap bisa dilepas). Urutan dari SP sudah sesuai aturan urut stok.
+    private List<TniStokSaldoDto> PilihanSize(List<TniStokSaldoDto> daftar, Dictionary<int, int?> draft) =>
+        daftar.Where(x => x.StokBebas > 0 || draft.ContainsKey(x.PolaId))
+              .Where(x => string.IsNullOrWhiteSpace(cariSize)
+                          || x.Kode.Contains(cariSize.Trim(), StringComparison.OrdinalIgnoreCase))
+              .ToList();
+
+    private async Task MuatDaftarSizeAsync()
+    {
+        isLoadingSize = true;
+        try
+        {
+            daftarKemeja = await StokApi.GetSaldoAsync("KEMEJA");
+            daftarCelana = await StokApi.GetSaldoAsync("CELANA");
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+        isLoadingSize = false;
+    }
+
+    private async Task BacaSizeAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", KunciSize);
+            if (string.IsNullOrWhiteSpace(json)) return;
+            var simpan = System.Text.Json.JsonSerializer.Deserialize<SizeSimpan>(json);
+            sizeKemeja = simpan?.Kemeja ?? new();
+            sizeCelana = simpan?.Celana ?? new();
+        }
+        catch { /* localStorage diblokir / isi rusak / format lama tanpa qty -> anggap kosong */ }
+    }
+
+    private async Task SimpanSizeAsync()
+    {
+        try
+        {
+            if (!SizeAktif)
+                await JS.InvokeVoidAsync("localStorage.removeItem", KunciSize);
+            else
+                await JS.InvokeVoidAsync("localStorage.setItem", KunciSize,
+                    System.Text.Json.JsonSerializer.Serialize(new SizeSimpan
+                    {
+                        Kemeja = sizeKemeja,
+                        Celana = sizeCelana
+                    }));
+        }
+        catch { }
+    }
+
+    private async Task BukaSizeAsync()
+    {
+        draftKemeja = new(sizeKemeja);
+        draftCelana = new(sizeCelana);
+        cariSize = string.Empty;
+        showSize = true;
+        await MuatDaftarSizeAsync();   // segarkan angka stok bebas tiap kali dibuka
+    }
+
+    private static void ToggleDraft(Dictionary<int, int?> draft, int polaId)
+    {
+        if (!draft.Remove(polaId)) draft[polaId] = null;
+    }
+
+    private void KosongkanDraft()
+    {
+        draftKemeja.Clear();
+        draftCelana.Clear();
+    }
+
+    private async Task TerapkanSizeAsync()
+    {
+        sizeKemeja = new(draftKemeja);
+        sizeCelana = new(draftCelana);
+        showSize = false;
+        await SimpanSizeAsync();
+        await MuatUlangLangkahAsync();
+    }
+
+    private async Task HapusSizeAsync()
+    {
+        sizeKemeja.Clear();
+        sizeCelana.Clear();
+        await SimpanSizeAsync();
+        await MuatUlangLangkahAsync();
+    }
+
+    private async Task MuatUlangLangkahAsync()
+    {
+        if (langkah == 1) await LoadRawatanAsync();
+        else if (langkah == 2) { isLoading = true; await MuatSatuanAsync(); isLoading = false; }
+        else
+        {
+            await LoadDetailAsync();
+            // urutan greedy berubah -> buang centang yang kini tidak lagi "bisa dibuat"
+            if (detail is not null) dipilih.IntersectWith(detail.BisaDibuat.Select(x => x.PersonelId));
+        }
+    }
+
+    private async Task MuatSatuanAsync()
+    {
+        if (rawatanTerpilih is null) return;
+        satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId, sizeKemeja, sizeCelana);
+    }
+
+    private void PilihSizePrioritas(List<TniKandidatDto> cocok)
+    {
+        if (cocok.All(x => dipilih.Contains(x.PersonelId)))
+            dipilih.ExceptWith(cocok.Select(x => x.PersonelId));
+        else
+            dipilih.UnionWith(cocok.Select(x => x.PersonelId));
+        konfirmCetak = false;
+    }
+
+    // Kode pola "kemeja · celana"; yang termasuk size prioritas ditandai emas.
+    private RenderFragment PolaPasangan(TniKandidatDto p) =>
+        @<span class="tni-pola" style="font-size:11.5px">
+            <span style="@(sizeKemeja.ContainsKey(p.PolaKemejaId) ? GayaPolaCocok : "")">@p.PolaKemejaKode</span>
+            ·
+            <span style="@(sizeCelana.ContainsKey(p.PolaCelanaId) ? GayaPolaCocok : "")">@p.PolaCelanaKode</span>
+        </span>;
+
+    private RenderFragment KartuBisa(TniKandidatDto p) =>
+        @<div class="tni-card tni-tap" @onclick="@(() => Toggle(p.PersonelId))">
+            <div class="tni-row">
+                <span>
+                    <input type="checkbox" checked="@dipilih.Contains(p.PersonelId)"
+                           @onclick:stopPropagation="true" @onchange="@(() => Toggle(p.PersonelId))" />
+                    <span class="tni-pola-lg" style="font-size:15px;margin-left:6px">@p.KodeRef</span>
+                </span>
+                @PolaPasangan(p)
+            </div>
+            <div class="tni-note" style="margin-top:2px">@p.Pangkat @p.Nama</div>
+        </div>;
+
+    private const string WarnaBox = "var(--tni-navy2)";
+    private const string WarnaSetJadi = "var(--tni-gold)";
+    private const string WarnaDicetak = "#9DB8D6";
+
+    // Kartu satuan di langkah 2. Bar satu batang tiga warna, kumulatif dari kiri:
+    // masuk box (navy) -> set jadi belum masuk box (emas) -> dicetak belum set jadi (biru muda).
+    // Masuk box selalu bagian dari set jadi, set jadi selalu bagian dari dicetak.
+    private RenderFragment KartuSatuan(TniSatuanSaranDto s) =>
+        @<div class="tni-card tni-tap" style="@(s.BisaTuntas ? "border:1.5px solid var(--tni-ok)" : "")"
+              @onclick="@(() => PilihSatuanAsync(s))">
+            <div class="tni-row">
+                <span style="display:flex;align-items:center;gap:4px;min-width:0">
+                    <button type="button"
+                            title="@(s.IsPrioritas ? "Lepas prioritas" : "Jadikan prioritas")"
+                            disabled="@prioritasProses.Contains(s.SatuanId)"
+                            @onclick="@(() => TogglePrioritasAsync(s))" @onclick:stopPropagation="true"
+                            style="background:none;border:0;padding:2px 4px 2px 0;font-size:21px;line-height:1;cursor:pointer;color:@(s.IsPrioritas ? WarnaSetJadi : "#B8C0CC")">
+                        @(s.IsPrioritas ? "★" : "☆")
+                    </button>
+                    <span class="tni-b">@s.SatuanName</span>
+                </span>
+                @if (s.BisaTuntas)
+                {
+                    <span class="tni-chip tni-chip-ok">Bisa tuntas</span>
+                }
+                else if (s.Sisa == 0)
+                {
+                    <span class="tni-chip tni-chip-mut">Semua sudah dicetak</span>
+                }
+                else
+                {
+                    <span class="tni-k">@s.BisaDibuat / @s.Sisa</span>
+                }
+            </div>
+            <div class="tni-note" style="margin-top:3px">
+                @s.SatuanCode · sudah dicetak <b>@s.SudahDicetak.ToString("N0")</b> dari @s.TotalPersonel.ToString("N0")
+                @if (s.BisaTuntas)
+                {
+                    <span> · stok cukup untuk sisa <b>@s.Sisa</b></span>
+                }
+            </div>
+            @if (SizeAktif && s.BisaSizePrioritas > 0)
+            {
+                <div style="margin-top:4px">
+                    @ChipSize(s.BisaSizePrioritas, s.PakaiSizePrioritas, s.StokSizePrioritas)
+                </div>
+            }
+            <div style="display:flex;height:7px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
+                <div style="height:100%;width:@(s.PersenSelesai)%;background:@WarnaBox"></div>
+                <div style="height:100%;width:@(Math.Max(0, s.PersenSetJadi - s.PersenSelesai))%;background:@WarnaSetJadi"></div>
+                <div style="height:100%;width:@(Math.Max(0, s.PersenDicetak - s.PersenSetJadi))%;background:@WarnaDicetak"></div>
+            </div>
+            <div class="tni-note" style="margin-top:4px;display:flex;flex-wrap:wrap;column-gap:12px;row-gap:2px">
+                <span>
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@WarnaBox;margin-right:4px"></span>
+                    Masuk box <b>@s.PersenSelesai%</b> (@s.SudahMasukBox.ToString("N0"))
+                </span>
+                <span>
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@WarnaSetJadi;margin-right:4px"></span>
+                    Set jadi <b>@s.PersenSetJadi%</b> (@s.SudahSetJadi.ToString("N0"))
+                </span>
+                <span>
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@WarnaDicetak;margin-right:4px"></span>
+                    Dicetak <b>@s.PersenDicetak%</b> (@s.SudahDicetak.ToString("N0"))
+                </span>
+            </div>
+        </div>;
+
+    private async Task TogglePrioritasAsync(TniSatuanSaranDto s)
+    {
+        if (!prioritasProses.Add(s.SatuanId)) return;   // cegah tap ganda
+        errorMessage = string.Empty;
+
+        var (ok, err) = await PkApi.SetPrioritasAsync(s.SatuanId, !s.IsPrioritas);
+        if (!ok) errorMessage = err;
+        else if (rawatanTerpilih is not null) await MuatSatuanAsync();
+
+        prioritasProses.Remove(s.SatuanId);
+    }
 
     private string Breadcrumb => langkah switch
     {
@@ -381,14 +804,16 @@ else
         if (hasAccess != true) return;
 
         await OrderState.EnsureLoadedAsync();
+        await BacaSizeAsync();
         await LoadRawatanAsync();
+        if (SizeAktif) await MuatDaftarSizeAsync();   // untuk menampilkan kode size di chip
     }
 
     private async Task LoadRawatanAsync()
     {
         isLoading = true;
         errorMessage = string.Empty;
-        try { rawatanData = await PkApi.GetRawatanAsync(); }
+        try { rawatanData = await PkApi.GetRawatanAsync(sizeKemeja, sizeCelana); }
         catch (Exception ex) { errorMessage = ex.Message; }
         isLoading = false;
     }
@@ -399,7 +824,7 @@ else
         langkah = 2;
         infoMessage = string.Empty;
         isLoading = true;
-        try { satuanList = await PkApi.GetSatuanAsync(r.AreaId); }
+        try { await MuatSatuanAsync(); }
         catch (Exception ex) { errorMessage = ex.Message; }
         isLoading = false;
     }
@@ -424,7 +849,7 @@ else
         isLoading = true;
         try
         {
-            detail = await PkApi.GetSatuanDetailAsync(satuanTerpilih.SatuanId);
+            detail = await PkApi.GetSatuanDetailAsync(satuanTerpilih.SatuanId, sizeKemeja, sizeCelana);
             dijatah = await PkApi.GetDijatahAsync(satuanTerpilih.SatuanId);
         }
         catch (Exception ex) { errorMessage = ex.Message; }
@@ -443,7 +868,7 @@ else
         konfirmLepas = false;
         infoMessage = string.Empty;
 
-        if (langkah == 3) { langkah = 2; if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId); }
+        if (langkah == 3) { langkah = 2; if (rawatanTerpilih is not null) await MuatSatuanAsync(); }
         else if (langkah == 2) { langkah = 1; await LoadRawatanAsync(); }
     }
 
@@ -474,6 +899,82 @@ else
         konfirmLepas = false;
     }
 
+    // ---------- ringkasan konfirmasi cetak ----------
+    // Dipakai sebagai daftar ambil untuk penyiap set, sekaligus catatan berapa
+    // stok size prioritas yang terpakai. Murni hitungan client dari personel terpilih.
+    private sealed record BarisRingkas(string Kode, int Ambil, int? StokBebas, bool Prioritas, int? QtyPrioritas);
+
+    private async Task BukaKonfirmCetakAsync()
+    {
+        konfirmCetak = true;
+        await MuatDaftarSizeAsync();   // stok bebas terbaru untuk kolom Stok/Sisa
+    }
+
+    private List<BarisRingkas> RingkasCetak(bool kemeja)
+    {
+        if (detail is null) return new();
+        var daftar = kemeja ? daftarKemeja : daftarCelana;
+        var size = kemeja ? sizeKemeja : sizeCelana;
+
+        return detail.BisaDibuat
+            .Where(p => dipilih.Contains(p.PersonelId))
+            .GroupBy(p => kemeja
+                ? new { Id = p.PolaKemejaId, Kode = p.PolaKemejaKode }
+                : new { Id = p.PolaCelanaId, Kode = p.PolaCelanaKode })
+            .Select(g =>
+            {
+                var stok = daftar.FirstOrDefault(x => x.PolaId == g.Key.Id);
+                var prio = size.TryGetValue(g.Key.Id, out var qty);
+                return new
+                {
+                    Urut = daftar.FindIndex(x => x.PolaId == g.Key.Id),
+                    Baris = new BarisRingkas(g.Key.Kode, g.Count(), stok?.StokBebas, prio, qty)
+                };
+            })
+            .OrderByDescending(x => x.Baris.Prioritas)
+            .ThenBy(x => x.Urut < 0 ? int.MaxValue : x.Urut)   // urutan size dari SP saldo
+            .ThenBy(x => x.Baris.Kode)
+            .Select(x => x.Baris)
+            .ToList();
+    }
+
+    private RenderFragment TabelRingkas(string judul, List<BarisRingkas> baris) =>
+        @<div style="margin-top:10px">
+            <div class="tni-row" style="margin-bottom:4px">
+                <span class="tni-b">@judul</span>
+                <span class="tni-k">total <b style="font-size:15px">@baris.Sum(x => x.Ambil)</b> pcs · @baris.Count size</span>
+            </div>
+            <div class="tni-tblwrap">
+                <table class="tni-tbl tni-tbl-sm">
+                    <thead>
+                        <tr><th>Size</th><th>Ambil</th><th>Stok bebas</th><th>Sisa</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var b in baris)
+                        {
+                            var sisa = b.StokBebas - b.Ambil;
+                            <tr style="@(b.Prioritas ? "background:var(--tni-warnbg)" : "")">
+                                <td>
+                                    <span class="tni-pola" style="@(b.Prioritas ? GayaPolaCocok : "")">@b.Kode</span>
+                                    @if (b.Prioritas)
+                                    {
+                                        <div class="tni-note" style="color:#7A5A12">
+                                            @(b.QtyPrioritas is int q
+                                                ? $"prioritas {q} → sisa {Math.Max(0, q - b.Ambil)}"
+                                                : "prioritas (semua stok)")
+                                        </div>
+                                    }
+                                </td>
+                                <td style="font-weight:700;font-size:14px">@b.Ambil</td>
+                                <td>@(b.StokBebas?.ToString() ?? "-")</td>
+                                <td style="@(sisa < 0 ? "color:var(--tni-bad);font-weight:700" : "")">@(sisa?.ToString() ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>;
+
     private async Task CetakAsync()
     {
         isSaving = true;
@@ -491,7 +992,7 @@ else
 
         // stok bebas & angka satuan lain ikut berubah -> muat ulang
         await LoadDetailAsync();
-        if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId);
+        if (rawatanTerpilih is not null) await MuatSatuanAsync();
     }
 
     private async Task LepasAsync()
@@ -513,6 +1014,6 @@ else
 
         dipilihLepas.Clear();
         await LoadDetailAsync();
-        if (rawatanTerpilih is not null) satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId);
+        if (rawatanTerpilih is not null) await MuatSatuanAsync();
     }
 }

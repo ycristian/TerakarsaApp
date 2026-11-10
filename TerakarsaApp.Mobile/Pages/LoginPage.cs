@@ -37,6 +37,12 @@ public class LoginPage : ContentPage
         setting.Clicked += async (_, _) =>
             await Navigation.PushAsync(new SettingPage(_auth, _resolver));
 
+        // Prompt 86: pintu masuk perangkat stasiun -- langsung ke pemindai QR Kode Login.
+        // Disembunyikan kalau Mode Stasiun sudah siap (login ini dibuka dari "Masuk Admin").
+        var stasiun = Gaya.Tombol("Masuk sebagai Stasiun (scan QR)", utama: false);
+        stasiun.IsVisible = !AppPrefs.StationModeSiap;
+        stasiun.Clicked += async (_, _) => await MasukStasiunAsync();
+
         Content = new ScrollView
         {
             Content = new VerticalStackLayout
@@ -60,6 +66,7 @@ public class LoginPage : ContentPage
                     _password,
                     _masuk,
                     _pesan,
+                    stasiun,
                     setting
                 }
             }
@@ -106,6 +113,21 @@ public class LoginPage : ContentPage
 
         _password.Text = string.Empty;
         await Navigation.PushAsync(new TujuanPage(_auth, _resolver));
+    }
+
+    // Scan QR Kode Login -> simpan kode + nyalakan Mode Stasiun -> root window diganti layar
+    // Mode Stasiun, yang langsung membuka /station. Tanpa login user.
+    private async Task MasukStasiunAsync()
+    {
+        var kode = await StationScanPage.ScanKodeLoginAsync(this);
+        if (kode is null) return;
+
+        AppPrefs.StationLoginCode = kode;
+        AppPrefs.StationMode = true;
+
+        var window = Application.Current?.Windows.FirstOrDefault();
+        if (window is not null)
+            window.Page = new NavigationPage(new StationHomePage(_auth, _resolver));
     }
 
     private void Tampilkan(string pesan)

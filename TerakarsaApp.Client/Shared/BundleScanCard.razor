@@ -39,6 +39,18 @@
                     @Info.Bundle.Qty <small class="text-muted">pcs</small>
                     <span class="badge bg-secondary fl-6">@Info.Bundle.SizeName</span>
                 </h4>
+                @* Ad hoc (2026-11-02): bundle ANAK dapat tautan balik ke induk langsungnya --
+                   arah sebaliknya dari tautan anak di timeline, supaya pohon pemecahan bisa
+                   ditelusuri dua arah tanpa scan QR ulang. Hanya muncul kalau ada induknya;
+                   induk utama tidak menampilkan apa pun. Induk yang sendirinya bundle anak
+                   (pohon bertingkat) ikut berlabel '-{seq}'. *@
+                @if (!string.IsNullOrEmpty(Info.Bundle.ParentSerial))
+                {
+                    <a class="btn btn-outline-primary btn-sm mt-2 me-1" href="/b/@Info.Bundle.ParentSerial">
+                        <i class="fe fe-corner-left-up"></i>
+                        ke @BundleDisplay.Format(Info.Bundle.BundleLetter, Info.Bundle.RootBundleNo)@(Info.Bundle.ParentSequenceNo > 0 ? $"-{Info.Bundle.ParentSequenceNo}" : "")
+                    </a>
+                }
                 @if (AllowReprint)
                 {
                     <button class="btn btn-outline-secondary btn-sm mt-2" disabled="@reprintBusy" @onclick="OpenReprintModal">
@@ -147,6 +159,50 @@
                             Diterima @t.ReceivedAt.Value.ToString("dd/MM HH:mm") oleh @(t.ReceivedByResourceName ?? (t.ReceivedRemark == "Otomatis: auto-terima" ? "Otomatis" : ""))
                             @(!string.IsNullOrEmpty(t.ReceivedRemark) ? $"— {t.ReceivedRemark}" : "")
                         </small>
+                    }
+
+                    @* Ad hoc (2026-11-02): INFO PEMECAHAN baris ini -- bundle anak yang lahir
+                       dari pernyataan Kirim Hasil ini, plus pcs yang dinyatakan hilang. Tiap
+                       anak jadi TAUTAN ke halamannya sendiri (/b/{serial}) supaya pohon
+                       pemecahan bisa ditelusuri tanpa scan QR ulang. *@
+                    @if (t.SplitChildren.Count > 0 || t.SplitMissingQty != 0)
+                    {
+                        <div class="small mt-1 ps-2" style="border-left: 2px solid var(--bs-border-color);">
+                            <div class="text-muted">Pemecahan:</div>
+                            @foreach (var ch in t.SplitChildren)
+                            {
+                                var chReject = ch.Status == "Reject";
+                                <div>
+                                    <a href="/b/@ch.Serial">
+                                        @BundleDisplay.Format(ch.BundleLetter, ch.RootBundleNo)@(ch.SequenceNo > 0 ? $"-{ch.SequenceNo}" : "")
+                                    </a>
+                                    <span class="badge @(chReject ? "bg-danger" : "bg-warning text-dark") ms-1" style="font-size: 0.6rem;">
+                                        @BundleRejectCategory.Label(ch.RejectCategory ?? ch.Status)
+                                    </span>
+                                    <span class="@(chReject ? "text-danger" : "")">@ch.Qty pcs</span>
+                                    @if (!string.IsNullOrWhiteSpace(ch.RejectReason))
+                                    {
+                                        <span class="text-muted">&middot; @ch.RejectReason</span>
+                                    }
+                                </div>
+                            }
+                            @if (t.SplitMissingQty != 0)
+                            {
+                                @* Negatif = koreksi saat edit Kirim Hasil (selisih dikembalikan),
+                                   jadi kata "Hilang" saja akan menyesatkan. *@
+                                <div class="text-danger">
+                                    @if (t.SplitMissingQty > 0)
+                                    {
+                                        <text>Hilang: @t.SplitMissingQty pcs</text>
+                                    }
+                                    else
+                                    {
+                                        <text>Koreksi hilang: @t.SplitMissingQty pcs</text>
+                                    }
+                                    <span class="text-muted">(tidak lahir barcode &mdash; barangnya tidak ada)</span>
+                                </div>
+                            }
+                        </div>
                     }
                 </li>
             }
@@ -405,7 +461,10 @@
                 <div class="modal-body">
                     <p class="mb-2">Cetak ulang label @Info.Bundle.Serial.</p>
                     <label class="form-label">Jumlah Label</label>
-                    <input type="number" min="1" class="form-control" @bind="reprintCopies" />
+                    <input type="number" min="1" class="form-control mb-2" @bind="reprintCopies" />
+                    @* Prompt 88: printer tujuan (dropdown hanya kalau >1 printer). *@
+                    <PrinterPicker JobType="BUNDLE_LABEL" Station="true" @bind-Value="reprintPrinterId"
+                                   CanPrintChanged="v => reprintPrinterOk = v" />
                     @if (!string.IsNullOrEmpty(reprintModalError))
                     {
                         <div class="alert alert-danger mt-2 mb-0">@reprintModalError</div>
@@ -413,7 +472,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-light" @onclick="CloseReprintModal">Batal</button>
-                    <button class="btn btn-primary" disabled="@(reprintBusy || reprintCopies < 1)" @onclick="SubmitReprint">Cetak</button>
+                    <button class="btn btn-primary" disabled="@(reprintBusy || reprintCopies < 1 || !reprintPrinterOk)" @onclick="SubmitReprint">Cetak</button>
                 </div>
             </div>
         </div>
@@ -478,6 +537,9 @@
     private bool showReprintModal = false;
     private int reprintCopies = 1;
     private string reprintModalError = string.Empty;
+    // Prompt 88: printer pilihan (PrinterPicker).
+    private int? reprintPrinterId;
+    private bool reprintPrinterOk = true;
 
     private void OpenReprintModal()
     {
@@ -499,7 +561,7 @@
         reprintModalError = string.Empty;
         reprintFeedback = string.Empty;
 
-        var (success, error) = await StationApi.ReprintBundleAsync(Info.Bundle.BundleId, reprintCopies);
+        var (success, error) = await StationApi.ReprintBundleAsync(Info.Bundle.BundleId, reprintCopies, reprintPrinterId);
 
         reprintBusy = false;
 

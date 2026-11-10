@@ -50,6 +50,7 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+		<PackageReference Include="ZXing.Net.Maui.Controls" Version="0.10.4" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -63,8 +64,7 @@
 
 	<!-- Signing release: nilai diambil dari signing.local.json (gitignored).
 	     Lihat signing.example.json + README.md. -->
-	<Target Name="TerakarsaReadSigning" BeforeTargets="BeforeBuild"
-	        Condition="'$(Configuration)' == 'Release' AND Exists('$(MSBuildProjectDirectory)\signing.local.json')">
+	<Target Name="TerakarsaReadSigning" BeforeTargets="BeforeBuild" Condition="'$(Configuration)' == 'Release' AND Exists('$(MSBuildProjectDirectory)\signing.local.json')">
 		<PropertyGroup>
 			<_SigningJson>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\signing.local.json'))</_SigningJson>
 			<AndroidKeyStore>true</AndroidKeyStore>

@@ -120,6 +120,9 @@ public class BundleSplitRequest
     public List<BundleSplitRowRequest> Rows { get; set; } = new();
     // Prompt 40: penerima manual kalau step tujuan auto_receive = 1 dan counterpart tidak valid.
     public int? AutoReceiveResourceId { get; set; }
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }
 
 // Anak yang lahir dari submit -- dipakai client menampilkan konfirmasi "barcode yang lahir".
@@ -189,4 +192,7 @@ public class BundleFoundRequest
     public string? Reason { get; set; }
     // Kosong = pakai alokasi LIFO otomatis di server (is_system_choice = 1).
     public List<BundleFoundAllocationRequest> Allocations { get; set; } = new();
+    // Prompt 88: printer tujuan pilihan user (PrinterPicker). NULL = otomatis (job type
+    // dengan satu printer); wajib diisi kalau job type punya >1 printer.
+    public int? PrintDeviceId { get; set; }
 }

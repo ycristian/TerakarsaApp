@@ -410,7 +410,12 @@ BEGIN
            + CASE WHEN @Qty IS NOT NULL AND o.rn = o.TotalRows AND @Qty > o.CumQty
                   THEN @Qty - o.CumQty ELSE 0 END AS AllocQty,
            CAST(CASE WHEN @Qty IS NOT NULL AND o.rn = o.TotalRows AND @Qty > o.CumQty THEN 1 ELSE 0 END AS BIT) AS IsOverflow,
-           o.rn AS SortOrder
+           -- CAST ke INT WAJIB: ROW_NUMBER() bertipe BIGINT, sedangkan
+           -- BundleMissingBundleDto.SortOrder adalah int -- tanpa cast, EF melempar
+           -- InvalidCastException (Int64 -> Int32) dan SELURUH endpoint ini balas 500.
+           -- Bug ini ada sejak Prompt 82 dan tidak pernah terlihat karena client menelan
+           -- status non-2xx jadi daftar kosong.
+           CAST(o.rn AS INT) AS SortOrder
     FROM Ordered o
     INNER JOIN articles a ON a.article_id = o.article_id
     INNER JOIN projects p ON p.project_id = a.project_id

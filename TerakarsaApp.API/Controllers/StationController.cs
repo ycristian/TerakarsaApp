@@ -99,4 +99,23 @@ public class StationController : ControllerBase
         if (!success) return BadRequest(error);
         return Ok();
     }
+
+    // Prompt 85: "Kunci Kode Login" dan "Refresh Kode" -- kode permanen 10 karakter untuk
+    // Pengaturan app Android. Tidak merotasi station_token (perangkat yang jalan tetap jalan).
+    [HttpPost("{id:int}/login-code/lock")]
+    public async Task<IActionResult> LockLoginCode(int id)
+    {
+        var (success, error, result) = await _stationService.LockLoginCodeAsync(id, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok(result);
+    }
+
+    // Prompt 85: "Buka Kunci" -- kode login dihapus, token tidak disentuh.
+    [HttpPost("{id:int}/login-code/unlock")]
+    public async Task<IActionResult> UnlockLoginCode(int id)
+    {
+        var (success, error) = await _stationService.UnlockLoginCodeAsync(id, CurrentUserId);
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
 }

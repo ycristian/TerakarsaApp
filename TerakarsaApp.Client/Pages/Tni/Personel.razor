@@ -5,12 +5,14 @@
 @using TerakarsaApp.Client.Services
 @using TerakarsaApp.Shared.Tni
 @inject TniPersonelApiService PersonelApi
+@inject TniPolaApiService PolaApi
 @inject TniOrderState OrderState
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @implements IDisposable
 
 @* Prompt 63: daftar personel PDH TNI AD -- cari satu orang lewat kode / NRP / nama,
-   lihat posisinya di alur, filter per area / satuan / status / perlu review.
+   lihat posisinya di alur, filter per area / satuan / status / perlu review / pola kemeja & celana.
    Muat bertahap 30 per halaman. *@
 
 <PageTitle>Personel — PDH TNI AD</PageTitle>
@@ -44,12 +46,28 @@ else
         <button class="tni-btn @(AdaFilter ? "tni-btn-p" : "tni-btn-o")" @onclick="@(() => showFilter = true)">
             <i class="fe fe-filter"></i> Filter@(AdaFilter ? $" ({JumlahFilter})" : "")
         </button>
-        <span class="tni-k">@total.ToString("N0") orang</span>
+        @* Prompt 89: laporan PDF A4 dari daftar yang sedang tampil; jumlah orang pindah ke dalam tombol. *@
+        <button class="tni-btn tni-btn-o" disabled="@(total == 0 || isLoading || isUnduh)" @onclick="UnduhLaporanAsync">
+            @if (isUnduh)
+            {
+                <span class="spinner-border spinner-border-sm" style="margin-right:4px"></span>
+            }
+            else
+            {
+                <text>⬇ </text>
+            }
+            Laporan PDF · @total.ToString("N0") orang
+        </button>
     </div>
 
     @if (!string.IsNullOrEmpty(errorMessage))
     {
         <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (!string.IsNullOrEmpty(infoMessage))
+    {
+        <div class="alert alert-success">@infoMessage</div>
     }
 
     @if (items.Count == 0 && !isLoading)
@@ -141,6 +159,25 @@ else
                 <option value="TERKIRIM">Terkirim</option>
             </select>
 
+            @* Hanya pola yang dipakai personel di order aktif, beserta jumlah orangnya. *@
+            <div class="tni-k" style="margin-top:8px">Kemeja</div>
+            <select class="tni-inp" @bind="polaKemejaId">
+                <option value="0">Semua kemeja</option>
+                @foreach (var pk in polaKemeja)
+                {
+                    <option value="@pk.PolaId">@pk.Kode (@pk.JumlahPemakai.ToString("N0"))</option>
+                }
+            </select>
+
+            <div class="tni-k" style="margin-top:8px">Celana</div>
+            <select class="tni-inp" @bind="polaCelanaId">
+                <option value="0">Semua celana</option>
+                @foreach (var pc in polaCelana)
+                {
+                    <option value="@pc.PolaId">@pc.Kode (@pc.JumlahPemakai.ToString("N0"))</option>
+                }
+            </select>
+
             <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin-top:10px">
                 <input type="checkbox" @bind="perluReview" />
                 Hanya yang perlu review
@@ -164,6 +201,8 @@ else
     [SupplyParameterFromQuery(Name = "review")] public string? QReview { get; set; }
     [SupplyParameterFromQuery(Name = "areaId")] public int? QAreaId { get; set; }
     [SupplyParameterFromQuery(Name = "satuanId")] public int? QSatuanId { get; set; }
+    [SupplyParameterFromQuery(Name = "polaKemejaId")] public int? QPolaKemejaId { get; set; }
+    [SupplyParameterFromQuery(Name = "polaCelanaId")] public int? QPolaCelanaId { get; set; }
 
     private bool? hasAccess;
     private bool isLoading;
@@ -175,6 +214,11 @@ else
     private int satuanId;
     private string status = string.Empty;
     private bool perluReview;
+    private int polaKemejaId;
+    private int polaCelanaId;
+
+    private List<TniPolaDto> polaKemeja = new();
+    private List<TniPolaDto> polaCelana = new();
 
     private int page = 1;
     private int total;
@@ -191,11 +235,12 @@ else
                .OrderBy(w => w.SatuanCode)
                .ToList();
 
-    private bool AdaFilter => areaId > 0 || satuanId > 0 || !string.IsNullOrEmpty(status) || perluReview;
+    private bool AdaFilter => JumlahFilter > 0;
 
     private int JumlahFilter =>
         (areaId > 0 ? 1 : 0) + (satuanId > 0 ? 1 : 0) +
-        (string.IsNullOrEmpty(status) ? 0 : 1) + (perluReview ? 1 : 0);
+        (string.IsNullOrEmpty(status) ? 0 : 1) + (perluReview ? 1 : 0) +
+        (polaKemejaId > 0 ? 1 : 0) + (polaCelanaId > 0 ? 1 : 0);
 
     protected override async Task OnInitializedAsync()
     {
@@ -208,9 +253,23 @@ else
         if (QReview is "1" or "true") perluReview = true;
         if (QAreaId is > 0) areaId = QAreaId.Value;
         if (QSatuanId is > 0) satuanId = QSatuanId.Value;
+        if (QPolaKemejaId is > 0) polaKemejaId = QPolaKemejaId.Value;
+        if (QPolaCelanaId is > 0) polaCelanaId = QPolaCelanaId.Value;
 
         await OrderState.EnsureLoadedAsync();
-        wilayah = await PersonelApi.GetWilayahAsync();
+
+        var wilayahTask = PersonelApi.GetWilayahAsync();
+        var kemejaTask = PolaApi.GetListAsync("KEMEJA");
+        var celanaTask = PolaApi.GetListAsync("CELANA");
+        await Task.WhenAll(wilayahTask, kemejaTask, celanaTask);
+
+        wilayah = wilayahTask.Result;
+        // JumlahPemakai dihitung untuk order aktif -- pola yang tidak dipakai tidak perlu dipilih.
+        polaKemeja = kemejaTask.Result.Where(p => p.JumlahPemakai > 0)
+            .OrderBy(p => p.TargetGender).ThenBy(p => p.LingkarDadaAcuan).ThenBy(p => p.Kode).ToList();
+        polaCelana = celanaTask.Result.Where(p => p.JumlahPemakai > 0)
+            .OrderBy(p => p.TargetGender).ThenBy(p => p.SizeAngka).ThenBy(p => p.Kode).ToList();
+
         await LoadAsync();
     }
 
@@ -222,12 +281,19 @@ else
 
         try
         {
+            var f = new FilterAktif(
+                string.IsNullOrWhiteSpace(search) ? null : search,
+                areaId > 0 ? areaId : null, satuanId > 0 ? satuanId : null,
+                string.IsNullOrEmpty(status) ? null : status, perluReview,
+                polaKemejaId > 0 ? polaKemejaId : null, polaCelanaId > 0 ? polaCelanaId : null);
+
             var result = await PersonelApi.GetListAsync(
-                search, areaId > 0 ? areaId : null, satuanId > 0 ? satuanId : null,
-                string.IsNullOrEmpty(status) ? null : status, perluReview, page, PageSize);
+                f.Search, f.AreaId, f.SatuanId, f.Status, f.PerluReview, page, PageSize,
+                f.PolaKemejaId, f.PolaCelanaId);
 
             items = result.Items;
             total = result.TotalCount;
+            filterAktif = f;
         }
         catch (Exception ex)
         {
@@ -246,7 +312,8 @@ else
         {
             var result = await PersonelApi.GetListAsync(
                 search, areaId > 0 ? areaId : null, satuanId > 0 ? satuanId : null,
-                string.IsNullOrEmpty(status) ? null : status, perluReview, page, PageSize);
+                string.IsNullOrEmpty(status) ? null : status, perluReview, page, PageSize,
+                polaKemejaId > 0 ? polaKemejaId : null, polaCelanaId > 0 ? polaCelanaId : null);
 
             items.AddRange(result.Items);
             total = result.TotalCount;
@@ -290,8 +357,65 @@ else
         satuanId = 0;
         status = string.Empty;
         perluReview = false;
+        polaKemejaId = 0;
+        polaCelanaId = 0;
         showFilter = false;
         await LoadAsync();
+    }
+
+    // ---------- Prompt 89: unduh laporan PDF ----------
+
+    // Filter yang TERAKHIR dipakai memuat daftar -- isian sheet Filter yang belum
+    // diterapkan / ketikan yang belum lewat debounce tidak ikut ke laporan.
+    private sealed record FilterAktif(string? Search, int? AreaId, int? SatuanId, string? Status, bool PerluReview,
+        int? PolaKemejaId, int? PolaCelanaId);
+
+    private FilterAktif filterAktif = new(null, null, null, null, false, null, null);
+    private bool isUnduh;
+    private string infoMessage = string.Empty;
+
+    // Perkiraan halaman PDF landscape: ±28 baris per halaman + 1 untuk rekap/tanda tangan.
+    private const int BarisPerHalaman = 28;
+    private const int AmbangKonfirmasi = 300;
+
+    private async Task UnduhLaporanAsync()
+    {
+        if (total == 0 || isUnduh) return;
+
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+
+        if (total > AmbangKonfirmasi)
+        {
+            var halaman = (int)Math.Ceiling(total / (double)BarisPerHalaman) + 1;
+            var lanjut = await JS.InvokeAsync<bool>("confirm",
+                $"Laporan {total:N0} orang ≈ {halaman:N0} halaman. Lanjutkan?");
+            if (!lanjut) return;
+        }
+
+        isUnduh = true;
+        StateHasChanged();
+
+        try
+        {
+            var f = filterAktif;
+            var (ok, err, bytes, nama) = await PersonelApi.GetLaporanPdfAsync(
+                f.Search, f.AreaId, f.SatuanId, f.Status, f.PerluReview, f.PolaKemejaId, f.PolaCelanaId);
+
+            if (!ok) { errorMessage = err; return; }
+
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                nama, "application/pdf", Convert.ToBase64String(bytes!));
+            infoMessage = $"Laporan {nama} diunduh.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isUnduh = false;
+        }
     }
 
     public void Dispose() => debounceTimer?.Dispose();

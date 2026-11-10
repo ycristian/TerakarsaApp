@@ -186,6 +186,9 @@ else
                             <label class="form-label">Catatan (opsional)</label>
                             <textarea class="form-control" rows="2" maxlength="500" @bind="addForm.Remarks"></textarea>
                         </div>
+                        @* Prompt 88: printer label (dropdown hanya kalau >1 printer). *@
+                        <PrinterPicker JobType="BUNDLE_LABEL" @bind-Value="addPrinterId"
+                                       CanPrintChanged="v => addPrinterOk = v" />
                         @if (!string.IsNullOrEmpty(addExceedMessage))
                         {
                             <div class="alert alert-warning">
@@ -198,7 +201,7 @@ else
                         {
                             <div class="alert alert-danger">@addError</div>
                         }
-                        <button type="button" class="btn btn-primary w-100" disabled="@isSavingAdd" @onclick="HandleAddBundle">
+                        <button type="button" class="btn btn-primary w-100" disabled="@(isSavingAdd || !addPrinterOk)" @onclick="HandleAddBundle">
                             @(isSavingAdd ? "Menyimpan..." : "Simpan")
                         </button>
                     </div>
@@ -296,7 +299,11 @@ else
         <Message>
             <p class="mb-2">Cetak ulang label "@bundlePendingReprint?.Serial"?</p>
             <label class="form-label">Jumlah Label</label>
-            <input type="number" min="1" class="form-control" @bind="reprintCopies" />
+            <input type="number" min="1" class="form-control mb-2" @bind="reprintCopies" />
+            @if (showReprintConfirm)
+            {
+                <PrinterPicker JobType="BUNDLE_LABEL" @bind-Value="reprintPrinterId" />
+            }
             @if (!string.IsNullOrEmpty(reprintError))
             {
                 <div class="text-danger mt-2">@reprintError</div>
@@ -349,6 +356,10 @@ else
     private bool showReprintConfirm = false;
     private BundleDto? bundlePendingReprint;
     private int reprintCopies = 1;
+    // Prompt 88: printer pilihan (PrinterPicker) untuk tambah bundle & cetak ulang.
+    private int? addPrinterId;
+    private bool addPrinterOk = true;
+    private int? reprintPrinterId;
     private string reprintError = string.Empty;
     private bool pendingBundleQrRender = false;
     private string publicBaseUrl = string.Empty;
@@ -479,7 +490,8 @@ else
             ResourceId = addForm.ResourceId > 0 ? addForm.ResourceId : null,
             EmployeeId = addForm.EmployeeId > 0 ? addForm.EmployeeId : null,
             BundlingResourceId = addForm.BundlingResourceId > 0 ? addForm.BundlingResourceId : null,
-            Remarks = addForm.Remarks
+            Remarks = addForm.Remarks,
+            PrintDeviceId = addPrinterId
         });
 
         isSavingAdd = false;
@@ -676,7 +688,7 @@ else
         if (bundlePendingReprint is null || reprintCopies < 1) return;
 
         reprintingId = bundlePendingReprint.Id;
-        var result = await BundleApi.ReprintAsync(bundlePendingReprint.Id, reprintCopies);
+        var result = await BundleApi.ReprintAsync(bundlePendingReprint.Id, reprintCopies, reprintPrinterId);
         reprintingId = null;
 
         if (!result.Success)

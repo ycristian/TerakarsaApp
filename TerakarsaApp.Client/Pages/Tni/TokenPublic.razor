@@ -15,7 +15,8 @@
    {Tni:QrBaseUrl}/t/{qr_token}, jadi link ini bisa dibuka dengan kamera biasa.
 
    TANPA PERANGKAT -> data terbatas: NRP, size, TB/BB, kategori, rawatan (2026-10-06);
-                      No HP & ukuran badan TIDAK. Komplain (no telp + komentar) boleh.
+                      No HP & ukuran badan TIDAK. Komplain (no telp + komentar) boleh
+                      -- DISEMBUNYIKAN sejak 2026-11-09 (TampilKomplain).
    SUDAH LOGIN + punya module TNI_PDH -> data lengkap + aksi.
 
    Scan TIDAK BISA dihapus dari sini -- "Ajukan batal" (Prompt 68) hanya
@@ -249,8 +250,9 @@
     }
 
     @* ---------- komplain ukuran (2026-10-06) -- SIAPA PUN, tanpa perangkat ----------
-       No telp & komentar wajib; komentar textarea, Enter = baris baru. *@
-    @if (!isLoading && publik is not null && !pilihBox)
+       No telp & komentar wajib; komentar textarea, Enter = baris baru.
+       2026-11-09: disembunyikan lewat TampilKomplain (kode & API tetap ada). *@
+    @if (TampilKomplain && !isLoading && publik is not null && !pilihBox)
     {
         <div class="tni-sec">Komplain ukuran</div>
         <div class="tni-card">
@@ -378,7 +380,7 @@
             ? await ScanApi.GetByTokenAsync(Token)
             : null;
 
-        komplainList = detail is not null
+        komplainList = TampilKomplain && detail is not null
             ? await ScanApi.GetKomplainAsync(detail.PersonelId)
             : new();
 
@@ -386,6 +388,9 @@
     }
 
     // ---------- komplain ukuran (2026-10-06) ----------
+    // 2026-11-09: fitur komplain disembunyikan dari halaman QR. Ubah ke true untuk menampilkan lagi.
+    private const bool TampilKomplain = false;
+
     private string komplainTelp = string.Empty;
     private string komplainKomentar = string.Empty;
     private string komplainInfo = string.Empty;
