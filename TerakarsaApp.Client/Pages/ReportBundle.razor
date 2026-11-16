@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using TerakarsaApp.Client.Services
+@using TerakarsaApp.Client.Pages.Cctv.Shared
 @using TerakarsaApp.Shared.Divisions
 @using TerakarsaApp.Shared.Employees
 @using TerakarsaApp.Shared.Projects
@@ -362,6 +363,9 @@ else
                                                     {
                                                         <button class="btn btn-outline-secondary btn-sm p-0 ms-2" title="Edit" @onclick="() => editPanel!.OpenEditLogAsync(t.Id)"><i class="fe fe-edit"></i></button>
                                                     }
+                                                    @* Prompt 94: tombol "Lihat" CCTV saat step selesai -- tidak dirender tanpa module CCTV. *@
+                                                    <CctvEventButton EventTime="t.CreatedAt" ResourceId="t.ResourceId" DivisionId="t.DivisionId" CssClass="ms-2"
+                                                                     Title="@($"{historyResult.Header?.Serial} · {t.StepName}{(string.IsNullOrEmpty(t.PelaksanaName) ? "" : " · " + t.PelaksanaName)}")" />
                                                 </span>
                                             </div>
                                             @if (t.QtyOk > 0 || t.QtyReject > 0 || !string.IsNullOrEmpty(t.PelaksanaName) || !string.IsNullOrEmpty(t.Remark) || !string.IsNullOrEmpty(t.TargetDivisionName))

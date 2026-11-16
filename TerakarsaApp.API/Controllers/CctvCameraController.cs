@@ -58,6 +58,11 @@ public class CctvCameraController : ControllerBase
         });
     }
 
+    // Prompt 94: kamera untuk transaksi -- dari resource dulu, kalau tidak ada dari divisi.
+    [HttpGet("for-event")]
+    public async Task<IActionResult> ForEvent([FromQuery] int? resourceId, [FromQuery] int? divisionId, CancellationToken ct)
+        => Ok(await _cameraService.GetForEventAsync(resourceId, divisionId, ct));
+
     [HttpGet("lookup")]
     public async Task<IActionResult> Lookup(CancellationToken ct) => Ok(await _cameraService.GetLookupAsync(ct));
 

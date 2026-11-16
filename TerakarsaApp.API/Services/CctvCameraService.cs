@@ -205,6 +205,49 @@ public class CctvCameraService
         return detail is null ? null : (detail.MtxPath, detail.Name);
     }
 
+    // Prompt 94: kamera untuk sebuah transaksi. Result set 1 = tertaut resource (atau divisi
+    // kalau resource tidak punya kamera), result set 2 = kamera lain di area yang sama.
+    public async Task<CctvForEventResponse> GetForEventAsync(int? resourceId, int? divisionId, CancellationToken ct = default)
+    {
+        var hasil = new CctvForEventResponse();
+        var conn = (SqlConnection)_db.Database.GetDbConnection();
+        var wasClosed = conn.State != ConnectionState.Open;
+        if (wasClosed) await conn.OpenAsync(ct);
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "cctv.SIS_Camera_ForEvent";
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.Parameters.Add(new SqlParameter("@ResourceId", (object?)resourceId ?? DBNull.Value));
+            cmd.Parameters.Add(new SqlParameter("@DivisionId", (object?)divisionId ?? DBNull.Value));
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            await BacaKameraEvent(reader, hasil.Cameras, ct);
+            if (await reader.NextResultAsync(ct)) await BacaKameraEvent(reader, hasil.Others, ct);
+            return hasil;
+        }
+        finally
+        {
+            if (wasClosed) await conn.CloseAsync();
+        }
+    }
+
+    private static async Task BacaKameraEvent(SqlDataReader reader, List<CctvEventCameraDto> list, CancellationToken ct)
+    {
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new CctvEventCameraDto
+            {
+                CameraId = reader.GetInt32(reader.GetOrdinal("CameraId")),
+                Name = reader.GetString(reader.GetOrdinal("Name")),
+                Area = Str(reader, "Area"),
+                MtxPath = reader.GetString(reader.GetOrdinal("MtxPath")),
+                MatchedBy = reader.GetString(reader.GetOrdinal("MatchedBy"))
+            });
+        }
+    }
+
     // Prompt 93: nama kamera hidup untuk path (nama file unduhan). Null kalau tidak ada.
     public async Task<string?> GetNameByPathAsync(string mtxPath, CancellationToken ct = default)
     {

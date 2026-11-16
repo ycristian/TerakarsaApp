@@ -1,0 +1,321 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cctv
+@inject CctvApiService CctvApi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 94 -- tombol "Lihat" (CCTV saat kejadian), mengikuti panel kanan mockup Transaksi.dc.html.
+   Komponen bersama: dipasang pertama di Laporan Bundle -> tab Riwayat; halaman lain menyusul.
+   TIDAK dirender sama sekali kalau user tidak punya module CCTV.
+   Rekaman diputar dari 30 detik sebelum sampai 60 detik sesudah EventTime (satu permintaan
+   playback 90 detik lewat rute Prompt 93). Tidak ada klip yang disimpan di server. *@
+
+@if (hasModule)
+{
+    <button type="button" class="cc-evbtn @CssClass" title="Lihat CCTV saat kejadian" @onclick="Buka" @onclick:stopPropagation="true">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+        Lihat
+    </button>
+
+    @if (open)
+    {
+        <div class="cc-panel-back" @onclick="Tutup"></div>
+        <div class="cc-panel cc-scope" role="dialog" aria-label="CCTV saat kejadian">
+            <div style="display:flex;align-items:flex-start;gap:8px">
+                <div class="cc-grow">
+                    <div class="cc-h">CCTV saat kejadian</div>
+                    <div class="cc-sub">@Subjudul</div>
+                </div>
+                <button type="button" class="cc-btn cc-btn-ico" aria-label="Tutup" @onclick="Tutup">
+                    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"></path><path d="M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            @if (loading)
+            {
+                <div class="cc-muted">Memuat kamera...</div>
+            }
+            else if (loadFailed)
+            {
+                <div class="cc-banner cc-banner-err">Gagal memuat kamera. Coba lagi.</div>
+            }
+            else if (AllCams.Count == 0)
+            {
+                <div class="cc-card">
+                    <div>Belum ada kamera untuk station ini</div>
+                    <a href="/cctv/kamera">Atur kamera di halaman Kamera</a>
+                </div>
+            }
+            else
+            {
+                @if (terlaluBaru)
+                {
+                    <div class="cc-banner">Rekaman belum tersedia, coba beberapa saat lagi</div>
+                }
+                else
+                {
+                    <div class="cc-video">
+                        <video id="@VideoId" muted playsinline style="@(playing ? "" : "visibility:hidden")"></video>
+                        @if (!string.IsNullOrEmpty(videoMessage))
+                        {
+                            <div class="cc-video-msg">@videoMessage</div>
+                        }
+                        @if (Selected is not null)
+                        {
+                            <div class="cc-stamp" style="font-size:12px;padding:3px 8px;left:10px;top:10px">@Selected.Name · @CctvWaktu.Jam(ClipStart.AddSeconds(currentSec))</div>
+                        }
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                        <div class="cc-evbar">
+                            <div class="cc-evbar-fill" style="width:@Persen(currentSec / ClipSeconds * 100)"></div>
+                            <div class="cc-evbar-mark" style="left:@Persen(BeforeSeconds / (double)ClipSeconds * 100)"></div>
+                        </div>
+                        <div class="cc-evlbl">
+                            <span>@CctvWaktu.Jam(ClipStart)</span>
+                            <span style="color:#9A3A06;font-weight:600">scan @CctvWaktu.Jam(EventAt)</span>
+                            <span>@CctvWaktu.Jam(ClipStart.AddSeconds(ClipSeconds))</span>
+                        </div>
+                    </div>
+
+                    <div class="cc-hint" style="font-size:13px">Diputar otomatis dari 30 detik sebelum scan sampai 60 detik sesudahnya.</div>
+                }
+
+                <div class="cc-field">
+                    <label class="cc-label" for="@($"{VideoId}-cam")">Kamera lain di area ini</label>
+                    <select id="@($"{VideoId}-cam")" class="cc-sel" value="@selectedId" @onchange="GantiKamera">
+                        @foreach (var c in AllCams)
+                        {
+                            <option value="@c.CameraId">@c.Name · @c.MtxPath</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="cc-row" style="gap:8px">
+                    <a class="cc-btn cc-btn-p" href="@PlaybackHref">Buka di Playback</a>
+                    <button type="button" class="cc-btn" disabled="@terlaluBaru" @onclick="Unduh">Unduh klip</button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    [Parameter, EditorRequired] public DateTime EventTime { get; set; }
+    [Parameter] public int? ResourceId { get; set; }
+    [Parameter] public int? DivisionId { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    private const int BeforeSeconds = 30;
+    private const int AfterSeconds = 60;
+    private const int ClipSeconds = BeforeSeconds + AfterSeconds;   // satu permintaan 90 detik
+    private const int MinAgeSeconds = 15;
+
+    private readonly string VideoId = "cc-ev-" + Guid.NewGuid().ToString("N")[..10];
+
+    private bool hasModule;
+    private bool open;
+    private bool loading;
+    private bool loadFailed;
+    private bool terlaluBaru;
+    private CctvForEventResponse data = new();
+    private int selectedId;
+
+    private bool playing;
+    private string? videoMessage;
+    private double currentSec;
+    private int clipSeq;
+
+    private DotNetObjectReference<CctvEventButton>? selfRef;
+    private System.Threading.Timer? tickTimer;
+    private bool disposed;
+
+    private DateTimeOffset EventAt => CctvWaktu.FromDateTime(EventTime);
+    private DateTimeOffset ClipStart => EventAt.AddSeconds(-BeforeSeconds);
+
+    private List<CctvEventCameraDto> AllCams => data.Cameras.Concat(data.Others).ToList();
+    private CctvEventCameraDto? Selected => AllCams.FirstOrDefault(c => c.CameraId == selectedId);
+
+    private string Subjudul
+    {
+        get
+        {
+            var waktu = $"{CctvWaktu.TanggalPendek(EventAt)} {CctvWaktu.Jam(EventAt)}";
+            return string.IsNullOrWhiteSpace(Title) ? waktu : $"{Title} · {waktu}";
+        }
+    }
+
+    private string PlaybackHref => Selected is null
+        ? "/cctv/playback"
+        : $"/cctv/playback?cameraId={Selected.CameraId}&at={Uri.EscapeDataString(CctvWaktu.Iso(ClipStart))}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null) return;
+        var state = await AuthState;
+        hasModule = state.User.HasClaim("module", "CCTV");
+    }
+
+    private async Task Buka()
+    {
+        open = true;
+        loading = true;
+        loadFailed = false;
+        videoMessage = null;
+        playing = false;
+        currentSec = 0;
+        terlaluBaru = (CctvWaktu.Now() - EventAt).TotalSeconds < MinAgeSeconds;
+        StateHasChanged();
+
+        var resp = await CctvApi.GetForEventAsync(ResourceId, DivisionId);
+        loading = false;
+        if (resp is null)
+        {
+            loadFailed = true;
+            return;
+        }
+
+        data = resp;
+        selectedId = data.Cameras.FirstOrDefault()?.CameraId ?? 0;
+        StateHasChanged();
+
+        if (selectedId > 0 && !terlaluBaru)
+        {
+            selfRef ??= DotNetObjectReference.Create(this);
+            tickTimer ??= new System.Threading.Timer(_ => InvokeAsync(Tick), null,
+                TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+            await Putar();
+        }
+    }
+
+    private async Task Putar()
+    {
+        var cam = Selected;
+        if (cam is null) return;
+
+        clipSeq++;
+        var seq = clipSeq;
+        playing = false;
+        currentSec = 0;
+        videoMessage = "Memuat rekaman...";
+        StateHasChanged();
+
+        var token = await CctvApi.GetStreamTokenAsync(cam.CameraId);
+        if (seq != clipSeq || !open) return;
+        if (token is null)
+        {
+            videoMessage = "Gagal meminta izin putar. Coba lagi.";
+            return;
+        }
+
+        // Cek dulu ada rekaman di rentang ini (pesan jelas, bukan galat video mentah).
+        var tanggal = DateOnly.FromDateTime(ClipStart.DateTime);
+        var spans = await CctvApi.GetRecordingsAsync(token.Path, token.Token, tanggal);
+        if (seq != clipSeq || !open) return;
+        if (spans is not null && !spans.Any(s => s.Start < ClipStart.AddSeconds(ClipSeconds) && s.End > ClipStart))
+        {
+            videoMessage = "Tidak ada rekaman pada jam itu";
+            return;
+        }
+
+        // Render dulu supaya elemen <video> pasti ada.
+        StateHasChanged();
+        await Task.Yield();
+
+        await JS.InvokeVoidAsync("cctvPlayer.playClip", VideoId,
+            CctvApi.PlaybackUrl(token.Path, token.Token, ClipStart, ClipSeconds), selfRef, seq, 0, 1);
+    }
+
+    [JSInvokable]
+    public Task OnClipState(int seq, string state)
+    {
+        if (disposed || seq != clipSeq) return Task.CompletedTask;
+        switch (state)
+        {
+            case "playing":
+                playing = true;
+                videoMessage = null;
+                break;
+            case "ended":
+                playing = true;
+                currentSec = ClipSeconds;
+                break;
+            case "error":
+                playing = false;
+                videoMessage = "Rekaman tidak bisa diputar.";
+                break;
+        }
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task Tick()
+    {
+        if (disposed || !open || !playing) return;
+        try
+        {
+            var info = await JS.InvokeAsync<ClipInfo?>("cctvPlayer.clipInfo", VideoId);
+            if (info is null) return;
+            currentSec = Math.Min(ClipSeconds, info.CurrentTime);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
+    private class ClipInfo
+    {
+        public double CurrentTime { get; set; }
+        public bool Paused { get; set; }
+        public double Duration { get; set; }
+    }
+
+    private async Task GantiKamera(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var id)) return;
+        selectedId = id;
+        if (!terlaluBaru) await Putar();
+    }
+
+    private async Task Unduh()
+    {
+        var cam = Selected;
+        if (cam is null) return;
+        var token = await CctvApi.GetStreamTokenAsync(cam.CameraId);
+        if (token is null)
+        {
+            videoMessage = "Gagal meminta izin unduh. Coba lagi.";
+            return;
+        }
+        await JS.InvokeVoidAsync("cctvPlayer.download",
+            CctvApi.PlaybackUrl(token.Path, token.Token, ClipStart, ClipSeconds, download: true));
+    }
+
+    private async Task Tutup()
+    {
+        open = false;
+        clipSeq++;
+        playing = false;
+        try { await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private static string Persen(double v) =>
+        Math.Clamp(v, 0, 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        tickTimer?.Dispose();
+        if (open)
+        {
+            try { await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId); }
+            catch (JSDisconnectedException) { }
+        }
+        selfRef?.Dispose();
+    }
+}

@@ -6,7 +6,7 @@
    Semua class berawalan cc- supaya tidak bentrok dengan tema admin.
    ============================================================= */
 
-.cctv {
+.cctv, .cc-scope {
     --cc-primary: #1F5FBF;
     --cc-primary-dark: #17488F;
     --cc-primary-soft: #E8F0FB;
@@ -23,7 +23,10 @@
     --cc-head: #EEF1F4;
     --cc-empty: #D5DBE3;
     --cc-marker: #E8590C;
+}
 
+/* .cctv = halaman /cctv; .cc-scope = komponen CCTV di halaman lain (variabel saja). */
+.cctv {
     min-height: 100vh;
     background: var(--cc-bg);
     font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;

@@ -102,6 +102,22 @@ public class CctvLookupItemDto
     public string? GroupName { get; set; }             // nama divisi untuk RESOURCE
 }
 
+// Prompt 94: kamera untuk sebuah transaksi (cctv.SIS_Camera_ForEvent).
+public class CctvEventCameraDto
+{
+    public int CameraId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Area { get; set; }
+    public string MtxPath { get; set; } = string.Empty;
+    public string MatchedBy { get; set; } = string.Empty;   // RESOURCE | DIVISION | AREA
+}
+
+public class CctvForEventResponse
+{
+    public List<CctvEventCameraDto> Cameras { get; set; } = new();   // tertaut resource / divisi
+    public List<CctvEventCameraDto> Others { get; set; } = new();    // kamera lain di area yang sama
+}
+
 public class CctvSyncResultDto
 {
     public bool Reachable { get; set; }

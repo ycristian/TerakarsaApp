@@ -422,7 +422,11 @@ BEGIN
         cu.FullName AS CreatedByName,
         awl.received_at AS ReceivedAt,
         rr.resource_name AS ReceivedByResourceName,
-        awl.received_remark AS ReceivedRemark
+        awl.received_remark AS ReceivedRemark,
+        -- Prompt 94: id pelaksana & divisi step untuk tombol "Lihat CCTV" -- kolom murni
+        -- tambahan di AKHIR, tanpa perubahan logika (lihat sql/cctv/alter_94_report_bundle_history.sql).
+        awl.resource_id AS ResourceId,
+        awl.division_id AS DivisionId
     FROM article_workflow_logs awl
     INNER JOIN article_workflows aw ON aw.article_workflow_id = awl.article_workflow_id
     LEFT JOIN divisions d ON d.division_id = awl.division_id

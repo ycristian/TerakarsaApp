@@ -140,6 +140,9 @@ public class BundleHistoryTimelineDto
     public DateTime? ReceivedAt { get; set; }
     public string? ReceivedByResourceName { get; set; }
     public string? ReceivedRemark { get; set; }
+    // Prompt 94: id pelaksana & divisi step -- tombol "Lihat CCTV" (CctvEventButton).
+    public int? ResourceId { get; set; }
+    public int? DivisionId { get; set; }
 }
 
 public class BundleHistoryResultDto

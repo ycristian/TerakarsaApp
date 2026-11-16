@@ -297,6 +297,9 @@ public class ReportBundleService
                     ReceivedAt = reader.IsDBNull(reader.GetOrdinal("ReceivedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedAt")),
                     ReceivedByResourceName = reader.IsDBNull(reader.GetOrdinal("ReceivedByResourceName")) ? null : reader.GetString(reader.GetOrdinal("ReceivedByResourceName")),
                     ReceivedRemark = reader.IsDBNull(reader.GetOrdinal("ReceivedRemark")) ? null : reader.GetString(reader.GetOrdinal("ReceivedRemark")),
+                    // Prompt 94: kolom tambahan di akhir SELECT timeline (tombol "Lihat CCTV").
+                    ResourceId = reader.IsDBNull(reader.GetOrdinal("ResourceId")) ? null : reader.GetInt32(reader.GetOrdinal("ResourceId")),
+                    DivisionId = reader.IsDBNull(reader.GetOrdinal("DivisionId")) ? null : reader.GetInt32(reader.GetOrdinal("DivisionId")),
                 });
             }
 

@@ -69,6 +69,24 @@ public class CctvApiService
         }
     }
 
+    // Prompt 94: null = gagal (bukan "tidak ada kamera").
+    public async Task<CctvForEventResponse?> GetForEventAsync(int? resourceId, int? divisionId)
+    {
+        var q = new List<string>();
+        if (resourceId.HasValue) q.Add($"resourceId={resourceId.Value}");
+        if (divisionId.HasValue) q.Add($"divisionId={divisionId.Value}");
+        try
+        {
+            var response = await _http.GetAsync("api/cctv/cameras/for-event" + (q.Count > 0 ? "?" + string.Join("&", q) : ""));
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<CctvForEventResponse>();
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
     // ==================== stream (Prompt 92) ====================
 
     public async Task<CctvStreamTokenDto?> GetStreamTokenAsync(int cameraId)
