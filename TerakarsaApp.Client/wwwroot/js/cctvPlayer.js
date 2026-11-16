@@ -188,6 +188,20 @@ window.cctvPlayer = (function () {
         return t;
     }
 
+    // Lompat ke detik t di potongan yang sedang diputar -- hanya kalau posisi itu bisa
+    // dicari (seekable/buffered). false -> .NET meminta potongan baru mulai dari posisi itu.
+    function seekTo(videoId, t) {
+        var v = document.getElementById(videoId);
+        if (!v || !v.src) return false;
+        function dalam(r) {
+            for (var i = 0; i < r.length; i++) { if (t >= r.start(i) && t <= r.end(i)) return true; }
+            return false;
+        }
+        if (!dalam(v.seekable) && !dalam(v.buffered)) return false;
+        v.currentTime = t;
+        return true;
+    }
+
     function togglePause(videoId) {
         var v = document.getElementById(videoId);
         if (!v) return true;
@@ -234,7 +248,7 @@ window.cctvPlayer = (function () {
     return {
         start: start, setToken: setToken, stop: stop, stopAll: stopAll, fullscreen: fullscreen,
         watchVisibility: watchVisibility, unwatchVisibility: unwatchVisibility,
-        playClip: playClip, clipInfo: clipInfo, seekBy: seekBy, togglePause: togglePause,
+        playClip: playClip, clipInfo: clipInfo, seekBy: seekBy, seekTo: seekTo, togglePause: togglePause,
         setRate: setRate, stopClip: stopClip, download: download, clickRatio: clickRatio
     };
 })();

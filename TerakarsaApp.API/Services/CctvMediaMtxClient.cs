@@ -17,6 +17,17 @@ public class CctvOptions
 
 public record CctvMtxPath(string Name, bool Ready, string? VideoCodec);
 
+// Prompt 93: waktu pabrik = WIB (UTC+7, tanpa DST). Semua waktu ke MediaMTX dikirim RFC3339 +07:00.
+public static class CctvTime
+{
+    public static readonly TimeSpan Wib = TimeSpan.FromHours(7);
+
+    public static DateTimeOffset ToWib(DateTimeOffset t) => t.ToOffset(Wib);
+
+    public static string ToRfc3339(DateTimeOffset t) =>
+        ToWib(t).ToString("yyyy-MM-dd'T'HH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture);
+}
+
 public record CctvMtxPathsResult(bool Reachable, List<CctvMtxPath> Paths);
 
 // Prompt 91: klien API kontrol MediaMTX (/v3/paths/list). Typed HttpClient, timeout 5 detik.
@@ -77,6 +88,57 @@ public class CctvMediaMtxClient
             if (ct.IsCancellationRequested) throw;
             _logger.LogWarning("MediaMTX API tidak terjangkau ({Pesan}).", ex.Message);
             return new CctvMtxPathsResult(false, new List<CctvMtxPath>());
+        }
+    }
+
+    // Prompt 93: daftar rekaman dari server playback MediaMTX:
+    //   GET {MtxPlaybackBaseUrl}/list?path=..&start=..&end=..   (start/end RFC3339, opsional)
+    // Jawaban: [{ "start": "<RFC3339>", "duration": <detik, angka ATAU string>, "url": ... }].
+    // 404 = tidak ada rekaman -> daftar kosong. Tidak terjangkau -> Reachable = false.
+    public async Task<(bool Reachable, List<(DateTimeOffset Start, DateTimeOffset End)> Spans)> ListRecordingsAsync(
+        string path, DateTimeOffset? start, DateTimeOffset? end, CancellationToken ct = default)
+    {
+        var spans = new List<(DateTimeOffset, DateTimeOffset)>();
+        var url = $"{_options.MtxPlaybackBaseUrl.TrimEnd('/')}/list?path={Uri.EscapeDataString(path)}";
+        if (start.HasValue) url += "&start=" + Uri.EscapeDataString(CctvTime.ToRfc3339(start.Value));
+        if (end.HasValue) url += "&end=" + Uri.EscapeDataString(CctvTime.ToRfc3339(end.Value));
+
+        try
+        {
+            using var resp = await _http.GetAsync(url, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return (true, spans);
+            resp.EnsureSuccessStatusCode();
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return (true, spans);
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (!item.TryGetProperty("start", out var s) || s.ValueKind != JsonValueKind.String) continue;
+                if (!DateTimeOffset.TryParse(s.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var st)) continue;
+
+                double dur = 0;
+                if (item.TryGetProperty("duration", out var d))
+                {
+                    if (d.ValueKind == JsonValueKind.Number) dur = d.GetDouble();
+                    else if (d.ValueKind == JsonValueKind.String)
+                        double.TryParse(d.GetString(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out dur);
+                }
+                if (dur <= 0) continue;
+
+                spans.Add((st, st.AddSeconds(dur)));
+            }
+
+            return (true, spans);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            if (ct.IsCancellationRequested) throw;
+            _logger.LogWarning("Server playback MediaMTX tidak terjangkau ({Pesan}).", ex.Message);
+            return (false, spans);
         }
     }
 

@@ -205,6 +205,15 @@ public class CctvCameraService
         return detail is null ? null : (detail.MtxPath, detail.Name);
     }
 
+    // Prompt 93: nama kamera hidup untuk path (nama file unduhan). Null kalau tidak ada.
+    public async Task<string?> GetNameByPathAsync(string mtxPath, CancellationToken ct = default)
+    {
+        var rows = await _db.Database
+            .SqlQueryRaw<CameraRow>("EXEC cctv.SIS_Camera_List @OnlyVisible = 0, @Area = NULL")
+            .ToListAsync(ct);
+        return rows.FirstOrDefault(r => string.Equals(r.MtxPath, mtxPath, StringComparison.OrdinalIgnoreCase))?.Name;
+    }
+
     // ==================== bantuan ====================
 
     private async Task<(bool Success, string Error, int Id)> ManageAsync(string sql, params SqlParameter[] parameters)

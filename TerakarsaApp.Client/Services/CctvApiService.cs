@@ -88,6 +88,44 @@ public class CctvApiService
     // URL playlist live lewat proxy API (TANPA token -- cctvPlayer.js menambahkan ?t= ke tiap request).
     public string HlsUrl(string path) => $"{ApiBaseUrl}/api/cctv/hls/{Uri.EscapeDataString(path)}/index.m3u8";
 
+    // ==================== playback (Prompt 93) ====================
+
+    // null = server rekaman tidak terjangkau / gagal.
+    public async Task<List<CctvRecordingSpanDto>?> GetRecordingsAsync(string path, string token, DateOnly date)
+    {
+        try
+        {
+            var response = await _http.GetAsync(
+                $"api/cctv/playback/{Uri.EscapeDataString(path)}/list?date={date:yyyy-MM-dd}&t={Uri.EscapeDataString(token)}");
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<List<CctvRecordingSpanDto>>() ?? new();
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<CctvRecordingRangeDto?> GetRecordingRangeAsync(string path, string token)
+    {
+        try
+        {
+            var response = await _http.GetAsync(
+                $"api/cctv/playback/{Uri.EscapeDataString(path)}/range?t={Uri.EscapeDataString(token)}");
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<CctvRecordingRangeDto>();
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    // URL <video src> (fMP4) / unduhan (MP4) lewat proxy API. start dikirim ISO8601 +07:00.
+    public string PlaybackUrl(string path, string token, DateTimeOffset start, int durationSec, bool download = false) =>
+        $"{ApiBaseUrl}/api/cctv/playback/{Uri.EscapeDataString(path)}/{(download ? "download" : "get")}" +
+        $"?start={Uri.EscapeDataString(CctvWaktu.Iso(start))}&duration={durationSec}&t={Uri.EscapeDataString(token)}";
+
     // ==================== bantuan ====================
 
     private static async Task<(bool Success, string Error, int Id)> Kirim(Task<HttpResponseMessage> task)

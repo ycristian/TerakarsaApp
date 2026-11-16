@@ -10,3 +10,18 @@ public class CctvStreamTokenDto
     public string Token { get; set; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; set; }
 }
+
+// Prompt 93: rentang rekaman (WIB, +07:00), sudah dipotong ke batas hari & digabung bila
+// bersambung (selisih <= 2 detik).
+public class CctvRecordingSpanDto
+{
+    public DateTimeOffset Start { get; set; }
+    public DateTimeOffset End { get; set; }
+}
+
+// Prompt 93: rekaman paling lama & paling baru yang masih tersedia di server playback.
+public class CctvRecordingRangeDto
+{
+    public DateTimeOffset? Oldest { get; set; }
+    public DateTimeOffset? Newest { get; set; }
+}

@@ -3,13 +3,571 @@
 @layout TerakarsaApp.Client.Layout.CctvLayout
 @using Microsoft.AspNetCore.Authorization
 @using TerakarsaApp.Client.Pages.Cctv.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cctv
+@inject CctvApiService CctvApi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 93 -- playback rekaman, mengikuti mockup Playback.dc.html.
+   Query opsional: cameraId, at (ISO8601) -- dipakai tombol dari Live dan Prompt 94.
+   Rekaman diputar per potongan maks 10 menit lewat proxy API
+   (api/cctv/playback/{path}/get?start=&duration=&t=); token diperbarui tiap ganti potongan.
+   Semua waktu WIB (CctvWaktu), tidak bergantung zona waktu perangkat. *@
 
 <PageTitle>CCTV · Playback</PageTitle>
 
-<CctvTabs Active="playback" />
+<CctvTabs Active="playback">Rekaman tersimpan 30 hari</CctvTabs>
 
 <div class="cc-body">
-    <div class="cc-card">
-        <div class="cc-h">Menyusul</div>
+    <div class="cc-pb">
+        <div class="cc-card cc-pb-side" style="gap:14px">
+            <div class="cc-field">
+                <label class="cc-label" for="pb-area">Area</label>
+                <select id="pb-area" class="cc-sel" value="@(selArea ?? "")" @onchange="GantiArea">
+                    <option value="">Semua area</option>
+                    @foreach (var a in areas)
+                    {
+                        <option value="@a">@a</option>
+                    }
+                </select>
+            </div>
+            <div class="cc-field">
+                <label class="cc-label" for="pb-cam">Kamera</label>
+                <select id="pb-cam" class="cc-sel" value="@selCameraId" @onchange="GantiKamera">
+                    <option value="0">— pilih kamera —</option>
+                    @foreach (var c in CamerasInArea)
+                    {
+                        <option value="@c.CameraId">@c.Name · @c.MtxPath</option>
+                    }
+                </select>
+            </div>
+            <div class="cc-field">
+                <label class="cc-label" for="pb-tgl">Tanggal</label>
+                <input id="pb-tgl" type="date" class="cc-inp" value="@date.ToString("yyyy-MM-dd")" @onchange="GantiTanggal" />
+            </div>
+            <div class="cc-field">
+                <label class="cc-label" for="pb-jam">Jam mulai</label>
+                <input id="pb-jam" type="time" step="1" class="cc-inp" value="@timeText" @onchange="@(e => timeText = e.Value?.ToString() ?? timeText)" />
+            </div>
+            <button type="button" class="cc-btn cc-btn-p" disabled="@(Cam is null || busy)" @onclick="PutarDariForm">Putar</button>
+            <div class="cc-hint">
+                @if (Cam is null)
+                {
+                    <span>Pilih kamera untuk melihat rekaman.</span>
+                }
+                else if (rangeLoading)
+                {
+                    <span>Memeriksa rekaman...</span>
+                }
+                else if (oldest is not null)
+                {
+                    <span>Rekaman paling lama: @CctvWaktu.Tanggal(oldest.Value). Yang lebih lama sudah terhapus otomatis.</span>
+                }
+                else if (serverDown)
+                {
+                    <span class="cc-c-offline">Server rekaman tidak terjangkau.</span>
+                }
+                else
+                {
+                    <span>Belum ada rekaman untuk kamera ini.</span>
+                }
+            </div>
+        </div>
+
+        <div class="cc-pb-main">
+            <div class="cc-video" id="cc-pb-box">
+                <video id="cc-pb-video" muted playsinline style="@(chunkActive ? "" : "visibility:hidden")"></video>
+                @if (!chunkActive)
+                {
+                    <svg class="cc-video-ph" aria-hidden="true" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#3A4654" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="position:absolute"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+                }
+                @if (Cam is not null && currentAbs is not null)
+                {
+                    <div class="cc-stamp">@Cam.Name · @CctvWaktu.Tanggal(currentAbs.Value) @CctvWaktu.Jam(currentAbs.Value)</div>
+                }
+                <div class="cc-stamp-r">REKAMAN</div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(message))
+            {
+                <div class="cc-banner">@message</div>
+            }
+
+            <div class="cc-card" style="padding:14px 16px">
+                <div class="cc-row" style="gap:8px">
+                    <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(-10)">− 10 dtk</button>
+                    <button type="button" class="cc-btn cc-btn-p" style="padding:0 20px" disabled="@(!chunkActive)" @onclick="JedaPutar">@(paused ? "Putar" : "Jeda")</button>
+                    <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(10)">+ 10 dtk</button>
+                    <div class="cc-row cc-grow" style="gap:6px;margin-left:8px">
+                        <label for="pb-speed" class="cc-sub" style="margin:0">Kecepatan</label>
+                        <select id="pb-speed" class="cc-sel" style="width:auto" value="@rate" @onchange="GantiKecepatan">
+                            <option value="1">1×</option>
+                            <option value="2">2×</option>
+                            <option value="4">4×</option>
+                        </select>
+                    </div>
+                    <button type="button" class="cc-btn" disabled="@(Cam is null)" @onclick="BukaUnduh">Unduh klip (MP4)</button>
+                </div>
+
+                <div class="cc-field">
+                    <div class="cc-label">Garis waktu @CctvWaktu.Tanggal(date) — klik jam untuk lompat</div>
+                    <div class="cc-tl-wrap" id="cc-tl" @onclick="KlikGarisWaktu">
+                        <div class="cc-tl">
+                            @for (var h = 0; h < 24; h++)
+                            {
+                                var jam = h;
+                                <div class="cc-tl-h">
+                                    <div class="cc-tl-bar">
+                                        @foreach (var (left, width) in FillJam(jam))
+                                        {
+                                            <div class="cc-tl-fill" style="left:@Persen(left);width:@Persen(width)"></div>
+                                        }
+                                    </div>
+                                    <div class="cc-tl-lbl">@jam.ToString("00")</div>
+                                </div>
+                            }
+                        </div>
+                        @if (PosisiPersen is double pos)
+                        {
+                            <div class="cc-tl-pos" style="left:@Persen(pos)"></div>
+                        }
+                    </div>
+                    <div class="cc-legend">
+                        <span><span class="cc-sw" style="background:#1F5FBF"></span>Ada rekaman</span>
+                        <span><span class="cc-sw" style="background:#D5DBE3"></span>Kosong (kamera offline / belum terjadi)</span>
+                        <span><span class="cc-sw" style="width:3px;height:12px;background:#E8590C"></span>Posisi putar</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+
+@if (downloadOpen)
+{
+    <div class="cc-modal-back" @onclick="() => downloadOpen = false">
+        <div class="cc-modal" @onclick:stopPropagation="true">
+            <div class="cc-h">Unduh klip (MP4)</div>
+            <div class="cc-sub" style="margin:0">Mulai dari @(downloadStart is null ? "-" : $"{CctvWaktu.Tanggal(downloadStart.Value)} {CctvWaktu.Jam(downloadStart.Value)}")</div>
+            <div class="cc-row" style="gap:8px">
+                <button type="button" class="cc-btn cc-grow" @onclick="() => Unduh(1)">1 menit</button>
+                <button type="button" class="cc-btn cc-grow" @onclick="() => Unduh(5)">5 menit</button>
+                <button type="button" class="cc-btn cc-grow" @onclick="() => Unduh(10)">10 menit</button>
+            </div>
+            <button type="button" class="cc-btn" @onclick="() => downloadOpen = false">Batal</button>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "cameraId")] public int? CameraIdQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "at")] public string? AtQuery { get; set; }
+
+    private const string VideoId = "cc-pb-video";
+    private const int ChunkSeconds = 600;     // potongan 10 menit
+
+    private List<CctvCameraDto> cameras = new();
+    private List<string> areas = new();
+    private string? selArea;
+    private int selCameraId;
+
+    private DateOnly date;
+    private string timeText = "00:00:00";
+
+    private List<CctvRecordingSpanDto> spans = new();
+    private DateTimeOffset? oldest;
+    private bool rangeLoading;
+    private bool serverDown;
+
+    // potongan aktif
+    private bool chunkActive;
+    private DateTimeOffset chunkStart;
+    private int chunkDur;
+    private int chunkSeq;
+    private DateTimeOffset? currentAbs;
+    private bool paused;
+    private double rate = 1;
+    private bool busy;
+
+    private string? message;
+    private bool downloadOpen;
+    private DateTimeOffset? downloadStart;
+
+    private DateTimeOffset? autoPlayAt;
+    private DotNetObjectReference<Playback>? selfRef;
+    private System.Threading.Timer? tickTimer;
+    private bool disposed;
+
+    private CctvCameraDto? Cam => cameras.FirstOrDefault(c => c.CameraId == selCameraId);
+
+    private List<CctvCameraDto> CamerasInArea => string.IsNullOrEmpty(selArea)
+        ? cameras
+        : cameras.Where(c => c.Area == selArea || c.CameraId == selCameraId).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var now = CctvWaktu.Now();
+        date = DateOnly.FromDateTime(now.DateTime);
+        timeText = CctvWaktu.Jam(now.AddMinutes(-5));
+
+        var resp = await CctvApi.GetCamerasAsync();
+        cameras = resp.Cameras;
+        areas = cameras.Select(c => c.Area).Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a!)
+            .Distinct().OrderBy(a => a).ToList();
+
+        if (CameraIdQuery is int qid && cameras.Any(c => c.CameraId == qid))
+        {
+            selCameraId = qid;
+            selArea = Cam?.Area;
+        }
+
+        if (!string.IsNullOrWhiteSpace(AtQuery)
+            && DateTimeOffset.TryParse(AtQuery.Replace(' ', '+'), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var at))
+        {
+            at = CctvWaktu.ToWib(at);
+            date = DateOnly.FromDateTime(at.DateTime);
+            timeText = CctvWaktu.Jam(at);
+            autoPlayAt = at;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed) return;
+
+        selfRef = DotNetObjectReference.Create(this);
+        tickTimer = new System.Threading.Timer(_ => InvokeAsync(Tick), null,
+            TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+
+        if (Cam is not null)
+        {
+            await MuatDataKamera();
+            if (autoPlayAt is DateTimeOffset at) await PutarDari(at);
+        }
+    }
+
+    // ==================== data rekaman ====================
+
+    private async Task MuatDataKamera()
+    {
+        oldest = null;
+        spans = new();
+        serverDown = false;
+        if (Cam is null) return;
+
+        rangeLoading = true;
+        StateHasChanged();
+        try
+        {
+            var token = await CctvApi.GetStreamTokenAsync(Cam.CameraId);
+            if (token is null)
+            {
+                serverDown = true;
+                return;
+            }
+
+            var rangeTask = CctvApi.GetRecordingRangeAsync(token.Path, token.Token);
+            var listTask = CctvApi.GetRecordingsAsync(token.Path, token.Token, date);
+            var range = await rangeTask;
+            var list = await listTask;
+
+            serverDown = range is null || list is null;
+            oldest = range?.Oldest;
+            spans = list ?? new();
+        }
+        finally
+        {
+            rangeLoading = false;
+        }
+    }
+
+    private async Task MuatSpans()
+    {
+        spans = new();
+        if (Cam is null) return;
+        var token = await CctvApi.GetStreamTokenAsync(Cam.CameraId);
+        if (token is null) return;
+        var list = await CctvApi.GetRecordingsAsync(token.Path, token.Token, date);
+        serverDown = list is null;
+        spans = list ?? new();
+    }
+
+    private CctvRecordingSpanDto? SpanBerisi(DateTimeOffset t) =>
+        spans.FirstOrDefault(s => s.Start <= t && t < s.End);
+
+    private CctvRecordingSpanDto? SpanBerikut(DateTimeOffset t) =>
+        spans.Where(s => s.Start >= t).OrderBy(s => s.Start).FirstOrDefault();
+
+    // ==================== pemutaran ====================
+
+    private async Task PutarDariForm()
+    {
+        if (!TimeOnly.TryParse(timeText, System.Globalization.CultureInfo.InvariantCulture, out var t))
+        {
+            message = "Jam mulai tidak valid.";
+            return;
+        }
+        await PutarDari(CctvWaktu.Of(date, t));
+    }
+
+    private async Task PutarDari(DateTimeOffset at)
+    {
+        if (Cam is null) return;
+        message = null;
+        at = CctvWaktu.ToWib(at);
+
+        // tanggal berbeda dari garis waktu -> muat rentang tanggal itu dulu
+        var tgl = DateOnly.FromDateTime(at.DateTime);
+        if (tgl != date)
+        {
+            date = tgl;
+            await MuatSpans();
+        }
+
+        var span = SpanBerisi(at);
+        if (span is null)
+        {
+            message = "Tidak ada rekaman pada jam itu";
+            return;
+        }
+
+        await MulaiPotongan(at, span);
+    }
+
+    private async Task MulaiPotongan(DateTimeOffset start, CctvRecordingSpanDto span)
+    {
+        if (Cam is null) return;
+        busy = true;
+        try
+        {
+            // token baru tiap ganti potongan (potongan 10 menit = umur token)
+            var token = await CctvApi.GetStreamTokenAsync(Cam.CameraId);
+            if (token is null)
+            {
+                message = "Gagal meminta izin putar. Coba lagi.";
+                return;
+            }
+
+            var sisa = (int)Math.Ceiling((span.End - start).TotalSeconds);
+            chunkStart = start;
+            chunkDur = Math.Clamp(sisa, 1, ChunkSeconds);
+            chunkSeq++;
+            chunkActive = true;
+            paused = false;
+            currentAbs = start;
+            timeText = CctvWaktu.Jam(start);
+
+            var url = CctvApi.PlaybackUrl(token.Path, token.Token, start, chunkDur);
+            await JS.InvokeVoidAsync("cctvPlayer.playClip", VideoId, url, selfRef, chunkSeq, 0, rate);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnClipState(int seq, string state)
+    {
+        if (disposed || seq != chunkSeq) return;
+
+        if (state == "ended")
+        {
+            // lanjut otomatis ke potongan berikutnya
+            var next = chunkStart.AddSeconds(chunkDur);
+            var span = SpanBerisi(next) ?? SpanBerikut(next);
+            if (span is null || DateOnly.FromDateTime(CctvWaktu.ToWib(span.Start).DateTime) != date)
+            {
+                message = "Rekaman pada tanggal ini sudah habis.";
+                paused = true;
+                StateHasChanged();
+                return;
+            }
+            await MulaiPotongan(next < span.Start ? span.Start : next, span);
+        }
+        else if (state == "error")
+        {
+            chunkActive = false;
+            currentAbs = null;
+            message = "Rekaman tidak bisa diputar pada jam itu.";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task Tick()
+    {
+        if (disposed || !chunkActive) return;
+        try
+        {
+            var info = await JS.InvokeAsync<ClipInfo?>("cctvPlayer.clipInfo", VideoId);
+            if (info is null) return;
+            currentAbs = chunkStart.AddSeconds(info.CurrentTime);
+            paused = info.Paused;
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
+    private class ClipInfo
+    {
+        public double CurrentTime { get; set; }
+        public bool Paused { get; set; }
+        public double Duration { get; set; }
+    }
+
+    private async Task Geser(int detik)
+    {
+        if (!chunkActive || currentAbs is null) return;
+        var target = currentAbs.Value.AddSeconds(detik);
+        var offset = (target - chunkStart).TotalSeconds;
+
+        if (offset >= 0 && offset < chunkDur
+            && await JS.InvokeAsync<bool>("cctvPlayer.seekTo", VideoId, offset))
+        {
+            currentAbs = target;
+            return;
+        }
+
+        // di luar potongan / belum bisa dicari -> minta potongan baru dari posisi itu
+        await PutarDari(target);
+    }
+
+    private async Task JedaPutar()
+    {
+        paused = await JS.InvokeAsync<bool>("cctvPlayer.togglePause", VideoId);
+    }
+
+    private async Task GantiKecepatan(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var r) || r is not (1 or 2 or 4)) return;
+        rate = r;
+        await JS.InvokeVoidAsync("cctvPlayer.setRate", VideoId, rate);
+    }
+
+    // ==================== form ====================
+
+    private async Task Berhenti()
+    {
+        chunkSeq++;
+        chunkActive = false;
+        currentAbs = null;
+        await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId);
+    }
+
+    private async Task GantiArea(ChangeEventArgs e)
+    {
+        selArea = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString();
+        if (Cam is not null && selArea is not null && Cam.Area != selArea)
+        {
+            selCameraId = 0;
+            await Berhenti();
+            spans = new();
+            oldest = null;
+        }
+    }
+
+    private async Task GantiKamera(ChangeEventArgs e)
+    {
+        selCameraId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+        message = null;
+        await Berhenti();
+        await MuatDataKamera();
+    }
+
+    private async Task GantiTanggal(ChangeEventArgs e)
+    {
+        if (!DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", out var d)) return;
+        date = d;
+        message = null;
+        await MuatSpans();
+    }
+
+    // ==================== garis waktu ====================
+
+    private IEnumerable<(double Left, double Width)> FillJam(int jam)
+    {
+        var hs = CctvWaktu.DayStart(date).AddHours(jam);
+        var he = hs.AddHours(1);
+        foreach (var s in spans)
+        {
+            var a = s.Start > hs ? s.Start : hs;
+            var b = s.End < he ? s.End : he;
+            if (b <= a) continue;
+            yield return ((a - hs).TotalSeconds / 36.0, Math.Max(0.5, (b - a).TotalSeconds / 36.0));
+        }
+    }
+
+    private double? PosisiPersen
+    {
+        get
+        {
+            if (currentAbs is null) return null;
+            var pos = (currentAbs.Value - CctvWaktu.DayStart(date)).TotalSeconds / 864.0;
+            return pos is < 0 or > 100 ? null : pos;
+        }
+    }
+
+    private static string Persen(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private async Task KlikGarisWaktu(MouseEventArgs e)
+    {
+        if (Cam is null) return;
+        var ratio = await JS.InvokeAsync<double>("cctvPlayer.clickRatio", "cc-tl", e.ClientX);
+        if (ratio < 0) return;
+
+        var menit = Math.Min(1439, (int)Math.Floor(ratio * 1440));
+        var t = CctvWaktu.DayStart(date).AddMinutes(menit);
+
+        // ketelitian menit: pakai bagian pertama menit itu yang punya rekaman
+        var span = spans.FirstOrDefault(s => s.Start < t.AddMinutes(1) && s.End > t);
+        if (span is null)
+        {
+            message = "Tidak ada rekaman pada jam itu";
+            return;
+        }
+
+        await PutarDari(span.Start > t ? span.Start : t);
+    }
+
+    // ==================== unduh ====================
+
+    private void BukaUnduh()
+    {
+        if (currentAbs is not null) downloadStart = currentAbs;
+        else if (TimeOnly.TryParse(timeText, System.Globalization.CultureInfo.InvariantCulture, out var t))
+            downloadStart = CctvWaktu.Of(date, t);
+        else downloadStart = null;
+        downloadOpen = true;
+    }
+
+    private async Task Unduh(int menit)
+    {
+        downloadOpen = false;
+        if (Cam is null || downloadStart is null) return;
+
+        var token = await CctvApi.GetStreamTokenAsync(Cam.CameraId);
+        if (token is null)
+        {
+            message = "Gagal meminta izin unduh. Coba lagi.";
+            return;
+        }
+
+        var dur = Math.Clamp(menit * 60, 1, 600);   // maks 10 menit per permintaan
+        await JS.InvokeVoidAsync("cctvPlayer.download",
+            CctvApi.PlaybackUrl(token.Path, token.Token, downloadStart.Value, dur, download: true));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        tickTimer?.Dispose();
+        try { await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId); }
+        catch (JSDisconnectedException) { }
+        selfRef?.Dispose();
+    }
+}
