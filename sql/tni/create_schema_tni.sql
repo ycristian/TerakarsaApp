@@ -677,3 +677,17 @@ IF COL_LENGTH('tni.satuan','prioritas_perangkat_id') IS NULL
     ALTER TABLE tni.satuan ADD prioritas_perangkat_id int null
         constraint FK_tni_satuan_prioritas_perangkat foreign key references tni.perangkat(perangkat_id);
 GO
+
+-- 2026-11-11 (alter_81): KUNCI STOK satuan di Perintah Kerja -- stok bebas disisihkan
+-- untuk kebutuhan BELUM_CETAK satuan ini (pembagian di tni.v_stok_kunci, v_stok.sql).
+-- kunci_stok_at terisi = terkunci; diubah hanya lewat tni.SIS_Satuan_Manage 'KUNCI_STOK'.
+IF COL_LENGTH('tni.satuan','kunci_stok_at') IS NULL
+    ALTER TABLE tni.satuan ADD kunci_stok_at datetime2 null;
+GO
+IF COL_LENGTH('tni.satuan','kunci_stok_by') IS NULL
+    ALTER TABLE tni.satuan ADD kunci_stok_by int null;
+GO
+IF COL_LENGTH('tni.satuan','kunci_stok_perangkat_id') IS NULL
+    ALTER TABLE tni.satuan ADD kunci_stok_perangkat_id int null
+        constraint FK_tni_satuan_kunci_stok_perangkat foreign key references tni.perangkat(perangkat_id);
+GO

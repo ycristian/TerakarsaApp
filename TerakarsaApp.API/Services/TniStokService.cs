@@ -218,6 +218,36 @@ public class TniStokService
         }
     }
 
+    // 2026-11-11: Stock Opname -- Items = hitung fisik, SP yang menghitung selisih.
+    public async Task<(bool Success, string Error, TniStokOpnameHasilDto? Hasil)> OpnameAsync(
+        int orderId, TniStokOpnameRequest request, int userId, int? perangkatId = null)
+    {
+        var json = JsonSerializer.Serialize(request.Items, JsonOpts);
+
+        try
+        {
+            var result = await _db.Database
+                .SqlQueryRaw<TniStokOpnameHasilDto>(
+                    @"EXEC tni.SIS_Stok_Manage @Action = 'OPNAME', @OrderId = @OrderId, @Tanggal = @Tanggal,
+                        @Items = @Items, @Alasan = @Alasan, @UserId = @UserId, @PerangkatId = @PerangkatId",
+                    new SqlParameter("@OrderId", orderId),
+                    new SqlParameter("@Tanggal", request.Tanggal.HasValue
+                        ? request.Tanggal.Value.Date : (object)DBNull.Value),
+                    new SqlParameter("@Items", json),
+                    new SqlParameter("@Alasan", string.IsNullOrWhiteSpace(request.Catatan)
+                        ? DBNull.Value : request.Catatan.Trim()),
+                    new SqlParameter("@UserId", userId),
+                    new SqlParameter("@PerangkatId", perangkatId ?? (object)DBNull.Value))
+                .ToListAsync();
+
+            return (true, string.Empty, result.FirstOrDefault());
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message, null);
+        }
+    }
+
     // Hapus (soft) satu pengeluaran beserta seluruh isinya.
     public async Task<(bool Success, string Error)> HapusKeluarAsync(int orderId, int keluarId, int userId)
     {

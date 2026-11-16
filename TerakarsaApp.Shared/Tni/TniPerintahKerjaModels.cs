@@ -56,6 +56,10 @@ public class TniRawatanDto
     public int PakaiSizePrioritas { get; set; }
     public int StokSizePrioritas { get; set; }
 
+    // Stok bebas yang dikunci satuan bergembok di rawatan ini (alter_81).
+    public int DikunciKemeja { get; set; }
+    public int DikunciCelana { get; set; }
+
     public int PersenSelesai =>
         TotalPersonel == 0 ? 0 : (int)Math.Round(SudahMasukBox * 100.0 / TotalPersonel);
 }
@@ -79,6 +83,12 @@ public class TniSatuanSaranDto
 
     // Bintang prioritas (tni.satuan.prioritas_at, alter_78) -- selalu di urutan teratas.
     public bool IsPrioritas { get; set; }
+
+    // Gembok kunci stok (tni.satuan.kunci_stok_at, alter_81): stok bebas disisihkan untuk
+    // kebutuhan BELUM_CETAK satuan ini; Dikunci* = jatah yang sedang ditahan untuknya.
+    public bool IsKunciStok { get; set; }
+    public int DikunciKemeja { get; set; }
+    public int DikunciCelana { get; set; }
 
     // Filter size prioritas aktif: berapa dari BisaDibuat yang memakai size itu.
     public int BisaSizePrioritas { get; set; }
@@ -105,12 +115,25 @@ public class TniSatuanPrioritasRequest
     public bool Prioritas { get; set; }
 }
 
+public class TniSatuanKunciStokRequest
+{
+    public bool Kunci { get; set; }
+}
+
 // Kekurangan per pola, untuk ringkasan "kurang 20 kemeja LD_108_P".
 public class TniKekuranganDto
 {
     public string JenisItem { get; set; } = string.Empty;   // KEMEJA | CELANA
     public string Kode { get; set; } = string.Empty;
     public int Kurang { get; set; }
+
+    // P | PG | W | WH (kemeja), P | W (celana) -- sama dengan halaman Stok.
+    // List sudah terurut dari API: kemeja dulu, lalu grup, lalu size.
+    public string GrupGender { get; set; } = string.Empty;
+
+    // Bintang: ada personel yang barang pasangannya SUDAH ada di stok, tinggal menunggu
+    // pola ini -- begitu pola ini masuk, setnya langsung jadi. Prioritaskan produksinya.
+    public bool AdaPasangan { get; set; }
 }
 
 // Satu orang di tab "Belum bisa", beserta pola yang kurang.
@@ -144,6 +167,11 @@ public class TniSatuanDetailDto
     // Filter size prioritas: barang size terpilih yang terpakai vs total stok bebasnya.
     public int PakaiSizePrioritas { get; set; }
     public int StokSizePrioritas { get; set; }
+
+    // polaId -> stok yang boleh dipakai satuan ini (bebas tanpa kunci + jatah kuncinya
+    // sendiri), > 0 saja. Untuk kolom Stok/Sisa di konfirmasi cetak.
+    public Dictionary<int, int> TersediaKemeja { get; set; } = new();
+    public Dictionary<int, int> TersediaCelana { get; set; } = new();
 }
 
 // Satu kartu yang sudah tercetak tapi belum di-scan Set Jadi.
@@ -158,6 +186,10 @@ public class TniDijatahDto
     public DateTime? PrintedAt { get; set; }
     public int PrintCount { get; set; }
     public string? PrintedByNama { get; set; }
+    // Job kartu terakhir di dbo.print_jobs (urutan keluar printer + status printer).
+    public int? PrintJobId { get; set; }
+    public string? PrintJobStatus { get; set; }      // DONE / ERROR / PENDING / ...
+    public DateTime? PrintJobPrintedAt { get; set; }
 }
 
 public class TniCetakRequest

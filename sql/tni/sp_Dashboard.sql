@@ -136,7 +136,7 @@ GO
 --            pola ini; DIFILTER @AreaId bila diisi.
 --            2026-10-07: juga DIFILTER @SatuanId bila diisi.
 -- saldo      stok GLOBAL dari tni.v_stok_pola -- tidak dibagi per area.
--- stok_bebas saldo - dijatah (kartu DICETAK), juga global.
+-- stok_bebas saldo - dijatah (kartu DICETAK) - dikunci satuan (2026-11-11), juga global.
 -- selisih    saldo - butuh; negatif = harus diproduksi.
 -- ============================================================
 CREATE OR ALTER PROCEDURE tni.SIS_Dashboard_KebutuhanSize
@@ -176,12 +176,17 @@ BEGIN
            sp.is_active        AS IsActive,
            ISNULL(b.butuh, 0)  AS Butuh,
            sp.saldo            AS Saldo,
-           sp.stok_bebas       AS StokBebas,
+           -- 2026-11-11 (alter_81): stok yang dikunci satuan tidak dihitung bebas.
+           sp.stok_bebas - ISNULL(k.dikunci, 0) AS StokBebas,
            sp.dijatah          AS Dijatah,
            sp.saldo - ISNULL(b.butuh, 0) AS Selisih,
            sp.grup_gender      AS GrupGender
     FROM tni.v_stok_pola sp
     LEFT JOIN butuh b ON b.pola_id = sp.pola_id
+    OUTER APPLY (SELECT SUM(x.dikunci) AS dikunci
+                   FROM tni.v_stok_kunci x
+                  WHERE x.order_id = sp.order_id AND x.jenis_item = sp.jenis_item
+                    AND x.pola_id = sp.pola_id) k
     WHERE sp.order_id = @OrderId
       AND sp.jenis_item = @JenisItem
       -- pola yang tidak dibutuhkan DAN tidak ada stoknya tidak perlu ditampilkan

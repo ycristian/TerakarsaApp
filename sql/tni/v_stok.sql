@@ -155,3 +155,73 @@ OUTER APPLY (
 WHERE o.deleted_at IS NULL
   AND pc.deleted_at IS NULL;
 GO
+
+/* =============================================================
+   tni.v_stok_kunci -- STOK YANG DIKUNCI SATUAN (2026-11-11, alter_81)
+
+   Satuan dengan tni.satuan.kunci_stok_at terisi menyisihkan stok bebas
+   (saldo - dijatah, minus dianggap 0) untuk kebutuhan personelnya yang masih
+   BELUM_CETAK, PER POLA -- bukan per pasang: kemeja yang celananya belum ada
+   tetap ditahan untuk satuan itu.
+
+   Beberapa satuan butuh pola yang sama -> antre menurut kunci_stok_at
+   (yang dikunci DULUAN dapat duluan), lalu satuan_id.
+
+   Satu baris per (order, satuan terkunci, jenis, pola) yang masih dibutuhkan.
+     butuh    personel BELUM_CETAK satuan itu dengan pola ini
+     dikunci  bagian stok bebas yang disisihkan (0..butuh)
+
+   Begitu kartu dicetak, personel pindah ke DICETAK -> masuk "dijatah" di
+   v_stok_pola dan keluar dari "butuh" di sini, jadi tidak dihitung dua kali.
+   v_stok_pola.stok_bebas TIDAK dikurangi kunci -- pengurangan dilakukan di
+   pemakainya (SIS_Stok_Saldo, SIS_Dashboard_KebutuhanSize, saran Perintah Kerja),
+   karena satuan pemilik kunci tetap boleh memakai stok ini.
+   ============================================================= */
+CREATE OR ALTER VIEW tni.v_stok_kunci
+AS
+WITH butuh AS (
+    SELECT v.order_id, v.satuan_id, s.kunci_stok_at,
+           CAST('KEMEJA' AS VARCHAR(10)) AS jenis_item,
+           v.pola_kemeja_id AS pola_id,
+           COUNT(*) AS butuh
+    FROM tni.v_personel v
+    JOIN tni.satuan s ON s.satuan_id = v.satuan_id
+    WHERE s.kunci_stok_at IS NOT NULL
+      AND s.deleted_at IS NULL
+      AND v.status_progres = 'BELUM_CETAK'
+    GROUP BY v.order_id, v.satuan_id, s.kunci_stok_at, v.pola_kemeja_id
+
+    UNION ALL
+
+    SELECT v.order_id, v.satuan_id, s.kunci_stok_at,
+           CAST('CELANA' AS VARCHAR(10)),
+           v.pola_celana_id,
+           COUNT(*)
+    FROM tni.v_personel v
+    JOIN tni.satuan s ON s.satuan_id = v.satuan_id
+    WHERE s.kunci_stok_at IS NOT NULL
+      AND s.deleted_at IS NULL
+      AND v.status_progres = 'BELUM_CETAK'
+    GROUP BY v.order_id, v.satuan_id, s.kunci_stok_at, v.pola_celana_id
+),
+antre AS (
+    SELECT b.*,
+           SUM(b.butuh) OVER (PARTITION BY b.order_id, b.jenis_item, b.pola_id
+                              ORDER BY b.kunci_stok_at, b.satuan_id
+                              ROWS UNBOUNDED PRECEDING) - b.butuh AS butuh_sebelum
+    FROM butuh b
+)
+SELECT a.order_id,
+       a.satuan_id,
+       a.kunci_stok_at,
+       a.jenis_item,
+       a.pola_id,
+       a.butuh,
+       CASE WHEN x.bebas <= a.butuh_sebelum           THEN 0
+            WHEN x.bebas - a.butuh_sebelum >= a.butuh THEN a.butuh
+            ELSE x.bebas - a.butuh_sebelum END AS dikunci
+FROM antre a
+JOIN tni.v_stok_pola sp
+  ON sp.order_id = a.order_id AND sp.jenis_item = a.jenis_item AND sp.pola_id = a.pola_id
+CROSS APPLY (SELECT CASE WHEN sp.stok_bebas > 0 THEN sp.stok_bebas ELSE 0 END AS bebas) x;
+GO

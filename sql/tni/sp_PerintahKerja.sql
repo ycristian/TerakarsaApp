@@ -15,7 +15,8 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- ============================================================
--- DATA -- 3 result set: kandidat + stok bebas kemeja + stok bebas celana
+-- DATA -- 4 result set: kandidat + stok bebas kemeja + stok bebas celana
+--         + stok dikunci satuan (2026-11-11)
 -- ============================================================
 -- Kandidat = personel order aktif berstatus BELUM_CETAK.
 CREATE OR ALTER PROCEDURE tni.SIS_PerintahKerja_Data
@@ -49,10 +50,15 @@ BEGIN
     ORDER BY v.satuan_code, v.kode_ref;
 
     -- (2) stok bebas kemeja per pola
+    --     GrupGender/Urut* (2026-11-10): rekap kekurangan dipisah & diurut sama dengan halaman Stok.
     SELECT s.pola_id   AS PolaId,
            s.kode      AS Kode,
            s.stok_bebas AS StokBebas,
-           s.saldo     AS Saldo
+           s.saldo     AS Saldo,
+           s.grup_gender AS GrupGender,
+           s.urut_gender AS UrutGender,
+           s.urut_varian AS UrutVarian,
+           s.urut_size   AS UrutSize
     FROM tni.v_stok_pola s
     WHERE s.order_id = @OrderId AND s.jenis_item = 'KEMEJA';
 
@@ -60,9 +66,23 @@ BEGIN
     SELECT s.pola_id   AS PolaId,
            s.kode      AS Kode,
            s.stok_bebas AS StokBebas,
-           s.saldo     AS Saldo
+           s.saldo     AS Saldo,
+           s.grup_gender AS GrupGender,
+           s.urut_gender AS UrutGender,
+           s.urut_varian AS UrutVarian,
+           s.urut_size   AS UrutSize
     FROM tni.v_stok_pola s
     WHERE s.order_id = @OrderId AND s.jenis_item = 'CELANA';
+
+    -- (4) 2026-11-11 (alter_81): stok bebas yang DIKUNCI satuan, per satuan per pola.
+    --     SEMUA satuan terkunci di order ini (tidak difilter @AreaId/@SatuanId) --
+    --     API butuh totalnya untuk menghitung stok bebas yang boleh dipakai satuan lain.
+    SELECT k.satuan_id  AS SatuanId,
+           k.jenis_item AS JenisItem,
+           k.pola_id    AS PolaId,
+           k.dikunci    AS Dikunci
+    FROM tni.v_stok_kunci k
+    WHERE k.order_id = @OrderId AND k.dikunci > 0;
 END;
 GO
 
@@ -84,14 +104,27 @@ BEGIN
            v.pola_celana_kode AS PolaCelanaKode,
            v.printed_at       AS PrintedAt,
            v.print_count      AS PrintCount,
-           COALESCE(ptc.nama_petugas, u.FullName) AS PrintedByNama
+           COALESCE(ptc.nama_petugas, u.FullName) AS PrintedByNama,
+           -- 2026-11-10: job kartu terakhir -> urutan keluar printer + status printer
+           -- (kertas habis / printer mati -> perlu cetak ulang).
+           j.print_job_id     AS PrintJobId,
+           j.status           AS PrintJobStatus,
+           j.printed_at       AS PrintJobPrintedAt
     FROM tni.v_personel v
     LEFT JOIN Users u ON u.Id = v.printed_by
     LEFT JOIN tni.perangkat ptc ON ptc.perangkat_id = v.printed_perangkat_id
+    OUTER APPLY (SELECT TOP 1 pj.print_job_id, pj.status, pj.printed_at
+                   FROM dbo.print_jobs pj
+                  WHERE pj.job_type = 'TNI_KARTU'
+                    AND pj.ref_id = v.personel_id
+                    AND pj.deleted_at IS NULL
+                  ORDER BY pj.print_job_id DESC) j
     WHERE v.order_id = @OrderId
       AND v.satuan_id = @SatuanId
       AND v.status_progres = 'DICETAK'
-    ORDER BY v.kode_ref;
+    -- Batch cetak terbaru di atas (satu batch = printed_at sama, satu transaksi);
+    -- di dalam batch urut seperti keluar dari printer.
+    ORDER BY v.printed_at DESC, j.print_job_id, v.kode_ref;
 END;
 GO
 

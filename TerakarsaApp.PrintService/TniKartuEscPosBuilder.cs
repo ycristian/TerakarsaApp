@@ -218,13 +218,12 @@ public static class TniKartuEscPosBuilder
         // Semua ukuran font NORMAL (permintaan owner 2026-11-09) -- tidak ada GS ! besar.
         W(ESC, 0x40);
 
-        // ---------- kepala ----------
+        // ---------- kepala: hanya waktu cetak - petugas, font kecil (Font B) -- owner 2026-11-10
+        // (judul order & tulisan "REKAP SIZE" dibuang supaya hemat kertas) ----------
         Center();
-        Line(Cut(p.JudulOrder, Width));
-        Bold(true);
-        Line("REKAP SIZE");
-        Bold(false);
+        W(ESC, 0x4D, 0x01); // ESC M 1 : font B
         Line(Cut(RekapSubjudul(p), Width));
+        W(ESC, 0x4D, 0x00); // ESC M 0 : kembali font A
         Left();
         Line(new string('=', Width));
 
@@ -234,20 +233,13 @@ public static class TniKartuEscPosBuilder
         Line(KodeQty("TOTAL KARTU", p.TotalKartu, kolom));
         Bold(false);
 
-        // ---------- celana lalu kemeja (urutan sama dengan urutan cetak kartu) ----------
-        void Bagian(string judul, List<TniKartuRekapItem> items)
-        {
-            Line(new string('-', Width));
-            Bold(true);
-            Line(judul);
-            Bold(false);
-
-            foreach (var it in items)
-                Line(KodeQty(it.Kode, it.Jumlah, kolom));
-        }
-
-        Bagian("CELANA", p.Celana);
-        Bagian("KEMEJA", p.Kemeja);
+        // ---------- kemeja kiri, celana kanan (2 kolom, hemat kertas -- owner 2026-11-10) ----------
+        Line(new string('-', Width));
+        Bold(true);
+        Line(DuaKolom("KEMEJA", "CELANA"));
+        Bold(false);
+        foreach (var baris in RekapBarisDuaKolom(p))
+            Line(baris);
 
         Line(new string('=', Width));
 
@@ -262,20 +254,15 @@ public static class TniKartuEscPosBuilder
         var sb = new StringBuilder();
         void L(string s = "") => sb.AppendLine(s);
 
-        L(CenterText(Cut(p.JudulOrder, Width), Width));
-        L(CenterText("REKAP SIZE", Width) + "   [tebal]");
-        L(CenterText(Cut(RekapSubjudul(p), Width), Width));
+        L(CenterText(Cut(RekapSubjudul(p), Width), Width) + "   [font kecil]");
         L(new string('=', Width));
         var kolom = RekapKolom(p);
         L(KodeQty("TOTAL KARTU", p.TotalKartu, kolom) + "   [tebal]");
 
-        foreach (var (judul, items) in new[] { ("CELANA", p.Celana), ("KEMEJA", p.Kemeja) })
-        {
-            L(new string('-', Width));
-            L(judul + "   [tebal]");
-            foreach (var it in items)
-                L(KodeQty(it.Kode, it.Jumlah, kolom));
-        }
+        L(new string('-', Width));
+        L(DuaKolom("KEMEJA", "CELANA") + "   [tebal]");
+        foreach (var baris in RekapBarisDuaKolom(p))
+            L(baris);
 
         L(new string('=', Width));
         L();
@@ -295,6 +282,27 @@ public static class TniKartuEscPosBuilder
                 .Select(x => Ascii(x.Kode).Length)
                 .Append("TOTAL KARTU".Length)
                 .Max() + 1;
+
+    // Dua kolom selebar setengah kertas: kiri 23 karakter + '|' + kanan.
+    private const int KolomKiri = Width / 2 - 1;
+
+    private static string DuaKolom(string kiri, string kanan) =>
+        Pad(kiri, KolomKiri) + "| " + Cut(kanan, Width - KolomKiri - 2);
+
+    // Baris ke-i = kemeja ke-i (kiri) dan celana ke-i (kanan); sisi yang habis dibiarkan kosong.
+    private static IEnumerable<string> RekapBarisDuaKolom(TniKartuRekapPayload p)
+    {
+        // Lebar kode sama di kedua sisi supaya ':' sejajar; sisakan tempat untuk ': 9999'.
+        var kolom = Math.Min(
+            p.Celana.Concat(p.Kemeja).Select(x => Ascii(x.Kode).Length).DefaultIfEmpty(0).Max() + 1,
+            KolomKiri - 6);
+        string Sel(List<TniKartuRekapItem> items, int i) =>
+            i < items.Count ? KodeQty(items[i].Kode, items[i].Jumlah, kolom) : string.Empty;
+
+        var n = Math.Max(p.Celana.Count, p.Kemeja.Count);
+        for (var i = 0; i < n; i++)
+            yield return DuaKolom(Sel(p.Kemeja, i), Sel(p.Celana, i)).TrimEnd();
+    }
 
     private static string KodeQty(string kode, int jumlah, int kolom) =>
         Pad(kode, Math.Min(kolom, Width - 8)) + ": " + jumlah.ToString(CultureInfo.InvariantCulture);

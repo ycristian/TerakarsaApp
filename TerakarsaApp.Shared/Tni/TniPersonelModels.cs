@@ -15,19 +15,31 @@ public class TniBerandaSummaryDto
     public int KartuBelumScan { get; set; }       // DICETAK
     public int PerluReview { get; set; }
     public int PembatalanMenunggu { get; set; }
+    public int BoxTotal { get; set; }             // box order ini (tidak terhapus)
+    public int BoxTerbuka { get; set; }           // packed_at NULL
 
     public int PersenBox => Total == 0 ? 0 : (int)Math.Round(MasukBox * 100.0 / Total);
     public int PersenKirim => Total == 0 ? 0 : (int)Math.Round(Terkirim * 100.0 / Total);
 }
 
 // Kartu Kemeja / Celana / Set di beranda (2026-11-10), dari tni.SIS_Beranda_Stok.
-// Tersedia = stok fisik yang belum di-set jadi = Lock + Unlock.
+// Tersedia = stok fisik yang belum di-set jadi = Lock + Kunci + Unlock.
 public class TniBerandaStokJenisDto
 {
     public int Masuk { get; set; }       // masuk bersih: MASUK + RUSAK/KOREKSI
     public int Lock { get; set; }        // stok yang sudah dijatah kartu DICETAK
-    public int Unlock { get; set; }      // stok bebas, belum dijatah kartu
-    public int Tersedia => Lock + Unlock;
+    public int Kunci { get; set; }       // stok bebas yang dikunci satuan bergembok (alter_81)
+    public int Unlock { get; set; }      // stok bebas, belum dijatah kartu, tidak dikunci
+    public int Tersedia => Lock + Kunci + Unlock;
+
+    // Rincian Kunci per kode satuan, urut antrean kunci (yang dikunci duluan di depan).
+    public List<TniBerandaKunciSatuanDto> KunciSatuan { get; set; } = new();
+}
+
+public class TniBerandaKunciSatuanDto
+{
+    public string SatuanCode { get; set; } = string.Empty;
+    public int Qty { get; set; }
 }
 
 public class TniBerandaStokDto
@@ -35,8 +47,9 @@ public class TniBerandaStokDto
     public TniBerandaStokJenisDto Kemeja { get; set; } = new();
     public TniBerandaStokJenisDto Celana { get; set; } = new();
     public int BisaDisetLock { get; set; }    // personel DICETAK yang kemeja+celananya ada
-    public int BisaDisetUnlock { get; set; }  // personel BELUM_CETAK dari stok unlock (greedy)
-    public int BisaDiset => BisaDisetLock + BisaDisetUnlock;
+    public int BisaDisetKunci { get; set; }   // personel BELUM_CETAK satuan bergembok (jatah kunci + unlock)
+    public int BisaDisetUnlock { get; set; }  // personel BELUM_CETAK satuan lain, dari stok unlock (greedy)
+    public int BisaDiset => BisaDisetLock + BisaDisetKunci + BisaDisetUnlock;
 }
 
 public class TniPersonelListItemDto

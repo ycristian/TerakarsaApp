@@ -193,6 +193,29 @@ public class TniStokController : ControllerBase
         return Ok();
     }
 
+    // 2026-11-11: Stock Opname -- hitung fisik per pola; hanya pola yang diinput
+    // yang disesuaikan, selisih dicatat sebagai KOREKSI berketerangan "Stock opname".
+    [HttpPost("opname")]
+    public async Task<IActionResult> Opname([FromBody] TniStokOpnameRequest request)
+    {
+        if (request.Items is null || request.Items.Count == 0)
+            return BadRequest("Hitung fisik kosong — tambahkan minimal satu baris.");
+
+        if (request.Items.Any(i => !JenisValid(i.JenisItem)))
+            return BadRequest("Jenis item harus KEMEJA atau CELANA.");
+
+        if (request.Items.Any(i => i.PolaId <= 0 || i.Qty < 0))
+            return BadRequest("Setiap baris harus punya pola dan jumlah fisik tidak minus.");
+
+        var orderId = await OrderIdAsync();
+        if (orderId is null) return BadRequest("Belum ada order PDH TNI AD yang aktif.");
+
+        var (success, error, hasil) = await _stokService.OpnameAsync(
+            orderId.Value, request, CurrentUserId, this.TniPerangkatId());
+        if (!success) return BadRequest(error);
+        return Ok(hasil);
+    }
+
     // Hapus satu pengeluaran beserta seluruh isinya (soft delete).
     [HttpDelete("keluar/{id:int}")]
     public async Task<IActionResult> HapusKeluar(int id)

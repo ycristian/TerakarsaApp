@@ -32,7 +32,8 @@
     <!-- <link rel="stylesheet" href="css/app.css" /> -->
     <link href="css/scrollbar.css" rel="stylesheet" asp-append-version="true" />
     <!-- Module PDH TNI AD (Prompt 60-69): design system halaman /tni/... -->
-    <link href="css/tni.css" rel="stylesheet" asp-append-version="true" />
+    <!-- ?v= naikkan tiap tni.css berubah (asp-append-version tidak jalan di index.html statis) -->
+    <link href="css/tni.css?v=20261111" rel="stylesheet" asp-append-version="true" />
     <!-- Module Stok Benang (Prompt 71-77): design system halaman /gudang/benang/... -->
     <link href="css/benang.css" rel="stylesheet" asp-append-version="true" />
     <!-- Prompt 78-80: module Cutting (/cutting) -->
@@ -94,6 +95,8 @@
     <!-- Prompt 66: pemindai beruntun module PDH TNI AD (kamera tidak berhenti per hasil) -->
     <!-- ?v= naikkan tiap tniScanner.js berubah (2026-11-09: bunyi konfirmasi + buka audio HP) -->
     <script src="js/tniScanner.js?v=2"></script>
+    <!-- 2026-11-10: tombol "Salin gambar" kekurangan stok (Perintah Kerja) -->
+    <script src="js/tniCapture.js?v=2"></script>
     <script src="js/modalInterop.js"></script>
     <script src="js/lineDetailCharts.js"></script>
     <!-- Prompt 71: deteksi lebar layar halaman /gudang/benang (satu kolom vs dua panel) -->

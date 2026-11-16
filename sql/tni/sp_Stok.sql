@@ -18,6 +18,9 @@
 -- 2026-10-07 (alter_77): pengeluaran (RUSAK/KOREKSI) juga punya header
 -- tni.stok_keluar, banyak pola per pengeluaran, TANPA penggabungan;
 -- KELUAR_EDIT / KELUAR_HAPUS setara dengan setoran.
+-- 2026-11-11: OPNAME -- hitung fisik per pola; selisih dicatat sebagai
+-- pengeluaran KOREKSI (+/-) berketerangan 'Stock opname...'. Hanya pola
+-- yang diinput yang disentuh. Riwayat Manual menerima filter 'OPNAME'.
 --
 -- ANSI_NULLS/QUOTED_IDENTIFIER wajib ON: tabel tni punya filtered index.
 
@@ -452,6 +455,14 @@ BEGIN
             RETURN;
         END
 
+        -- 2026-11-11: entri hasil Stock Opname keterangannya tetap diawali
+        -- 'Stock opname' walau alasannya diedit.
+        IF @Action = 'KELUAR_EDIT' AND @JenisMutasi = 'KOREKSI'
+           AND LOWER(@Alasan) NOT LIKE 'stock opname%'
+           AND EXISTS (SELECT 1 FROM tni.stok_keluar
+                       WHERE keluar_id = @KeluarId AND LOWER(alasan) LIKE 'stock opname%')
+            SET @Alasan = LEFT('Stock opname - ' + @Alasan, 500);
+
         -- pola harus hidup & aktif; saat EDIT pola yang sudah ada di
         -- pengeluaran ini boleh dipertahankan walau kini nonaktif.
         DECLARE @BadKeluar VARCHAR(100);
@@ -554,6 +565,144 @@ BEGIN
             SELECT @KeluarId AS KeluarId,
                    (SELECT COUNT(*) FROM tni.stok_mutasi WHERE keluar_id = @KeluarId AND deleted_at IS NULL) AS JumlahBaris,
                    (SELECT SUM(qty) FROM tni.stok_mutasi WHERE keluar_id = @KeluarId AND deleted_at IS NULL) AS QtyTersimpan;
+        RETURN;
+    END
+
+    -- ========================================================
+    -- OPNAME (2026-11-11) -- tab Stock Opname.
+    -- @Items = HASIL HITUNG FISIK [{jenisItem, polaId, qty}], qty >= 0.
+    -- Selisih = fisik - saldo sistem (tni.v_stok_pola, dihitung saat simpan).
+    -- HANYA pola yang diinput yang disesuaikan -- pola lain TIDAK disentuh
+    -- (tidak dianggap fisik 0). Pola yang sama diinput dua kali dijumlah.
+    -- Dicatat sebagai pengeluaran KOREKSI (header tni.stok_keluar, alter_77):
+    --   selisih > 0 -> satu header arah  1 (masuk)
+    --   selisih < 0 -> satu header arah -1 (keluar)
+    -- Keterangan SELALU diawali 'Stock opname' (+ catatan opsional @Alasan).
+    -- Pola nonaktif boleh: opname harus bisa membetulkan saldo pola apa pun.
+    -- ========================================================
+    IF @Action = 'OPNAME'
+    BEGIN
+        IF @Items IS NULL OR ISJSON(@Items) <> 1
+        BEGIN
+            RAISERROR('Daftar hitung fisik tidak valid.', 16, 1);
+            RETURN;
+        END
+
+        CREATE TABLE #oRaw (jenisItem VARCHAR(10) COLLATE DATABASE_DEFAULT, polaId INT, qty INT);
+        INSERT INTO #oRaw (jenisItem, polaId, qty)
+        SELECT j.jenisItem, j.polaId, j.qty
+        FROM OPENJSON(@Items) WITH (
+            jenisItem VARCHAR(10) '$.jenisItem',
+            polaId    INT         '$.polaId',
+            qty       INT         '$.qty'
+        ) j;
+
+        IF NOT EXISTS (SELECT 1 FROM #oRaw)
+        BEGIN
+            RAISERROR('Hitung fisik kosong.', 16, 1);
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM #oRaw WHERE jenisItem IS NULL OR jenisItem NOT IN ('KEMEJA','CELANA'))
+        BEGIN
+            RAISERROR('Jenis item harus KEMEJA atau CELANA.', 16, 1);
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM #oRaw WHERE qty IS NULL OR qty < 0)
+        BEGIN
+            RAISERROR('Jumlah fisik harus diisi dan tidak boleh minus.', 16, 1);
+            RETURN;
+        END
+
+        DECLARE @BadOpname VARCHAR(100);
+
+        SELECT TOP 1 @BadOpname = CONCAT(r.jenisItem, ' id ', r.polaId)
+        FROM #oRaw r
+        WHERE (r.jenisItem = 'KEMEJA'
+               AND NOT EXISTS (SELECT 1 FROM tni.pola_kemeja pk
+                                WHERE pk.pola_kemeja_id = r.polaId AND pk.deleted_at IS NULL))
+           OR (r.jenisItem = 'CELANA'
+               AND NOT EXISTS (SELECT 1 FROM tni.pola_celana pc
+                                WHERE pc.pola_celana_id = r.polaId AND pc.deleted_at IS NULL));
+
+        IF @BadOpname IS NOT NULL
+        BEGIN
+            RAISERROR('Pola tidak ditemukan: %s.', 16, 1, @BadOpname);
+            RETURN;
+        END
+
+        SET @Alasan = NULLIF(LTRIM(RTRIM(ISNULL(@Alasan, ''))), '');
+        SET @Alasan = CASE WHEN @Alasan IS NULL THEN 'Stock opname'
+                           WHEN LOWER(@Alasan) LIKE 'stock opname%' THEN LEFT(@Alasan, 500)
+                           ELSE LEFT('Stock opname - ' + @Alasan, 500) END;
+
+        DECLARE @OpnameTambahId INT, @OpnameKurangId INT;
+
+        BEGIN TRY
+            BEGIN TRANSACTION;
+
+            SELECT r.jenisItem, r.polaId,
+                   SUM(r.qty) AS fisik,
+                   ISNULL(MAX(v.saldo), 0) AS saldo,
+                   SUM(r.qty) - ISNULL(MAX(v.saldo), 0) AS selisih
+            INTO #oSel
+            FROM #oRaw r
+            LEFT JOIN tni.v_stok_pola v
+                   ON v.order_id = @OrderId AND v.jenis_item = r.jenisItem AND v.pola_id = r.polaId
+            GROUP BY r.jenisItem, r.polaId;
+
+            IF EXISTS (SELECT 1 FROM #oSel WHERE selisih > 0)
+            BEGIN
+                INSERT INTO tni.stok_keluar (order_id, tanggal, jenis_mutasi, arah, alasan, perangkat_id, created_by)
+                VALUES (@OrderId, @Tanggal, 'KOREKSI', 1, @Alasan, @PerangkatId, @UserId);
+                SET @OpnameTambahId = CAST(SCOPE_IDENTITY() AS INT);
+
+                INSERT INTO tni.stok_mutasi
+                    (order_id, jenis_item, pola_kemeja_id, pola_celana_id,
+                     jenis_mutasi, qty, alasan, tanggal, created_by, perangkat_id, keluar_id)
+                SELECT @OrderId, s.jenisItem,
+                       CASE WHEN s.jenisItem = 'KEMEJA' THEN s.polaId END,
+                       CASE WHEN s.jenisItem = 'CELANA' THEN s.polaId END,
+                       'KOREKSI', s.selisih, @Alasan, @Tanggal, @UserId, @PerangkatId, @OpnameTambahId
+                FROM #oSel s
+                WHERE s.selisih > 0;
+            END
+
+            IF EXISTS (SELECT 1 FROM #oSel WHERE selisih < 0)
+            BEGIN
+                INSERT INTO tni.stok_keluar (order_id, tanggal, jenis_mutasi, arah, alasan, perangkat_id, created_by)
+                VALUES (@OrderId, @Tanggal, 'KOREKSI', -1, @Alasan, @PerangkatId, @UserId);
+                SET @OpnameKurangId = CAST(SCOPE_IDENTITY() AS INT);
+
+                INSERT INTO tni.stok_mutasi
+                    (order_id, jenis_item, pola_kemeja_id, pola_celana_id,
+                     jenis_mutasi, qty, alasan, tanggal, created_by, perangkat_id, keluar_id)
+                SELECT @OrderId, s.jenisItem,
+                       CASE WHEN s.jenisItem = 'KEMEJA' THEN s.polaId END,
+                       CASE WHEN s.jenisItem = 'CELANA' THEN s.polaId END,
+                       'KOREKSI', s.selisih, @Alasan, @Tanggal, @UserId, @PerangkatId, @OpnameKurangId
+                FROM #oSel s
+                WHERE s.selisih < 0;
+            END
+
+            COMMIT TRANSACTION;
+        END TRY
+        BEGIN CATCH
+            IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+            THROW;
+        END CATCH
+
+        SELECT CAST(COUNT(*) AS INT)                                         AS JumlahPola,
+               CAST(SUM(CASE WHEN selisih = 0 THEN 1 ELSE 0 END) AS INT)     AS PolaCocok,
+               CAST(SUM(CASE WHEN selisih > 0 THEN 1 ELSE 0 END) AS INT)     AS PolaTambah,
+               CAST(SUM(CASE WHEN selisih > 0 THEN selisih ELSE 0 END) AS INT) AS QtyTambah,
+               CAST(SUM(CASE WHEN selisih < 0 THEN 1 ELSE 0 END) AS INT)     AS PolaKurang,
+               CAST(-SUM(CASE WHEN selisih < 0 THEN selisih ELSE 0 END) AS INT) AS QtyKurang,
+               @OpnameTambahId                                               AS KeluarIdTambah,
+               @OpnameKurangId                                               AS KeluarIdKurang,
+               @Alasan                                                       AS Keterangan
+        FROM #oSel;
         RETURN;
     END
 
@@ -680,8 +829,16 @@ BEGIN
            v.dijatah         AS Dijatah,
            v.stok_bebas      AS StokBebas,
            v.kebutuhan_sisa  AS KebutuhanSisa,
-           v.grup_gender     AS GrupGender
+           v.grup_gender     AS GrupGender,
+           -- 2026-11-11 (alter_81): bagian stok bebas yang dikunci satuan (tni.v_stok_kunci).
+           -- StokBebas sengaja TETAP saldo - dijatah (satuan pemilik kunci masih boleh
+           -- memakainya); layar Stok menampilkan bebas = StokBebas - Dikunci.
+           ISNULL(k.dikunci, 0) AS Dikunci
     FROM tni.v_stok_pola v
+    OUTER APPLY (SELECT SUM(x.dikunci) AS dikunci
+                   FROM tni.v_stok_kunci x
+                  WHERE x.order_id = v.order_id AND x.jenis_item = v.jenis_item
+                    AND x.pola_id = v.pola_id) k
     WHERE v.order_id = @OrderId
       AND v.jenis_item = @JenisItem
       AND (@Search IS NULL OR v.kode LIKE '%' + @Search + '%')
@@ -769,7 +926,9 @@ BEGIN
         FROM tni.stok_setoran s
         WHERE s.order_id = @OrderId
           AND s.deleted_at IS NULL
-          AND (@JenisMutasi IS NULL OR @JenisMutasi = 'MASUK')
+          AND (@JenisMutasi IS NULL OR @JenisMutasi = 'MASUK'
+               -- setoran opname lama dari script (supplier 'STOCK OPNAME')
+               OR (@JenisMutasi = 'OPNAME' AND LOWER(ISNULL(s.supplier, '')) LIKE 'stock opname%'))
           AND EXISTS (SELECT 1 FROM tni.stok_mutasi x
                       WHERE x.setoran_id = s.setoran_id AND x.deleted_at IS NULL)
 
@@ -780,7 +939,10 @@ BEGIN
         FROM tni.stok_keluar k
         WHERE k.order_id = @OrderId
           AND k.deleted_at IS NULL
-          AND (@JenisMutasi IS NULL OR k.jenis_mutasi = @JenisMutasi)
+          AND (@JenisMutasi IS NULL OR k.jenis_mutasi = @JenisMutasi
+               -- 2026-11-11: OPNAME = KOREKSI yang keterangannya 'Stock opname...'
+               OR (@JenisMutasi = 'OPNAME' AND k.jenis_mutasi = 'KOREKSI'
+                   AND LOWER(ISNULL(k.alasan, '')) LIKE 'stock opname%'))
           AND EXISTS (SELECT 1 FROM tni.stok_mutasi x
                       WHERE x.keluar_id = k.keluar_id AND x.deleted_at IS NULL)
     ),

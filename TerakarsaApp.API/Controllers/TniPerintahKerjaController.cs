@@ -52,6 +52,23 @@ public class TniPerintahKerjaController : ControllerBase
         return Ok(await _pkService.GetSatuanAsync(orderId.Value, areaId, TniSizePrioritas.Parse(kemeja, celana)));
     }
 
+    // Kekurangan gabungan beberapa satuan satu rawatan (mis. semua yang berbintang).
+    // satuanIds = id dipisah koma. Kebutuhan dijumlah dulu, baru dikurangi stok bebas sekali.
+    [HttpGet("rawatan/{areaId:int}/kekurangan")]
+    public async Task<IActionResult> GetKekuranganGabungan(int areaId, [FromQuery] string? satuanIds = null)
+    {
+        var orderId = await OrderIdAsync();
+        if (orderId is null) return Ok(new List<TniKekuranganDto>());
+
+        var ids = (satuanIds ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => int.TryParse(x, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
+
+        return Ok(await _pkService.GetKekuranganGabunganAsync(orderId.Value, areaId, ids));
+    }
+
     [HttpGet("satuan/{satuanId:int}")]
     public async Task<IActionResult> GetSatuanDetail(int satuanId, [FromQuery] string? kemeja = null, [FromQuery] string? celana = null)
     {
@@ -76,6 +93,16 @@ public class TniPerintahKerjaController : ControllerBase
     {
         var (success, error) = await _pkService.SetPrioritasAsync(
             satuanId, request.Prioritas, CurrentUserId, this.TniPerangkatId());
+        if (!success) return BadRequest(error);
+        return Ok();
+    }
+
+    // Gembok kunci stok satuan (alter_81): stok bebas disisihkan untuk satuan ini.
+    [HttpPost("satuan/{satuanId:int}/kunci-stok")]
+    public async Task<IActionResult> SetKunciStok(int satuanId, [FromBody] TniSatuanKunciStokRequest request)
+    {
+        var (success, error) = await _pkService.SetKunciStokAsync(
+            satuanId, request.Kunci, CurrentUserId, this.TniPerangkatId());
         if (!success) return BadRequest(error);
         return Ok();
     }

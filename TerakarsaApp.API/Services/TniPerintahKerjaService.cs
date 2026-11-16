@@ -22,6 +22,13 @@ namespace TerakarsaApp.API.Services;
 // yang fisiknya sedang dekat, masing-masing dengan QTY tumpukan di dekat (null = semua stok
 // bebas). Tujuannya MENGHABISKAN tumpukan itu: greedy dua tahap di TniPerintahKerjaService.Bagi
 // -- tahap 1 hanya personel yang masih kebagian kuota size terpilih, tahap 2 sisanya.
+//
+// KUNCI STOK (2026-11-11, alter_81): satuan bergembok menyisihkan stok bebas untuk
+// kebutuhan BELUM_CETAK-nya (pembagian di SQL, tni.v_stok_kunci). Semua hitungan di
+// sini memakai StokPool: satuan bergembok boleh memakai jatah kuncinya SENDIRI +
+// stok bebas yang tidak dikunci siapa pun; satuan lain hanya yang tidak dikunci.
+// Jadi set satuan bergembok langsung "bisa dibuat" begitu pasangannya masuk, dan
+// stoknya tidak terhitung untuk satuan lain.
 public sealed class TniSizePrioritas
 {
     // pola_id -> qty di dekat (null = semua stok bebas)
@@ -91,6 +98,110 @@ public class TniPerintahKerjaService
         public Dictionary<int, int> StokCelana { get; set; } = new();
         public Dictionary<int, string> KodeKemeja { get; set; } = new();
         public Dictionary<int, string> KodeCelana { get; set; } = new();
+        public Dictionary<int, PolaUrut> UrutKemeja { get; set; } = new();
+        public Dictionary<int, PolaUrut> UrutCelana { get; set; } = new();
+
+        // satuanId -> (polaId -> qty dikunci). Semua satuan bergembok di order ini.
+        public Dictionary<int, Dictionary<int, int>> KunciKemeja { get; set; } = new();
+        public Dictionary<int, Dictionary<int, int>> KunciCelana { get; set; } = new();
+
+        // Stok yang boleh dipakai kumpulan satuan ini: stok bebas yang tidak dikunci
+        // siapa pun + jatah kunci satuan-satuan itu sendiri (per satuan, terpisah).
+        public StokPool Pool(IEnumerable<int> satuanIds)
+        {
+            var ids = satuanIds.ToHashSet();
+            return new StokPool(
+                TanpaKunci(StokKemeja, KunciKemeja), TanpaKunci(StokCelana, KunciCelana),
+                Jatah(KunciKemeja, ids), Jatah(KunciCelana, ids));
+        }
+
+        public int DikunciKemeja(int satuanId) => KunciKemeja.TryGetValue(satuanId, out var d) ? d.Values.Sum() : 0;
+        public int DikunciCelana(int satuanId) => KunciCelana.TryGetValue(satuanId, out var d) ? d.Values.Sum() : 0;
+
+        // stok bebas (minus = 0) dikurangi semua kunci -- tidak pernah < 0 karena
+        // kunci di SQL dibatasi stok bebas.
+        private static Dictionary<int, int> TanpaKunci(Dictionary<int, int> stok, Dictionary<int, Dictionary<int, int>> kunci)
+        {
+            var hasil = stok.ToDictionary(x => x.Key, x => Math.Max(0, x.Value));
+            foreach (var per in kunci.Values)
+                foreach (var (pola, qty) in per)
+                    hasil[pola] = Math.Max(0, hasil.GetValueOrDefault(pola) - qty);
+            return hasil;
+        }
+
+        private static Dictionary<int, Dictionary<int, int>> Jatah(Dictionary<int, Dictionary<int, int>> kunci, HashSet<int> ids) =>
+            kunci.Where(x => ids.Contains(x.Key)).ToDictionary(x => x.Key, x => new Dictionary<int, int>(x.Value));
+    }
+
+    // Stok yang sedang dibagi greedy. Satu orang mengambil dari jatah kunci satuannya
+    // dulu, baru dari stok tanpa kunci. Satuan tanpa gembok hanya punya stok tanpa kunci.
+    private sealed class StokPool
+    {
+        private readonly Dictionary<int, int> _bebasK, _bebasC;
+        private readonly Dictionary<int, Dictionary<int, int>> _kunciK, _kunciC;
+
+        public StokPool(Dictionary<int, int> bebasK, Dictionary<int, int> bebasC,
+            Dictionary<int, Dictionary<int, int>> kunciK, Dictionary<int, Dictionary<int, int>> kunciC)
+        {
+            _bebasK = bebasK; _bebasC = bebasC; _kunciK = kunciK; _kunciC = kunciC;
+        }
+
+        public StokPool Salin() => new(
+            new(_bebasK), new(_bebasC),
+            _kunciK.ToDictionary(x => x.Key, x => new Dictionary<int, int>(x.Value)),
+            _kunciC.ToDictionary(x => x.Key, x => new Dictionary<int, int>(x.Value)));
+
+        public int Kemeja(TniKandidatDto p) => Ada(_bebasK, _kunciK, p.SatuanId, p.PolaKemejaId);
+        public int Celana(TniKandidatDto p) => Ada(_bebasC, _kunciC, p.SatuanId, p.PolaCelanaId);
+
+        public void Ambil(TniKandidatDto p)
+        {
+            Kurangi(_bebasK, _kunciK, p.SatuanId, p.PolaKemejaId);
+            Kurangi(_bebasC, _kunciC, p.SatuanId, p.PolaCelanaId);
+        }
+
+        // Total per pola yang bisa dipakai kumpulan satuan di pool ini.
+        public Dictionary<int, int> TotalKemeja() => Total(_bebasK, _kunciK);
+        public Dictionary<int, int> TotalCelana() => Total(_bebasC, _kunciC);
+
+        private static int Ada(Dictionary<int, int> bebas, Dictionary<int, Dictionary<int, int>> kunci, int satuanId, int polaId) =>
+            bebas.GetValueOrDefault(polaId)
+            + (kunci.TryGetValue(satuanId, out var d) ? d.GetValueOrDefault(polaId) : 0);
+
+        private static void Kurangi(Dictionary<int, int> bebas, Dictionary<int, Dictionary<int, int>> kunci, int satuanId, int polaId)
+        {
+            if (kunci.TryGetValue(satuanId, out var d) && d.GetValueOrDefault(polaId) > 0)
+                d[polaId]--;
+            else
+                bebas[polaId] = bebas.GetValueOrDefault(polaId) - 1;
+        }
+
+        private static Dictionary<int, int> Total(Dictionary<int, int> bebas, Dictionary<int, Dictionary<int, int>> kunci)
+        {
+            var hasil = new Dictionary<int, int>(bebas);
+            foreach (var per in kunci.Values)
+                foreach (var (pola, qty) in per)
+                    hasil[pola] = hasil.GetValueOrDefault(pola) + qty;
+            return hasil;
+        }
+    }
+
+    // Grup gender + urutan tampilan pola, sama dengan halaman Stok (tni.v_pola_urut).
+    private sealed record PolaUrut(string Grup, int UrutGender, int UrutVarian, decimal UrutSize);
+
+    private static PolaUrut BacaUrut(SqlDataReader r)
+    {
+        int Ord(string n) { try { return r.GetOrdinal(n); } catch (IndexOutOfRangeException) { return -1; } }
+        var g = Ord("GrupGender");
+        if (g < 0) return new PolaUrut(string.Empty, 9, 0, 0);   // SP lama: tanpa kolom urut
+        var ug = Ord("UrutGender");
+        var uv = Ord("UrutVarian");
+        var us = Ord("UrutSize");
+        return new PolaUrut(
+            r.IsDBNull(g) ? string.Empty : r.GetString(g),
+            r.IsDBNull(ug) ? 9 : Convert.ToInt32(r.GetValue(ug)),
+            r.IsDBNull(uv) ? 0 : Convert.ToInt32(r.GetValue(uv)),
+            r.IsDBNull(us) ? 0 : Convert.ToDecimal(r.GetValue(us)));
     }
 
     // SIS_PerintahKerja_Data mengembalikan 3 result set -- EF Core SqlQueryRaw hanya
@@ -142,6 +253,7 @@ public class TniPerintahKerjaService
                 var id = reader.GetInt32(reader.GetOrdinal("PolaId"));
                 result.StokKemeja[id] = reader.GetInt32(reader.GetOrdinal("StokBebas"));
                 result.KodeKemeja[id] = reader.GetString(reader.GetOrdinal("Kode"));
+                result.UrutKemeja[id] = BacaUrut(reader);
             }
 
             await reader.NextResultAsync();
@@ -150,6 +262,22 @@ public class TniPerintahKerjaService
                 var id = reader.GetInt32(reader.GetOrdinal("PolaId"));
                 result.StokCelana[id] = reader.GetInt32(reader.GetOrdinal("StokBebas"));
                 result.KodeCelana[id] = reader.GetString(reader.GetOrdinal("Kode"));
+                result.UrutCelana[id] = BacaUrut(reader);
+            }
+
+            // (4) stok dikunci satuan (alter_81). SP lama tanpa result set ini = tanpa kunci.
+            if (await reader.NextResultAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var satuan = reader.GetInt32(reader.GetOrdinal("SatuanId"));
+                    var pola = reader.GetInt32(reader.GetOrdinal("PolaId"));
+                    var qty = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("Dikunci")));
+                    var target = reader.GetString(reader.GetOrdinal("JenisItem")) == "KEMEJA"
+                        ? result.KunciKemeja : result.KunciCelana;
+                    if (!target.TryGetValue(satuan, out var per)) target[satuan] = per = new();
+                    per[pola] = per.GetValueOrDefault(pola) + qty;
+                }
             }
 
             return result;
@@ -163,28 +291,34 @@ public class TniPerintahKerjaService
     // ---------------- greedy ----------------
 
     // Menelusuri kandidat (urut sesuai urutan list yang diberikan) atas SALINAN
-    // stok bebas. Mengembalikan siapa yang bisa dibuat dan siapa yang belum bisa.
+    // stok pool. Mengembalikan siapa yang bisa dibuat dan siapa yang belum bisa.
     private static (List<TniKandidatDto> Bisa, List<TniBelumBisaDto> Belum) Greedy(
         IEnumerable<TniKandidatDto> kandidat,
-        Dictionary<int, int> stokKemeja,
-        Dictionary<int, int> stokCelana)
+        StokPool pool)
     {
-        // salinan -- stok asli tidak disentuh supaya bisa dipakai ulang per satuan
-        var k = new Dictionary<int, int>(stokKemeja);
-        var c = new Dictionary<int, int>(stokCelana);
+        var (bisa, belum, _) = GreedySisa(kandidat, pool);
+        return (bisa, belum);
+    }
+
+    // Sama dengan Greedy, plus sisa stok setelah semua yang "bisa" diambil.
+    private static (List<TniKandidatDto> Bisa, List<TniBelumBisaDto> Belum, StokPool Sisa) GreedySisa(
+        IEnumerable<TniKandidatDto> kandidat,
+        StokPool pool)
+    {
+        // salinan -- pool asli tidak disentuh supaya bisa dipakai ulang
+        var stok = pool.Salin();
 
         var bisa = new List<TniKandidatDto>();
         var belum = new List<TniBelumBisaDto>();
 
         foreach (var p in kandidat)
         {
-            var adaKemeja = k.TryGetValue(p.PolaKemejaId, out var sk) && sk > 0;
-            var adaCelana = c.TryGetValue(p.PolaCelanaId, out var sc) && sc > 0;
+            var adaKemeja = stok.Kemeja(p) > 0;
+            var adaCelana = stok.Celana(p) > 0;
 
             if (adaKemeja && adaCelana)
             {
-                k[p.PolaKemejaId] = sk - 1;
-                c[p.PolaCelanaId] = sc - 1;
+                stok.Ambil(p);
                 bisa.Add(p);
             }
             else
@@ -198,7 +332,7 @@ public class TniPerintahKerjaService
             }
         }
 
-        return (bisa, belum);
+        return (bisa, belum, stok);
     }
 
     private sealed record HasilBagi(
@@ -213,22 +347,21 @@ public class TniPerintahKerjaService
     // Filter kosong = persis Greedy biasa.
     private static HasilBagi Bagi(
         List<TniKandidatDto> kandidat,
-        Dictionary<int, int> stokKemeja,
-        Dictionary<int, int> stokCelana,
+        StokPool pool,
         TniSizePrioritas size)
     {
         foreach (var p in kandidat) p.IsSizePrioritas = false;
 
         if (!size.Aktif)
         {
-            var (b, bl) = Greedy(kandidat, stokKemeja, stokCelana);
+            var (b, bl) = Greedy(kandidat, pool);
             return new HasilBagi(b, bl, 0, 0, 0);
         }
 
-        var k = new Dictionary<int, int>(stokKemeja);
-        var c = new Dictionary<int, int>(stokCelana);
-        var kuotaK = size.KuotaKemeja(stokKemeja);
-        var kuotaC = size.KuotaCelana(stokCelana);
+        var stok = pool.Salin();
+        // kuota dibatasi stok yang memang boleh dipakai kandidat ini (kunci satuan lain tidak)
+        var kuotaK = size.KuotaKemeja(pool.TotalKemeja());
+        var kuotaC = size.KuotaCelana(pool.TotalCelana());
         var stokPrioritas = kuotaK.Values.Sum() + kuotaC.Values.Sum();
 
         var tahap1 = new List<TniKandidatDto>();
@@ -241,11 +374,10 @@ public class TniPerintahKerjaService
             var sisaC = kuotaC.TryGetValue(p.PolaCelanaId, out var qc) && qc > 0;
             if (!sisaK && !sisaC) continue;   // kuota size-nya sudah habis -> tahap 2
 
-            if (k.GetValueOrDefault(p.PolaKemejaId) <= 0 || c.GetValueOrDefault(p.PolaCelanaId) <= 0)
+            if (stok.Kemeja(p) <= 0 || stok.Celana(p) <= 0)
                 continue;                      // pasangannya kosong -> tahap 2 (akan masuk "belum bisa")
 
-            k[p.PolaKemejaId]--;
-            c[p.PolaCelanaId]--;
+            stok.Ambil(p);
             if (sisaK) { kuotaK[p.PolaKemejaId] = qk - 1; pakai++; }
             if (sisaC) { kuotaC[p.PolaCelanaId] = qc - 1; pakai++; }
 
@@ -254,7 +386,7 @@ public class TniPerintahKerjaService
             diambil.Add(p.PersonelId);
         }
 
-        var (tahap2, belum) = Greedy(kandidat.Where(x => !diambil.Contains(x.PersonelId)), k, c);
+        var (tahap2, belum) = Greedy(kandidat.Where(x => !diambil.Contains(x.PersonelId)), stok);
 
         return new HasilBagi(tahap1.Concat(tahap2).ToList(), belum, tahap1.Count, pakai, stokPrioritas);
     }
@@ -290,7 +422,9 @@ public class TniPerintahKerjaService
 
             // per rawatan: greedy atas SELURUH kandidat rawatan itu
             // (size prioritas didahulukan sampai qty di dekat habis)
-            var bagi = Bagi(kandidatArea, data.StokKemeja, data.StokCelana, size);
+            // (satuan bergembok di rawatan ini memakai jatah kuncinya; kunci rawatan lain tidak terpakai)
+            var satuanArea = kandidatArea.Select(x => x.SatuanId).Distinct().ToList();
+            var bagi = Bagi(kandidatArea, data.Pool(satuanArea), size);
 
             // jumlah satuan yang bisa tuntas: tiap satuan dihitung dengan salinan
             // stok bebas yang SEGAR (angka antarsatuan bisa tumpang tindih)
@@ -298,7 +432,7 @@ public class TniPerintahKerjaService
                 .GroupBy(x => x.SatuanId)
                 .Count(g =>
                 {
-                    var (b, _) = Greedy(g.OrderBy(x => x.KodeRef), data.StokKemeja, data.StokCelana);
+                    var (b, _) = Greedy(g.OrderBy(x => x.KodeRef), data.Pool(new[] { g.Key }));
                     return g.Count() > 0 && b.Count == g.Count();
                 });
 
@@ -314,7 +448,9 @@ public class TniPerintahKerjaService
                 SatuanBisaTuntas = satuanBisaTuntas,
                 BisaSizePrioritas = bagi.BisaPrioritas,
                 PakaiSizePrioritas = bagi.PakaiPrioritas,
-                StokSizePrioritas = bagi.StokPrioritas
+                StokSizePrioritas = bagi.StokPrioritas,
+                DikunciKemeja = satuanArea.Sum(data.DikunciKemeja),
+                DikunciCelana = satuanArea.Sum(data.DikunciCelana)
             });
         }
 
@@ -340,6 +476,7 @@ public class TniPerintahKerjaService
         public int SudahDicetak { get; set; }
         public int SudahSetJadi { get; set; }
         public bool IsPrioritas { get; set; }
+        public bool IsKunciStok { get; set; }
     }
 
     // ---------------- daftar satuan satu rawatan ----------------
@@ -360,11 +497,12 @@ public class TniPerintahKerjaService
                          SUM(CASE WHEN v.status_progres IN ('MASUK_BOX','TERKIRIM') THEN 1 ELSE 0 END) AS SudahMasukBox,
                          SUM(CASE WHEN v.status_progres <> 'BELUM_CETAK' THEN 1 ELSE 0 END) AS SudahDicetak,
                          SUM(CASE WHEN v.status_progres IN ('SET_JADI','MASUK_BOX','TERKIRIM') THEN 1 ELSE 0 END) AS SudahSetJadi,
-                         CAST(CASE WHEN s.prioritas_at IS NOT NULL THEN 1 ELSE 0 END AS bit) AS IsPrioritas
+                         CAST(CASE WHEN s.prioritas_at IS NOT NULL THEN 1 ELSE 0 END AS bit) AS IsPrioritas,
+                         CAST(CASE WHEN s.kunci_stok_at IS NOT NULL THEN 1 ELSE 0 END AS bit) AS IsKunciStok
                   FROM tni.v_personel v
                   JOIN tni.satuan s ON s.satuan_id = v.satuan_id
                   WHERE v.order_id = @OrderId AND v.area_id = @AreaId
-                  GROUP BY v.satuan_id, v.satuan_code, v.satuan_name, s.prioritas_at",
+                  GROUP BY v.satuan_id, v.satuan_code, v.satuan_name, s.prioritas_at, s.kunci_stok_at",
                 new SqlParameter("@OrderId", orderId),
                 new SqlParameter("@AreaId", areaId))
             .ToListAsync();
@@ -378,8 +516,8 @@ public class TniPerintahKerjaService
                 .OrderBy(x => x.KodeRef)
                 .ToList();
 
-            // salinan stok bebas yang SEGAR untuk tiap satuan
-            var bagi = Bagi(kandidat, data.StokKemeja, data.StokCelana, size);
+            // salinan stok bebas yang SEGAR untuk tiap satuan (+ jatah kuncinya sendiri)
+            var bagi = Bagi(kandidat, data.Pool(new[] { s.SatuanId }), size);
 
             hasil.Add(new TniSatuanSaranDto
             {
@@ -391,6 +529,9 @@ public class TniPerintahKerjaService
                 SudahDicetak = s.SudahDicetak,
                 SudahSetJadi = s.SudahSetJadi,
                 IsPrioritas = s.IsPrioritas,
+                IsKunciStok = s.IsKunciStok,
+                DikunciKemeja = data.DikunciKemeja(s.SatuanId),
+                DikunciCelana = data.DikunciCelana(s.SatuanId),
                 Sisa = kandidat.Count,
                 BisaDibuat = bagi.Bisa.Count,
                 BisaSizePrioritas = bagi.BisaPrioritas,
@@ -419,31 +560,11 @@ public class TniPerintahKerjaService
 
         // size prioritas di depan (sampai qty di dekat habis); IsSizePrioritas diisi Bagi
         var kandidat = data.Kandidat.OrderBy(x => x.KodeRef).ToList();
-        var bagi = Bagi(kandidat, data.StokKemeja, data.StokCelana, size);
+        var pool = data.Pool(new[] { satuanId });
+        var bagi = Bagi(kandidat, pool, size);
         var (bisa, belum) = (bagi.Bisa, bagi.Belum);
 
-        // Ringkasan kekurangan per pola: berapa orang yang tertahan karena pola itu.
-        var kekurangan = belum
-            .Where(b => b.KemejaKurang)
-            .GroupBy(b => b.Personel.PolaKemejaId)
-            .Select(g => new TniKekuranganDto
-            {
-                JenisItem = "KEMEJA",
-                Kode = data.KodeKemeja.TryGetValue(g.Key, out var k) ? k : g.First().Personel.PolaKemejaKode,
-                Kurang = g.Count()
-            })
-            .Concat(belum
-                .Where(b => b.CelanaKurang)
-                .GroupBy(b => b.Personel.PolaCelanaId)
-                .Select(g => new TniKekuranganDto
-                {
-                    JenisItem = "CELANA",
-                    Kode = data.KodeCelana.TryGetValue(g.Key, out var c) ? c : g.First().Personel.PolaCelanaKode,
-                    Kurang = g.Count()
-                }))
-            .OrderByDescending(x => x.Kurang)
-            .ThenBy(x => x.Kode)
-            .ToList();
+        var kekurangan = HitungKekurangan(kandidat, data, pool);
 
         var contoh = kandidat.FirstOrDefault();
 
@@ -457,8 +578,73 @@ public class TniPerintahKerjaService
             PakaiSizePrioritas = bagi.PakaiPrioritas,
             StokSizePrioritas = bagi.StokPrioritas,
             BelumBisa = belum,
-            Kekurangan = kekurangan
+            Kekurangan = kekurangan,
+            TersediaKemeja = pool.TotalKemeja().Where(x => x.Value > 0).ToDictionary(x => x.Key, x => x.Value),
+            TersediaCelana = pool.TotalCelana().Where(x => x.Value > 0).ToDictionary(x => x.Key, x => x.Value)
         };
+    }
+
+    // Kekurangan GABUNGAN beberapa satuan (mis. semua satuan berbintang satu rawatan).
+    // Kebutuhan seluruh satuan DIJUMLAH DULU per pola, baru dikurangi stok bebas SEKALI --
+    // BUKAN jumlah kekurangan per satuan (tiap satuan memakai stok bebas yang sama, jadi
+    // menjumlah per satuan akan terlalu kecil). Satu panggilan SP saja.
+    public async Task<List<TniKekuranganDto>> GetKekuranganGabunganAsync(int orderId, int areaId, IReadOnlyCollection<int> satuanIds)
+    {
+        if (satuanIds.Count == 0) return new();
+
+        var data = await GetDataAsync(orderId, areaId, null);
+        var kandidat = data.Kandidat.Where(x => satuanIds.Contains(x.SatuanId)).ToList();
+        return HitungKekurangan(kandidat, data, data.Pool(satuanIds));
+    }
+
+    // Ringkasan kekurangan per pola = kebutuhan sisa (semua kandidat BELUM_CETAK yang diberikan)
+    // dikurangi stok yang boleh mereka pakai (stok bebas tanpa kunci + jatah kunci satuan-satuan
+    // itu sendiri). Tidak dihitung dari daftar "belum bisa", karena orang yang tertahan oleh
+    // barang pasangannya tetap butuh pola ini.
+    // Urutan = halaman Stok: kemeja dulu, lalu grup gender (P, PG, W, WH), varian, size.
+    //
+    // AdaPasangan (bintang, 2026-11-11): greedy dulu, lalu dari SISA stok -- orang yang tertahan
+    // karena kemejanya kosong padahal celananya masih ada di sisa -> kemeja pola itu berbintang
+    // (begitu kemeja itu masuk, setnya langsung jadi). Sebaliknya untuk celana. Sisa = setelah
+    // semua yang "bisa dibuat" mengambil barangnya, jadi pasangan tidak dihitung dua kali.
+    private static List<TniKekuranganDto> HitungKekurangan(List<TniKandidatDto> kandidat, DataMentah data, StokPool pool)
+    {
+        var tanpaUrut = new PolaUrut(string.Empty, 9, 0, 0);
+        var stokK = pool.TotalKemeja();
+        var stokC = pool.TotalCelana();
+
+        var (_, belum, sisa) = GreedySisa(kandidat.OrderBy(x => x.SatuanCode).ThenBy(x => x.KodeRef), pool);
+        var pasanganK = belum.Where(b => b.KemejaKurang && sisa.Celana(b.Personel) > 0)
+                             .Select(b => b.Personel.PolaKemejaId).ToHashSet();
+        var pasanganC = belum.Where(b => b.CelanaKurang && sisa.Kemeja(b.Personel) > 0)
+                             .Select(b => b.Personel.PolaCelanaId).ToHashSet();
+
+        return kandidat
+            .GroupBy(p => p.PolaKemejaId)
+            .Select(g => (Urut: data.UrutKemeja.GetValueOrDefault(g.Key) ?? tanpaUrut, Dto: new TniKekuranganDto
+            {
+                JenisItem = "KEMEJA",
+                Kode = data.KodeKemeja.TryGetValue(g.Key, out var k) ? k : g.First().PolaKemejaKode,
+                Kurang = g.Count() - Math.Max(0, stokK.GetValueOrDefault(g.Key)),
+                AdaPasangan = pasanganK.Contains(g.Key)
+            }))
+            .Concat(kandidat
+                .GroupBy(p => p.PolaCelanaId)
+                .Select(g => (Urut: data.UrutCelana.GetValueOrDefault(g.Key) ?? tanpaUrut, Dto: new TniKekuranganDto
+                {
+                    JenisItem = "CELANA",
+                    Kode = data.KodeCelana.TryGetValue(g.Key, out var c) ? c : g.First().PolaCelanaKode,
+                    Kurang = g.Count() - Math.Max(0, stokC.GetValueOrDefault(g.Key)),
+                    AdaPasangan = pasanganC.Contains(g.Key)
+                })))
+            .Where(x => x.Dto.Kurang > 0)
+            .OrderBy(x => x.Dto.JenisItem == "KEMEJA" ? 0 : 1)
+            .ThenBy(x => x.Urut.UrutGender)
+            .ThenBy(x => x.Urut.UrutVarian)
+            .ThenBy(x => x.Urut.UrutSize)
+            .ThenBy(x => x.Dto.Kode)
+            .Select(x => { x.Dto.GrupGender = x.Urut.Grup; return x.Dto; })
+            .ToList();
     }
 
     public async Task<List<TniDijatahDto>> GetDijatahAsync(int orderId, int satuanId)
@@ -527,6 +713,28 @@ public class TniPerintahKerjaService
                     @Prioritas = @Prioritas, @UserId = @UserId, @PerangkatId = @PerangkatId",
                 new SqlParameter("@Id", satuanId),
                 new SqlParameter("@Prioritas", prioritas),
+                new SqlParameter("@UserId", userId),
+                new SqlParameter("@PerangkatId", perangkatId ?? (object)DBNull.Value));
+
+            return (true, string.Empty);
+        }
+        catch (SqlException ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    // Kunci stok satuan (alter_81): stok bebas disisihkan untuk kebutuhan satuan ini.
+    public async Task<(bool Success, string Error)> SetKunciStokAsync(
+        int satuanId, bool kunci, int userId, int? perangkatId)
+    {
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(
+                @"EXEC tni.SIS_Satuan_Manage @Action = 'KUNCI_STOK', @Id = @Id,
+                    @Kunci = @Kunci, @UserId = @UserId, @PerangkatId = @PerangkatId",
+                new SqlParameter("@Id", satuanId),
+                new SqlParameter("@Kunci", kunci),
                 new SqlParameter("@UserId", userId),
                 new SqlParameter("@PerangkatId", perangkatId ?? (object)DBNull.Value));
 

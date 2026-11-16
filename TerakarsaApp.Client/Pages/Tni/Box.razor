@@ -47,6 +47,17 @@ else
         <div class="alert alert-success">@infoMessage</div>
     }
 
+    @* ---------- tab status box -- default Terbuka ---------- *@
+    <div class="tni-seg">
+        @foreach (var (kode, label) in Tabs)
+        {
+            var n = boxList.Count(x => x.Status == kode);
+            <button class="@(tab == kode ? "on" : "")" @onclick="@(() => tab = kode)">
+                @label (@n)
+            </button>
+        }
+    </div>
+
     @* ---------- cari no box / kode box (alter_72) -- mengabaikan filter lain ---------- *@
     <input class="tni-inp tni-search" style="font-size:15px;padding:12px"
            placeholder="Cari no box (mis. 12) atau kode box"
@@ -60,7 +71,7 @@ else
                 @onclick="@(() => showFilter = true)">
             <i class="fe fe-filter"></i> Filter@(AdaFilter ? $" ({JumlahFilter})" : "")
         </button>
-        <span class="tni-k">@boxList.Count.ToString("N0") box</span>
+        <span class="tni-k">@boxTab.Count.ToString("N0") box</span>
     </div>
 
     @if (isLoading)
@@ -128,14 +139,6 @@ else
                 {
                     <option value="@sa.SatuanId">@sa.SatuanCode — @sa.SatuanName</option>
                 }
-            </select>
-
-            <div class="tni-k" style="margin-top:8px">Status</div>
-            <select class="tni-inp" @bind="status">
-                <option value="">Semua status</option>
-                <option value="TERBUKA">Terbuka</option>
-                <option value="TERTUTUP">Tertutup</option>
-                <option value="TERKIRIM">Terkirim</option>
             </select>
 
             <div class="tni-bot" style="position:static;margin:14px -14px -18px">
@@ -232,11 +235,19 @@ else
     private bool showFilter;
     private int areaId;
     private int satuanId;
-    private string status = string.Empty;
 
-    private bool AdaFilter => areaId > 0 || satuanId > 0 || !string.IsNullOrEmpty(status);
-    private int JumlahFilter =>
-        (areaId > 0 ? 1 : 0) + (satuanId > 0 ? 1 : 0) + (string.IsNullOrEmpty(status) ? 0 : 1);
+    // Status box jadi tab (bukan filter): semua status dimuat sekali, dipilah di klien
+    // supaya jumlah tiap tab langsung terlihat. Default tab = box terbuka.
+    private static readonly (string Kode, string Label)[] Tabs =
+    {
+        ("TERBUKA", "Terbuka"),
+        ("TERTUTUP", "Tertutup"),
+        ("TERKIRIM", "Terkirim")
+    };
+    private string tab = "TERBUKA";
+
+    private bool AdaFilter => areaId > 0 || satuanId > 0;
+    private int JumlahFilter => (areaId > 0 ? 1 : 0) + (satuanId > 0 ? 1 : 0);
 
     // Pilihan satuan mengikuti rawatan yang dipilih.
     private List<TniWilayahRowDto> SatuanPilihan =>
@@ -255,8 +266,11 @@ else
     private string cari = string.Empty;
     private CancellationTokenSource? cariCts;
 
-    private List<TniBoxListItemDto> boxSatuan => boxList.Where(x => !x.Gabungan).ToList();
-    private List<TniBoxListItemDto> boxGabungan => boxList.Where(x => x.Gabungan).ToList();
+    // 2026-11-11 permintaan owner: semua tab urut No. Box terbesar dulu.
+    private List<TniBoxListItemDto> boxTab =>
+        boxList.Where(x => x.Status == tab).OrderByDescending(x => x.BoxNo).ToList();
+    private List<TniBoxListItemDto> boxSatuan => boxTab.Where(x => !x.Gabungan).ToList();
+    private List<TniBoxListItemDto> boxGabungan => boxTab.Where(x => x.Gabungan).ToList();
 
     private List<TniWilayahRowDto> satuanList =>
         wilayah.Where(x => x.SatuanId.HasValue).OrderBy(x => x.SatuanCode).ToList();
@@ -302,7 +316,6 @@ else
     {
         areaId = 0;
         satuanId = 0;
-        status = string.Empty;
         showFilter = false;
         await SimpanSatuanAsync();
         await LoadAsync();
@@ -322,14 +335,17 @@ else
 
         try
         {
-            // Pencarian berlaku untuk SELURUH order -- filter satuan/status diabaikan,
+            // Pencarian berlaku untuk SELURUH order -- filter rawatan/satuan diabaikan,
             // supaya box ke-N tetap ketemu walau filter masih terpasang.
             boxList = string.IsNullOrWhiteSpace(cari)
                 ? await BoxApi.GetListAsync(
                     areaId: areaId > 0 ? areaId : null,
-                    satuanId: satuanId > 0 ? satuanId : null,
-                    status: string.IsNullOrEmpty(status) ? null : status)
+                    satuanId: satuanId > 0 ? satuanId : null)
                 : await BoxApi.GetListAsync(cari: cari);
+
+            // Hasil cari ada di tab lain -> pindah ke tab itu supaya langsung terlihat.
+            if (!string.IsNullOrWhiteSpace(cari) && boxList.Count > 0 && !boxList.Any(x => x.Status == tab))
+                tab = boxList[0].Status;
         }
         catch (Exception ex) { errorMessage = ex.Message; }
 

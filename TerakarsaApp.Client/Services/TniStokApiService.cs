@@ -109,6 +109,20 @@ public class TniStokApiService
         return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menghapus." : error.Trim('"'));
     }
 
+    public async Task<(bool Success, string Error, TniStokOpnameHasilDto? Hasil)> OpnameAsync(
+        TniStokOpnameRequest request)
+    {
+        var response = await _http.PostAsJsonAsync("api/tni/stok/opname", request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan stock opname." : error.Trim('"'), null);
+        }
+
+        return (true, string.Empty, await response.Content.ReadFromJsonAsync<TniStokOpnameHasilDto>());
+    }
+
     public async Task<(bool Success, string Error)> KeluarAsync(TniStokKeluarRequest request)
     {
         var response = await _http.PostAsJsonAsync("api/tni/stok/keluar", request);

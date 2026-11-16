@@ -1,5 +1,6 @@
 @* Baris isi setoran / pengeluaran stok (2026-10-07): jenis · pola · qty · hapus.
-   Dipakai di tab Setoran, tab Keluarkan, dan pop up edit keduanya supaya
+   Dipakai di tab Setoran, tab Keluarkan, tab Stock Opname (BolehNol: qty =
+   hitung fisik, 0 sah), dan pop up edit setoran/pengeluaran supaya
    tampilannya SAMA PERSIS. Daftar Baris diubah langsung (by reference);
    OnChanged dipanggil setiap ada perubahan supaya induk menghitung ulang total
    dan membatalkan konfirmasi yang sedang terbuka. Qty selalu positif --
@@ -82,8 +83,8 @@ else
                               Placeholder="Cari kode pola..." />
         </div>
         <input class="tni-inp" style="flex:0 0 76px;width:76px;font-size:17px;font-weight:700;text-align:center;padding:7px 4px"
-               type="number" inputmode="numeric" min="1" placeholder="0"
-               value="@(b.Qty == 0 ? "" : b.Qty.ToString())"
+               type="number" inputmode="numeric" min="@(BolehNol ? "0" : "1")" placeholder="@(BolehNol ? "fisik" : "0")"
+               value="@TampilQty(b.Qty)"
                @onchange="@(e => UbahAsync(() => b.Qty = ParseInt(e.Value?.ToString())))" />
         <button class="tni-btn" style="flex:0 0 auto;padding:6px 8px" title="Hapus baris"
                 @onclick="@(() => UbahAsync(() => Baris.RemoveAt(idx)))">
@@ -107,6 +108,15 @@ else
         await OnChanged.InvokeAsync();
     }
 
-    private static int ParseInt(string? raw) =>
-        int.TryParse(raw, out var v) && v > 0 ? v : 0;
+    // Stock Opname (2026-11-11): qty = hitung fisik, 0 sah, jadi "belum diisi" = -1.
+    // Hanya mode kartu (bukan Compact) yang mendukung BolehNol.
+    [Parameter] public bool BolehNol { get; set; }
+
+    private string TampilQty(int qty) =>
+        BolehNol ? (qty < 0 ? "" : qty.ToString()) : (qty == 0 ? "" : qty.ToString());
+
+    private int ParseInt(string? raw) =>
+        BolehNol
+            ? (int.TryParse(raw, out var n) && n >= 0 ? n : -1)
+            : (int.TryParse(raw, out var v) && v > 0 ? v : 0);
 }

@@ -27,14 +27,19 @@ public class TniPersonelService
         return result.FirstOrDefault();
     }
 
-    // Kartu stok beranda. SIS_Beranda_Stok punya 2 result set -> reader mentah.
+    // Kartu stok beranda. SIS_Beranda_Stok punya 3 result set -> reader mentah.
     // "Bisa di-set" = greedy atas saldo per pola (sama seperti Perintah Kerja):
-    // personel DICETAK dulu (stoknya sudah dijatah = lock), lalu BELUM_CETAK dari sisanya.
+    // personel DICETAK dulu (stoknya sudah dijatah = lock), lalu BELUM_CETAK dari sisanya
+    // dengan aturan kunci stok satuan (alter_81).
     public async Task<TniBerandaStokDto> GetBerandaStokAsync(int orderId)
     {
         var hasil = new TniBerandaStokDto();
         var saldoK = new Dictionary<int, int>();
         var saldoC = new Dictionary<int, int>();
+        var orang = new List<(int K, int C, bool Dicetak, int SatuanId)>();
+        // satuanId -> (polaId -> qty dikunci), alter_81
+        var kunciK = new Dictionary<int, Dictionary<int, int>>();
+        var kunciC = new Dictionary<int, Dictionary<int, int>>();
 
         var conn = (SqlConnection)_db.Database.GetDbConnection();
         var wasClosed = conn.State != System.Data.ConnectionState.Open;
@@ -67,18 +72,34 @@ public class TniPersonelService
                 (kemeja ? saldoK : saldoC)[polaId] = saldo;
             }
 
-            // (2) personel belum dapat set, DICETAK dulu
+            // (2) personel belum dapat set, DICETAK dulu (urutan dari SP)
             await reader.NextResultAsync();
             while (await reader.ReadAsync())
-            {
-                var k = reader.GetInt32(0);
-                var c = reader.GetInt32(1);
-                if (saldoK.GetValueOrDefault(k) <= 0 || saldoC.GetValueOrDefault(c) <= 0) continue;
+                orang.Add((reader.GetInt32(0), reader.GetInt32(1), reader.GetBoolean(2),
+                           reader.FieldCount > 3 ? reader.GetInt32(3) : 0));
 
-                saldoK[k]--;
-                saldoC[c]--;
-                if (reader.GetBoolean(2)) hasil.BisaDisetLock++;
-                else hasil.BisaDisetUnlock++;
+            // (3) stok dikunci satuan (alter_81). SP lama tanpa result set ini = tanpa kunci.
+            if (await reader.NextResultAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var satuanId = reader.GetInt32(0);
+                    var kode = reader.GetString(1);
+                    var kemeja = reader.GetString(2) == "KEMEJA";
+                    var polaId = reader.GetInt32(3);
+                    var qty = Convert.ToInt32(reader.GetValue(4));
+
+                    var j = kemeja ? hasil.Kemeja : hasil.Celana;
+                    j.Kunci += qty;
+                    j.Unlock -= qty;      // kunci selalu bagian dari stok bebas (dibatasi di SQL)
+                    var baris = j.KunciSatuan.FirstOrDefault(x => x.SatuanCode == kode);
+                    if (baris is null) j.KunciSatuan.Add(baris = new TniBerandaKunciSatuanDto { SatuanCode = kode });
+                    baris.Qty += qty;
+
+                    var kunci = kemeja ? kunciK : kunciC;
+                    if (!kunci.TryGetValue(satuanId, out var per)) kunci[satuanId] = per = new();
+                    per[polaId] = per.GetValueOrDefault(polaId) + qty;
+                }
             }
         }
         finally
@@ -86,7 +107,51 @@ public class TniPersonelService
             if (wasClosed) await conn.CloseAsync();
         }
 
+        // Tahap 1: DICETAK -- stoknya sudah dijatah (lock).
+        foreach (var p in orang.Where(x => x.Dicetak))
+        {
+            if (saldoK.GetValueOrDefault(p.K) <= 0 || saldoC.GetValueOrDefault(p.C) <= 0) continue;
+            saldoK[p.K]--;
+            saldoC[p.C]--;
+            hasil.BisaDisetLock++;
+        }
+
+        // Tahap 2: BELUM_CETAK -- sama dengan Perintah Kerja: satuan bergembok memakai
+        // jatah kuncinya sendiri dulu lalu stok tanpa kunci; satuan lain hanya stok tanpa kunci.
+        // Sisa tahap 1 >= stok bebas >= total kunci per pola, jadi bebasK/C tidak minus.
+        var bebasK = TanpaKunci(saldoK, kunciK);
+        var bebasC = TanpaKunci(saldoC, kunciC);
+
+        foreach (var p in orang.Where(x => !x.Dicetak))
+        {
+            var jatahK = kunciK.GetValueOrDefault(p.SatuanId);
+            var jatahC = kunciC.GetValueOrDefault(p.SatuanId);
+            var adaK = bebasK.GetValueOrDefault(p.K) + (jatahK?.GetValueOrDefault(p.K) ?? 0);
+            var adaC = bebasC.GetValueOrDefault(p.C) + (jatahC?.GetValueOrDefault(p.C) ?? 0);
+            if (adaK <= 0 || adaC <= 0) continue;
+
+            Ambil(bebasK, jatahK, p.K);
+            Ambil(bebasC, jatahC, p.C);
+            if (kunciK.ContainsKey(p.SatuanId) || kunciC.ContainsKey(p.SatuanId)) hasil.BisaDisetKunci++;
+            else hasil.BisaDisetUnlock++;
+        }
+
         return hasil;
+
+        static Dictionary<int, int> TanpaKunci(Dictionary<int, int> sisa, Dictionary<int, Dictionary<int, int>> kunci)
+        {
+            var h = new Dictionary<int, int>(sisa);
+            foreach (var per in kunci.Values)
+                foreach (var (pola, qty) in per)
+                    h[pola] = Math.Max(0, h.GetValueOrDefault(pola) - qty);
+            return h;
+        }
+
+        static void Ambil(Dictionary<int, int> bebas, Dictionary<int, int>? jatah, int pola)
+        {
+            if (jatah is not null && jatah.GetValueOrDefault(pola) > 0) jatah[pola]--;
+            else bebas[pola] = bebas.GetValueOrDefault(pola) - 1;
+        }
     }
 
     public async Task<TniPersonelListResult> GetListAsync(

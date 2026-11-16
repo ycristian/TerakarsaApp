@@ -54,6 +54,15 @@ public class TniPerintahKerjaApiService
         return await response.Content.ReadFromJsonAsync<TniSatuanDetailDto>();
     }
 
+    // Kekurangan gabungan beberapa satuan (kebutuhan dijumlah dulu, baru dikurangi stok bebas sekali).
+    public async Task<List<TniKekuranganDto>> GetKekuranganGabunganAsync(int areaId, IEnumerable<int> satuanIds)
+    {
+        var response = await _http.GetAsync(
+            $"api/tni/perintah-kerja/rawatan/{areaId}/kekurangan?satuanIds={string.Join(",", satuanIds)}");
+        if (!response.IsSuccessStatusCode) return new();
+        return await response.Content.ReadFromJsonAsync<List<TniKekuranganDto>>() ?? new();
+    }
+
     public async Task<List<TniDijatahDto>> GetDijatahAsync(int satuanId)
     {
         var response = await _http.GetAsync($"api/tni/perintah-kerja/satuan/{satuanId}/dijatah");
@@ -70,6 +79,20 @@ public class TniPerintahKerjaApiService
         {
             var error = await response.Content.ReadAsStringAsync();
             return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan prioritas." : error.Trim('"'));
+        }
+
+        return (true, string.Empty);
+    }
+
+    public async Task<(bool Success, string Error)> SetKunciStokAsync(int satuanId, bool kunci)
+    {
+        var response = await _http.PostAsJsonAsync($"api/tni/perintah-kerja/satuan/{satuanId}/kunci-stok",
+            new TniSatuanKunciStokRequest { Kunci = kunci });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(error) ? "Gagal menyimpan kunci stok." : error.Trim('"'));
         }
 
         return (true, string.Empty);

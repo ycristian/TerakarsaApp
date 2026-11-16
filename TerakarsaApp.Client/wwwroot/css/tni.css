@@ -131,6 +131,15 @@
     border: 0;
 }
 .tni-seg > button.on { background: var(--tni-navy); color: #fff; }
+/* 5 tab sejajar (halaman Stok, 2026-11-11): label boleh 2 baris, tetap di tengah */
+.tni-seg.tni-seg-5 > button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1.15;
+    padding: 6px 2px;
+}
 
 /* ---------- angka besar ---------- */
 .tni-stat4 {
@@ -230,6 +239,14 @@
 .tni-tbl-sm th, .tni-tbl-sm td { padding: 5px 10px; }
 .tni-tbl-sm tbody tr { cursor: default; }
 .tni-tbl-sm tbody tr:active { background: transparent; }
+/* varian paling rapat (rekap kekurangan stok di Perintah Kerja, 2026-11-10) */
+.tni-tbl-xs { font-size: 11.5px; line-height: 1.25; }
+.tni-tbl-xs th, .tni-tbl-xs td,
+.tni-tbl.tni-tbl-xs tr.tni-tbl-grp td { padding: 2px 8px; font-size: 11.5px; }
+.tni-tbl.tni-tbl-xs tr.tni-tbl-grp td:last-child { text-align: right; }
+.tni-tbl-xs .tni-code { font-size: 11px; padding: 0 4px; border-radius: 4px; }
+.tni-tbl-xs tbody tr { cursor: default; }
+.tni-tbl-xs tbody tr:active { background: transparent; }
 /* tabel kecil yang bisa diedit (pop up edit setoran / pengeluaran) */
 .tni-tbl-edit td { padding: 3px 6px; vertical-align: middle; }
 .tni-tbl-edit .form-control { font-size: 12px; padding: 4px 8px; min-height: 0; height: auto; }

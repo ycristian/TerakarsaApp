@@ -105,6 +105,14 @@ else
         <div class="tni-note" style="margin-bottom:8px">
             Stok bebas total: <b>@rawatanData.StokBebasKemeja</b> kemeja ·
             <b>@rawatanData.StokBebasCelana</b> celana.
+            @if (rawatanData.Rawatan.Sum(x => x.DikunciKemeja + x.DikunciCelana) > 0)
+            {
+                <span>
+                    <i class="fe fe-lock" style="color:var(--tni-navy)"></i>
+                    Di antaranya dikunci satuan: <b>@rawatanData.Rawatan.Sum(x => x.DikunciKemeja)</b> kemeja ·
+                    <b>@rawatanData.Rawatan.Sum(x => x.DikunciCelana)</b> celana.
+                </span>
+            }
         </div>
 
         @foreach (var r in rawatanData.Rawatan)
@@ -137,6 +145,13 @@ else
                         }
                     </div>
                 }
+                @if (r.DikunciKemeja + r.DikunciCelana > 0)
+                {
+                    <div class="tni-note" style="margin-top:4px">
+                        <i class="fe fe-lock" style="color:var(--tni-navy)"></i>
+                        Stok dikunci: <b>@r.DikunciKemeja</b> kemeja · <b>@r.DikunciCelana</b> celana
+                    </div>
+                }
             </div>
         }
     }
@@ -145,13 +160,67 @@ else
     @if (langkah == 2 && !isLoading)
     {
         // Berbintang selalu di atas; sisanya tetap dibagi bisa tuntas / lainnya.
-        var prioritas = satuanList.Where(x => x.IsPrioritas).ToList();
-        var tuntas = satuanList.Where(x => !x.IsPrioritas && x.BisaTuntas).ToList();
-        var lainnya = satuanList.Where(x => !x.IsPrioritas && !x.BisaTuntas).ToList();
+        // Isi box penuh (2026-11-11): hanya satuan yang bisa dicetak >= 1 box (52).
+        var tampil = boxPenuh ? satuanList.Where(x => x.BisaDibuat >= IsiBox).ToList() : satuanList;
+        var prioritas = tampil.Where(x => x.IsPrioritas).ToList();
+        var tuntas = tampil.Where(x => !x.IsPrioritas && x.BisaTuntas).ToList();
+        var lainnya = tampil.Where(x => !x.IsPrioritas && !x.BisaTuntas).ToList();
+
+        @CentangBoxPenuh()
+        @if (boxPenuh)
+        {
+            <div class="tni-note" style="margin:-4px 0 8px">
+                <b>@tampil.Count</b> dari @satuanList.Count satuan bisa dicetak minimal @IsiBox set (1 box penuh).
+            </div>
+        }
+
+        @* Kunci stok (alter_81): ringkasan stok yang ditahan satuan bergembok di rawatan ini. *@
+        var terkunci = satuanList.Where(x => x.IsKunciStok).ToList();
+        @if (terkunci.Count > 0)
+        {
+            <div class="tni-card" style="padding:9px 12px">
+                <div class="tni-row">
+                    <span style="font-weight:700;font-size:13px">
+                        <i class="fe fe-lock" style="color:var(--tni-navy)"></i> Stok dikunci
+                    </span>
+                    <span class="tni-k">
+                        <b>@terkunci.Sum(x => x.DikunciKemeja)</b> kemeja · <b>@terkunci.Sum(x => x.DikunciCelana)</b> celana
+                    </span>
+                </div>
+                <div class="tni-note" style="margin-top:3px">
+                    @foreach (var s in terkunci)
+                    {
+                        <div>@s.SatuanCode: @s.DikunciKemeja kemeja · @s.DikunciCelana celana</div>
+                    }
+                </div>
+            </div>
+        }
 
         @if (prioritas.Count > 0)
         {
-            <div class="tni-sec"><span style="color:var(--tni-gold)">★</span> Prioritas</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <div class="tni-sec"><span style="color:var(--tni-gold)">★</span> Prioritas</div>
+                <button class="tni-btn tni-btn-o" style="padding:3px 9px;font-size:11.5px"
+                        disabled="@isLoadingGabungan" @onclick="ToggleKurangGabunganAsync">
+                    <span style="color:var(--tni-gold)">★</span>
+                    @(isLoadingGabungan ? "Memuat..." : kurangGabungan is null ? "Kurang stok gabungan" : "Tutup kurang stok")
+                </button>
+            </div>
+            @if (kurangGabungan is not null)
+            {
+                @if (kurangGabungan.Count == 0)
+                {
+                    <div class="tni-card" style="border-color:var(--tni-ok)">
+                        <span class="tni-note">Stok bebas cukup untuk sisa semua satuan prioritas.</span>
+                    </div>
+                }
+                else
+                {
+                    @KartuKekurangan(kurangGabungan, $"Gabungan {prioritas.Count} satuan prioritas",
+                                     string.Join(", ", prioritas.Select(x => x.SatuanCode)),
+                                     $"kekurangan-prioritas-{rawatanTerpilih?.AreaCode ?? "stok"}.png")
+                }
+            }
             @foreach (var s in prioritas)
             {
                 @KartuSatuan(s)
@@ -180,6 +249,8 @@ else
         <div class="tni-note" style="margin-top:10px">
             Angka tiap satuan dihitung sendiri-sendiri dari stok bebas yang sama —
             kalau dua satuan dikerjakan bersamaan, totalnya bisa tidak cukup.
+            Stok yang dikunci (<i class="fe fe-lock"></i>) hanya dihitung untuk satuan pemiliknya;
+            kalau dua satuan terkunci butuh size yang sama, yang dikunci duluan dapat duluan.
         </div>
     }
 
@@ -215,6 +286,14 @@ else
                 var cocokSize = detail.BisaDibuat.Where(x => x.IsSizePrioritas).ToList();
                 var lainSize = detail.BisaDibuat.Where(x => !x.IsSizePrioritas).ToList();
 
+                @CentangBoxPenuh()
+                @if (boxPenuh && detail.BisaDibuat.Count < IsiBox)
+                {
+                    <div class="tni-note" style="margin:-4px 0 8px;color:var(--tni-bad)">
+                        Belum cukup untuk 1 box penuh: baru @detail.BisaDibuat.Count dari @IsiBox set yang bisa dibuat.
+                    </div>
+                }
+
                 <div class="tni-row" style="margin-bottom:8px;gap:6px">
                     <span style="display:flex;gap:6px;flex-wrap:wrap">
                         <button class="tni-btn tni-btn-o" @onclick="PilihSemua">
@@ -228,7 +307,9 @@ else
                             </button>
                         }
                     </span>
-                    <span class="tni-k">@dipilih.Count dipilih</span>
+                    <span class="tni-k">
+                        @dipilih.Count dipilih@(dipilih.Count > 0 && dipilih.Count % IsiBox == 0 ? $" · {dipilih.Count / IsiBox} box" : "")
+                    </span>
                 </div>
 
                 @if (SizeAktif)
@@ -260,16 +341,8 @@ else
         {
             @if (detail.Kekurangan.Count > 0)
             {
-                <div class="tni-card" style="border-color:var(--tni-bad)">
-                    <div class="tni-k" style="font-weight:700;margin-bottom:4px">Kekurangan stok</div>
-                    @foreach (var k in detail.Kekurangan)
-                    {
-                        <div class="tni-row" style="font-size:12.5px">
-                            <span>kurang <b>@k.Kurang</b> @(k.JenisItem == "KEMEJA" ? "kemeja" : "celana")</span>
-                            <span class="tni-pola">@k.Kode</span>
-                        </div>
-                    }
-                </div>
+                @KartuKekurangan(detail.Kekurangan, satuanTerpilih?.SatuanName ?? "-", satuanTerpilih?.SatuanCode,
+                                 $"kekurangan-{satuanTerpilih?.SatuanCode ?? "stok"}.png")
             }
 
             @if (detail.BelumBisa.Count == 0)
@@ -302,7 +375,8 @@ else
             {
                 <div class="tni-note" style="margin-bottom:8px">
                     Kartu ini sudah dicetak tapi belum di-scan Set Jadi, jadi stoknya
-                    dianggap <b>sudah dijatah</b>.
+                    dianggap <b>sudah dijatah</b>. Batch terbaru di atas; isi tiap batch
+                    urut seperti keluar dari printer.
                 </div>
                 <div class="tni-row" style="margin-bottom:8px">
                     <button class="tni-btn tni-btn-o" @onclick="PilihSemuaDijatah">
@@ -311,27 +385,68 @@ else
                     <span class="tni-k">@dipilihLepas.Count dipilih</span>
                 </div>
 
-                @foreach (var d in dijatah)
+                @foreach (var batch in BatchDijatah())
                 {
-                    var id = d.PersonelId;
-                    <div class="tni-card tni-tap" @onclick="@(() => ToggleLepas(id))">
-                        <div class="tni-row">
-                            <span>
-                                <input type="checkbox" checked="@dipilihLepas.Contains(id)"
-                                       @onclick:stopPropagation="true" @onchange="@(() => ToggleLepas(id))" />
-                                <span class="tni-pola-lg" style="font-size:15px;margin-left:6px">@d.KodeRef</span>
-                            </span>
-                            <span class="tni-pola" style="font-size:11.5px">
-                                @d.PolaKemejaKode · @d.PolaCelanaKode
-                            </span>
-                        </div>
-                        <div class="tni-note" style="margin-top:2px">@d.Pangkat @d.Nama</div>
-                        <div class="tni-note">
-                            dicetak @d.PrintedAt?.ToString("dd/MM HH:mm")
-                            @(string.IsNullOrEmpty(d.PrintedByNama) ? "" : $" · {d.PrintedByNama}")
-                            @(d.PrintCount > 1 ? $" · {d.PrintCount}x" : "")
-                        </div>
+                    var isiBatch = batch.ToList();
+                    var gagal = isiBatch.Count(x => x.PrintJobStatus == "ERROR");
+                    <div class="tni-sec tni-row">
+                        <span>
+                            Batch @batch.Key?.ToString("dd/MM HH:mm") · @isiBatch.Count kartu
+                            @if (gagal > 0)
+                            {
+                                <span style="color:var(--tni-bad)"> · @gagal gagal</span>
+                            }
+                        </span>
+                        <button class="tni-btn tni-btn-o" style="padding:2px 8px;font-size:11.5px"
+                                @onclick="@(() => PilihRentang(isiBatch, 0))">
+                            @(isiBatch.All(x => dipilihLepas.Contains(x.PersonelId)) ? "Lepas batch" : "Pilih batch")
+                        </button>
                     </div>
+
+                    @for (var i = 0; i < isiBatch.Count; i++)
+                    {
+                        var d = isiBatch[i];
+                        var id = d.PersonelId;
+                        var urut = i;
+                        <div class="tni-card tni-tap" @onclick="@(() => ToggleLepas(id))"
+                             style="@(d.PrintJobStatus == "ERROR" ? "border-left:3px solid var(--tni-bad)" : "")">
+                            <div class="tni-row">
+                                <span>
+                                    <input type="checkbox" checked="@dipilihLepas.Contains(id)"
+                                           @onclick:stopPropagation="true" @onchange="@(() => ToggleLepas(id))" />
+                                    <span class="tni-k" style="margin-left:6px">#@(urut + 1)</span>
+                                    <span class="tni-pola-lg" style="font-size:15px;margin-left:4px">@d.KodeRef</span>
+                                </span>
+                                <span class="tni-pola" style="font-size:11.5px">
+                                    @d.PolaKemejaKode · @d.PolaCelanaKode
+                                </span>
+                            </div>
+                            <div class="tni-note" style="margin-top:2px">@d.Pangkat @d.Nama</div>
+                            <div class="tni-row">
+                                <span class="tni-note">
+                                    dicetak @d.PrintedAt?.ToString("dd/MM HH:mm")
+                                    @(string.IsNullOrEmpty(d.PrintedByNama) ? "" : $" · {d.PrintedByNama}")
+                                    @(d.PrintCount > 1 ? $" · {d.PrintCount}x" : "")
+                                    @if (d.PrintJobStatus == "ERROR")
+                                    {
+                                        <b style="color:var(--tni-bad)"> · gagal cetak</b>
+                                    }
+                                    else if (d.PrintJobStatus is not null && d.PrintJobStatus != "DONE")
+                                    {
+                                        <b style="color:#7A5A12"> · antri</b>
+                                    }
+                                </span>
+                                @if (urut < isiBatch.Count - 1)
+                                {
+                                    <button class="tni-btn tni-btn-o" style="padding:2px 8px;font-size:11.5px"
+                                            @onclick:stopPropagation="true"
+                                            @onclick="@(() => PilihRentang(isiBatch, urut))">
+                                        Pilih s/d akhir
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
                 }
             }
         }
@@ -347,9 +462,23 @@ else
             }
             else if (tab == "DIJATAH" && dipilihLepas.Count > 0)
             {
-                @if (!konfirmLepas)
+                @if (konfirmUlang)
+                {
+                    <span class="tni-note" style="flex:1">
+                        Cetak ulang <b>@dipilihLepas.Count</b> kartu? Kartu lama tidak berubah, hanya dicetak lagi.
+                    </span>
+                    <button class="tni-btn tni-btn-o" @onclick="@(() => konfirmUlang = false)">Batal</button>
+                    <button class="tni-btn tni-btn-c" disabled="@isSaving" @onclick="CetakUlangAsync">
+                        @(isSaving ? "Mengirim..." : "Ya, cetak ulang")
+                    </button>
+                }
+                else if (!konfirmLepas)
                 {
                     <span class="tni-note" style="flex:1"><b>@dipilihLepas.Count</b> dipilih</span>
+                    <button class="tni-btn tni-btn-p" disabled="@isSaving"
+                            @onclick="@(() => { konfirmUlang = true; konfirmLepas = false; })">
+                        Cetak ulang
+                    </button>
                     <button class="tni-btn tni-btn-r" disabled="@isSaving" @onclick="@(() => konfirmLepas = true)">
                         Lepas kartu
                     </button>
@@ -369,7 +498,7 @@ else
             {
                 <span class="tni-note" style="flex:1">
                     @(tab == "BISA" ? "Centang personel untuk dicetak." :
-                      tab == "DIJATAH" ? "Centang kartu yang batal dikerjakan." :
+                      tab == "DIJATAH" ? "Centang kartu untuk dicetak ulang atau dilepas." :
                       "Tidak ada aksi di tab ini.")
                 </span>
             }
@@ -476,7 +605,13 @@ else
                             <input type="checkbox" checked="@dicentang"
                                    @onchange="@(() => ToggleDraft(draft, polaId))" />
                             <span class="tni-pola" style="flex:1">@x.Kode</span>
-                            <span class="tni-k">stok bebas <b>@x.StokBebas</b></span>
+                            <span class="tni-k">
+                                stok bebas <b>@x.StokBebas</b>
+                                @if (x.Dikunci > 0)
+                                {
+                                    <span style="color:var(--tni-navy)"> · <i class="fe fe-lock"></i> @x.Dikunci</span>
+                                }
+                            </span>
                         </label>
                         @if (dicentang)
                         {
@@ -511,6 +646,7 @@ else
     private bool isSaving;
     private bool konfirmCetak;
     private bool konfirmLepas;
+    private bool konfirmUlang;
     private string errorMessage = string.Empty;
     private string infoMessage = string.Empty;
 
@@ -527,6 +663,7 @@ else
     private HashSet<int> dipilih = new();
     private HashSet<int> dipilihLepas = new();
     private HashSet<int> prioritasProses = new();
+    private HashSet<int> kunciProses = new();
 
     // ---------- filter size prioritas ----------
     // Per perangkat (localStorage), karena "size yang ada di dekat kita" tergantung
@@ -669,7 +806,8 @@ else
         {
             await LoadDetailAsync();
             // urutan greedy berubah -> buang centang yang kini tidak lagi "bisa dibuat"
-            if (detail is not null) dipilih.IntersectWith(detail.BisaDibuat.Select(x => x.PersonelId));
+            if (boxPenuh) PilihBoxPenuh();
+            else if (detail is not null) dipilih.IntersectWith(detail.BisaDibuat.Select(x => x.PersonelId));
         }
     }
 
@@ -677,6 +815,145 @@ else
     {
         if (rawatanTerpilih is null) return;
         satuanList = await PkApi.GetSatuanAsync(rawatanTerpilih.AreaId, sizeKemeja, sizeCelana);
+        // bintang berubah / habis cetak -> angka gabungan ikut disegarkan bila sedang terbuka
+        if (kurangGabungan is not null) await MuatKurangGabunganAsync();
+    }
+
+    // ---------- kekurangan gabungan satuan prioritas ----------
+    // null = kartu tertutup. Dihitung API dalam SATU panggilan: kebutuhan semua satuan
+    // berbintang dijumlah dulu per pola, baru dikurangi stok bebas sekali.
+    private List<TniKekuranganDto>? kurangGabungan;
+    private bool isLoadingGabungan;
+
+    private async Task ToggleKurangGabunganAsync()
+    {
+        if (kurangGabungan is not null) { kurangGabungan = null; return; }
+        await MuatKurangGabunganAsync();
+    }
+
+    private async Task MuatKurangGabunganAsync()
+    {
+        if (rawatanTerpilih is null) return;
+        var ids = satuanList.Where(x => x.IsPrioritas).Select(x => x.SatuanId).ToList();
+        if (ids.Count == 0) { kurangGabungan = null; return; }
+
+        isLoadingGabungan = true;
+        try { kurangGabungan = await PkApi.GetKekuranganGabunganAsync(rawatanTerpilih.AreaId, ids); }
+        catch (Exception ex) { errorMessage = ex.Message; kurangGabungan = null; }
+        isLoadingGabungan = false;
+    }
+
+    // Kartu "Kekurangan stok": dipakai di tab Belum bisa (satu satuan) dan di
+    // bagian Prioritas (gabungan). Urutan list dari API sudah = halaman Stok.
+    private RenderFragment KartuKekurangan(List<TniKekuranganDto> list, string satuan, string? ket, string namaFile) =>
+        @<div class="tni-card" style="border-color:var(--tni-bad)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <div class="tni-k" style="font-weight:700">Kekurangan stok</div>
+                <button class="tni-btn tni-btn-o" style="padding:3px 9px;font-size:11.5px"
+                        disabled="@isMenyalin" @onclick="@(() => SalinGambarKekuranganAsync(list, satuan, ket, namaFile))">
+                    @(isMenyalin ? "Menyalin..." : "Salin gambar")
+                </button>
+            </div>
+            <div style="font-size:12px;margin-bottom:6px;line-height:1.4">
+                <div><span class="tni-k">Rawatan</span> <b>@rawatanTerpilih?.AreaName</b></div>
+                <div>
+                    <span class="tni-k">Satuan</span> <b>@satuan</b>
+                    @if (!string.IsNullOrEmpty(ket))
+                    {
+                        <span class="tni-k"> (@ket)</span>
+                    }
+                </div>
+            </div>
+            @* Dua tabel kecil berdampingan (turun ke bawah bila layar sempit). *@
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start">
+                @foreach (var (kemeja, label) in new[] { (true, "Kemeja"), (false, "Celana") })
+                {
+                    var grup = list.Where(k => (k.JenisItem == "KEMEJA") == kemeja).ToList();
+                    if (grup.Count == 0) continue;
+                    <div class="tni-tblwrap" style="flex:1 1 140px;min-width:140px;max-width:220px;border-radius:8px">
+                        <table class="tni-tbl tni-tbl-xs">
+                            <thead>
+                                <tr><th>@label</th><th>Kurang</th></tr>
+                            </thead>
+                            <tbody>
+                                @for (var i = 0; i < grup.Count; i++)
+                                {
+                                    var k = grup[i];
+                                    @if (!string.IsNullOrEmpty(k.GrupGender) && (i == 0 || grup[i - 1].GrupGender != k.GrupGender))
+                                    {
+                                        <tr class="tni-tbl-grp">
+                                            <td>@TniUrutStok.Label(k.GrupGender)</td>
+                                            <td>@grup.Where(x => x.GrupGender == k.GrupGender).Sum(x => x.Kurang)</td>
+                                        </tr>
+                                    }
+                                    <tr>
+                                        <td>
+                                            @k.Kode
+                                            @if (k.AdaPasangan)
+                                            {
+                                                <span style="color:var(--tni-gold);margin-left:2px" title="Pasangannya sudah ada — begitu size ini masuk, set langsung jadi">★</span>
+                                            }
+                                        </td>
+                                        <td style="font-weight:700">@k.Kurang</td>
+                                    </tr>
+                                }
+                                <tr class="tni-tbl-grp">
+                                    <td>Total</td>
+                                    <td>@grup.Sum(x => x.Kurang)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+            @if (list.Any(x => x.AdaPasangan))
+            {
+                <div class="tni-note" style="margin-top:6px">
+                    <span style="color:var(--tni-gold)">★</span> pasangannya sudah ada di stok — begitu size ini masuk, set langsung jadi. Prioritaskan.
+                </div>
+            }
+        </div>;
+
+    // ---------- isi box penuh (2026-11-11) ----------
+    // Satu kardus = 52 set. Dicentang: daftar satuan hanya yang bisa dicetak >= 52,
+    // dan di detail satuan 52 personel pertama langsung tercentang, mengikuti
+    // urutan tampil (size prioritas dulu). Per perangkat.
+    private const int IsiBox = 52;
+    private const string KunciBoxPenuh = "tni.pk.boxPenuh";
+    private bool boxPenuh;
+
+    private RenderFragment CentangBoxPenuh() =>
+        @<label class="tni-card" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;@(boxPenuh ? "border:1.5px solid var(--tni-navy2)" : "")">
+            <input type="checkbox" checked="@boxPenuh" @onchange="@(e => SetBoxPenuhAsync(e.Value is true))" />
+            <span>
+                <b><i class="fe fe-package"></i> Isi box penuh</b>
+                <span class="tni-note">— @IsiBox set pertama</span>
+            </span>
+        </label>;
+
+    private async Task SetBoxPenuhAsync(bool aktif)
+    {
+        boxPenuh = aktif;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", KunciBoxPenuh, aktif ? "1" : "0"); }
+        catch { }
+
+        if (langkah != 3) return;
+        if (aktif) PilihBoxPenuh();
+        else dipilih.Clear();
+        konfirmCetak = false;
+    }
+
+    // Tepat SATU box: 52 personel pertama, urut sama dengan daftar di layar
+    // (2026-11-11 owner: bukan kelipatan). Kurang dari 52 -> tidak ada yang dicentang.
+    private void PilihBoxPenuh()
+    {
+        if (detail is null) return;
+        var urut = SizeAktif
+            ? detail.BisaDibuat.Where(x => x.IsSizePrioritas).Concat(detail.BisaDibuat.Where(x => !x.IsSizePrioritas))
+            : detail.BisaDibuat;
+        var jumlah = detail.BisaDibuat.Count >= IsiBox ? IsiBox : 0;
+        dipilih = urut.Take(jumlah).Select(x => x.PersonelId).ToHashSet();
+        konfirmCetak = false;
     }
 
     private void PilihSizePrioritas(List<TniKandidatDto> cocok)
@@ -728,7 +1005,14 @@ else
                             style="background:none;border:0;padding:2px 4px 2px 0;font-size:21px;line-height:1;cursor:pointer;color:@(s.IsPrioritas ? WarnaSetJadi : "#B8C0CC")">
                         @(s.IsPrioritas ? "★" : "☆")
                     </button>
-                    <span class="tni-b">@s.SatuanName</span>
+                    <button type="button"
+                            title="@(s.IsKunciStok ? "Lepas kunci stok" : "Kunci stok untuk satuan ini")"
+                            disabled="@kunciProses.Contains(s.SatuanId)"
+                            @onclick="@(() => ToggleKunciStokAsync(s))" @onclick:stopPropagation="true"
+                            style="background:none;border:0;padding:2px 6px 2px 0;font-size:17px;line-height:1;cursor:pointer;color:@(s.IsKunciStok ? "var(--tni-navy)" : "#B8C0CC")">
+                        <i class="fe @(s.IsKunciStok ? "fe-lock" : "fe-unlock")"></i>
+                    </button>
+                    <span class="tni-b">@s.SatuanName (@s.SatuanCode)</span>
                 </span>
                 @if (s.BisaTuntas)
                 {
@@ -750,10 +1034,36 @@ else
                     <span> · stok cukup untuk sisa <b>@s.Sisa</b></span>
                 }
             </div>
+            @if (s.IsKunciStok)
+            {
+                <div class="tni-note" style="margin-top:3px;color:var(--tni-navy)">
+                    <i class="fe fe-lock"></i>
+                    @if (s.DikunciKemeja + s.DikunciCelana > 0)
+                    {
+                        <span>Stok dikunci: <b>@s.DikunciKemeja</b> kemeja · <b>@s.DikunciCelana</b> celana</span>
+                    }
+                    else if (s.Sisa == 0)
+                    {
+                        <span>Terkunci — semua sudah dicetak, tidak ada stok yang ditahan</span>
+                    }
+                    else
+                    {
+                        <span>Terkunci — belum ada stok bebas yang cocok untuk ditahan</span>
+                    }
+                </div>
+            }
             @if (SizeAktif && s.BisaSizePrioritas > 0)
             {
                 <div style="margin-top:4px">
                     @ChipSize(s.BisaSizePrioritas, s.PakaiSizePrioritas, s.StokSizePrioritas)
+                </div>
+            }
+            @if (boxPenuh && s.BisaDibuat >= IsiBox)
+            {
+                <div style="margin-top:4px">
+                    <span class="tni-chip tni-chip-navy">
+                        <i class="fe fe-package"></i> @(s.BisaDibuat / IsiBox) box penuh · @(s.BisaDibuat / IsiBox * IsiBox) set
+                    </span>
                 </div>
             }
             <div style="display:flex;height:7px;background:#E8ECF1;border-radius:4px;overflow:hidden;margin-top:6px">
@@ -768,14 +1078,20 @@ else
                 </span>
                 <span>
                     <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@WarnaSetJadi;margin-right:4px"></span>
-                    Set jadi <b>@s.PersenSetJadi%</b> (@s.SudahSetJadi.ToString("N0"))
+                    Set jadi <b>@s.PersenSetJadi%</b> (@TeksProses(s.SudahSetJadi - s.SudahMasukBox, s.SudahSetJadi))
                 </span>
                 <span>
                     <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:@WarnaDicetak;margin-right:4px"></span>
-                    Dicetak <b>@s.PersenDicetak%</b> (@s.SudahDicetak.ToString("N0"))
+                    Dicetak <b>@s.PersenDicetak%</b> (@TeksProses(s.SudahDicetak - s.SudahSetJadi, s.SudahDicetak))
                 </span>
             </div>
         </div>;
+
+    // Legend bar (2026-11-11): "5/312" = 5 masih di tahap ini (belum lanjut ke tahap
+    // berikutnya) dari 312 kumulatif. Tidak ada yang tertahan (0/312) atau semuanya
+    // masih di tahap ini (312/312) -> cukup "312".
+    private static string TeksProses(int proses, int total) =>
+        proses > 0 && proses < total ? $"{proses:N0}/{total:N0}" : total.ToString("N0");
 
     private async Task TogglePrioritasAsync(TniSatuanSaranDto s)
     {
@@ -787,6 +1103,28 @@ else
         else if (rawatanTerpilih is not null) await MuatSatuanAsync();
 
         prioritasProses.Remove(s.SatuanId);
+    }
+
+    // Gembok kunci stok (alter_81). Melepas dikonfirmasi: kunci lagi nanti = antre paling belakang.
+    private async Task ToggleKunciStokAsync(TniSatuanSaranDto s)
+    {
+        if (s.IsKunciStok && !await JS.InvokeAsync<bool>("confirm",
+                $"Lepas kunci stok {s.SatuanCode}? Stok yang ditahan kembali bebas untuk satuan lain. " +
+                "Kalau dikunci lagi nanti, satuan ini antre paling belakang."))
+            return;
+
+        if (!kunciProses.Add(s.SatuanId)) return;   // cegah tap ganda
+        errorMessage = string.Empty;
+
+        var (ok, err) = await PkApi.SetKunciStokAsync(s.SatuanId, !s.IsKunciStok);
+        if (!ok) errorMessage = err;
+        else if (rawatanTerpilih is not null)
+        {
+            kurangGabungan = null;   // angka gabungan prioritas berubah -> buka ulang
+            await MuatSatuanAsync();
+        }
+
+        kunciProses.Remove(s.SatuanId);
     }
 
     private string Breadcrumb => langkah switch
@@ -805,6 +1143,8 @@ else
 
         await OrderState.EnsureLoadedAsync();
         await BacaSizeAsync();
+        try { boxPenuh = await JS.InvokeAsync<string?>("localStorage.getItem", KunciBoxPenuh) == "1"; }
+        catch { }
         await LoadRawatanAsync();
         if (SizeAktif) await MuatDaftarSizeAsync();   // untuk menampilkan kode size di chip
     }
@@ -821,6 +1161,7 @@ else
     private async Task PilihRawatanAsync(TniRawatanDto r)
     {
         rawatanTerpilih = r;
+        kurangGabungan = null;   // milik rawatan sebelumnya
         langkah = 2;
         infoMessage = string.Empty;
         isLoading = true;
@@ -838,8 +1179,10 @@ else
         dipilihLepas.Clear();
         konfirmCetak = false;
         konfirmLepas = false;
+        konfirmUlang = false;
         infoMessage = string.Empty;
         await LoadDetailAsync();
+        if (boxPenuh) PilihBoxPenuh();
     }
 
     private async Task LoadDetailAsync()
@@ -866,6 +1209,7 @@ else
     {
         konfirmCetak = false;
         konfirmLepas = false;
+        konfirmUlang = false;
         infoMessage = string.Empty;
 
         if (langkah == 3) { langkah = 2; if (rawatanTerpilih is not null) await MuatSatuanAsync(); }
@@ -882,6 +1226,23 @@ else
     {
         if (!dipilihLepas.Add(id)) dipilihLepas.Remove(id);
         konfirmLepas = false;
+        konfirmUlang = false;
+    }
+
+    // Satu batch = satu kali tekan Cetak (printed_at sama). Urutan dari SP:
+    // batch terbaru dulu, isi batch urut keluar printer — GroupBy menjaga urutan itu.
+    private IEnumerable<IGrouping<DateTime?, TniDijatahDto>> BatchDijatah() =>
+        dijatah.GroupBy(x => x.PrintedAt);
+
+    // Pilih dari kartu ke-[dari] sampai akhir batch (mis. kertas habis di tengah batch).
+    // Kalau rentang itu sudah terpilih semua, tombol yang sama melepasnya.
+    private void PilihRentang(List<TniDijatahDto> isiBatch, int dari)
+    {
+        var ids = isiBatch.Skip(dari).Select(x => x.PersonelId).ToList();
+        if (ids.All(dipilihLepas.Contains)) dipilihLepas.ExceptWith(ids);
+        else dipilihLepas.UnionWith(ids);
+        konfirmLepas = false;
+        konfirmUlang = false;
     }
 
     private void PilihSemua()
@@ -897,6 +1258,7 @@ else
         if (dipilihLepas.Count == dijatah.Count) dipilihLepas.Clear();
         else dipilihLepas = dijatah.Select(x => x.PersonelId).ToHashSet();
         konfirmLepas = false;
+        konfirmUlang = false;
     }
 
     // ---------- ringkasan konfirmasi cetak ----------
@@ -915,6 +1277,8 @@ else
         if (detail is null) return new();
         var daftar = kemeja ? daftarKemeja : daftarCelana;
         var size = kemeja ? sizeKemeja : sizeCelana;
+        // stok yang boleh dipakai satuan ini (bebas tanpa kunci + jatah kuncinya sendiri)
+        var tersedia = kemeja ? detail.TersediaKemeja : detail.TersediaCelana;
 
         return detail.BisaDibuat
             .Where(p => dipilih.Contains(p.PersonelId))
@@ -923,12 +1287,11 @@ else
                 : new { Id = p.PolaCelanaId, Kode = p.PolaCelanaKode })
             .Select(g =>
             {
-                var stok = daftar.FirstOrDefault(x => x.PolaId == g.Key.Id);
                 var prio = size.TryGetValue(g.Key.Id, out var qty);
                 return new
                 {
                     Urut = daftar.FindIndex(x => x.PolaId == g.Key.Id),
-                    Baris = new BarisRingkas(g.Key.Kode, g.Count(), stok?.StokBebas, prio, qty)
+                    Baris = new BarisRingkas(g.Key.Kode, g.Count(), tersedia.GetValueOrDefault(g.Key.Id), prio, qty)
                 };
             })
             .OrderByDescending(x => x.Baris.Prioritas)
@@ -947,7 +1310,7 @@ else
             <div class="tni-tblwrap">
                 <table class="tni-tbl tni-tbl-sm">
                     <thead>
-                        <tr><th>Size</th><th>Ambil</th><th>Stok bebas</th><th>Sisa</th></tr>
+                        <tr><th>Size</th><th>Ambil</th><th>Stok</th><th>Sisa</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var b in baris)
@@ -992,7 +1355,27 @@ else
 
         // stok bebas & angka satuan lain ikut berubah -> muat ulang
         await LoadDetailAsync();
+        if (boxPenuh) PilihBoxPenuh();   // box penuh berikutnya langsung siap (tetap lewat konfirmasi)
         if (rawatanTerpilih is not null) await MuatSatuanAsync();
+    }
+
+    // Cetak ulang dari tab Sudah dicetak: SP cetak yang sama (berlaku untuk status apa pun),
+    // print_count naik; urutan cetak tetap diatur SP (size celana lalu kemeja).
+    private async Task CetakUlangAsync()
+    {
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        var (ok, err, hasil) = await PkApi.CetakAsync(dipilihLepas.ToList());
+
+        isSaving = false;
+        konfirmUlang = false;
+
+        if (!ok) { errorMessage = err; return; }
+
+        infoMessage = $"{hasil?.JumlahJob ?? 0} kartu masuk antrian cetak ulang.";
+        dipilihLepas.Clear();
+        if (satuanTerpilih is not null) dijatah = await PkApi.GetDijatahAsync(satuanTerpilih.SatuanId);
     }
 
     private async Task LepasAsync()
@@ -1015,5 +1398,58 @@ else
         dipilihLepas.Clear();
         await LoadDetailAsync();
         if (rawatanTerpilih is not null) await MuatSatuanAsync();
+    }
+
+    // 2026-11-10: kartu Kekurangan stok -> gambar PNG (js/tniCapture.js) -> clipboard,
+    // supaya bisa langsung di-paste ke WhatsApp. Di HTTP biasa jatuh ke unduh file.
+    private bool isMenyalin;
+
+    private async Task SalinGambarKekuranganAsync(List<TniKekuranganDto> list, string satuan, string? ket, string namaFile)
+    {
+        if (list.Count == 0) return;
+        isMenyalin = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+        try
+        {
+            var tabel = new List<object>();
+            foreach (var (kemeja, label) in new[] { (true, "Kemeja"), (false, "Celana") })
+            {
+                var grup = list.Where(k => (k.JenisItem == "KEMEJA") == kemeja).ToList();
+                if (grup.Count == 0) continue;
+                var baris = new List<object>();
+                for (var i = 0; i < grup.Count; i++)
+                {
+                    var k = grup[i];
+                    if (!string.IsNullOrEmpty(k.GrupGender) && (i == 0 || grup[i - 1].GrupGender != k.GrupGender))
+                        baris.Add(new { grp = true, kode = TniUrutStok.Label(k.GrupGender),
+                                        qty = grup.Where(x => x.GrupGender == k.GrupGender).Sum(x => x.Kurang) });
+                    baris.Add(new { grp = false, kode = k.AdaPasangan ? k.Kode + " ★" : k.Kode, qty = k.Kurang });
+                }
+                baris.Add(new { grp = true, kode = "Total", qty = grup.Sum(x => x.Kurang) });
+                tabel.Add(new { label, baris });
+            }
+
+            var data = new
+            {
+                judul = "Kekurangan stok",
+                info = new[]
+                {
+                    new[] { "Rawatan", rawatanTerpilih?.AreaName ?? "-" },
+                    new[] { "Satuan", string.IsNullOrEmpty(ket) ? satuan : $"{satuan} ({ket})" }
+                }.Concat(list.Any(x => x.AdaPasangan)
+                    ? new[] { new[] { "★", "pasangannya sudah ada, prioritaskan" } }
+                    : Array.Empty<string[]>()).ToArray(),
+                tabel,
+                namaFile
+            };
+
+            var hasil = await JS.InvokeAsync<string>("tniCapture.salin", data);
+            infoMessage = hasil == "COPY"
+                ? "Gambar kekurangan stok disalin — tinggal paste (Ctrl+V) di WhatsApp."
+                : "Browser tidak mengizinkan salin gambar di alamat ini — gambar diunduh sebagai file.";
+        }
+        catch (Exception ex) { errorMessage = "Gagal membuat gambar: " + ex.Message; }
+        finally { isMenyalin = false; }
     }
 }

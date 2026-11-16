@@ -24,6 +24,13 @@ public class TniStokSaldoDto
     // P | PG | W | WH (kemeja), P | W (celana); baris sudah terurut per grup.
     public string GrupGender { get; set; } = string.Empty;
 
+    // 2026-11-11 (alter_81): bagian StokBebas yang dikunci satuan bergembok di Perintah Kerja.
+    // StokBebas sendiri TIDAK dikurangi (satuan pemilik kunci tetap memakainya).
+    public int Dikunci { get; set; }
+
+    // Bebas untuk satuan mana pun = belum dicetak dan tidak dikunci.
+    public int BebasTanpaKunci => StokBebas - Dikunci;
+
     // Saldo minus = setoran kemungkinan belum dicatat (scan tidak pernah diblok).
     public bool SaldoMinus => Saldo < 0;
 
@@ -97,6 +104,29 @@ public class TniStokKeluarRequest
     public int Arah { get; set; } = -1;                   // KOREKSI saja
     public string? Alasan { get; set; }
     public List<TniStokSetoranItem> Items { get; set; } = new();
+}
+
+// 2026-11-11: tab Stock Opname. Items = HASIL HITUNG FISIK per pola (Qty >= 0).
+// SP menghitung selisih terhadap saldo sistem; hanya pola yang diinput yang
+// disesuaikan. Keterangan selalu diawali "Stock opname" (catatan opsional).
+public class TniStokOpnameRequest
+{
+    public DateTime? Tanggal { get; set; }
+    public string? Catatan { get; set; }
+    public List<TniStokSetoranItem> Items { get; set; } = new();
+}
+
+public class TniStokOpnameHasilDto
+{
+    public int JumlahPola { get; set; }
+    public int PolaCocok { get; set; }
+    public int PolaTambah { get; set; }
+    public int QtyTambah { get; set; }
+    public int PolaKurang { get; set; }
+    public int QtyKurang { get; set; }      // positif
+    public int? KeluarIdTambah { get; set; }
+    public int? KeluarIdKurang { get; set; }
+    public string Keterangan { get; set; } = string.Empty;
 }
 
 public class TniStokMutasiDto

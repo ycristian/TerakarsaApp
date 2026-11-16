@@ -85,7 +85,10 @@ else
             <span @onclick="@(() => KePersonel("status=DICETAK"))"><i style="background:@WarnaDicetak"></i>Sedang dikerjakan <b>@s.KartuBelumScan.ToString("N0")</b></span>
         </div>
         <div class="tni-row" style="margin-top:6px">
-            <span class="tni-note">@s.MasukBox.ToString("N0") dari @s.Total.ToString("N0") personel masuk box</span>
+            <span class="tni-note">
+                @s.MasukBox.ToString("N0") dari @s.Total.ToString("N0") personel masuk box
+                · <b>@s.BoxTerbuka/@s.BoxTotal</b> box terbuka
+            </span>
             @if (s.PerluReview > 0 && Sesi.BolehMenu("PERSONEL"))
             {
                 <span class="tni-chip tni-chip-bad" style="cursor:pointer"
@@ -122,7 +125,8 @@ else
     <div class="tni-sec">Barang &amp; stok</div>
     @* ---------- barang & stok (2026-11-10) ----------
        Kartu Kemeja/Celana: masuk bersih vs kebutuhan (1 per personel), lalu stok
-       tersedia = belum di-set jadi = lock (dijatah kartu yang sudah dicetak) + unlock.
+       tersedia = belum di-set jadi = lock (dijatah kartu yang sudah dicetak) + kunci
+       (ditahan satuan bergembok, dirinci per kode satuan) + unlock.
        Kartu Set: berapa personel yang bisa di-set dari stok itu sekarang. *@
     <div class="tni-grid3">
         @foreach (var (label, j) in new[] { ("Kemeja", st.Kemeja), ("Celana", st.Celana) })
@@ -141,8 +145,19 @@ else
                     <b class="tni-big">@j.Tersedia.ToString("N0")</b>
                     <div class="tni-leg" style="margin-top:4px">
                         <span><i style="background:@WarnaDicetak"></i>Lock @j.Lock.ToString("N0")</span>
+                        @if (j.Kunci > 0)
+                        {
+                            <span><i style="background:@WarnaKunci"></i>Kunci @j.Kunci.ToString("N0")</span>
+                        }
                         <span><i style="background:@WarnaUnlock"></i>Unlock @j.Unlock.ToString("N0")</span>
                     </div>
+                    @if (j.KunciSatuan.Count > 0)
+                    {
+                        <div class="tni-note" style="margin-top:3px">
+                            <i class="fe fe-lock" style="color:@WarnaKunci"></i>
+                            @(string.Join(" · ", j.KunciSatuan.Select(x => x.SatuanCode + " " + x.Qty.ToString("N0"))))
+                        </div>
+                    }
                 </div>
             </div>
         }
@@ -156,9 +171,19 @@ else
             <div class="tni-grid3-sep">
                 <div class="tni-leg" style="flex-direction:column;gap:3px">
                     <span><i style="background:@WarnaDicetak"></i>@st.BisaDisetLock.ToString("N0") dari lock</span>
+                    @if (st.BisaDisetKunci > 0 || st.Kemeja.Kunci + st.Celana.Kunci > 0)
+                    {
+                        <span><i style="background:@WarnaKunci"></i>@st.BisaDisetKunci.ToString("N0") untuk satuan dikunci</span>
+                    }
                     <span><i style="background:@WarnaUnlock"></i>@st.BisaDisetUnlock.ToString("N0") dari unlock</span>
                 </div>
-                <div class="tni-note" style="margin-top:4px">Lock = stok yang sudah dijatah ke kartu tercetak.</div>
+                <div class="tni-note" style="margin-top:4px">
+                    Lock = stok yang sudah dijatah ke kartu tercetak.
+                    @if (st.Kemeja.Kunci + st.Celana.Kunci > 0)
+                    {
+                        <span>Kunci = stok yang ditahan untuk satuan bergembok di Perintah Kerja.</span>
+                    }
+                </div>
             </div>
         </div>
     </div>
@@ -185,6 +210,7 @@ else
     // "dicetak / sedang dikerjakan" & stok lock -- sama dengan WarnaDicetak di PerintahKerja
     private const string WarnaDicetak = "#9DB8D6";
     private const string WarnaUnlock = "#F08A24";   // stok bebas (unlock) -- oranye
+    private const string WarnaKunci = "#16365C";    // stok dikunci satuan (alter_81) -- navy, sama dengan gembok Perintah Kerja
 
     // legenda progres -> daftar Personel, hanya bila perangkat boleh membuka Personel
     private void KePersonel(string query)

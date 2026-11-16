@@ -36,7 +36,13 @@ BEGIN
            FROM tni.pembatalan pb
            JOIN tni.personel p2 ON p2.personel_id = pb.personel_id AND p2.deleted_at IS NULL
           WHERE p2.order_id = @OrderId AND pb.[status] = 'MENUNGGU' AND pb.deleted_at IS NULL)
-                                                                                  AS PembatalanMenunggu
+                                                                                  AS PembatalanMenunggu,
+        -- box (2026-11-10): terbuka = packed_at NULL; sisanya tertutup/terkirim
+        (SELECT COUNT(*) FROM tni.box b
+          WHERE b.order_id = @OrderId AND b.deleted_at IS NULL)                   AS BoxTotal,
+        (SELECT COUNT(*) FROM tni.box b
+          WHERE b.order_id = @OrderId AND b.deleted_at IS NULL AND b.packed_at IS NULL)
+                                                                                  AS BoxTerbuka
     FROM tni.v_personel v
     WHERE v.order_id = @OrderId;
 END;
@@ -52,6 +58,10 @@ GO
 --   (2) personel yang belum dapat set (DICETAK lalu BELUM_CETAK), urutan yang
 --       dipakai greedy "bisa di-set sekarang" di API -- DICETAK didahulukan karena
 --       stoknya sudah dijatah; BELUM_CETAK urut seperti Perintah Kerja.
+--       2026-11-11: + SatuanId (kolom terakhir) untuk jatah kunci stok.
+--   (3) 2026-11-11 (alter_81): stok bebas yang DIKUNCI satuan bergembok, per satuan
+--       per pola (tni.v_stok_kunci), urut antrean kunci. Beranda memisahkan "Kunci"
+--       dari Unlock dan merinci per kode satuan.
 CREATE OR ALTER PROCEDURE tni.SIS_Beranda_Stok
     @OrderId INT
 AS
@@ -70,12 +80,23 @@ BEGIN
 
     SELECT v.pola_kemeja_id AS PolaKemejaId,
            v.pola_celana_id AS PolaCelanaId,
-           CAST(CASE WHEN v.status_progres = 'DICETAK' THEN 1 ELSE 0 END AS BIT) AS Dicetak
+           CAST(CASE WHEN v.status_progres = 'DICETAK' THEN 1 ELSE 0 END AS BIT) AS Dicetak,
+           v.satuan_id      AS SatuanId
     FROM tni.v_personel v
     WHERE v.order_id = @OrderId
       AND v.status_progres IN ('BELUM_CETAK', 'DICETAK')
     ORDER BY CASE WHEN v.status_progres = 'DICETAK' THEN 0 ELSE 1 END,
              v.satuan_code, v.kode_ref;
+
+    SELECT k.satuan_id   AS SatuanId,
+           s.satuan_code AS SatuanCode,
+           k.jenis_item  AS JenisItem,
+           k.pola_id     AS PolaId,
+           k.dikunci     AS Dikunci
+    FROM tni.v_stok_kunci k
+    JOIN tni.satuan s ON s.satuan_id = k.satuan_id
+    WHERE k.order_id = @OrderId AND k.dikunci > 0
+    ORDER BY k.kunci_stok_at, k.satuan_id;
 END;
 GO
 
