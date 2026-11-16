@@ -69,6 +69,25 @@ public class CctvApiService
         }
     }
 
+    // ==================== stream (Prompt 92) ====================
+
+    public async Task<CctvStreamTokenDto?> GetStreamTokenAsync(int cameraId)
+    {
+        try
+        {
+            var response = await _http.GetAsync($"api/cctv/cameras/{cameraId}/stream-token");
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<CctvStreamTokenDto>();
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    // URL playlist live lewat proxy API (TANPA token -- cctvPlayer.js menambahkan ?t= ke tiap request).
+    public string HlsUrl(string path) => $"{ApiBaseUrl}/api/cctv/hls/{Uri.EscapeDataString(path)}/index.m3u8";
+
     // ==================== bantuan ====================
 
     private static async Task<(bool Success, string Error, int Id)> Kirim(Task<HttpResponseMessage> task)

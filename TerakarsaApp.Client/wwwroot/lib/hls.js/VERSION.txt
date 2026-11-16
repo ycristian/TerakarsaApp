@@ -1,0 +1,1 @@
+hls.js 1.7.4 (npm pack hls.js@1.7.4, dist/hls.min.js) -- Apache-2.0. Dimuat lokal, BUKAN dari CDN (Prompt 92).

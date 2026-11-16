@@ -17,10 +17,12 @@ namespace TerakarsaApp.API.Controllers;
 public class CctvCameraController : ControllerBase
 {
     private readonly CctvCameraService _cameraService;
+    private readonly CctvStreamTokenService _tokens;
 
-    public CctvCameraController(CctvCameraService cameraService)
+    public CctvCameraController(CctvCameraService cameraService, CctvStreamTokenService tokens)
     {
         _cameraService = cameraService;
+        _tokens = tokens;
     }
 
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -36,6 +38,24 @@ public class CctvCameraController : ControllerBase
         var detail = await _cameraService.GetByIdAsync(id, ct);
         if (detail is null) return NotFound();
         return Ok(detail);
+    }
+
+    // Prompt 92: token stream pendek untuk satu kamera hidup (dipakai rute proxy ?t=).
+    [HttpGet("{id:int}/stream-token")]
+    public async Task<IActionResult> StreamToken(int id, CancellationToken ct)
+    {
+        var cam = await _cameraService.GetPathAsync(id, ct);
+        if (cam is null) return NotFound("Kamera tidak ditemukan.");
+
+        var (token, expiresAt) = _tokens.Create(cam.Value.MtxPath, CurrentUserId);
+        return Ok(new CctvStreamTokenDto
+        {
+            CameraId = id,
+            Path = cam.Value.MtxPath,
+            Name = cam.Value.Name,
+            Token = token,
+            ExpiresAt = expiresAt
+        });
     }
 
     [HttpGet("lookup")]

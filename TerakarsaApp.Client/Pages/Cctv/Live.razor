@@ -3,13 +3,338 @@
 @layout TerakarsaApp.Client.Layout.CctvLayout
 @using Microsoft.AspNetCore.Authorization
 @using TerakarsaApp.Client.Pages.Cctv.Shared
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cctv
+@inject CctvApiService CctvApi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Prompt 92 -- grid live, mengikuti mockup Main.dc.html.
+   Video lewat proxy HLS API (api/cctv/hls/{path}/...?t=token) -- browser tidak pernah
+   menghubungi MediaMTX. Hemat beban (WAJIB): hanya kamera di halaman aktif yang diputar
+   (maks 12); semua stream dihentikan saat ganti halaman/area/tampilan, saat keluar dari
+   halaman ini, dan saat tab browser disembunyikan. *@
 
 <PageTitle>CCTV · Live</PageTitle>
 
-<CctvTabs Active="live" />
+<CctvTabs Active="live">
+    @if (loaded)
+    {
+        @if (mtxReachable)
+        {
+            <span>@cameras.Count kamera · <span class="cc-c-online">@cameras.Count(c => c.Status == CctvCameraStatus.Online) online</span> · <span class="cc-c-offline">@cameras.Count(c => c.Status == CctvCameraStatus.Offline) offline</span></span>
+        }
+        else
+        {
+            <span>@cameras.Count kamera · status tidak diketahui</span>
+        }
+    }
+</CctvTabs>
 
 <div class="cc-body">
-    <div class="cc-card">
-        <div class="cc-h">Menyusul</div>
+    @if (loaded && !mtxReachable)
+    {
+        <div class="cc-banner">Server rekaman tidak terjangkau — status kamera tidak diketahui</div>
+    }
+
+    <div class="cc-row">
+        <div class="cc-row cc-grow" style="gap:8px">
+            <button type="button" class="cc-chip @(area is null ? "is-on" : "")" @onclick="() => PilihArea(null)">Semua · @cameras.Count</button>
+            @foreach (var a in areas)
+            {
+                var nama = a.Name;
+                <button type="button" class="cc-chip @(area == nama ? "is-on" : "")" @onclick="() => PilihArea(nama)">@nama · @a.Count</button>
+            }
+        </div>
+        <div class="cc-row" style="gap:8px">
+            <label for="tata" class="cc-sub" style="margin:0">Tampilan</label>
+            <select id="tata" class="cc-sel" style="width:auto" value="@perPage" @onchange="GantiTampilan">
+                <option value="12">4 × 3 (12 kamera)</option>
+                <option value="9">3 × 3 (9 kamera)</option>
+                <option value="4">2 × 2 (4 kamera)</option>
+            </select>
+        </div>
     </div>
+
+    @if (!loaded)
+    {
+        <div class="cc-muted">Memuat kamera...</div>
+    }
+    else if (Filtered.Count == 0)
+    {
+        <div class="cc-card">
+            <div class="cc-muted">Belum ada kamera yang ditampilkan. Atur di tab <a href="/cctv/kamera">Kamera</a>.</div>
+        </div>
+    }
+    else
+    {
+        <div class="cc-grid" style="--cc-cols:@Cols">
+            @foreach (var c in PageCams)
+            {
+                var cam = c;
+                var st = StateOf(cam);
+                <div class="cc-cam" @key="cam.CameraId">
+                    <div class="cc-video" id="cc-box-@cam.CameraId" @onclick="() => LayarPenuh(cam.CameraId)">
+                        @if (IsStreamable(cam))
+                        {
+                            <video id="cc-v-@cam.CameraId" muted playsinline autoplay
+                                   style="@(st == "playing" ? "" : "visibility:hidden")"></video>
+                        }
+                        @if (st == "playing")
+                        {
+                            <div class="cc-live"><span class="cc-live-dot"></span>LIVE</div>
+                        }
+                        else
+                        {
+                            <div class="cc-video-msg">@PesanState(cam, st)</div>
+                        }
+                        <div class="cc-video-path">@cam.MtxPath</div>
+                    </div>
+                    <div class="cc-cam-foot">
+                        <div class="cc-grow" style="min-width:0">
+                            <div class="cc-cam-name">@cam.Name</div>
+                            <div class="cc-cam-area">@(cam.Area ?? "—")</div>
+                        </div>
+                        <a href="/cctv/playback?cameraId=@cam.CameraId" class="cc-ico-link" aria-label="Putar ulang rekaman" title="Putar ulang rekaman">
+                            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"></path><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"></path><path d="M12 7v5l3 2"></path></svg>
+                        </a>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="cc-row" style="justify-content:space-between">
+            <div class="cc-sub" style="margin:0">Menampilkan @(page * perPage + 1)–@(page * perPage + PageCams.Count) dari @Filtered.Count kamera. Klik gambar untuk layar penuh.</div>
+            <div class="cc-row" style="gap:8px">
+                <button type="button" class="cc-btn" disabled="@(page == 0)" @onclick="() => KeHalaman(page - 1)">Sebelumnya</button>
+                <span class="cc-strong">@(page + 1) / @PageCount</span>
+                <button type="button" class="cc-btn" disabled="@(page >= PageCount - 1)" @onclick="() => KeHalaman(page + 1)">Berikutnya</button>
+            </div>
+        </div>
+    }
 </div>
+
+@code {
+    private const string LayoutKey = "cctv.live.perPage";
+    private static readonly TimeSpan TokenRefreshBefore = TimeSpan.FromMinutes(2);
+
+    private record AreaChip(string Name, int Count);
+
+    private List<CctvCameraDto> cameras = new();
+    private List<AreaChip> areas = new();
+    private bool loaded;
+    private bool mtxReachable = true;
+
+    private string? area;
+    private int perPage = 12;
+    private int page;
+
+    // kondisi tiap kamera di halaman aktif: loading | playing | retrying | nosignal | unsupported
+    private readonly Dictionary<int, string> states = new();
+    private readonly Dictionary<int, DateTimeOffset> tokenExpiry = new();
+    private int generation;
+    private bool needStart;
+    private bool hidden;
+    private bool disposed;
+
+    private DotNetObjectReference<Live>? selfRef;
+    private System.Threading.Timer? tokenTimer;
+
+    private const string NoArea = "Tanpa area";
+
+    private List<CctvCameraDto> Filtered => area is null
+        ? cameras
+        : cameras.Where(c => (c.Area ?? NoArea) == area).ToList();
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(Filtered.Count / (double)perPage));
+
+    private List<CctvCameraDto> PageCams => Filtered.Skip(page * perPage).Take(Math.Min(perPage, 12)).ToList();
+
+    private int Cols => perPage switch { 4 => 2, 9 => 3, _ => 4 };
+
+    private static bool IsStreamable(CctvCameraDto c) => c.Status != CctvCameraStatus.Offline && !c.IsH265;
+
+    private string StateOf(CctvCameraDto c)
+    {
+        if (c.Status == CctvCameraStatus.Offline) return "nosignal";
+        if (c.IsH265) return "h265";
+        return states.TryGetValue(c.CameraId, out var s) ? s : "loading";
+    }
+
+    private static string PesanState(CctvCameraDto c, string st) => st switch
+    {
+        "loading" => "Memuat...",
+        "retrying" => "Menyambung ulang...",
+        "h265" => "H265 — tidak tampil di browser",
+        "unsupported" => "Browser tidak bisa memutar video ini",
+        _ => "Tidak ada sinyal"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await CctvApi.GetCamerasAsync(onlyVisible: true);
+        cameras = resp.Cameras;
+        mtxReachable = resp.MtxReachable;
+        areas = cameras
+            .GroupBy(c => c.Area ?? NoArea)
+            .Select(g => new AreaChip(g.Key, g.Count()))
+            .ToList();
+        loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (disposed) return;
+
+        if (firstRender)
+        {
+            selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("cctvPlayer.watchVisibility", selfRef);
+
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", LayoutKey);
+            if (int.TryParse(saved, out var pp) && pp is 4 or 9 or 12) perPage = pp;
+
+            tokenTimer = new System.Threading.Timer(_ => InvokeAsync(PerbaruiToken), null,
+                TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+
+            await Restart();
+            return;
+        }
+
+        if (needStart && loaded && !hidden)
+        {
+            needStart = false;
+            await MulaiStream(generation);
+        }
+    }
+
+    // Hentikan semua stream, reset kondisi halaman aktif, lalu mulai lagi setelah render.
+    private async Task Restart()
+    {
+        generation++;
+        await StopAll();
+        states.Clear();
+        tokenExpiry.Clear();
+        needStart = true;
+        StateHasChanged();
+    }
+
+    private async Task MulaiStream(int gen)
+    {
+        var targets = PageCams.Where(IsStreamable).Take(12).ToList();
+
+        var tasks = targets.Select(async c => (Cam: c, Token: await CctvApi.GetStreamTokenAsync(c.CameraId))).ToList();
+        var hasil = await Task.WhenAll(tasks);
+
+        if (gen != generation || disposed || hidden) return;   // sudah ganti halaman / tab tersembunyi
+
+        foreach (var (cam, token) in hasil)
+        {
+            if (token is null)
+            {
+                states[cam.CameraId] = "nosignal";
+                continue;
+            }
+
+            tokenExpiry[cam.CameraId] = token.ExpiresAt;
+            states[cam.CameraId] = "loading";
+            await JS.InvokeVoidAsync("cctvPlayer.start", $"cc-v-{cam.CameraId}", CctvApi.HlsUrl(token.Path),
+                token.Token, selfRef, cam.CameraId);
+        }
+
+        StateHasChanged();
+    }
+
+    // Stream live berjalan lebih lama dari umur token: perbarui token sebelum kedaluwarsa.
+    private async Task PerbaruiToken()
+    {
+        if (disposed || hidden) return;
+        var gen = generation;
+        var now = DateTimeOffset.UtcNow;
+
+        foreach (var (id, exp) in tokenExpiry.ToList())
+        {
+            if (exp - now > TokenRefreshBefore) continue;
+
+            var token = await CctvApi.GetStreamTokenAsync(id);
+            if (gen != generation || disposed) return;
+            if (token is null) continue;
+
+            tokenExpiry[id] = token.ExpiresAt;
+            await JS.InvokeVoidAsync("cctvPlayer.setToken", $"cc-v-{id}", token.Token);
+        }
+    }
+
+    [JSInvokable]
+    public Task OnPlayerState(int cameraId, string state)
+    {
+        if (disposed) return Task.CompletedTask;
+        states[cameraId] = state;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task OnVisibilityChanged(bool isHidden)
+    {
+        if (disposed) return;
+        hidden = isHidden;
+        if (isHidden)
+        {
+            generation++;
+            await StopAll();
+        }
+        else
+        {
+            await Restart();
+        }
+    }
+
+    private async Task PilihArea(string? nama)
+    {
+        area = nama;
+        page = 0;
+        await Restart();
+    }
+
+    private async Task GantiTampilan(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var pp) || pp is not (4 or 9 or 12)) return;
+        perPage = pp;
+        page = 0;
+        await JS.InvokeVoidAsync("localStorage.setItem", LayoutKey, pp.ToString());
+        await Restart();
+    }
+
+    private async Task KeHalaman(int p)
+    {
+        if (p < 0 || p >= PageCount) return;
+        page = p;
+        await Restart();
+    }
+
+    private async Task LayarPenuh(int cameraId)
+    {
+        await JS.InvokeVoidAsync("cctvPlayer.fullscreen", $"cc-box-{cameraId}");
+    }
+
+    private async Task StopAll()
+    {
+        try { await JS.InvokeVoidAsync("cctvPlayer.stopAll"); }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        generation++;
+        tokenTimer?.Dispose();
+        try
+        {
+            await JS.InvokeVoidAsync("cctvPlayer.stopAll");
+            await JS.InvokeVoidAsync("cctvPlayer.unwatchVisibility");
+        }
+        catch (JSDisconnectedException) { }
+        selfRef?.Dispose();
+    }
+}

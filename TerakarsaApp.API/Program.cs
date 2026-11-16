@@ -63,6 +63,18 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0
         }));
 
+    // Prompt 92: rute video CCTV (HLS live / playback). Segmen diminta terus-menerus
+    // (12 kamera x LL-HLS bisa puluhan request/detik), jadi batasnya LONGGAR per IP --
+    // hanya rem untuk klien yang rusak/berulah, bukan limiter login.
+    options.AddPolicy("cctv-stream", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 6000,
+            QueueLimit = 0
+        }));
+
     options.OnRejected = async (context, cancellationToken) =>
     {
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -161,6 +173,19 @@ builder.Services.AddScoped<PayrollRekapService>();
 builder.Services.Configure<CctvOptions>(builder.Configuration.GetSection("Cctv"));
 builder.Services.AddHttpClient<CctvMediaMtxClient>(c => c.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddScoped<CctvCameraService>();
+// Prompt 92: token stream (HMAC, terikat path) + proxy HLS. Client proxy TANPA timeout total
+// (stream live / rekaman bisa lama), tapi koneksi ke MediaMTX dibatasi 5 detik; redirect
+// tidak diikuti (tujuan selalu base URL konfigurasi).
+builder.Services.AddSingleton<CctvStreamTokenService>();
+builder.Services.AddSingleton<CctvProxyService>();
+builder.Services.AddHttpClient(CctvProxyService.HttpClientName, c => c.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    });
 builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
 builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));
@@ -186,6 +211,10 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Prompt 92: Cctv:StreamTokenSecret wajib di luar Development -- dibuat SEKARANG supaya API
+// menolak start (pesan jelas di log) daripada gagal saat token pertama diminta.
+app.Services.GetRequiredService<CctvStreamTokenService>();
 
 // Cloudflared berjalan di mesin yang sama (koneksi dari loopback) sehingga
 // KnownProxies/KnownNetworks default (loopback) sudah cukup untuk memercayainya --
