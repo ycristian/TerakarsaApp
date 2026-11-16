@@ -1,0 +1,281 @@
+/* =============================================================
+   Module CCTV (Prompt 91-94) -- halaman /cctv/...
+   Mengikuti mockup claude prompt/cctv/mockup/*.dc.html.
+   Warna: aksi utama #1F5FBF, latar #F5F6F8, kotak video #11161C,
+   online #1B7A3D, offline #B42318, peringatan #9A3A06.
+   Semua class berawalan cc- supaya tidak bentrok dengan tema admin.
+   ============================================================= */
+
+.cctv {
+    --cc-primary: #1F5FBF;
+    --cc-primary-dark: #17488F;
+    --cc-primary-soft: #E8F0FB;
+    --cc-bg: #F5F6F8;
+    --cc-video: #11161C;
+    --cc-online: #1B7A3D;
+    --cc-offline: #B42318;
+    --cc-warn: #9A3A06;
+    --cc-text: #18212B;
+    --cc-text-2: #3B4652;
+    --cc-muted: #55606C;
+    --cc-border: #DDE2E8;
+    --cc-border-2: #C5CCD5;
+    --cc-head: #EEF1F4;
+    --cc-empty: #D5DBE3;
+    --cc-marker: #E8590C;
+
+    min-height: 100vh;
+    background: var(--cc-bg);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--cc-text);
+    padding-bottom: 32px;
+}
+
+.cctv a { color: var(--cc-primary); }
+.cctv a:hover { color: var(--cc-primary-dark); }
+
+/* ---------- bar atas + tab ---------- */
+.cc-top {
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--cc-border);
+    padding: 12px 24px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 20px;
+}
+.cc-top-title { font-size: 18px; font-weight: 700; }
+.cc-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex-grow: 1; }
+.cctv .cc-tabs a {
+    padding: 12px 14px;
+    border-radius: 8px;
+    color: var(--cc-text-2);
+    font-weight: 500;
+    font-size: 14px;
+    text-decoration: none;
+}
+.cctv .cc-tabs a.is-on { background: var(--cc-primary-soft); color: var(--cc-primary-dark); font-weight: 600; }
+.cc-top-info { font-size: 13px; color: var(--cc-muted); }
+.cc-top-home {
+    width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+    border-radius: 8px; color: var(--cc-text-2) !important; text-decoration: none;
+}
+.cc-top-home:hover { background: var(--cc-head); }
+
+/* ---------- isi halaman ---------- */
+.cc-body {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 16px 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.cc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cc-grow { flex-grow: 1; }
+.cc-h { font-size: 16px; font-weight: 700; }
+.cc-sub { font-size: 13px; color: var(--cc-muted); margin-top: 2px; }
+.cc-hint { font-size: 12px; color: var(--cc-muted); line-height: 1.5; }
+.cc-muted { color: var(--cc-muted); }
+.cc-c-online { color: var(--cc-online); font-weight: 600; }
+.cc-c-offline { color: var(--cc-offline); font-weight: 600; }
+.cc-c-warn { color: var(--cc-warn); font-weight: 600; }
+.cc-c-unknown { color: var(--cc-muted); font-weight: 600; }
+
+.cc-card {
+    background: #FFFFFF;
+    border: 1px solid var(--cc-border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cc-banner {
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+    background: #FFF4E5;
+    border: 1px solid #F5C58A;
+    color: var(--cc-warn);
+    font-weight: 500;
+}
+.cc-banner-err { background: #FEF3F2; border-color: #FDA29B; color: var(--cc-offline); }
+
+/* ---------- tombol & input ---------- */
+.cc-btn {
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid var(--cc-border-2);
+    background: #FFFFFF;
+    color: var(--cc-text);
+    font: 500 14px Inter, system-ui, sans-serif;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-decoration: none;
+    cursor: pointer;
+}
+.cc-btn:hover:not(:disabled) { background: #F8FAFC; }
+.cc-btn:disabled { background: var(--cc-head); color: #6B7682; border-color: var(--cc-border); cursor: default; }
+.cc-btn-p { border-color: var(--cc-primary); background: var(--cc-primary); color: #FFFFFF !important; font-weight: 600; }
+.cc-btn-p:hover:not(:disabled) { background: var(--cc-primary-dark); }
+.cc-btn-link { color: var(--cc-primary); font-weight: 600; font-size: 13px; }
+.cc-btn-sm { min-height: 36px; font-size: 13px; padding: 0 10px; }
+.cc-btn-ico { width: 44px; padding: 0; }
+.cc-btn-danger { color: var(--cc-offline); }
+
+.cc-chip {
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: 22px;
+    border: 1px solid var(--cc-border-2);
+    background: #FFFFFF;
+    color: var(--cc-text);
+    font: 500 14px Inter, system-ui, sans-serif;
+    cursor: pointer;
+}
+.cc-chip.is-on { border-color: var(--cc-primary); background: var(--cc-primary); color: #FFFFFF; font-weight: 600; }
+
+.cc-field { display: flex; flex-direction: column; gap: 6px; }
+.cc-label { font-size: 13px; font-weight: 600; }
+.cc-inp, .cc-sel {
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--cc-border-2);
+    background: #FFFFFF;
+    color: var(--cc-text);
+    font: 500 14px Inter, system-ui, sans-serif;
+    box-sizing: border-box;
+    width: 100%;
+}
+.cc-inp:disabled { background: var(--cc-head); color: var(--cc-muted); }
+textarea.cc-inp { padding: 10px 12px; min-height: 64px; }
+.cc-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.cc-check { display: flex; align-items: center; gap: 8px; font-size: 14px; min-height: 44px; }
+.cc-check input { width: 20px; height: 20px; }
+
+/* tag pilihan banyak (station / divisi) */
+.cc-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--cc-primary-soft); color: var(--cc-primary-dark);
+    border-radius: 14px; padding: 4px 4px 4px 10px; font-size: 13px; font-weight: 500;
+}
+.cc-tag button {
+    border: 0; background: transparent; color: inherit; width: 24px; height: 24px;
+    border-radius: 12px; cursor: pointer; line-height: 1;
+}
+.cc-tag button:hover { background: rgba(23, 72, 143, .12); }
+
+/* ---------- tabel master kamera ---------- */
+.cc-table-wrap { background: #FFFFFF; border: 1px solid var(--cc-border); border-radius: 10px; overflow-x: auto; }
+.cc-table { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px; }
+.cc-table thead tr { background: var(--cc-head); text-align: left; }
+.cc-table th { padding: 12px 14px; font-weight: 600; white-space: nowrap; }
+.cc-table td { padding: 8px 14px; border-top: 1px solid var(--cc-border); vertical-align: middle; }
+.cc-table tr.is-sel td { background: var(--cc-primary-soft); }
+.cc-nowrap { white-space: nowrap; }
+.cc-strong { font-weight: 600; }
+
+.cc-form-wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.cc-form { flex: 1 1 360px; max-width: 520px; }
+
+/* ---------- toast ---------- */
+.cc-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #18212B; color: #FFFFFF; padding: 12px 18px; border-radius: 10px;
+    font-size: 14px; font-weight: 500; z-index: 2000; box-shadow: 0 6px 20px rgba(0,0,0,.2);
+    max-width: calc(100vw - 32px);
+}
+
+/* ---------- kotak video ---------- */
+.cc-video {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--cc-video);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.cc-video video { width: 100%; height: 100%; object-fit: contain; background: var(--cc-video); display: block; }
+.cc-video-ph { color: #3A4654; }
+.cc-video-msg { color: #C9D2DC; font-size: 13px; text-align: center; padding: 0 12px; position: absolute; }
+.cc-live {
+    position: absolute; left: 8px; top: 8px; display: flex; align-items: center; gap: 6px;
+    background: #000000; color: #FFFFFF; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px;
+}
+.cc-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #F04438; }
+.cc-video-path { position: absolute; right: 8px; bottom: 8px; color: #C9D2DC; font-size: 11px; }
+.cc-stamp {
+    position: absolute; left: 12px; top: 12px; background: #000000; color: #FFFFFF;
+    font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 4px;
+}
+.cc-stamp-r {
+    position: absolute; right: 12px; top: 12px; background: #000000; color: #C9D2DC;
+    font-size: 12px; padding: 4px 10px; border-radius: 4px;
+}
+
+/* ---------- grid live ---------- */
+.cc-grid { display: grid; gap: 12px; grid-template-columns: repeat(var(--cc-cols, 4), minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cc-grid { grid-template-columns: repeat(min(var(--cc-cols, 4), 3), minmax(0, 1fr)); } }
+@media (max-width: 800px)  { .cc-grid { grid-template-columns: repeat(min(var(--cc-cols, 4), 2), minmax(0, 1fr)); } }
+@media (max-width: 520px)  { .cc-grid { grid-template-columns: minmax(0, 1fr); } }
+.cc-cam { background: #FFFFFF; border: 1px solid var(--cc-border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.cc-cam .cc-video { cursor: zoom-in; }
+.cc-cam-foot { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; }
+.cc-cam-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-cam-area { font-size: 12px; color: var(--cc-muted); }
+.cc-ico-link { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; flex-shrink: 0; }
+.cc-ico-link:hover { background: var(--cc-head); }
+
+/* ---------- playback ---------- */
+.cc-pb { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.cc-pb-side { flex: 1 1 260px; max-width: 320px; }
+.cc-pb-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.cc-pb-main .cc-video { border-radius: 10px; }
+@media (max-width: 700px) { .cc-pb-side { max-width: none; } }
+.cc-tl-wrap { position: relative; cursor: pointer; user-select: none; }
+.cc-tl { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; }
+.cc-tl-h { display: flex; flex-direction: column; gap: 4px; }
+.cc-tl-bar { height: 28px; border-radius: 3px; background: var(--cc-empty); position: relative; overflow: hidden; }
+.cc-tl-fill { position: absolute; top: 0; bottom: 0; background: var(--cc-primary); }
+.cc-tl-lbl { font-size: 11px; color: var(--cc-muted); text-align: center; }
+.cc-tl-pos { position: absolute; top: -4px; width: 3px; height: 36px; background: var(--cc-marker); border-radius: 2px; pointer-events: none; }
+.cc-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--cc-muted); }
+.cc-legend span { display: flex; align-items: center; gap: 6px; }
+.cc-sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* ---------- dialog kecil ---------- */
+.cc-modal-back {
+    position: fixed; inset: 0; background: rgba(17, 22, 28, .45); z-index: 1990;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.cc-modal { background: #FFFFFF; border-radius: 12px; padding: 18px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- panel "CCTV saat kejadian" (Prompt 94) ---------- */
+.cc-panel-back { position: fixed; inset: 0; background: rgba(17, 22, 28, .35); z-index: 1980; }
+.cc-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 100vw;
+    background: #FFFFFF; border-left: 1px solid var(--cc-border); z-index: 1985;
+    padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--cc-text);
+    box-shadow: -8px 0 24px rgba(0,0,0,.12);
+}
+@media (max-width: 600px) { .cc-panel { width: 100vw; border-left: 0; } }
+.cc-panel .cc-video { border-radius: 8px; }
+.cc-evbar { position: relative; height: 10px; border-radius: 5px; background: var(--cc-empty); }
+.cc-evbar-fill { position: absolute; left: 0; top: 0; height: 10px; border-radius: 5px; background: var(--cc-primary); }
+.cc-evbar-mark { position: absolute; top: -5px; width: 3px; height: 20px; background: var(--cc-marker); border-radius: 2px; }
+.cc-evlbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--cc-muted); }
+.cc-evbtn {
+    min-height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--cc-border-2, #C5CCD5);
+    background: #FFFFFF; color: #1F5FBF; font: 600 12px Inter, system-ui, sans-serif;
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
+}
+.cc-evbtn:hover { background: #F8FAFC; }

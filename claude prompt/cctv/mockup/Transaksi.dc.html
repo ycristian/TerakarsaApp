@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>CCTV dari transaksi</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F5FBF}a:hover{color:#17488F}
+</style>
+</helmet>
+<div style="background: #F5F6F8; font-family: Inter, system-ui, sans-serif; color: #18212B; padding-bottom: 32px">
+  <div style="background: #FFFFFF; border-bottom: 1px solid #DDE2E8; padding: 16px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+    <div style="font-size: 18px; font-weight: 700; flex-grow: 1">Riwayat scan bundle</div>
+    <div style="font-size: 13px; color: #55606C">Contoh halaman yang sudah ada — hanya ditambah kolom CCTV</div>
+  </div>
+
+  <div style="max-width: 1400px; margin: 0 auto; padding: 16px 24px 0; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+    <div style="flex: 999 1 560px; min-width: 0; background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; overflow-x: auto">
+      <table style="width: 100%; min-width: 620px; border-collapse: collapse; font-size: 14px">
+        <thead>
+          <tr style="background: #EEF1F4; text-align: left">
+            <th style="padding: 12px 14px; font-weight: 600">Waktu</th>
+            <th style="padding: 12px 14px; font-weight: 600">Bundle</th>
+            <th style="padding: 12px 14px; font-weight: 600">Step</th>
+            <th style="padding: 12px 14px; font-weight: 600">Station / line</th>
+            <th style="padding: 12px 14px; font-weight: 600; text-align: right">Qty</th>
+            <th style="padding: 12px 14px; font-weight: 600">CCTV</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
+            <tr style="border-top: 1px solid #DDE2E8; background: {{r.bg}}">
+              <td style="padding: 8px 14px; white-space: nowrap">{{r.waktu}}</td>
+              <td style="padding: 8px 14px; font-weight: 600; white-space: nowrap">{{r.bundle}}</td>
+              <td style="padding: 8px 14px">{{r.step}}</td>
+              <td style="padding: 8px 14px">{{r.line}}</td>
+              <td style="padding: 8px 14px; text-align: right">{{r.qty}}</td>
+              <td style="padding: 4px 14px">
+                <sc-if value="{{r.ada}}" hint-placeholder-val="{{true}}">
+                  <button type="button" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #1F5FBF; font: 600 13px Inter, sans-serif; display: flex; align-items: center; gap: 6px">
+                    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+                    Lihat
+                  </button>
+                </sc-if>
+                <sc-if value="{{r.tidak}}" hint-placeholder-val="{{false}}">
+                  <span style="font-size: 12px; color: #55606C">Belum ada kamera</span>
+                </sc-if>
+              </td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="flex: 1 1 400px; max-width: 520px; background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: flex-start; gap: 8px">
+        <div style="flex-grow: 1">
+          <div style="font-size: 16px; font-weight: 700">CCTV saat kejadian</div>
+          <div style="font-size: 13px; color: #55606C; margin-top: 2px">H0412-M-07 · Sewing · Line 3 · 16 Nov 14:32:10</div>
+        </div>
+        <button type="button" aria-label="Tutup" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; display: flex; align-items: center; justify-content: center">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"></path><path d="M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <div style="position: relative; aspect-ratio: 16 / 9; background: #11161C; border-radius: 8px; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3A4654" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+        <div style="position: absolute; left: 10px; top: 10px; background: #000000; color: #FFFFFF; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 4px">Sewing line 3 · 14:31:52</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="position: relative; height: 10px; border-radius: 5px; background: #D5DBE3">
+          <div style="position: absolute; left: 0; top: 0; height: 10px; width: 20%; border-radius: 5px; background: #1F5FBF"></div>
+          <div style="position: absolute; left: 33.3%; top: -5px; width: 3px; height: 20px; background: #E8590C; border-radius: 2px"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #55606C">
+          <span>14:31:40</span>
+          <span style="color: #9A3A06; font-weight: 600">scan 14:32:10</span>
+          <span>14:33:10</span>
+        </div>
+      </div>
+
+      <div style="font-size: 13px; color: #55606C; line-height: 1.5">Diputar otomatis dari 30 detik sebelum scan sampai 60 detik sesudahnya.</div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="tx-cam" style="font-size: 13px; font-weight: 600">Kamera lain di area ini</label>
+        <select id="tx-cam" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>Sewing line 3 · cam8_66</option><option>Sewing line 4 · cam8_67</option><option>QC · cam8_68</option></select>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <a href="Playback.dc.html" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #1F5FBF; background: #1F5FBF; color: #FFFFFF; font-weight: 600; font-size: 14px; text-decoration: none; display: flex; align-items: center">Buka di Playback</a>
+        <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">Unduh klip</button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+var data = [
+['16 Nov 14:41:03','H0412-L-02','Sewing','Line 4',52,true],
+['16 Nov 14:36:47','H0411-M-11','QC','QC 1',50,true],
+['16 Nov 14:32:10','H0412-M-07','Sewing','Line 3',50,true],
+['16 Nov 14:20:55','H0410-S-04','Buang benang','Trim 1',48,false],
+['16 Nov 14:12:31','H0412-M-06','Sewing','Line 3',50,true],
+['16 Nov 13:58:09','H0409-XL-03','Packing','Packing 1',49,true],
+['16 Nov 13:44:26','H0411-M-10','Sewing','Line 1',50,true]
+];
+return { rows: data.map(function (d, i) { return { waktu: d[0], bundle: d[1], step: d[2], line: d[3], qty: d[4], ada: d[5], tidak: !d[5], bg: i === 2 ? '#E8F0FB' : '#FFFFFF' }; }) };
+}
+}
+</script>
+</body>
+</html>

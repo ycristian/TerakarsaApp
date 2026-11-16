@@ -110,6 +110,8 @@ builder.Services.AddScoped<TerakarsaApp.Client.Services.CuttingApiService>();
 // PAYROLL_REKAP (Rekap Gajian -- harga lock item + finalisasi periode).
 builder.Services.AddScoped<TerakarsaApp.Client.Services.ManualOutputApiService>();
 builder.Services.AddScoped<TerakarsaApp.Client.Services.PayrollRekapApiService>();
+// Prompt 91-94: module CCTV (/cctv) -- login biasa + module CCTV.
+builder.Services.AddScoped<TerakarsaApp.Client.Services.CctvApiService>();
 // Module PDH TNI AD -- dipakai SEPERTI STASIUN, TANPA LOGIN: tiap service di
 // bawah ini memakai HttpClient sendiri yang menyisipkan header X-Tni-Token
 // (TniDeviceTokenHandler), BUKAN JWT. Petugas dikenali server dari perangkat.

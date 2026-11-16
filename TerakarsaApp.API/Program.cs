@@ -156,6 +156,11 @@ builder.Services.AddScoped<CuttingService>();
 // (module PAYROLL_REKAP -- harga lock item + finalisasi periode).
 builder.Services.AddScoped<ManualOutputService>();
 builder.Services.AddScoped<PayrollRekapService>();
+// Prompt 91-94: module CCTV (schema SQL `cctv`). Semua video lewat API (proxy ke MediaMTX
+// di 127.0.0.1) -- browser tidak pernah menghubungi MediaMTX langsung.
+builder.Services.Configure<CctvOptions>(builder.Configuration.GetSection("Cctv"));
+builder.Services.AddHttpClient<CctvMediaMtxClient>(c => c.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddScoped<CctvCameraService>();
 builder.Services.Configure<GateServiceOptions>(builder.Configuration.GetSection("GateService"));
 builder.Services.Configure<GateOptions>(builder.Configuration.GetSection("Gate"));
 builder.Services.Configure<StationOptions>(builder.Configuration.GetSection("Station"));

@@ -1,0 +1,11 @@
+@inherits LayoutComponentBase
+
+@* Layout semua halaman /cctv -- module CCTV (Prompt 91-94).
+   Tanpa AppHeader/AppSidebar: mockup claude prompt/cctv/mockup/*.dc.html adalah layar
+   penuh dengan bar tab Live · Playback · Kamera sendiri (Pages/Cctv/Shared/CctvTabs.razor,
+   dipasang di tiap halaman karena teks kanan bar berbeda per halaman).
+   Login tetap WAJIB (@attribute [Authorize] di tiap halaman). *@
+
+<div class="cctv">
+    @Body
+</div>

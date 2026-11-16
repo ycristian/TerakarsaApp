@@ -1,0 +1,15 @@
+@page "/cctv"
+@attribute [Authorize]
+@layout TerakarsaApp.Client.Layout.CctvLayout
+@using Microsoft.AspNetCore.Authorization
+@using TerakarsaApp.Client.Pages.Cctv.Shared
+
+<PageTitle>CCTV · Live</PageTitle>
+
+<CctvTabs Active="live" />
+
+<div class="cc-body">
+    <div class="cc-card">
+        <div class="cc-h">Menyusul</div>
+    </div>
+</div>

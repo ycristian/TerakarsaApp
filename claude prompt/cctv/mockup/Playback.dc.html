@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>CCTV Playback</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F5FBF}a:hover{color:#17488F}
+</style>
+</helmet>
+<div style="background: #F5F6F8; font-family: Inter, system-ui, sans-serif; color: #18212B; padding-bottom: 32px">
+  <div style="background: #FFFFFF; border-bottom: 1px solid #DDE2E8; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+    <div style="font-size: 18px; font-weight: 700">CCTV</div>
+    <nav style="display: flex; flex-wrap: wrap; gap: 4px; flex-grow: 1">
+      <a href="Main.dc.html" style="padding: 12px 14px; border-radius: 8px; color: #3B4652; font-weight: 500; font-size: 14px; text-decoration: none">Live</a>
+      <a href="Playback.dc.html" style="padding: 12px 14px; border-radius: 8px; background: #E8F0FB; color: #17488F; font-weight: 600; font-size: 14px; text-decoration: none">Playback</a>
+      <a href="Kamera.dc.html" style="padding: 12px 14px; border-radius: 8px; color: #3B4652; font-weight: 500; font-size: 14px; text-decoration: none">Kamera</a>
+    </nav>
+    <div style="font-size: 13px; color: #55606C">Rekaman tersimpan 30 hari</div>
+  </div>
+
+  <div style="max-width: 1400px; margin: 0 auto; padding: 16px 24px 0; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+    <div style="flex: 1 1 260px; max-width: 320px; background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="pb-area" style="font-size: 13px; font-weight: 600">Area</label>
+        <select id="pb-area" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>Sewing</option><option>Cutting</option><option>Gudang</option></select>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="pb-cam" style="font-size: 13px; font-weight: 600">Kamera</label>
+        <select id="pb-cam" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>Sewing line 3 · cam8_66</option></select>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="pb-tgl" style="font-size: 13px; font-weight: 600">Tanggal</label>
+        <input id="pb-tgl" type="date" value="2026-11-16" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif; box-sizing: border-box">
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="pb-jam" style="font-size: 13px; font-weight: 600">Jam mulai</label>
+        <input id="pb-jam" type="time" step="1" value="14:32:00" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif; box-sizing: border-box">
+      </div>
+      <button type="button" style="min-height: 44px; border-radius: 8px; border: 1px solid #1F5FBF; background: #1F5FBF; color: #FFFFFF; font: 600 14px Inter, sans-serif">Putar</button>
+      <div style="font-size: 12px; color: #55606C; line-height: 1.5">Rekaman paling lama: 17 Okt 2026. Yang lebih lama sudah terhapus otomatis.</div>
+    </div>
+
+    <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+      <div style="position: relative; aspect-ratio: 16 / 9; background: #11161C; border-radius: 10px; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#3A4654" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+        <div style="position: absolute; left: 12px; top: 12px; background: #000000; color: #FFFFFF; font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 4px">Sewing line 3 · 16 Nov 2026 14:32:18</div>
+        <div style="position: absolute; right: 12px; top: 12px; background: #000000; color: #C9D2DC; font-size: 12px; padding: 4px 10px; border-radius: 4px">REKAMAN</div>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+          <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">− 10 dtk</button>
+          <button type="button" style="min-height: 44px; padding: 0 20px; border-radius: 8px; border: 1px solid #1F5FBF; background: #1F5FBF; color: #FFFFFF; font: 600 14px Inter, sans-serif">Jeda</button>
+          <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">+ 10 dtk</button>
+          <div style="display: flex; align-items: center; gap: 6px; margin-left: 8px; flex-grow: 1">
+            <label for="pb-speed" style="font-size: 13px; color: #55606C">Kecepatan</label>
+            <select id="pb-speed" style="min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>1×</option><option>2×</option><option>4×</option></select>
+          </div>
+          <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">Unduh klip (MP4)</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 13px; font-weight: 600">Garis waktu 16 Nov 2026 — klik jam untuk lompat</div>
+          <div style="position: relative">
+            <div style="display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px">
+              <sc-for list="{{hours}}" as="h" hint-placeholder-count="24">
+                <div style="display: flex; flex-direction: column; gap: 4px">
+                  <div style="height: 28px; border-radius: 3px; background: {{h.bg}}"></div>
+                  <div style="font-size: 11px; color: #55606C; text-align: center">{{h.label}}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="position: absolute; left: 60.6%; top: -4px; width: 3px; height: 36px; background: #E8590C; border-radius: 2px"></div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: #55606C">
+            <span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 10px; border-radius: 2px; background: #1F5FBF"></span>Ada rekaman</span>
+            <span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 10px; border-radius: 2px; background: #D5DBE3"></span>Kosong (kamera offline / belum terjadi)</span>
+            <span style="display: flex; align-items: center; gap: 6px"><span style="width: 3px; height: 12px; background: #E8590C"></span>Posisi putar</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+var hours = [];
+for (var i = 0; i < 24; i++) {
+var kosong = i === 3 || i >= 20;
+hours.push({ label: (i < 10 ? '0' : '') + i, bg: kosong ? '#D5DBE3' : '#1F5FBF' });
+}
+return { hours: hours };
+}
+}
+</script>
+</body>
+</html>

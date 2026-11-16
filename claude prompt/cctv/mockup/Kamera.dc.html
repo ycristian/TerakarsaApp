@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Master kamera</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F5FBF}a:hover{color:#17488F}
+</style>
+</helmet>
+<div style="background: #F5F6F8; font-family: Inter, system-ui, sans-serif; color: #18212B; padding-bottom: 32px">
+  <div style="background: #FFFFFF; border-bottom: 1px solid #DDE2E8; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+    <div style="font-size: 18px; font-weight: 700">CCTV</div>
+    <nav style="display: flex; flex-wrap: wrap; gap: 4px; flex-grow: 1">
+      <a href="Main.dc.html" style="padding: 12px 14px; border-radius: 8px; color: #3B4652; font-weight: 500; font-size: 14px; text-decoration: none">Live</a>
+      <a href="Playback.dc.html" style="padding: 12px 14px; border-radius: 8px; color: #3B4652; font-weight: 500; font-size: 14px; text-decoration: none">Playback</a>
+      <a href="Kamera.dc.html" style="padding: 12px 14px; border-radius: 8px; background: #E8F0FB; color: #17488F; font-weight: 600; font-size: 14px; text-decoration: none">Kamera</a>
+    </nav>
+  </div>
+
+  <div style="max-width: 1400px; margin: 0 auto; padding: 16px 24px 0; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <div style="flex-grow: 1">
+        <div style="font-size: 16px; font-weight: 700">Daftar kamera</div>
+        <div style="font-size: 13px; color: #55606C; margin-top: 2px">Nama, area, dan station diisi di sini. Status dibaca langsung dari server rekaman.</div>
+      </div>
+      <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">Ambil kamera baru dari server</button>
+      <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #1F5FBF; background: #1F5FBF; color: #FFFFFF; font: 600 14px Inter, sans-serif">Tambah manual</button>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; overflow-x: auto">
+      <table style="width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px">
+        <thead>
+          <tr style="background: #EEF1F4; text-align: left">
+            <th style="padding: 12px 14px; font-weight: 600">Nama kamera</th>
+            <th style="padding: 12px 14px; font-weight: 600">Area</th>
+            <th style="padding: 12px 14px; font-weight: 600">Station terkait</th>
+            <th style="padding: 12px 14px; font-weight: 600">Path</th>
+            <th style="padding: 12px 14px; font-weight: 600">IP</th>
+            <th style="padding: 12px 14px; font-weight: 600">NVR</th>
+            <th style="padding: 12px 14px; font-weight: 600">Status</th>
+            <th style="padding: 12px 14px; font-weight: 600">Tampil</th>
+            <th style="padding: 12px 14px; font-weight: 600"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden">Aksi</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+            <tr style="border-top: 1px solid #DDE2E8">
+              <td style="padding: 8px 14px; font-weight: 600">{{r.nama}}</td>
+              <td style="padding: 8px 14px">{{r.area}}</td>
+              <td style="padding: 8px 14px">{{r.station}}</td>
+              <td style="padding: 8px 14px; white-space: nowrap">{{r.path}}</td>
+              <td style="padding: 8px 14px; white-space: nowrap">{{r.ip}}</td>
+              <td style="padding: 8px 14px">{{r.nvr}}</td>
+              <td style="padding: 8px 14px; white-space: nowrap; font-weight: 600; color: {{r.warna}}">{{r.status}}</td>
+              <td style="padding: 8px 14px">{{r.tampil}}</td>
+              <td style="padding: 4px 14px"><button type="button" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #1F5FBF; font: 600 13px Inter, sans-serif">Ubah</button></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+      <div style="flex: 1 1 360px; max-width: 520px; background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="font-size: 16px; font-weight: 700">Ubah kamera · cam8_66</div>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <label for="k-nama" style="font-size: 13px; font-weight: 600">Nama kamera</label>
+          <input id="k-nama" type="text" value="Sewing line 3" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; color: #18212B; font: 500 14px Inter, sans-serif; box-sizing: border-box">
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="k-area" style="font-size: 13px; font-weight: 600">Area</label>
+            <select id="k-area" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>Sewing</option></select>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="k-urut" style="font-size: 13px; font-weight: 600">Urutan tampil</label>
+            <input id="k-urut" type="number" value="7" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; color: #18212B; font: 500 14px Inter, sans-serif; box-sizing: border-box">
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <label for="k-st" style="font-size: 13px; font-weight: 600">Station / line yang terlihat di kamera ini</label>
+          <select id="k-st" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif"><option>Line 3</option></select>
+          <div style="font-size: 12px; color: #55606C; line-height: 1.5">Dipakai tombol "Lihat CCTV" di riwayat scan. Boleh lebih dari satu, boleh kosong.</div>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1F5FBF; background: #1F5FBF; color: #FFFFFF; font: 600 14px Inter, sans-serif">Simpan</button>
+          <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #C5CCD5; background: #FFFFFF; color: #18212B; font: 500 14px Inter, sans-serif">Batal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+var ok = '#1B7A3D', bad = '#B42318', warn = '#9A3A06';
+var data = [
+['Meja cutting 1','Cutting','Admin Cutting','cam8_60','192.168.10.10','Ya','Online',ok,'Ya'],
+['Sewing line 1','Sewing','Line 1','cam8_64','192.168.8.64','—','Online',ok,'Ya'],
+['Sewing line 3','Sewing','Line 3','cam8_66','192.168.10.12','Ya','Online',ok,'Ya'],
+['QC','Sewing','QC 1','cam8_68','192.168.8.68','—','Online',ok,'Ya'],
+['Gudang benang','Gudang','—','cam8_70','192.168.8.70','—','Offline',bad,'Ya'],
+['Gerbang depan','Gerbang & luar','—','cam8_83','192.168.8.83','—','Online',ok,'Ya'],
+['(belum diberi nama)','—','—','cam8_85','192.168.10.103','Ya','H265 — tidak tampil di browser',warn,'Tidak']
+];
+return { rows: data.map(function (d) { return { nama: d[0], area: d[1], station: d[2], path: d[3], ip: d[4], nvr: d[5], status: d[6], warna: d[7], tampil: d[8] }; }) };
+}
+}
+</script>
+</body>
+</html>

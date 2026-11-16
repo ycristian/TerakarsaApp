@@ -1,0 +1,22 @@
+@* Bar atas module CCTV: judul + tab Live · Playback · Kamera (mockup *.dc.html).
+   ChildContent = teks ringkas di kanan bar (mis. jumlah kamera online). *@
+
+<div class="cc-top">
+    <div class="cc-top-title">CCTV</div>
+    <nav class="cc-tabs">
+        <a href="/cctv" class="@(Active == "live" ? "is-on" : "")">Live</a>
+        <a href="/cctv/playback" class="@(Active == "playback" ? "is-on" : "")">Playback</a>
+        <a href="/cctv/kamera" class="@(Active == "kamera" ? "is-on" : "")">Kamera</a>
+    </nav>
+    @if (ChildContent is not null)
+    {
+        <div class="cc-top-info">@ChildContent</div>
+    }
+    <a href="/" class="cc-top-home" title="Menu utama aplikasi" aria-label="Menu utama aplikasi"><i class="fe fe-grid"></i></a>
+</div>
+
+@code {
+    // live | playback | kamera
+    [Parameter, EditorRequired] public string Active { get; set; } = "live";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

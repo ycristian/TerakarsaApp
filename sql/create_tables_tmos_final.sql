@@ -31,8 +31,11 @@
 --   schema `tni` (module PDH TNI AD, Prompt 60-69)  -> sql/tni/create_schema_tni.sql
 --   schema `inv` (module Stok Benang, Prompt 71-77) -> sql/inv/create_71_inv_thread.sql
 --     + sql/inv/create_74_inv_thread_opname.sql (tabel stock opname)
--- Keduanya hanya MEMBACA tabel dbo (projects, resources, users) dan menyentuh dbo
--- sebatas seed Modules/UserModules + kolom Users.home_route di atas.
+--   schema `cctv` (module CCTV, Prompt 91-94)        -> sql/cctv/create_schema_cctv.sql
+--     (cctv.cameras, cctv.camera_links -- FK ke resources & divisions; SP di sql/cctv/sp_*.sql)
+-- Ketiganya hanya MEMBACA tabel dbo (projects, resources, divisions, users) dan menyentuh dbo
+-- sebatas seed Modules/UserModules + kolom Users.home_route di atas. Module CCTV
+-- (sql/cctv/seed_91_cctv_module.sql) sengaja tidak di-assign ke user mana pun.
 
 -- ============ 1. MASTER TANPA DEPENDENSI ============
 
