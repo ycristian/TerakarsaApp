@@ -83,7 +83,7 @@ public class TniPersonelController : ControllerBase
     // Prompt 89: batas baris laporan PDF -- konstanta, bukan setting.
     private const int LaporanMaxBaris = 2000;
 
-    // Prompt 89: PDF A4 landscape "Laporan Personel & Box" dari daftar yang
+    // Prompt 89: PDF A4 portrait "Laporan Personel & Box" dari daftar yang
     // sedang difilter. Query string SAMA dengan GetList (tanpa paging).
     // Hanya diunduh: tidak lewat print job, tidak disimpan ke disk.
     [HttpGet("laporan-pdf")]

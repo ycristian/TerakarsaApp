@@ -240,6 +240,11 @@ public class TniPersonelService
 
             // (2) baris personel
             await reader.NextResultAsync();
+            // HadirUkur (2026-11-18) -- dibaca hanya bila SP di DB sudah versi baru.
+            var ordHadir = -1;
+            for (var i = 0; i < reader.FieldCount; i++)
+                if (reader.GetName(i) == "HadirUkur") { ordHadir = i; break; }
+
             while (await reader.ReadAsync())
             {
                 result.Baris.Add(new TniLaporanPersonelBarisDto
@@ -254,6 +259,7 @@ public class TniPersonelService
                     Gender = reader.GetString(reader.GetOrdinal("Gender")),
                     PolaKemejaKode = reader.GetString(reader.GetOrdinal("PolaKemejaKode")),
                     PolaCelanaKode = reader.GetString(reader.GetOrdinal("PolaCelanaKode")),
+                    HadirUkur = ordHadir >= 0 && !reader.IsDBNull(ordHadir) && reader.GetBoolean(ordHadir),
                     BoxNo = Int(reader, "BoxNo"),
                     BoxCode = Str(reader, "BoxCode")
                 });

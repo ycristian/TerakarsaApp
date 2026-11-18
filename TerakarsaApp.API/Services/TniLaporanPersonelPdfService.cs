@@ -4,29 +4,38 @@ using TerakarsaApp.Shared.Tni;
 
 namespace TerakarsaApp.API.Services;
 
-// Prompt 89: PDF A4 LANDSCAPE "Laporan Personel & Box" PDH TNI AD.
+// Prompt 89: PDF A4 "Laporan Personel & Box" PDH TNI AD.
 //
 // Pola sama dengan TniBoxPdfService: SkiaSharp (SKDocument.CreatePdf), dibuat
 // SAAT DIMINTA, TIDAK disimpan ke disk, TIDAK lewat print job -- hanya diunduh.
 // Susunan mengikuti claude prompt/mockup_laporan_personel_a4.html.
 //
-// Satuan ukuran = POINT (1/72 inci). Landscape karena tabelnya 11-12 kolom.
+// Satuan ukuran = POINT (1/72 inci). Awalnya landscape; owner minta PORTRAIT
+// dipaksakan (2026-11-18) -- kolom & font dipadatkan, Nama/Satuan yang
+// kepanjangan dipotong "…" (diterima owner).
 //
 // Tata letak dihitung DULU (RencanakanHalaman) baru digambar, karena kaki
 // halaman butuh jumlah halaman total ("hal x/y") sejak halaman pertama.
 public class TniLaporanPersonelPdfService
 {
-    // A4 landscape dalam point
-    private const float PageW = 841.89f;
-    private const float PageH = 595.28f;
+    // A4 portrait dalam point
+    private const float PageW = 595.28f;
+    private const float PageH = 841.89f;
     private const float Margin = 10f * 72f / 25.4f;          // ~28.3pt
 
     private const float KakiH = 14f;                          // ruang kaki halaman
     private const float ContentBottom = PageH - Margin - KakiH;
 
     private const float KepalaH = 58f;                        // kepala halaman 1
-    private const float HeadRowH = 16f;
-    private const float RowH = 17f;                           // -> 26 baris hal 1, 30 baris hal penuh
+    private const float HeadRowH = 20f;                       // muat judul 2 baris ("HADIR / UKUR")
+    private const float RowH = 15f;                           // baris biasa -> ±46 baris hal 1, ±50 hal penuh
+    private const float RowH2 = 24f;                          // baris dengan nama 2 baris
+    private const float NamaLineH = 9f;                       // jarak antarbaris nama
+    private const float HeadLineH = 7.5f;                     // jarak antarbaris judul kolom
+
+    // ukuran font tabel personel (dipadatkan untuk portrait)
+    private const float FontHead = 6.4f;
+    private const float FontIsi = 7.5f;
 
     // blok bawah (rekap box)
     private const float GapTabel = 9f;
@@ -34,7 +43,7 @@ public class TniLaporanPersonelPdfService
     private const float RekapHeadH = 14f;
     private const float RekapRowH = 13f;
     private const float RekapPadBawah = 8f;
-    private const float CatatanH = 24f;
+    private const float CatatanH = 0f;                        // catatan kaki dihapus (2026-11-18)
 
     private static readonly CultureInfo Id = new("id-ID");
 
@@ -53,7 +62,17 @@ public class TniLaporanPersonelPdfService
 
         // Kolom Satuan hanya bila lingkup mencakup lebih dari satu satuan.
         var kolom = BuildKolom(h.JumlahSatuan > 1);
-        var rencana = RencanakanHalaman(data.Baris.Count, data.Box.Count);
+
+        // Nama panjang dibungkus jadi 2 baris -> tinggi baris tidak seragam,
+        // jadi dihitung dulu sebelum merencanakan halaman.
+        var namaW = kolom.First(k => k.Isi == Isi.Nama).Width - 7f;
+        List<List<string>> namaBaris;
+        using (var tNama = new Txt(FontIsi))
+            namaBaris = data.Baris.Select(b => BagiNama(b.Nama, tNama, namaW)).ToList();
+        var tinggiBaris = namaBaris.Select(l => l.Count > 1 ? RowH2 : RowH).ToList();
+
+        var rencana = RencanakanHalaman(tinggiBaris, data.Box.Count);
+        var hadirUkur = data.Baris.Count(b => b.HadirUkur);
         var labelKaki = h.SatuanCode ?? h.AreaCode ?? h.OrderName;
 
         using var ms = new MemoryStream();
@@ -75,13 +94,11 @@ public class TniLaporanPersonelPdfService
                 if (r.Kepala) y = DrawKepala(canvas, data, y);
 
                 if (r.RowCount > 0)
-                    y = DrawTabel(canvas, kolom, data.Baris, r.RowFrom, r.RowCount, y) + GapTabel;
+                    y = DrawTabel(canvas, kolom, data.Baris, namaBaris, tinggiBaris,
+                                  r.RowFrom, r.RowCount, y) + GapTabel;
 
                 if (r.Bawah)
-                {
-                    y = DrawBawah(canvas, data.Box, r, y);
-                    if (r.Catatan) DrawCatatan(canvas, y);
-                }
+                    DrawBawah(canvas, data.Box, r, y, hadirUkur, data.Baris.Count - hadirUkur);
 
                 DrawKaki(canvas, data.DicetakPada, labelKaki, p + 1, rencana.Count);
                 doc.EndPage();
@@ -158,48 +175,61 @@ public class TniLaporanPersonelPdfService
 
     // ---------------- kolom tabel ----------------
 
-    private enum Isi { No, Kode, Satuan, Pangkat, Nama, Nrp, NoHp, Gender, Kemeja, Celana, BoxNo, BoxCode }
+    // Kolom Kode (kode_ref) & Kode Box dihapus atas permintaan owner (2026-11-18):
+    // No sudah mencerminkan urutan, cukup No. Box. Ditambah kolom "Hadir Ukur".
+    private enum Isi { No, Satuan, Pangkat, Nama, Nrp, NoHp, Gender, Kemeja, Celana, HadirUkur, BoxNo }
 
+    // Judul boleh berisi '\n' -> digambar 2 baris (hemat lebar).
     private sealed record Kolom(string Judul, float Width, Isi Isi, bool Center = false, bool Right = false);
 
     private static List<Kolom> BuildKolom(bool denganSatuan)
     {
         var usable = PageW - Margin * 2;
 
-        // lebar tetap untuk kolom sempit, sisanya untuk Nama
-        const float no = 24f;
-        const float kode = 52f;
-        var satuan = denganSatuan ? 96f : 0f;
-        const float pangkat = 62f;
-        const float nrp = 88f;
-        const float noHp = 74f;
-        const float gender = 44f;
-        const float kemeja = 58f;
-        const float celana = 48f;
-        const float boxNo = 42f;
-        const float boxCode = 66f;
+        // Portrait: lebar tetap untuk kolom sempit (cukup untuk NRP 16 digit &
+        // No HP 13 digit pada font 7.5pt), sisanya untuk Nama (dibungkus 2 baris).
+        const float no = 22f;
+        var satuan = denganSatuan ? 60f : 0f;
+        const float pangkat = 46f;
+        const float nrp = 76f;
+        const float noHp = 62f;
+        const float gender = 34f;
+        const float kemeja = 50f;
+        const float celana = 42f;
+        const float hadir = 30f;
+        const float boxNo = 34f;
 
-        var nama = usable - (no + kode + satuan + pangkat + nrp + noHp + gender + kemeja + celana + boxNo + boxCode);
+        var nama = usable - (no + satuan + pangkat + nrp + noHp + gender + kemeja + celana + hadir + boxNo);
 
-        var list = new List<Kolom>
-        {
-            new("No", no, Isi.No, Right: true),
-            new("Kode", kode, Isi.Kode)
-        };
+        var list = new List<Kolom> { new("No", no, Isi.No, Right: true) };
 
         if (denganSatuan) list.Add(new("Satuan", satuan, Isi.Satuan));
 
         list.Add(new("Pangkat", pangkat, Isi.Pangkat));
         list.Add(new("Nama", nama, Isi.Nama));
-        list.Add(new("NRP", nrp, Isi.Nrp));
-        list.Add(new("No HP", noHp, Isi.NoHp));
-        list.Add(new("Gender", gender, Isi.Gender));
-        list.Add(new("Kemeja", kemeja, Isi.Kemeja));
-        list.Add(new("Celana", celana, Isi.Celana));
+        list.Add(new("NRP", nrp, Isi.Nrp, Center: true));
+        list.Add(new("No HP", noHp, Isi.NoHp, Center: true));
+        list.Add(new("Gender", gender, Isi.Gender, Center: true));
+        list.Add(new("Kemeja", kemeja, Isi.Kemeja, Center: true));
+        list.Add(new("Celana", celana, Isi.Celana, Center: true));
+        list.Add(new("Hadir\nUkur", hadir, Isi.HadirUkur, Center: true));
         list.Add(new("No. Box", boxNo, Isi.BoxNo, Center: true));
-        list.Add(new("Kode Box", boxCode, Isi.BoxCode));
 
         return list;
+    }
+
+    // Nama dibungkus maksimal 2 baris; sisa yang tetap tidak muat dipotong "…".
+    private static List<string> BagiNama(string? nama, Txt t, float maxW)
+    {
+        var teks = (nama ?? string.Empty).Trim();
+        if (t.Measure(teks) <= maxW) return [teks];
+
+        var baris = Bungkus(teks, t, maxW);
+        var b1 = Clip(baris[0], t, maxW);          // satu kata yang lebih lebar dari kolom
+        if (baris.Count == 1) return [b1];
+
+        var b2 = Clip(string.Join(" ", baris.Skip(1)), t, maxW);
+        return [b1, b2];
     }
 
     // ---------------- rencana halaman ----------------
@@ -211,11 +241,19 @@ public class TniLaporanPersonelPdfService
     private static float TinggiRekap(int rekapCount) =>
         RekapJudulH + RekapHeadH + Math.Max(1, rekapCount) * RekapRowH + RekapPadBawah;
 
-    private static List<Halaman> RencanakanHalaman(int totalBaris, int totalBox)
+    // Rekap pengukuran (2026-11-18): Hadir / Tidak hadir / Total, di kanan rekap box.
+    private const float TinggiUkur = RekapJudulH + RekapHeadH + 3 * RekapRowH + RekapPadBawah;
+
+    // Rekap pengukuran hanya ikut di potongan rekap box yang pertama.
+    private static float TinggiBawah(int rekapFrom, int rekapCount) =>
+        rekapFrom == 0 ? Math.Max(TinggiRekap(rekapCount), TinggiUkur) : TinggiRekap(rekapCount);
+
+    private static List<Halaman> RencanakanHalaman(List<float> tinggiBaris, int totalBox)
     {
         var hasil = new List<Halaman>();
+        var totalBaris = tinggiBaris.Count;
 
-        // ---- 1. baris tabel
+        // ---- 1. baris tabel (tinggi per baris bisa beda: nama 2 baris)
         var mulai = 0;
         var sisaTinggi = 0f;    // ruang tersisa di bawah tabel halaman terakhir
 
@@ -223,13 +261,24 @@ public class TniLaporanPersonelPdfService
         {
             var kepala = hasil.Count == 0;
             var top = Margin + (kepala ? KepalaH : 0f);
-            var tinggi = ContentBottom - top;
-            var muat = Math.Max(1, (int)Math.Floor((tinggi - HeadRowH) / RowH));
-            var ambil = Math.Min(muat, totalBaris - mulai);
+            var sisa = ContentBottom - top - HeadRowH;
+            var ambil = 0;
+
+            while (mulai + ambil < totalBaris && tinggiBaris[mulai + ambil] <= sisa)
+            {
+                sisa -= tinggiBaris[mulai + ambil];
+                ambil++;
+            }
+
+            if (ambil == 0 && mulai < totalBaris)   // jaga-jaga: minimal 1 baris per halaman
+            {
+                sisa -= tinggiBaris[mulai];
+                ambil = 1;
+            }
 
             hasil.Add(new Halaman(kepala, mulai, ambil, false, 0, 0, false));
             mulai += ambil;
-            sisaTinggi = tinggi - HeadRowH - ambil * RowH - GapTabel;
+            sisaTinggi = sisa - GapTabel;
         }
         while (mulai < totalBaris);
 
@@ -239,7 +288,7 @@ public class TniLaporanPersonelPdfService
         // Rekap yang lebih tinggi dari satu halaman penuh dipecah (lanjutan).
         var tinggiPenuh = ContentBottom - Margin;
 
-        if (TinggiRekap(totalBox) + CatatanH <= sisaTinggi)
+        if (TinggiBawah(0, totalBox) + CatatanH <= sisaTinggi)
         {
             hasil[^1] = hasil[^1] with { Bawah = true, RekapFrom = 0, RekapCount = totalBox, Catatan = true };
             return hasil;
@@ -251,7 +300,7 @@ public class TniLaporanPersonelPdfService
         {
             var sisaRekap = totalBox - rekapMulai;
 
-            if (TinggiRekap(sisaRekap) + CatatanH <= tinggiPenuh)
+            if (TinggiBawah(rekapMulai, sisaRekap) + CatatanH <= tinggiPenuh)
             {
                 hasil.Add(new Halaman(false, 0, 0, true, rekapMulai, sisaRekap, true));
                 return hasil;
@@ -290,14 +339,6 @@ public class TniLaporanPersonelPdfService
         Draw(canvas, Clip(judul, t2, PageW - Margin * 2 - 190f), Margin, y + 27f, t2);
 
         // baris keterangan filter: potongan biasa / tebal disambung berurutan
-        var x = Margin;
-        foreach (var (teks, bold) in BarisFilter(data))
-        {
-            var t = bold ? t3b : t3;
-            Draw(canvas, teks, x, y + 41f, t);
-            x += t.Measure(teks);
-        }
-
         // kanan: waktu cetak (lokal), TANPA nama pencetak
         var waktu = data.DicetakPada.ToString("dddd, d MMM yyyy · HH':'mm", Id);
         var lebarWaktu = rt.Measure("Dicetak ") + rtb.Measure(waktu);
@@ -306,6 +347,26 @@ public class TniLaporanPersonelPdfService
 
         const string dataPer = "Data per saat cetak";
         Draw(canvas, dataPer, right - rt.Measure(dataPer), y + 41f, rt);
+
+        // Portrait sempit: keterangan filter dipotong "…" sebelum menabrak
+        // "Data per saat cetak" di kanan.
+        var batasFilter = right - rt.Measure(dataPer) - 10f;
+        var x = Margin;
+        foreach (var (teks, bold) in BarisFilter(data))
+        {
+            var t = bold ? t3b : t3;
+            var sisa = batasFilter - x;
+            if (sisa <= 0f) break;
+
+            if (t.Measure(teks) > sisa)
+            {
+                Draw(canvas, Clip(teks, t, sisa), x, y + 41f, t);
+                break;
+            }
+
+            Draw(canvas, teks, x, y + 41f, t);
+            x += t.Measure(teks);
+        }
 
         var lineY = y + 48f;
         canvas.DrawLine(Margin, lineY, right, lineY, tebal);
@@ -387,24 +448,34 @@ public class TniLaporanPersonelPdfService
 
     // ---------------- tabel ----------------
 
+    // Baseline teks satu baris yang ditengahkan vertikal dalam sel setinggi h.
+    private static float BaselineTengah(float top, float h, float fontSize) =>
+        top + h / 2f + fontSize * 0.36f;
+
     private static float DrawTabel(
         SKCanvas canvas, List<Kolom> kolom, List<TniLaporanPersonelBarisDto> baris,
+        List<List<string>> namaBaris, List<float> tinggiBaris,
         int from, int count, float y)
     {
-        using var th = new Txt(7.5f, bold: true, color: HeadText);
-        using var td = new Txt(8.2f);
-        using var tdMono = new Txt(8.2f, mono: true);
-        using var tdMonoBold = new Txt(8.2f, bold: true, mono: true);
-        using var tdNo = new Txt(8.2f, color: Mut);
-        using var dim = new Txt(8.2f, color: Dim);
-        using var dimMono = new Txt(8.2f, mono: true, color: Dim);
+        using var th = new Txt(FontHead, bold: true, color: HeadText);
+        using var td = new Txt(FontIsi);
+        using var tdMono = new Txt(FontIsi, mono: true);
+        using var tdMonoBold = new Txt(FontIsi, bold: true, mono: true);
+        using var tdNo = new Txt(FontIsi, color: Mut);
+        using var dim = new Txt(FontIsi, color: Dim);
+        using var dimMono = new Txt(FontIsi, mono: true, color: Dim);
         using var border = Line(LineC, 0.6f);
         using var headBg = Fill(Soft);
+        using var centang = new SKPaint
+        {
+            Color = SKColors.Black, StrokeWidth = 1.1f, Style = SKPaintStyle.Stroke,
+            IsAntialias = true, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round
+        };
 
         var x0 = Margin;
         var totalW = kolom.Sum(k => k.Width);
 
-        // ---- header tabel (diulang tiap halaman)
+        // ---- header tabel (diulang tiap halaman); judul berisi '\n' -> 2 baris
         var headRect = new SKRect(x0, y, x0 + totalW, y + HeadRowH);
         canvas.DrawRect(headRect, headBg);
         canvas.DrawRect(headRect, border);
@@ -413,11 +484,18 @@ public class TniLaporanPersonelPdfService
         foreach (var k in kolom)
         {
             canvas.DrawLine(x, y, x, y + HeadRowH, border);
-            var judul = k.Judul.ToUpper(Id);
-            var tx = k.Center ? x + (k.Width - th.Measure(judul)) / 2f
-                   : k.Right ? x + k.Width - 4f - th.Measure(judul)
-                   : x + 4f;
-            Draw(canvas, judul, tx, y + 10.6f, th);
+
+            var lines = k.Judul.ToUpper(Id).Split('\n');
+            var by = BaselineTengah(y, HeadRowH, FontHead) - (lines.Length - 1) * HeadLineH / 2f;
+            foreach (var judul in lines)
+            {
+                var tx = k.Center ? x + (k.Width - th.Measure(judul)) / 2f
+                       : k.Right ? x + k.Width - 4f - th.Measure(judul)
+                       : x + 4f;
+                Draw(canvas, judul, tx, by, th);
+                by += HeadLineH;
+            }
+
             x += k.Width;
         }
 
@@ -426,39 +504,71 @@ public class TniLaporanPersonelPdfService
         // ---- baris data
         for (var i = 0; i < count; i++)
         {
-            var r = baris[from + i];
+            var idx = from + i;
+            var r = baris[idx];
+            var h = tinggiBaris[idx];
             var belumBox = r.BoxNo is null;
+            var baseline = BaselineTengah(y, h, FontIsi);
 
-            canvas.DrawRect(new SKRect(x0, y, x0 + totalW, y + RowH), border);
+            canvas.DrawRect(new SKRect(x0, y, x0 + totalW, y + h), border);
 
             x = x0;
             foreach (var k in kolom)
             {
-                canvas.DrawLine(x, y, x, y + RowH, border);
+                canvas.DrawLine(x, y, x, y + h, border);
 
-                var (teks, t) = Nilai(k.Isi, r, from + i + 1, belumBox,
-                                      td, tdMono, tdMonoBold, tdNo, dim, dimMono);
-
-                if (!string.IsNullOrEmpty(teks))
+                if (k.Isi == Isi.Nama)
                 {
-                    var c = Clip(teks, t, k.Width - 7f);
-                    var tx = k.Center ? x + (k.Width - t.Measure(c)) / 2f
-                           : k.Right ? x + k.Width - 4f - t.Measure(c)
-                           : x + 4f;
-                    Draw(canvas, c, tx, y + RowH - 5.6f, t);
+                    // nama sudah dibungkus (maks. 2 baris) saat perencanaan halaman
+                    var t = belumBox ? dim : td;
+                    var nama = namaBaris[idx];
+                    var ny = baseline - (nama.Count - 1) * NamaLineH / 2f;
+                    foreach (var n in nama)
+                    {
+                        Draw(canvas, n, x + 4f, ny, t);
+                        ny += NamaLineH;
+                    }
+                }
+                else if (k.Isi == Isi.HadirUkur)
+                {
+                    if (r.HadirUkur) DrawCentang(canvas, x + k.Width / 2f, y + h / 2f, centang);
+                }
+                else
+                {
+                    var (teks, t) = Nilai(k.Isi, r, idx + 1, belumBox,
+                                          td, tdMono, tdMonoBold, tdNo, dim, dimMono);
+
+                    if (!string.IsNullOrEmpty(teks))
+                    {
+                        var c = Clip(teks, t, k.Width - 7f);
+                        var tx = k.Center ? x + (k.Width - t.Measure(c)) / 2f
+                               : k.Right ? x + k.Width - 4f - t.Measure(c)
+                               : x + 4f;
+                        Draw(canvas, c, tx, baseline, t);
+                    }
                 }
 
                 x += k.Width;
             }
 
-            y += RowH;
+            y += h;
         }
 
         return y;
     }
 
-    // Kode, No. Box & Kode Box monospace tebal; kode pola monospace.
-    // Baris belum masuk box: abu-abu, monospace tidak tebal, box "—".
+    // Tanda centang digambar sebagai garis (font Arial tidak punya glyph ✓).
+    private static void DrawCentang(SKCanvas canvas, float cx, float cy, SKPaint paint)
+    {
+        using var path = new SKPath();
+        path.MoveTo(cx - 3.2f, cy + 0.2f);
+        path.LineTo(cx - 1f, cy + 2.6f);
+        path.LineTo(cx + 3.4f, cy - 2.8f);
+        canvas.DrawPath(path, paint);
+    }
+
+    // No. Box monospace tebal; kode pola monospace.
+    // Baris belum masuk box: monospace tidak tebal, box "—".
     private static (string Teks, Txt Font) Nilai(
         Isi isi, TniLaporanPersonelBarisDto r, int no, bool belumBox,
         Txt td, Txt tdMono, Txt tdMonoBold, Txt tdNo, Txt dim, Txt dimMono)
@@ -470,26 +580,26 @@ public class TniLaporanPersonelPdfService
         return isi switch
         {
             Isi.No => (no.ToString(Id), belumBox ? dim : tdNo),
-            Isi.Kode => (r.KodeRef, monoBold),
             Isi.Satuan => (r.SatuanName, biasa),
             Isi.Pangkat => (r.Pangkat ?? string.Empty, biasa),
-            Isi.Nama => (r.Nama, biasa),
             Isi.Nrp => (r.Nrp, biasa),
             Isi.NoHp => (r.NoHp ?? string.Empty, biasa),
             Isi.Gender => (r.Gender == "PRIA" ? "Pria" : "Wanita", biasa),
             Isi.Kemeja => (r.PolaKemejaKode, mono),
             Isi.Celana => (r.PolaCelanaKode, mono),
             Isi.BoxNo => (belumBox ? "—" : $"#{r.BoxNo}", monoBold),
-            Isi.BoxCode => (belumBox ? "—" : r.BoxCode ?? "—", monoBold),
             _ => (string.Empty, biasa)
         };
     }
 
     // ---------------- blok bawah: rekap box ----------------
     // Kotak tanda tangan (Diserahkan / Diterima oleh) dihapus atas permintaan
-    // owner (2026-11-09); rekap tetap selebar separuh halaman seperti mockup.
+    // owner (2026-11-09). Kolom Status & Ditutup/dikirim dihapus (2026-11-18):
+    // rekap cukup Box + Isi, selebar separuh halaman.
 
-    private static float DrawBawah(SKCanvas canvas, List<TniLaporanPersonelBoxDto> box, Halaman r, float y)
+    private static float DrawBawah(
+        SKCanvas canvas, List<TniLaporanPersonelBoxDto> box, Halaman r, float y,
+        int hadirUkur, int tidakHadirUkur)
     {
         using var label = new Txt(7.5f, bold: true, color: Mut);
         using var th = new Txt(7.5f, bold: true, color: HeadText);
@@ -503,6 +613,11 @@ public class TniLaporanPersonelPdfService
         var w = (PageW - Margin * 2 - gap) / 2f;
         var tinggi = TinggiRekap(r.RekapCount);
 
+        // kanan: rekap pengukuran (hanya bersama potongan rekap box pertama)
+        if (r.RekapFrom == 0)
+            DrawRekapUkur(canvas, Margin + w + gap, y, w, hadirUkur, tidakHadirUkur,
+                          label, th, td, border, headBg);
+
         var x1 = Margin;
         canvas.DrawRect(new SKRect(x1, y, x1 + w, y + tinggi), border);
 
@@ -511,12 +626,12 @@ public class TniLaporanPersonelPdfService
 
         var ix = x1 + 8f;
         var iw = w - 16f;
+        // No. Box & Kode Box dipisah (2026-11-18); box gabungan diberi keterangan.
         var cols = new[]
         {
-            ("Box", iw * 0.30f, false),
-            ("Status", iw * 0.26f, false),
-            ("Isi", iw * 0.24f, true),
-            ("Ditutup / dikirim", iw * 0.20f, false)
+            ("No. Box", iw * 0.20f, false),
+            ("Kode Box", iw * 0.46f, false),
+            ("Isi", iw * 0.34f, true)
         };
 
         var ty = y + RekapJudulH;
@@ -545,17 +660,16 @@ public class TniLaporanPersonelPdfService
             var b = box[r.RekapFrom + i];
             canvas.DrawRect(new SKRect(ix, ty, ix + tw, ty + RekapRowH), border);
 
-            var status = LabelStatusBox(b.Status);
             var nilai = new (string Teks, Txt Font)[]
             {
-                ($"#{b.BoxNo} {b.BoxCode}", tdMono),
-                (b.Gabungan ? $"Gabungan · {status}" : status, td),
+                ($"#{b.BoxNo}", tdMono),
+                (b.BoxCode, tdMono),
                 (b.Gabungan || b.IsiDariLingkup != b.Isi
                     ? $"{b.IsiDariLingkup.ToString("N0", Id)} dari lingkup ini"
-                    : b.Isi.ToString("N0", Id), td),
-                ((b.ShippedAt ?? b.PackedAt)?.ToString("d MMM yyyy", Id) ?? "—", td)
+                    : b.Isi.ToString("N0", Id), td)
             };
 
+            var baseY = ty + RekapRowH - 3.8f;
             cx = ix;
             for (var c = 0; c < cols.Length; c++)
             {
@@ -563,39 +677,66 @@ public class TniLaporanPersonelPdfService
                 var teks = Clip(nilai[c].Teks, nilai[c].Font, cw - 7f);
                 Draw(canvas, teks,
                      kanan ? cx + cw - 4f - nilai[c].Font.Measure(teks) : cx + 4f,
-                     ty + RekapRowH - 3.8f, nilai[c].Font);
+                     baseY, nilai[c].Font);
+
+                // keterangan "(gabungan)" di belakang kode box, huruf biasa abu-abu
+                if (c == 1 && b.Gabungan)
+                {
+                    var kx = cx + 4f + nilai[c].Font.Measure(teks) + 3f;
+                    Draw(canvas, Clip("(gabungan)", kecil, cx + cw - 3f - kx), kx, baseY, kecil);
+                }
+
                 cx += cw;
             }
 
             ty += RekapRowH;
         }
 
-        return y + tinggi;
+        return y + TinggiBawah(r.RekapFrom, r.RekapCount);
     }
 
-    private static string LabelStatusBox(string status) => status switch
+    // Rekap pengukuran (2026-11-18): jumlah personel lingkup laporan yang hadir
+    // pengukuran badan (kategori UKUR) vs tidak (TU_SIZING).
+    private static void DrawRekapUkur(
+        SKCanvas canvas, float x1, float y, float w, int hadir, int tidak,
+        Txt label, Txt th, Txt td, SKPaint border, SKPaint headBg)
     {
-        "TERKIRIM" => "Terkirim",
-        "TERTUTUP" => "Tertutup",
-        "TERBUKA" => "Terbuka",
-        _ => status
-    };
+        using var tdBold = new Txt(8f, bold: true);
 
-    private static void DrawCatatan(SKCanvas canvas, float y)
-    {
-        using var f = new Txt(7.5f, color: Mut);
+        canvas.DrawRect(new SKRect(x1, y, x1 + w, y + TinggiUkur), border);
+        Draw(canvas, "REKAP PENGUKURAN", x1 + 8f, y + 12f, label);
 
-        // No. Box = tni.box.box_no (alter_72): nomor urut box dalam order, sama
-        // dengan "No." yang tampil di halaman Box & Scan.
-        const string catatan =
-            "Data mengikuti kondisi sistem saat laporan dicetak. Personel yang belum masuk box ditandai " +
-            "No. Box —. No. Box = nomor urut box di aplikasi (urut dalam order), " +
-            "Kode Box = kode di kardus.";
+        var ix = x1 + 8f;
+        var iw = w - 16f;
+        var ty = y + RekapJudulH;
 
-        var baris = Bungkus(catatan, f, PageW - Margin * 2);
-        for (var i = 0; i < baris.Count; i++)
-            Draw(canvas, baris[i], Margin, y + 11f + i * 10f, f);
+        canvas.DrawRect(new SKRect(ix, ty, ix + iw, ty + RekapHeadH), headBg);
+        canvas.DrawRect(new SKRect(ix, ty, ix + iw, ty + RekapHeadH), border);
+        Draw(canvas, "KETERANGAN", ix + 4f, ty + 9.6f, th);
+        const string jml = "JUMLAH";
+        Draw(canvas, jml, ix + iw - 4f - th.Measure(jml), ty + 9.6f, th);
+        ty += RekapHeadH;
+
+        var baris = new (string Ket, int N, bool Tebal)[]
+        {
+            ("Hadir pengukuran", hadir, false),
+            ("Tidak hadir pengukuran", tidak, false),
+            ("Total", hadir + tidak, true)
+        };
+
+        foreach (var (ket, n, tebal) in baris)
+        {
+            canvas.DrawRect(new SKRect(ix, ty, ix + iw, ty + RekapRowH), border);
+            var t = tebal ? tdBold : td;
+            var baseY = ty + RekapRowH - 3.8f;
+            Draw(canvas, ket, ix + 4f, baseY, t);
+            var s = $"{n.ToString("N0", Id)} orang";
+            Draw(canvas, s, ix + iw - 4f - t.Measure(s), baseY, t);
+            ty += RekapRowH;
+        }
     }
+
+    // Catatan kaki di bawah rekap dihapus atas permintaan owner (2026-11-18).
 
     private static List<string> Bungkus(string teks, Txt t, float maxW)
     {

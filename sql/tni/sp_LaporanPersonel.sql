@@ -1,7 +1,7 @@
 /* =============================================================
    PDH TNI AD -- Laporan Personel & Box (Prompt 89)
 
-   tni.SIS_LaporanPersonel -- sumber PDF A4 landscape "Laporan Personel & Box"
+   tni.SIS_LaporanPersonel -- sumber PDF A4 portrait "Laporan Personel & Box"
    yang diunduh dari /tni/personel.
 
    Parameter = filter SIS_Personel_List (tanpa paging), supaya PDF berisi
@@ -52,6 +52,7 @@ BEGIN
            v.gender,
            v.pola_kemeja_kode,
            v.pola_celana_kode,
+           v.kategori,
            v.box_id,
            v.box_code
     INTO #f
@@ -98,6 +99,8 @@ BEGIN
            f.gender            AS Gender,
            f.pola_kemeja_kode  AS PolaKemejaKode,
            f.pola_celana_kode  AS PolaCelanaKode,
+           -- 2026-11-18: kolom "Hadir Ukur" (ceklis) = kategori UKUR (bukan TU_SIZING)
+           CAST(CASE WHEN f.kategori = 'UKUR' THEN 1 ELSE 0 END AS BIT) AS HadirUkur,
            b.box_no            AS BoxNo,
            f.box_code          AS BoxCode
     FROM #f f

@@ -374,8 +374,8 @@ else
     private bool isUnduh;
     private string infoMessage = string.Empty;
 
-    // Perkiraan halaman PDF landscape: ±28 baris per halaman + 1 untuk rekap/tanda tangan.
-    private const int BarisPerHalaman = 28;
+    // Perkiraan halaman PDF portrait: ±45 baris per halaman (sebagian nama 2 baris) + 1 untuk rekap box.
+    private const int BarisPerHalaman = 45;
     private const int AmbangKonfirmasi = 300;
 
     private async Task UnduhLaporanAsync()

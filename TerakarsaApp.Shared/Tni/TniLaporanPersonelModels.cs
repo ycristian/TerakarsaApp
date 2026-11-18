@@ -33,6 +33,8 @@ public class TniLaporanPersonelBarisDto
     public string Gender { get; set; } = string.Empty;
     public string PolaKemejaKode { get; set; } = string.Empty;
     public string PolaCelanaKode { get; set; } = string.Empty;
+    // kategori UKUR (hadir pengukuran) -> ceklis di kolom "Hadir Ukur"
+    public bool HadirUkur { get; set; }
     // NULL = belum masuk box
     public int? BoxNo { get; set; }
     public string? BoxCode { get; set; }
