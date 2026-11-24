@@ -42,6 +42,24 @@ public class ArticleController : ControllerBase
         return Ok(result);
     }
 
+    // Prompt 96: drill-down "Reject per Line" dari kartu yang sama -- otorisasi sama.
+    [HttpGet("{id}/reject-by-line")]
+    public async Task<IActionResult> GetRejectByLine(int id, [FromQuery] int? stepId, [FromQuery] string category, [FromQuery] int? sizeId)
+    {
+        var result = await _reportBundleService.GetArticleRejectByLineAsync(id, stepId, category, sizeId);
+        if (result.Error is not null) return BadRequest(new { message = result.Error });
+        return Ok(result);
+    }
+
+    // Prompt 96: drill-down "Total OK per pelaksana" (+ reject & hilang) per step.
+    [HttpGet("{id}/ok-by-line")]
+    public async Task<IActionResult> GetOkByLine(int id, [FromQuery] int stepId, [FromQuery] int? sizeId)
+    {
+        var result = await _reportBundleService.GetArticleOkByLineAsync(id, stepId, sizeId);
+        if (result.Error is not null) return BadRequest(new { message = result.Error });
+        return Ok(result);
+    }
+
     [HttpGet("by-project/{projectId}/sizes")]
     public async Task<IActionResult> GetSizesByProject(int projectId)
     {

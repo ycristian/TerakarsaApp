@@ -20,6 +20,38 @@ public class ArticleApiService
         return await response.Content.ReadFromJsonAsync<ArticleSizeProgressResultDto>() ?? new();
     }
 
+    // Prompt 96: drill-down "Reject per Line".
+    public async Task<ArticleRejectByLineResultDto> GetRejectByLineAsync(int articleId, int? stepId, string category, int? sizeId = null)
+    {
+        var url = $"api/articles/{articleId}/reject-by-line?category={Uri.EscapeDataString(category)}";
+        if (stepId.HasValue) url += $"&stepId={stepId.Value}";
+        if (sizeId.HasValue) url += $"&sizeId={sizeId.Value}";
+        return await GetByLineAsync(url);
+    }
+
+    // Prompt 96: klik angka Total OK -> per pelaksana step (+ reject & hilang).
+    public Task<ArticleRejectByLineResultDto> GetOkByLineAsync(int articleId, int stepId, int? sizeId = null)
+        => GetByLineAsync($"api/articles/{articleId}/ok-by-line?stepId={stepId}"
+            + (sizeId.HasValue ? $"&sizeId={sizeId.Value}" : ""));
+
+    private async Task<ArticleRejectByLineResultDto> GetByLineAsync(string url)
+    {
+        var response = await _http.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            string? message = null;
+            try { message = (await response.Content.ReadFromJsonAsync<ApiMessage>())?.Message; }
+            catch { /* body bukan JSON (mis. 403) */ }
+            return new ArticleRejectByLineResultDto { Error = message ?? "Gagal memuat rincian reject." };
+        }
+        return await response.Content.ReadFromJsonAsync<ArticleRejectByLineResultDto>() ?? new();
+    }
+
+    private class ApiMessage
+    {
+        public string? Message { get; set; }
+    }
+
     public async Task<List<ArticleListItemDto>> GetByProjectAsync(int projectId)
     {
         var response = await _http.GetAsync($"api/articles/by-project/{projectId}");

@@ -159,7 +159,7 @@ else
 </div>
 
 <div class="row">
-    <div class="col-lg-4 mb-4 mb-lg-0">
+    <div class="col-lg-3 mb-4 mb-lg-0">
         <div class="card h-100 mb-0">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h3 class="card-title mb-0">Artikel</h3>
@@ -219,7 +219,7 @@ else
         </div>
     </div>
 
-    <div class="col-lg-4 mb-4 mb-lg-0">
+    <div class="col-lg-3 mb-4 mb-lg-0">
         <div class="card h-100 mb-0">
             <div class="card-header">
                 <h3 class="card-title mb-0">Bundle</h3>
@@ -276,7 +276,7 @@ else
         </div>
     </div>
 
-    <div class="col-lg-4">
+    <div class="col-lg-6">
         <div class="card h-100 mb-0">
             <div class="card-header">
                 <h3 class="card-title mb-0">Laporan Progress per Ukuran</h3>
@@ -325,10 +325,10 @@ else
                                         {
                                             <tr>
                                                 <td class="text-start fw-bold">@size.SizeName</td>
-                                                <td>@size.PoQty</td>
+                                                <td>@size.PoQty.ToString("N0")</td>
                                                 @foreach (var step in steps)
                                                 {
-                                                    <td>@GetCellQty(progress, step.ArticleWorkflowId, size.SizeId)</td>
+                                                    <td>@GetCellQty(progress, step.ArticleWorkflowId, size.SizeId).ToString("N0")</td>
                                                 }
                                             </tr>
                                         }
@@ -336,12 +336,93 @@ else
                                     <tfoot>
                                         <tr class="fw-bold">
                                             <td class="text-start">Total</td>
-                                            <td>@poTotal</td>
+                                            <td>@poTotal.ToString("N0")</td>
                                             @foreach (var step in steps)
                                             {
-                                                <td>@GetStepTotal(progress, step.ArticleWorkflowId)</td>
+                                                var stepTotal = GetStepTotal(progress, step.ArticleWorkflowId);
+                                                @if (stepTotal == 0)
+                                                {
+                                                    <td>@stepTotal</td>
+                                                }
+                                                else
+                                                {
+                                                    <td>
+                                                        <button type="button" class="btn btn-link btn-sm p-0 progress-reject-link"
+                                                                title="Lihat per pelaksana (OK, reject, hilang)"
+                                                                @onclick="() => OpenOkByLine(a, step)">@stepTotal.ToString("N0")</button>
+                                                    </td>
+                                                }
                                             }
                                         </tr>
+                                        @if (progress.Rejects.Any(r => r.Category != "Hilang"))
+                                        {
+                                            var rejectExpanded = expandedRejectArticles.Contains(a.Id);
+                                            <tr class="progress-reject-total">
+                                                <td class="text-start text-nowrap">
+                                                    <button type="button" class="btn btn-link btn-sm p-0 progress-reject-toggle"
+                                                            title="Tampilkan rincian kategori reject"
+                                                            @onclick="() => ToggleRejectDetail(a.Id)">
+                                                        @(rejectExpanded ? "▾" : "▸") Total Reject
+                                                    </button>
+                                                </td>
+                                                <td></td>
+                                                @foreach (var step in steps)
+                                                {
+                                                    var totalReject = GetRejectQty(progress, step.ArticleWorkflowId, null);
+                                                    <td class="@(totalReject == 0 ? "text-muted" : "")">@(totalReject == 0 ? "–" : totalReject.ToString("N0"))</td>
+                                                }
+                                            </tr>
+                                            @if (rejectExpanded)
+                                            {
+                                                @foreach (var cat in RejectCategories.Where(c => c.Key != "Hilang"
+                                                    && steps.Any(s => GetRejectQty(progress, s.ArticleWorkflowId, c.Key) != 0)))
+                                                {
+                                                    <tr class="@cat.CssClass">
+                                                        <td class="text-start text-nowrap ps-3">@cat.Label</td>
+                                                        <td></td>
+                                                        @foreach (var step in steps)
+                                                        {
+                                                            var qty = GetRejectQty(progress, step.ArticleWorkflowId, cat.Key);
+                                                            @if (qty == 0)
+                                                            {
+                                                                <td class="text-muted">–</td>
+                                                            }
+                                                            else
+                                                            {
+                                                                <td>
+                                                                    <button type="button" class="btn btn-link btn-sm p-0 progress-reject-link"
+                                                                            title="Lihat per line"
+                                                                            @onclick="() => OpenRejectByLine(a, step, cat.Key)">@qty.ToString("N0")</button>
+                                                                </td>
+                                                            }
+                                                        }
+                                                    </tr>
+                                                }
+                                            }
+                                        }
+                                        @if (steps.Any(s => GetRejectQty(progress, s.ArticleWorkflowId, "Hilang") != 0))
+                                        {
+                                            <tr class="progress-hilang-row">
+                                                <td class="text-start">Hilang</td>
+                                                <td></td>
+                                                @foreach (var step in steps)
+                                                {
+                                                    var qty = GetRejectQty(progress, step.ArticleWorkflowId, "Hilang");
+                                                    @if (qty == 0)
+                                                    {
+                                                        <td class="text-muted">–</td>
+                                                    }
+                                                    else
+                                                    {
+                                                        <td>
+                                                            <button type="button" class="btn btn-link btn-sm p-0 progress-reject-link"
+                                                                    title="Lihat per line"
+                                                                    @onclick="() => OpenRejectByLine(a, step, HilangCategory)">@qty.ToString("N0")</button>
+                                                        </td>
+                                                    }
+                                                }
+                                            </tr>
+                                        }
                                         <tr class="small text-muted">
                                             <td class="text-start">%</td>
                                             <td>-</td>
@@ -353,6 +434,14 @@ else
                                     </tfoot>
                                 </table>
                             </div>
+                            var stepIds = steps.Select(s => s.ArticleWorkflowId).ToHashSet();
+                            var orphanReject = progress.Rejects
+                                .Where(r => r.ArticleWorkflowId is null || !stepIds.Contains(r.ArticleWorkflowId.Value))
+                                .Sum(r => r.Qty);
+                            @if (orphanReject != 0)
+                            {
+                                <div class="small text-muted mb-2">@orphanReject.ToString("N0") pcs reject/hilang tanpa proses tercatat.</div>
+                            }
                         }
                     }
                 }
@@ -360,6 +449,136 @@ else
         </div>
     </div>
 </div>
+
+@if (showRejectByLine)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0">
+                            @(rejectByLine?.StepName ?? rejectByLineStepName) — @(rejectByLine?.CategoryLabel ?? "")
+                            @if (rejectByLine is not null && rejectByLine.Error is null)
+                            {
+                                <span> · @rejectByLine.TotalQty.ToString("N0") pcs</span>
+                            }
+                        </h5>
+                        @if (rejectByLine is not null && rejectByLine.Error is null && rejectByLine.IsOkBreakdown)
+                        {
+                            <div class="small">
+                                <span class="reject-text">Reject @((rejectByLine.TotalReject ?? 0).ToString("N0"))</span>
+                                <span class="text-muted"> · </span>
+                                <span class="hilang-text">Hilang @((rejectByLine.TotalHilang ?? 0).ToString("N0"))</span>
+                            </div>
+                        }
+                        <div class="small text-muted">
+                            @rejectByLineArticleName
+                            @if (rejectByLine is not null && !string.IsNullOrEmpty(rejectByLine.AttributionLabel))
+                            {
+                                <span> · Atribusi: @rejectByLine.AttributionLabel</span>
+                            }
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseRejectByLine"></button>
+                </div>
+                <div class="modal-body">
+                    @if (byLineSizeTotals.Count > 0)
+                    {
+                        <div class="d-flex flex-wrap gap-1 mb-3">
+                            <button type="button"
+                                    class="btn btn-sm rounded-pill @(byLineSizeId is null ? "btn-primary" : "btn-outline-secondary")"
+                                    disabled="@isLoadingRejectByLine"
+                                    @onclick="() => SelectByLineSize(null)">
+                                Semua <span class="opacity-75">@byLineSizeTotals.Sum(t => t.Qty).ToString("N0")</span>
+                            </button>
+                            @foreach (var sz in byLineSizes)
+                            {
+                                var szTotal = byLineSizeTotals.FirstOrDefault(t => t.SizeId == sz.SizeId)?.Qty ?? 0;
+                                @if (szTotal != 0)
+                                {
+                                    <button type="button"
+                                            class="btn btn-sm rounded-pill @(byLineSizeId == sz.SizeId ? "btn-primary" : "btn-outline-secondary")"
+                                            disabled="@isLoadingRejectByLine"
+                                            @onclick="() => SelectByLineSize(sz.SizeId)">
+                                        @sz.SizeName <span class="opacity-75">@szTotal.ToString("N0")</span>
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                    @if (isLoadingRejectByLine || rejectByLine is null)
+                    {
+                        <p class="mb-0">Memuat...</p>
+                    }
+                    else if (rejectByLine.Error is not null)
+                    {
+                        <div class="alert alert-danger mb-0">@rejectByLine.Error</div>
+                    }
+                    else if (rejectByLine.Lines.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Tidak ada data.</p>
+                    }
+                    else
+                    {
+                        var isOk = rejectByLine.IsOkBreakdown;
+                        var maxQty = Math.Max(1, rejectByLine.Lines.Max(l => Math.Abs(l.Qty)));
+                        var topLine = rejectByLine.Lines[0];
+                        @if (isOk)
+                        {
+                            <div class="d-flex gap-2 small text-muted border-bottom pb-1">
+                                <div class="reject-line-name">Pelaksana</div>
+                                <div class="flex-grow-1"></div>
+                                <div class="reject-line-qty">OK</div>
+                                <div class="reject-line-qty">Reject</div>
+                                <div class="reject-line-qty">Hilang</div>
+                                <div class="reject-line-caret"></div>
+                            </div>
+                        }
+                        @foreach (var line in rejectByLine.Lines)
+                        {
+                            var lineKey = line.ResourceId?.ToString() ?? "null";
+                            var lineEmployees = rejectByLine.Employees.Where(e => e.ResourceId == line.ResourceId).ToList();
+                            var canExpand = lineEmployees.Any(e => e.EmployeeId is not null);
+                            var isOpen = expandedRejectLine == lineKey;
+                            <div class="reject-line-item">
+                                <div class="d-flex align-items-center gap-2 @(canExpand ? "reject-line-clickable" : "")"
+                                     @onclick="() => ToggleRejectLine(lineKey, canExpand)">
+                                    <div class="reject-line-name text-truncate">
+                                        @line.ResourceName
+                                        @if (ReferenceEquals(line, topLine) && rejectByLine.Lines.Count > 1)
+                                        {
+                                            <span class="badge bg-danger ms-1">terbanyak</span>
+                                        }
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <div class="reject-line-bar @(isOk ? "ok" : "")" style="width: @(Math.Abs(line.Qty) * 100 / maxQty)%"></div>
+                                    </div>
+                                    <div class="reject-line-qty fw-bold">@line.Qty.ToString("N0")</div>
+                                    @if (isOk)
+                                    {
+                                        <div class="reject-line-qty @((line.RejectQty ?? 0) == 0 ? "text-muted" : "reject-text")">@((line.RejectQty ?? 0) == 0 ? "–" : (line.RejectQty ?? 0).ToString("N0"))</div>
+                                        <div class="reject-line-qty @((line.HilangQty ?? 0) == 0 ? "text-muted" : "hilang-text")">@((line.HilangQty ?? 0) == 0 ? "–" : (line.HilangQty ?? 0).ToString("N0"))</div>
+                                    }
+                                    <div class="reject-line-caret text-muted small">@(canExpand ? (isOpen ? "▾" : "▸") : "")</div>
+                                </div>
+                                @if (isOpen)
+                                {
+                                    <div class="reject-line-employees small text-muted">
+                                        @string.Join(" · ", lineEmployees.Select(e => $"{e.EmployeeName} {e.Qty:N0}"))
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseRejectByLine">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @if (showForm)
 {
@@ -507,6 +726,106 @@ else
         if (poTotal <= 0) return "-";
         var stepTotal = GetStepTotal(progress, articleWorkflowId);
         return $"{(decimal)stepTotal / poTotal * 100:0.0}%";
+    }
+
+    // Prompt 96: baris Reject/Hilang di bawah Total + drill-down per line.
+    private record RejectCategoryInfo(string Key, string Label, string CssClass);
+
+    private const string HilangCategory = "Hilang";
+
+    private static readonly List<RejectCategoryInfo> RejectCategories = new()
+    {
+        new("RejectBahan", "Reject Bahan", "progress-reject-row"),
+        new("RejectJahit", "Reject Jahit", "progress-reject-row"),
+        new("RejectPrint", "Reject Print", "progress-reject-row"),
+        new("Perbaikan", "Perbaikan", "progress-perbaikan-row"),
+        new("TidakLengkap", "Tidak Lengkap", "progress-reject-row"),
+        new("Hilang", "Hilang", "progress-hilang-row"),
+    };
+
+    // category null = Total Reject (semua kategori kecuali Hilang).
+    private static int GetRejectQty(ArticleSizeProgressResultDto progress, int articleWorkflowId, string? category)
+        => progress.Rejects
+            .Where(r => r.ArticleWorkflowId == articleWorkflowId
+                && (category is null ? r.Category != "Hilang" : r.Category == category))
+            .Sum(r => r.Qty);
+
+    private HashSet<int> expandedRejectArticles = new();
+
+    private void ToggleRejectDetail(int articleId)
+    {
+        if (!expandedRejectArticles.Add(articleId)) expandedRejectArticles.Remove(articleId);
+    }
+
+    private bool showRejectByLine = false;
+    private bool isLoadingRejectByLine = false;
+    private ArticleRejectByLineResultDto? rejectByLine;
+    private string rejectByLineArticleName = string.Empty;
+    private string rejectByLineStepName = string.Empty;
+    private string? expandedRejectLine;
+
+    private Task OpenRejectByLine(ArticleListItemDto article, ArticleSizeProgressStepDto step, string category)
+        => OpenByLine(article, step, sizeId => ArticleApi.GetRejectByLineAsync(article.Id, step.ArticleWorkflowId, category, sizeId));
+
+    // Klik angka baris Total: OK per pelaksana step + reject & hilang yang dicatatnya.
+    private Task OpenOkByLine(ArticleListItemDto article, ArticleSizeProgressStepDto step)
+        => OpenByLine(article, step, sizeId => ArticleApi.GetOkByLineAsync(article.Id, step.ArticleWorkflowId, sizeId));
+
+    // Chip ukuran di modal: loader disimpan supaya ganti chip cukup memuat ulang dengan sizeId lain.
+    private Func<int?, Task<ArticleRejectByLineResultDto>>? byLineLoader;
+    private int? byLineSizeId;
+    private List<ArticleSizeProgressSizeDto> byLineSizes = new();
+    private List<ArticleRejectSizeTotalDto> byLineSizeTotals = new();
+
+    private async Task OpenByLine(ArticleListItemDto article, ArticleSizeProgressStepDto step, Func<int?, Task<ArticleRejectByLineResultDto>> load)
+    {
+        rejectByLine = null;
+        expandedRejectLine = null;
+        rejectByLineArticleName = article.ArticleName;
+        rejectByLineStepName = step.StepName;
+        byLineLoader = load;
+        byLineSizeId = null;
+        byLineSizeTotals = new();
+        byLineSizes = articleSizeProgress.TryGetValue(article.Id, out var progress)
+            ? progress.Sizes.OrderBy(s => s.SortOrder).ToList()
+            : new();
+        showRejectByLine = true;
+        await LoadByLine();
+    }
+
+    private async Task SelectByLineSize(int? sizeId)
+    {
+        if (byLineSizeId == sizeId) return;
+        byLineSizeId = sizeId;
+        expandedRejectLine = null;
+        await LoadByLine();
+    }
+
+    private async Task LoadByLine()
+    {
+        if (byLineLoader is null) return;
+        isLoadingRejectByLine = true;
+        StateHasChanged();
+
+        var result = await byLineLoader(byLineSizeId);
+        rejectByLine = result;
+        // Total per ukuran dihitung SP sebelum filter -- sama untuk semua chip.
+        if (result.Error is null) byLineSizeTotals = result.SizeTotals;
+        isLoadingRejectByLine = false;
+    }
+
+    private void ToggleRejectLine(string lineKey, bool canExpand)
+    {
+        if (!canExpand) return;
+        expandedRejectLine = expandedRejectLine == lineKey ? null : lineKey;
+    }
+
+    private void CloseRejectByLine()
+    {
+        showRejectByLine = false;
+        rejectByLine = null;
+        byLineLoader = null;
+        byLineSizeTotals = new();
     }
 
     private string searchTerm = string.Empty;

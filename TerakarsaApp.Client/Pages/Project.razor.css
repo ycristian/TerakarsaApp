@@ -1,0 +1,92 @@
+/* Prompt 96: baris Reject/Hilang di kartu "Laporan Progress per Ukuran" + modal Reject per Line. */
+
+.progress-reject-total td {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+.progress-reject-row td {
+    color: #dc3545;
+    font-size: 0.85em;
+}
+
+.progress-perbaikan-row td {
+    color: #b58105;
+    font-size: 0.85em;
+}
+
+.progress-hilang-row td {
+    color: #fd7e14;
+    font-weight: 600;
+}
+
+.progress-reject-toggle,
+.progress-reject-link {
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-decoration: none;
+    vertical-align: baseline;
+}
+
+.progress-reject-link {
+    text-decoration: underline dotted;
+}
+
+.progress-reject-link:hover,
+.progress-reject-toggle:hover {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.reject-line-item {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #f0f0f5;
+}
+
+.reject-line-item:last-child {
+    border-bottom: none;
+}
+
+.reject-line-clickable {
+    cursor: pointer;
+}
+
+.reject-line-name {
+    width: 9rem;
+    flex-shrink: 0;
+}
+
+.reject-line-bar {
+    height: 0.6rem;
+    min-width: 2px;
+    border-radius: 0.3rem;
+    background-color: #dc3545;
+}
+
+.reject-line-bar.ok {
+    background-color: #198754;
+}
+
+.reject-line-qty {
+    width: 3.2rem;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.reject-line-caret {
+    width: 0.8rem;
+    flex-shrink: 0;
+}
+
+.reject-text {
+    color: #dc3545;
+}
+
+.hilang-text {
+    color: #fd7e14;
+}
+
+.reject-line-employees {
+    padding: 0.25rem 0 0 9.5rem;
+}

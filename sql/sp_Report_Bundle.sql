@@ -585,6 +585,17 @@ BEGIN
 
     -- Result set 3: isi sel matriks -- SUM(qty_ok) per (step, ukuran), ditambah hasil
     -- hamparan di kolom step Cutting (lihat catatan revisi di atas SP ini).
+    -- Revisi Prompt 96 (2026-11-24): baris log bundle ANAK (sequence_no > 0) hanya dihitung
+    -- di step dengan sort_order >= step KELAHIRANNYA (step baris log induk yang membawa
+    -- split_id pemecahan yang melahirkan anak itu -- sama dengan OUTER APPLY src di
+    -- v_bundle_reject_unified cabang B). Di step-step sebelumnya pcs anak sudah terhitung
+    -- lewat induknya; di step kelahiran induk hanya mencatat qty OK, jadi pcs anak belum
+    -- terhitung di sana. Kasus utamanya anak Perbaikan: SIS_BundleSplit_Manage
+    -- mengembalikannya ke step ber-bundle SEBELUM step pecah (mis. Sewing), dan Kirim
+    -- pertamanya di sana mengisi qty_ok penuh -- tanpa aturan ini kolom Sewing dobel.
+    -- Anak yang tidak punya baris split (BirthSort NULL) tetap dihitung seperti sebelumnya.
+    -- Batasan diketahui: anak FOUND yang ditemukan di station LEBIH AWAL dari step tempat
+    -- barangnya hilang masih bisa dobel di step-step di antaranya (kasus jarang).
     ;WITH LogSized AS (
         SELECT
             l.article_workflow_id,
@@ -593,7 +604,18 @@ BEGIN
         FROM article_workflow_logs l
         INNER JOIN article_workflows aw ON aw.article_workflow_id = l.article_workflow_id
         LEFT JOIN bundles b ON b.bundle_id = l.bundle_id
+        OUTER APPLY (
+            SELECT TOP 1 paw.sort_order AS BirthSort
+            FROM bundle_split_results sr
+            INNER JOIN bundle_splits bs ON bs.split_id = sr.split_id
+            INNER JOIN article_workflow_logs pl ON pl.split_id = bs.split_id
+                AND pl.bundle_id = bs.source_bundle_id AND pl.deleted_at IS NULL
+            INNER JOIN article_workflows paw ON paw.article_workflow_id = pl.article_workflow_id
+            WHERE ISNULL(b.sequence_no, 0) > 0 AND sr.bundle_id = b.bundle_id
+            ORDER BY pl.workflow_log_id
+        ) birth
         WHERE aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND l.deleted_at IS NULL
+          AND (ISNULL(b.sequence_no, 0) = 0 OR birth.BirthSort IS NULL OR aw.sort_order >= birth.BirthSort)
 
         UNION ALL
 
@@ -620,6 +642,273 @@ BEGIN
     WHERE SizeId IS NOT NULL
     GROUP BY article_workflow_id, SizeId
     ORDER BY article_workflow_id ASC, SizeId ASC;
+
+    -- Result set 4 (Prompt 96): reject & hilang per (step, kategori) -- baris "Total Reject",
+    -- rincian kategori, dan "Hilang" di bawah baris Total. Sumbernya HANYA
+    -- v_bundle_reject_unified (sudah memegang batas gaya LAMA vs bundle ANAK -- jangan
+    -- menjumlah ulang dari kolom qty_reject_*/qty_lost). Tidak dipecah per ukuran.
+    -- Kategori: RejectBahan | RejectJahit | RejectPrint | Perbaikan | TidakLengkap | Hilang.
+    --   Perbaikan (bundle anak) = yang BELUM selesai diperbaiki: view menyaring anak
+    --     berstatus 'OK', dan anak Perbaikan berubah 'OK' begitu dikirim ulang.
+    --   Hilang gaya baru = saldo missing_qty per induk; step-nya dari log 'Hilang' terakhir.
+    -- ArticleWorkflowId NULL (proses tidak tercatat) ikut dikembalikan -- UI menampilkannya
+    -- sebagai catatan di bawah tabel, bukan kolom.
+    SELECT
+        v.ArticleWorkflowId,
+        v.Category,
+        SUM(v.Qty) AS Qty
+    FROM v_bundle_reject_unified v
+    INNER JOIN bundles b ON b.bundle_id = v.BundleId AND b.deleted_at IS NULL
+    WHERE b.article_id = @ArticleId
+    GROUP BY v.ArticleWorkflowId, v.Category
+    HAVING SUM(v.Qty) <> 0
+    ORDER BY v.ArticleWorkflowId, v.Category;
+END;
+GO
+
+-- E2. Prompt 96 -- drill-down "Reject per Line" (klik angka kategori di kartu Laporan Progress
+-- per Ukuran). Sumber sama: v_bundle_reject_unified. Atribusi per kategori:
+--   RejectJahit/RejectPrint/Perbaikan/TidakLengkap -> LINE PEMILIK BUNDLE: bundles.resource_id
+--       (line yang mengklaim bundle, diisi @TargetResourceId di SIS_CuttingBundle_Take) +
+--       penjahit bundles.employee_id dari bundle INDUK (v.BundleId) -- BUKAN station yang
+--       menemukan. Reject jahit biasanya ketahuan di QC/Trim, tapi kesalahannya di line jahit.
+--   Hilang      -> pemegang barang saat hilang: v.ResourceId (pelaksana log 'Hilang').
+--   RejectBahan -> bukan kesalahan line; dikelompokkan per pencatat (v.ResourceId).
+-- @ArticleWorkflowId NULL = semua step.
+-- @ArticleSizeId NULL = semua ukuran (chip "Semua" di modal); ukuran = bundles.article_size_id
+-- bundle INDUK (anak selalu seukuran induknya).
+-- Result set: 1 header, 2 per line (Qty DESC), 3 per line x penjahit (kosong utk Hilang/RejectBahan),
+-- 4 total per ukuran SEBELUM filter ukuran (angka di chip).
+CREATE OR ALTER PROCEDURE SIS_Report_ArticleRejectByLine
+    @ArticleId         INT,
+    @ArticleWorkflowId INT = NULL,
+    @Category          VARCHAR(20),
+    @ArticleSizeId     INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Category IS NULL OR @Category NOT IN ('RejectBahan', 'RejectJahit', 'RejectPrint', 'Perbaikan', 'TidakLengkap', 'Hilang')
+    BEGIN
+        RAISERROR('Kategori reject tidak dikenal.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @ByBundleOwner BIT = CASE WHEN @Category IN ('Hilang', 'RejectBahan') THEN 0 ELSE 1 END;
+
+    DECLARE @R TABLE (SizeId INT NULL, ResourceId INT NULL, EmployeeId INT NULL, Qty INT NOT NULL);
+
+    INSERT INTO @R (SizeId, ResourceId, EmployeeId, Qty)
+    SELECT
+        b.article_size_id,
+        CASE WHEN @ByBundleOwner = 1 THEN b.resource_id ELSE v.ResourceId END,
+        CASE WHEN @ByBundleOwner = 1 THEN b.employee_id ELSE NULL END,
+        v.Qty
+    FROM v_bundle_reject_unified v
+    INNER JOIN bundles b ON b.bundle_id = v.BundleId AND b.deleted_at IS NULL
+    WHERE b.article_id = @ArticleId
+      AND v.Category = @Category
+      AND (@ArticleWorkflowId IS NULL OR v.ArticleWorkflowId = @ArticleWorkflowId);
+
+    -- Total per ukuran (untuk chip) dihitung SEBELUM filter ukuran.
+    DECLARE @SizeTotals TABLE (SizeId INT NULL, Qty INT NOT NULL);
+    INSERT INTO @SizeTotals (SizeId, Qty)
+    SELECT SizeId, SUM(Qty) FROM @R GROUP BY SizeId HAVING SUM(Qty) <> 0;
+
+    IF @ArticleSizeId IS NOT NULL
+        DELETE FROM @R WHERE SizeId IS NULL OR SizeId <> @ArticleSizeId;
+
+    -- 1. Header
+    SELECT
+        ISNULL((SELECT step_name FROM article_workflows WHERE article_workflow_id = @ArticleWorkflowId), 'Semua proses') AS StepName,
+        CASE @Category
+            WHEN 'RejectBahan'  THEN 'Reject Bahan'
+            WHEN 'RejectJahit'  THEN 'Reject Jahit'
+            WHEN 'RejectPrint'  THEN 'Reject Print'
+            WHEN 'Perbaikan'    THEN 'Perbaikan'
+            WHEN 'TidakLengkap' THEN 'Tidak Lengkap'
+            ELSE 'Hilang' END AS CategoryLabel,
+        ISNULL((SELECT SUM(Qty) FROM @R), 0) AS TotalQty,
+        CASE WHEN @Category = 'Hilang' THEN 'Pemegang barang saat hilang'
+             WHEN @Category = 'RejectBahan' THEN 'Dicatat oleh'
+             ELSE 'Line pemilik bundle' END AS AttributionLabel;
+
+    -- 2. Per line / resource
+    SELECT
+        r.ResourceId,
+        ISNULL(res.resource_name, '(tanpa line)') AS ResourceName,
+        SUM(r.Qty) AS Qty
+    FROM @R r
+    LEFT JOIN resources res ON res.resource_id = r.ResourceId
+    GROUP BY r.ResourceId, res.resource_name
+    HAVING SUM(r.Qty) <> 0
+    ORDER BY SUM(r.Qty) DESC, ISNULL(res.resource_name, '');
+
+    -- 3. Per line x penjahit (hanya kategori atribusi line pemilik bundle)
+    SELECT
+        r.ResourceId,
+        r.EmployeeId,
+        ISNULL(emp.employee_name, '(tanpa penjahit)') AS EmployeeName,
+        SUM(r.Qty) AS Qty
+    FROM @R r
+    LEFT JOIN employees emp ON emp.employee_id = r.EmployeeId
+    WHERE @ByBundleOwner = 1
+    GROUP BY r.ResourceId, r.EmployeeId, emp.employee_name
+    HAVING SUM(r.Qty) <> 0
+    ORDER BY r.ResourceId, SUM(r.Qty) DESC;
+
+    -- 4. Total per ukuran (chip)
+    SELECT SizeId, Qty FROM @SizeTotals WHERE SizeId IS NOT NULL ORDER BY SizeId;
+END;
+GO
+
+-- E3. Prompt 96 (lanjutan) -- drill-down "Total OK per Line": klik angka baris Total di kartu
+-- Laporan Progress per Ukuran -> siapa saja yang memproduksi qty OK step itu.
+-- Isi baris HARUS sama dengan result set 3 SIS_Report_ArticleSizeProgress untuk step yang
+-- sama (TotalQty = angka Total di tabel): aturan dobel bundle anak (BirthSort) dan
+-- SizeId IS NOT NULL disalin persis dari sana -- kalau salah satu diubah, ubah keduanya.
+-- Atribusi = PELAKSANA STEP (article_workflow_logs.resource_id): SEW + QC -> line jahit,
+-- TRIM -> resource Trim, dst. Kolom Cutting dari hamparan tidak punya pelaksana (spreads tanpa
+-- resource) -> satu baris '(hasil hamparan cutting)'.
+-- Penjahit: log Kirim gaya baru (SIS_BundleSplit_Manage) tidak mengisi employee_id, jadi
+-- ISNULL(l.employee_id, b.employee_id) -- penjahit bundle HANYA dipakai kalau pelaksana step
+-- adalah line pemilik bundle (l.resource_id = b.resource_id); selain itu NULL supaya penjahit
+-- line jahit tidak muncul di bawah resource Trim/Press.
+-- Reject & Hilang per pelaksana (kolom tambahan): dari v_bundle_reject_unified di step yang
+-- SAMA, diatribusikan ke v.ResourceId (pelaksana yang mencatat di step itu) -- BEDA dengan
+-- SIS_Report_ArticleRejectByLine yang memakai line pemilik bundle. Di sini tujuannya melihat
+-- total olahan tiap pelaksana di step ini: OK + Reject + Hilang.
+-- @ArticleSizeId NULL = semua ukuran; ukuran baris OK = SizeId yang sama dengan result set 3
+-- SIS_Report_ArticleSizeProgress (jadi angka per chip = angka sel ukuran x step di tabel).
+-- Result set: header (+TotalReject, TotalHilang), per pelaksana (+RejectQty, HilangQty),
+-- per pelaksana x penjahit (OK saja), total OK per ukuran SEBELUM filter ukuran (chip).
+CREATE OR ALTER PROCEDURE SIS_Report_ArticleOkByLine
+    @ArticleId         INT,
+    @ArticleWorkflowId INT,
+    @ArticleSizeId     INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM article_workflows
+        WHERE article_workflow_id = @ArticleWorkflowId AND article_id = @ArticleId AND deleted_at IS NULL
+    )
+    BEGIN
+        RAISERROR('Step tidak ditemukan untuk artikel ini.', 16, 1);
+        RETURN;
+    END
+
+    -- Step Cutting = step non-bundle TERAKHIR (definisi sama dengan SIS_Report_ArticleSizeProgress).
+    DECLARE @CuttingStepId INT;
+    SELECT TOP 1 @CuttingStepId = article_workflow_id
+    FROM article_workflows
+    WHERE article_id = @ArticleId AND deleted_at IS NULL AND inactive_at IS NULL
+      AND requires_bundle = 0
+    ORDER BY sort_order DESC;
+
+    -- Kind: OK | Reject | Hilang
+    DECLARE @R TABLE (Kind VARCHAR(6) NOT NULL, SizeId INT NULL, ResourceId INT NULL, ResourceLabel VARCHAR(255) NULL, EmployeeId INT NULL, Qty INT NOT NULL);
+
+    INSERT INTO @R (Kind, SizeId, ResourceId, ResourceLabel, EmployeeId, Qty)
+    SELECT
+        'OK',
+        CASE WHEN aw.requires_bundle = 1 THEN b.article_size_id ELSE l.article_size_id END,
+        l.resource_id,
+        NULL,
+        CASE WHEN l.employee_id IS NOT NULL THEN l.employee_id
+             WHEN b.bundle_id IS NOT NULL AND l.resource_id = b.resource_id THEN b.employee_id
+             ELSE NULL END,
+        l.qty_ok
+    FROM article_workflow_logs l
+    INNER JOIN article_workflows aw ON aw.article_workflow_id = l.article_workflow_id
+    LEFT JOIN bundles b ON b.bundle_id = l.bundle_id
+    OUTER APPLY (
+        SELECT TOP 1 paw.sort_order AS BirthSort
+        FROM bundle_split_results sr
+        INNER JOIN bundle_splits bs ON bs.split_id = sr.split_id
+        INNER JOIN article_workflow_logs pl ON pl.split_id = bs.split_id
+            AND pl.bundle_id = bs.source_bundle_id AND pl.deleted_at IS NULL
+        INNER JOIN article_workflows paw ON paw.article_workflow_id = pl.article_workflow_id
+        WHERE ISNULL(b.sequence_no, 0) > 0 AND sr.bundle_id = b.bundle_id
+        ORDER BY pl.workflow_log_id
+    ) birth
+    WHERE l.article_workflow_id = @ArticleWorkflowId
+      AND aw.article_id = @ArticleId AND aw.deleted_at IS NULL AND l.deleted_at IS NULL
+      AND (ISNULL(b.sequence_no, 0) = 0 OR birth.BirthSort IS NULL OR aw.sort_order >= birth.BirthSort)
+      AND (CASE WHEN aw.requires_bundle = 1 THEN b.article_size_id ELSE l.article_size_id END) IS NOT NULL;
+
+    IF @ArticleWorkflowId = @CuttingStepId
+        INSERT INTO @R (Kind, SizeId, ResourceId, ResourceLabel, EmployeeId, Qty)
+        SELECT 'OK', b.article_size_id, NULL, '(hasil hamparan cutting)', NULL, b.qty
+        FROM bundles b
+        INNER JOIN spreads s ON s.spread_id = b.spread_id AND s.deleted_at IS NULL
+        WHERE b.article_id = @ArticleId
+          AND b.deleted_at IS NULL
+          AND b.article_size_id IS NOT NULL;
+
+    -- Reject & Hilang yang tercatat di step ini, per pelaksana pencatat (lihat catatan di atas SP).
+    INSERT INTO @R (Kind, SizeId, ResourceId, ResourceLabel, EmployeeId, Qty)
+    SELECT
+        CASE WHEN v.Category = 'Hilang' THEN 'Hilang' ELSE 'Reject' END,
+        b.article_size_id,
+        v.ResourceId,
+        NULL,
+        NULL,
+        v.Qty
+    FROM v_bundle_reject_unified v
+    INNER JOIN bundles b ON b.bundle_id = v.BundleId AND b.deleted_at IS NULL
+    WHERE b.article_id = @ArticleId
+      AND v.ArticleWorkflowId = @ArticleWorkflowId;
+
+    -- Total OK per ukuran (chip) dihitung SEBELUM filter ukuran.
+    DECLARE @SizeTotals TABLE (SizeId INT NULL, Qty INT NOT NULL);
+    INSERT INTO @SizeTotals (SizeId, Qty)
+    SELECT SizeId, SUM(Qty) FROM @R WHERE Kind = 'OK' GROUP BY SizeId HAVING SUM(Qty) <> 0;
+
+    IF @ArticleSizeId IS NOT NULL
+        DELETE FROM @R WHERE SizeId IS NULL OR SizeId <> @ArticleSizeId;
+
+    -- 1. Header (TotalQty = Total OK, sama dengan angka Total di tabel)
+    SELECT
+        (SELECT step_name FROM article_workflows WHERE article_workflow_id = @ArticleWorkflowId) AS StepName,
+        'Total OK' AS CategoryLabel,
+        ISNULL((SELECT SUM(Qty) FROM @R WHERE Kind = 'OK'), 0) AS TotalQty,
+        'Pelaksana step' AS AttributionLabel,
+        ISNULL((SELECT SUM(Qty) FROM @R WHERE Kind = 'Reject'), 0) AS TotalReject,
+        ISNULL((SELECT SUM(Qty) FROM @R WHERE Kind = 'Hilang'), 0) AS TotalHilang;
+
+    -- 2. Per pelaksana: OK (Qty) + Reject + Hilang, urut OK terbanyak
+    SELECT
+        r.ResourceId,
+        COALESCE(r.ResourceLabel, res.resource_name, '(tanpa pelaksana)') AS ResourceName,
+        SUM(CASE WHEN r.Kind = 'OK' THEN r.Qty ELSE 0 END) AS Qty,
+        SUM(CASE WHEN r.Kind = 'Reject' THEN r.Qty ELSE 0 END) AS RejectQty,
+        SUM(CASE WHEN r.Kind = 'Hilang' THEN r.Qty ELSE 0 END) AS HilangQty
+    FROM @R r
+    LEFT JOIN resources res ON res.resource_id = r.ResourceId
+    GROUP BY r.ResourceId, r.ResourceLabel, res.resource_name
+    HAVING SUM(CASE WHEN r.Kind = 'OK' THEN r.Qty ELSE 0 END) <> 0
+        OR SUM(CASE WHEN r.Kind = 'Reject' THEN r.Qty ELSE 0 END) <> 0
+        OR SUM(CASE WHEN r.Kind = 'Hilang' THEN r.Qty ELSE 0 END) <> 0
+    ORDER BY SUM(CASE WHEN r.Kind = 'OK' THEN r.Qty ELSE 0 END) DESC,
+             COALESCE(r.ResourceLabel, res.resource_name, '');
+
+    -- 3. Per pelaksana x penjahit (OK saja, baris tanpa hamparan)
+    SELECT
+        r.ResourceId,
+        r.EmployeeId,
+        ISNULL(emp.employee_name, '(tanpa penjahit)') AS EmployeeName,
+        SUM(r.Qty) AS Qty
+    FROM @R r
+    LEFT JOIN employees emp ON emp.employee_id = r.EmployeeId
+    WHERE r.Kind = 'OK' AND r.ResourceLabel IS NULL
+    GROUP BY r.ResourceId, r.EmployeeId, emp.employee_name
+    HAVING SUM(r.Qty) <> 0
+    ORDER BY r.ResourceId, SUM(r.Qty) DESC;
+
+    -- 4. Total OK per ukuran (chip)
+    SELECT SizeId, Qty FROM @SizeTotals WHERE SizeId IS NOT NULL ORDER BY SizeId;
 END;
 GO
 

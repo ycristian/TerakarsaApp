@@ -202,6 +202,124 @@ public class ReportBundleService
                 });
             }
 
+            // Prompt 96: result set 4 -- reject & hilang per (step, kategori).
+            if (await reader.NextResultAsync())
+            {
+                var stepOrd = reader.GetOrdinal("ArticleWorkflowId");
+                while (await reader.ReadAsync())
+                {
+                    result.Rejects.Add(new ArticleSizeProgressRejectDto
+                    {
+                        ArticleWorkflowId = reader.IsDBNull(stepOrd) ? null : reader.GetInt32(stepOrd),
+                        Category = reader.GetString(reader.GetOrdinal("Category")),
+                        Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
+                    });
+                }
+            }
+
+            return result;
+        }
+        finally
+        {
+            if (wasClosed) await conn.CloseAsync();
+        }
+    }
+
+    // Prompt 96: SIS_Report_ArticleRejectByLine -- 3 result set (header, per line, per
+    // line x penjahit). Pesan RAISERROR dikembalikan lewat Error.
+    public Task<ArticleRejectByLineResultDto> GetArticleRejectByLineAsync(int articleId, int? articleWorkflowId, string category, int? articleSizeId)
+        => ReadByLineAsync("SIS_Report_ArticleRejectByLine", isOk: false,
+            new SqlParameter("@ArticleId", articleId),
+            new SqlParameter("@ArticleWorkflowId", (object?)articleWorkflowId ?? DBNull.Value),
+            new SqlParameter("@Category", category),
+            new SqlParameter("@ArticleSizeId", (object?)articleSizeId ?? DBNull.Value));
+
+    // Prompt 96: SIS_Report_ArticleOkByLine -- klik angka Total OK; bentuk result set sama
+    // dengan RejectByLine + kolom RejectQty/HilangQty per pelaksana dan TotalReject/TotalHilang.
+    public Task<ArticleRejectByLineResultDto> GetArticleOkByLineAsync(int articleId, int articleWorkflowId, int? articleSizeId)
+        => ReadByLineAsync("SIS_Report_ArticleOkByLine", isOk: true,
+            new SqlParameter("@ArticleId", articleId),
+            new SqlParameter("@ArticleWorkflowId", articleWorkflowId),
+            new SqlParameter("@ArticleSizeId", (object?)articleSizeId ?? DBNull.Value));
+
+    private async Task<ArticleRejectByLineResultDto> ReadByLineAsync(string spName, bool isOk, params SqlParameter[] parameters)
+    {
+        var conn = (SqlConnection)_db.Database.GetDbConnection();
+        var wasClosed = conn.State != System.Data.ConnectionState.Open;
+        if (wasClosed) await conn.OpenAsync();
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = spName;
+            cmd.CommandType = System.Data.CommandType.StoredProcedure;
+            cmd.Parameters.AddRange(parameters);
+
+            var result = new ArticleRejectByLineResultDto { IsOkBreakdown = isOk };
+
+            try
+            {
+                using var reader = await cmd.ExecuteReaderAsync();
+
+                if (await reader.ReadAsync())
+                {
+                    result.StepName = reader.GetString(reader.GetOrdinal("StepName"));
+                    result.CategoryLabel = reader.GetString(reader.GetOrdinal("CategoryLabel"));
+                    result.TotalQty = reader.GetInt32(reader.GetOrdinal("TotalQty"));
+                    result.AttributionLabel = reader.GetString(reader.GetOrdinal("AttributionLabel"));
+                    if (isOk)
+                    {
+                        result.TotalReject = reader.GetInt32(reader.GetOrdinal("TotalReject"));
+                        result.TotalHilang = reader.GetInt32(reader.GetOrdinal("TotalHilang"));
+                    }
+                }
+
+                await reader.NextResultAsync();
+                while (await reader.ReadAsync())
+                {
+                    var resOrd = reader.GetOrdinal("ResourceId");
+                    result.Lines.Add(new ArticleRejectLineDto
+                    {
+                        ResourceId = reader.IsDBNull(resOrd) ? null : reader.GetInt32(resOrd),
+                        ResourceName = reader.GetString(reader.GetOrdinal("ResourceName")),
+                        Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
+                        RejectQty = isOk ? reader.GetInt32(reader.GetOrdinal("RejectQty")) : null,
+                        HilangQty = isOk ? reader.GetInt32(reader.GetOrdinal("HilangQty")) : null,
+                    });
+                }
+
+                await reader.NextResultAsync();
+                while (await reader.ReadAsync())
+                {
+                    var resOrd = reader.GetOrdinal("ResourceId");
+                    var empOrd = reader.GetOrdinal("EmployeeId");
+                    result.Employees.Add(new ArticleRejectEmployeeDto
+                    {
+                        ResourceId = reader.IsDBNull(resOrd) ? null : reader.GetInt32(resOrd),
+                        EmployeeId = reader.IsDBNull(empOrd) ? null : reader.GetInt32(empOrd),
+                        EmployeeName = reader.GetString(reader.GetOrdinal("EmployeeName")),
+                        Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
+                    });
+                }
+
+                // Result set 4: total per ukuran (chip filter ukuran).
+                if (await reader.NextResultAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        result.SizeTotals.Add(new ArticleRejectSizeTotalDto
+                        {
+                            SizeId = reader.GetInt32(reader.GetOrdinal("SizeId")),
+                            Qty = reader.GetInt32(reader.GetOrdinal("Qty")),
+                        });
+                    }
+                }
+            }
+            catch (SqlException ex)
+            {
+                result.Error = ex.Message;
+            }
+
             return result;
         }
         finally

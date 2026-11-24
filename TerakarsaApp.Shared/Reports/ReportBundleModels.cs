@@ -205,11 +205,64 @@ public class ArticleSizeProgressCellDto
     public int QtyOk { get; set; }
 }
 
+// Prompt 96: reject & hilang per (step, kategori) dari v_bundle_reject_unified.
+// ArticleWorkflowId null = proses tidak tercatat. Category: RejectBahan | RejectJahit |
+// RejectPrint | Perbaikan | TidakLengkap | Hilang.
+public class ArticleSizeProgressRejectDto
+{
+    public int? ArticleWorkflowId { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public int Qty { get; set; }
+}
+
 public class ArticleSizeProgressResultDto
 {
     public List<ArticleSizeProgressSizeDto> Sizes { get; set; } = new();
     public List<ArticleSizeProgressStepDto> Steps { get; set; } = new();
     public List<ArticleSizeProgressCellDto> Cells { get; set; } = new();
+    public List<ArticleSizeProgressRejectDto> Rejects { get; set; } = new();
+}
+
+// Prompt 96: drill-down per line -- dipakai dua SP dengan bentuk sama:
+// SIS_Report_ArticleRejectByLine (klik angka reject/hilang) dan SIS_Report_ArticleOkByLine
+// (klik angka Total OK; hanya dia yang mengisi RejectQty/HilangQty/TotalReject/TotalHilang).
+public class ArticleRejectLineDto
+{
+    public int? ResourceId { get; set; }
+    public string ResourceName { get; set; } = string.Empty;
+    public int Qty { get; set; }
+    public int? RejectQty { get; set; }
+    public int? HilangQty { get; set; }
+}
+
+public class ArticleRejectEmployeeDto
+{
+    public int? ResourceId { get; set; }
+    public int? EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public int Qty { get; set; }
+}
+
+public class ArticleRejectByLineResultDto
+{
+    public string StepName { get; set; } = string.Empty;
+    public string CategoryLabel { get; set; } = string.Empty;
+    public int TotalQty { get; set; }
+    public string AttributionLabel { get; set; } = string.Empty;
+    public int? TotalReject { get; set; }
+    public int? TotalHilang { get; set; }
+    public bool IsOkBreakdown { get; set; }
+    public List<ArticleRejectLineDto> Lines { get; set; } = new();
+    public List<ArticleRejectEmployeeDto> Employees { get; set; } = new();
+    // Total per ukuran SEBELUM filter ukuran -- angka di chip ukuran modal.
+    public List<ArticleRejectSizeTotalDto> SizeTotals { get; set; } = new();
+    public string? Error { get; set; }
+}
+
+public class ArticleRejectSizeTotalDto
+{
+    public int SizeId { get; set; }
+    public int Qty { get; set; }
 }
 
 // Ad hoc (2026-09-01): tab "Pengambilan" -- rekap bundle DIBUAT (bundles.created_at), sumbernya
