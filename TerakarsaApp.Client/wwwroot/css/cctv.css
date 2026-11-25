@@ -224,6 +224,29 @@ textarea.cc-inp { padding: 10px 12px; min-height: 64px; }
     font-size: 12px; padding: 4px 10px; border-radius: 4px;
 }
 
+/* zoom kotak saat satu kamera layar penuh (cctvPlayer.js: zoomSync). Kotak seleksi mengikuti
+   aspek rasio kamera; transform hanya di <video>, stream tidak dimuat ulang. */
+.cc-video.is-zoomable { cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
+.cc-video.is-zoomed video {
+    transform-origin: 0 0;
+    transform: translate(var(--cc-zx, 0px), var(--cc-zy, 0px)) scale(var(--cc-zs, 1));
+}
+.cc-zoom-sel {
+    display: none; position: absolute; z-index: 4; pointer-events: none;
+    border: 2px dashed #FFFFFF; background: rgba(46, 144, 250, .18);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .6);
+}
+.cc-zoom-ui { position: absolute; top: 12px; right: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; cursor: default; }
+.cc-zoom-info { background: rgba(0, 0, 0, .65); color: #FFFFFF; font-size: 13px; padding: 4px 10px; border-radius: 4px; }
+.cc-zoom-reset {
+    min-height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid #2F3945;
+    background: #161D26; color: #E6EDF3; font-size: 13px; cursor: pointer;
+}
+.cc-zoom-reset:hover { background: #202935; }
+.cc-video:not(.is-zoomed) .cc-zoom-reset { display: none; }
+/* Playback: pojok kanan atas sudah dipakai label REKAMAN */
+#cc-pb-box .cc-zoom-ui { top: auto; bottom: 12px; }
+
 /* ---------- grid live ---------- */
 .cc-grid { display: grid; gap: 12px; grid-template-columns: repeat(var(--cc-cols, 4), minmax(0, 1fr)); }
 @media (max-width: 1100px) { .cc-grid { grid-template-columns: repeat(min(var(--cc-cols, 4), 3), minmax(0, 1fr)); } }
@@ -231,11 +254,65 @@ textarea.cc-inp { padding: 10px 12px; min-height: 64px; }
 @media (max-width: 520px)  { .cc-grid { grid-template-columns: minmax(0, 1fr); } }
 .cc-cam { background: #FFFFFF; border: 1px solid var(--cc-border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
 .cc-cam .cc-video { cursor: zoom-in; }
+.cc-cam[draggable="true"] .cc-cam-foot { cursor: grab; }
+.cc-cam.is-drag { opacity: .45; }
+/* garis sisip: kamera yang diseret masuk sebelum (kiri) / sesudah (kanan) kartu ini */
+.cc-cam { position: relative; }
+.cc-cam.is-over-before::before, .cc-cam.is-over-after::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 5px;
+    background: var(--cc-primary); z-index: 3; pointer-events: none;
+}
+.cc-cam.is-over-before::before { left: 0; }
+.cc-cam.is-over-after::after { right: 0; }
 .cc-cam-foot { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; }
 .cc-cam-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cc-cam-area { font-size: 12px; color: var(--cc-muted); }
+.cc-cam-area { font-size: 12px; color: var(--cc-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-cam-serial { font-size: 10px; margin-left: 6px; opacity: .75; letter-spacing: .02em; }
+/* Prompt 97: kamera dengan kualitas rekaman Main + penanda belum sinkron ke MediaMTX */
+.cc-badge-hd { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 16px; letter-spacing: .04em; vertical-align: middle; color: #FFFFFF; background: #1F4E8C; }
+.cc-sync-wait { font-size: 11px; font-weight: 400; color: var(--cc-muted); }
 .cc-ico-link { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; flex-shrink: 0; }
 .cc-ico-link:hover { background: var(--cc-head); }
+button.cc-ico-link { border: 0; background: transparent; padding: 0; cursor: pointer; color: var(--bs-link-color, #0d6efd); }
+button.cc-ico-link:hover { background: var(--cc-head); }
+button.cc-ico-link:disabled { opacity: .4; cursor: default; }
+/* kartu area/halaman lain: disembunyikan, stream tetap jalan (pindah halaman tanpa muat ulang) */
+.cc-cam.is-hidden { display: none; }
+.cc-inp-num { width: 76px; }
+
+/* ---------- layar penuh (dinding CCTV) + rotasi halaman ---------- */
+.cc-wall.is-on {
+    position: fixed; inset: 0; z-index: 1500; background: #0B0F14;
+    display: flex; flex-direction: column; gap: 6px; padding: 6px; overflow: hidden;
+}
+.cc-wall:fullscreen { width: 100%; height: 100%; }
+.cc-wall::backdrop { background: #0B0F14; }
+.cc-wall-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 4px; color: #C9D2DC; font-size: 13px; }
+.cc-wall-title { color: #FFFFFF; font-weight: 600; }
+.cc-wall-info { color: #9AA6B2; font-size: 13px; }
+.cc-wall-btn {
+    min-height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid #2F3945;
+    background: #161D26; color: #E6EDF3; font-size: 13px; cursor: pointer;
+}
+.cc-wall-btn:hover { background: #202935; }
+.cc-wall-exit { border-color: #7A2E28; color: #FECDCA; }
+.cc-wall-inp {
+    width: 64px; min-height: 32px; padding: 0 6px; border-radius: 6px;
+    border: 1px solid #2F3945; background: #0F151C; color: #E6EDF3; font-size: 13px;
+}
+.cc-wall.is-on .cc-grid {
+    flex: 1 1 auto; min-height: 0; gap: 6px; overflow-y: auto;
+    grid-template-columns: repeat(var(--cc-cols, 4), minmax(0, 1fr));
+}
+/* 4×3 / 3×3 / 2×2: kartu mengisi tinggi layar (kolom × baris tetap, halaman terakhir ikut ukuran sama) */
+.cc-wall.is-on.is-fit .cc-grid { grid-template-rows: repeat(var(--cc-rows, 3), minmax(0, 1fr)); overflow: hidden; }
+.cc-wall.is-on .cc-cam { background: #161B22; border-color: #262E38; border-radius: 6px; min-height: 0; }
+.cc-wall.is-on.is-fit .cc-video { aspect-ratio: auto; flex: 1 1 auto; min-height: 0; }
+.cc-wall.is-on .cc-cam-foot { padding: 0 4px 0 10px; gap: 2px; }
+.cc-wall.is-on .cc-cam-name { color: #E6EDF3; font-size: 13px; }
+.cc-wall.is-on .cc-cam-area { color: #8B96A3; font-size: 11px; }
+.cc-wall.is-on .cc-ico-link { width: 34px; height: 34px; color: #8AB4F8; }
+.cc-wall.is-on .cc-ico-link:hover { background: #202935; }
 
 /* ---------- playback ---------- */
 .cc-pb { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
@@ -243,6 +320,41 @@ textarea.cc-inp { padding: 10px 12px; min-height: 64px; }
 .cc-pb-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .cc-pb-main .cc-video { border-radius: 10px; }
 @media (max-width: 700px) { .cc-pb-side { max-width: none; } }
+.cc-pb-side-col { display: flex; flex-direction: column; gap: 16px; }
+
+/* ---------- catatan kejadian (Playback) ---------- */
+.cc-seg { display: flex; border: 1px solid var(--cc-border); border-radius: 8px; overflow: hidden; }
+.cc-seg button { flex: 1 1 0; min-height: 36px; border: 0; background: #FFFFFF; font-size: 13px; cursor: pointer; color: inherit; }
+.cc-seg button + button { border-left: 1px solid var(--cc-border); }
+.cc-seg button.is-on { background: var(--cc-primary); color: #FFFFFF; font-weight: 600; }
+.cc-seg button:disabled { opacity: .5; cursor: default; }
+.cc-note-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.cc-note {
+    border: 1px solid var(--cc-border); border-left: 4px solid #7A3EC8; border-radius: 8px;
+    padding: 6px 8px 8px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;
+}
+.cc-note:hover { background: var(--cc-head); }
+.cc-note.is-on { background: #F3ECFC; border-color: #7A3EC8; }
+.cc-note-top { display: flex; align-items: center; gap: 6px; }
+.cc-note-time { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+.cc-note-tag { background: #EDE3FA; color: #5B2A9C; border-radius: 10px; padding: 1px 8px; font-size: 12px; font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-note-edit { min-height: 28px; padding: 0 6px; }
+.cc-note-cam { font-size: 12px; font-weight: 600; color: var(--cc-muted); }
+.cc-note-text { font-size: 13px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-note-by { font-size: 11px; color: var(--cc-muted); }
+.cc-note-chip {
+    border: 1px solid var(--cc-border); background: #FFFFFF; border-radius: 14px;
+    padding: 3px 10px; font-size: 12px; cursor: pointer; color: inherit;
+}
+.cc-note-chip.is-on { background: #7A3EC8; border-color: #7A3EC8; color: #FFFFFF; }
+/* penanda catatan di garis waktu: belah ketupat ungu di atas bar */
+.cc-tl-note {
+    position: absolute; top: -9px; width: 12px; height: 12px; padding: 0; margin-left: -6px;
+    border: 2px solid #FFFFFF; border-radius: 2px; background: #7A3EC8; transform: rotate(45deg);
+    cursor: pointer; z-index: 2; box-shadow: 0 0 0 1px rgba(0, 0, 0, .25);
+}
+.cc-tl-note:hover, .cc-tl-note.is-on { background: #E8590C; }
+.cc-sw-note { width: 10px; height: 10px; background: #7A3EC8; transform: rotate(45deg); }
 .cc-tl-wrap { position: relative; cursor: pointer; user-select: none; }
 .cc-tl { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; }
 .cc-tl-h { display: flex; flex-direction: column; gap: 4px; }
@@ -260,6 +372,7 @@ textarea.cc-inp { padding: 10px 12px; min-height: 64px; }
     display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .cc-modal { background: #FFFFFF; border-radius: 12px; padding: 18px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; }
+.cc-modal-lg { max-width: 560px; max-height: calc(100vh - 32px); overflow-y: auto; }
 
 /* ---------- panel "CCTV saat kejadian" (Prompt 94) ---------- */
 .cc-panel-back { position: fixed; inset: 0; background: rgba(17, 22, 28, .35); z-index: 1980; }

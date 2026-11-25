@@ -5,6 +5,9 @@
    cctv.SIS_Camera_Get     : detail (result set 1) + tautan (result set 2)
    cctv.SIS_Camera_Lookup  : resource & divisi hidup untuk form
 
+   Prompt 97: kolom record_quality (SUB | MAIN) ikut di CREATE/UPDATE/List/Get.
+   Jalankan sql/cctv/alter_97_cctv_record_quality.sql lebih dulu.
+
    Hanya MEMBACA dbo.resources & dbo.divisions.
    Idempotent: CREATE OR ALTER.
    ============================================================= */
@@ -26,6 +29,7 @@ CREATE OR ALTER PROCEDURE cctv.SIS_Camera_Manage
     @SortOrder   INT = NULL,
     @IsVisible   BIT = NULL,
     @Note        NVARCHAR(200) = NULL,
+    @RecordQuality VARCHAR(10) = NULL, -- Prompt 97: SUB | MAIN; NULL di UPDATE = tidak diubah
     @ResourceIds NVARCHAR(MAX) = NULL, -- SET_LINKS: id dipisah koma, boleh kosong
     @DivisionIds NVARCHAR(MAX) = NULL, -- SET_LINKS: id dipisah koma, boleh kosong
     @UserId      INT = NULL
@@ -39,6 +43,7 @@ BEGIN
     SET @IpAddress = NULLIF(LTRIM(RTRIM(ISNULL(@IpAddress, N''))), N'');
     SET @SerialNo  = NULLIF(LTRIM(RTRIM(ISNULL(@SerialNo, N''))), N'');
     SET @Note      = NULLIF(LTRIM(RTRIM(ISNULL(@Note, N''))), N'');
+    SET @RecordQuality = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(@RecordQuality, '')))), '');
 
     IF @UserId IS NULL
     BEGIN
@@ -80,6 +85,12 @@ BEGIN
             RAISERROR('Channel NVR tidak boleh minus.', 16, 1);
             RETURN;
         END
+
+        IF @RecordQuality IS NOT NULL AND @RecordQuality NOT IN ('SUB', 'MAIN')
+        BEGIN
+            RAISERROR('Kualitas rekaman harus Sub atau Main.', 16, 1);
+            RETURN;
+        END
     END
 
     IF @Action = 'CREATE'
@@ -103,9 +114,12 @@ BEGIN
         END
 
         INSERT INTO cctv.cameras (name, area, mtx_path, ip_address, serial_no, nvr_channel,
-                                  sort_order, is_visible, note, created_by)
+                                  sort_order, is_visible, note, record_quality,
+                                  record_quality_updated_at, record_quality_updated_by, created_by)
         VALUES (@Name, @Area, @MtxPath, @IpAddress, @SerialNo, @NvrChannel,
-                ISNULL(@SortOrder, 0), ISNULL(@IsVisible, 1), @Note, @UserId);
+                ISNULL(@SortOrder, 0), ISNULL(@IsVisible, 1), @Note, ISNULL(@RecordQuality, 'SUB'),
+                CASE WHEN @RecordQuality = 'MAIN' THEN SYSDATETIME() END,
+                CASE WHEN @RecordQuality = 'MAIN' THEN @UserId END, @UserId);
 
         SELECT CAST(SCOPE_IDENTITY() AS INT) AS Value;
         RETURN;
@@ -130,6 +144,12 @@ BEGIN
             sort_order  = ISNULL(@SortOrder, sort_order),
             is_visible  = ISNULL(@IsVisible, is_visible),
             note        = @Note,
+            -- Prompt 97: jejak ganti kualitas hanya diisi kalau nilainya benar-benar berubah.
+            record_quality = ISNULL(@RecordQuality, record_quality),
+            record_quality_updated_at = CASE WHEN @RecordQuality IS NOT NULL AND @RecordQuality <> record_quality
+                                             THEN SYSDATETIME() ELSE record_quality_updated_at END,
+            record_quality_updated_by = CASE WHEN @RecordQuality IS NOT NULL AND @RecordQuality <> record_quality
+                                             THEN @UserId ELSE record_quality_updated_by END,
             updated_at  = SYSDATETIME(),
             updated_by  = @UserId
         WHERE camera_id = @CameraId;
@@ -248,6 +268,7 @@ BEGIN
         c.sort_order  AS SortOrder,
         c.is_visible  AS IsVisible,
         c.note        AS Note,
+        c.record_quality AS RecordQuality,
         (SELECT STRING_AGG(CAST(r.resource_name AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY r.resource_name)
          FROM cctv.camera_links l
          JOIN dbo.resources r ON r.resource_id = l.resource_id
@@ -281,7 +302,8 @@ BEGIN
         c.nvr_channel AS NvrChannel,
         c.sort_order  AS SortOrder,
         c.is_visible  AS IsVisible,
-        c.note        AS Note
+        c.note        AS Note,
+        c.record_quality AS RecordQuality
     FROM cctv.cameras c
     WHERE c.camera_id = @CameraId AND c.deleted_at IS NULL;
 

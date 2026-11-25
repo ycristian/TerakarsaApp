@@ -60,7 +60,17 @@
                 @foreach (var c in cameras)
                 {
                     <tr class="@(form is not null && form.CameraId == c.CameraId ? "is-sel" : "")">
-                        <td class="cc-strong">@c.Name</td>
+                        <td class="cc-strong">
+                            @c.Name
+                            @if (c.IsMain)
+                            {
+                                <span class="cc-badge-hd" title="Kualitas rekaman Main (1080p)">HD</span>
+                            }
+                            @if (c.QualitySyncStatus == CctvQualitySyncStatus.Menunggu)
+                            {
+                                <div class="cc-sync-wait">menunggu sinkron</div>
+                            }
+                        </td>
                         <td>@(c.Area ?? "—")</td>
                         <td>@c.StationText</td>
                         <td class="cc-nowrap">@c.MtxPath</td>
@@ -144,6 +154,8 @@
                         </label>
                     </div>
                 </div>
+
+                <CctvQualityField IdPrefix="k" @bind-Value="form.RecordQuality" SyncStatus="@form.QualitySyncStatus" />
 
                 <div class="cc-field">
                     <span class="cc-label">Station / line yang terlihat di kamera ini</span>
@@ -234,6 +246,8 @@
         public int SortOrder { get; set; }
         public bool IsVisible { get; set; } = true;
         public string? Note { get; set; }
+        public string RecordQuality { get; set; } = CctvRecordQuality.Sub;
+        public string? QualitySyncStatus { get; set; }
         public List<int> ResourceIds { get; set; } = new();
         public List<int> DivisionIds { get; set; } = new();
     }
@@ -341,6 +355,8 @@
             SortOrder = d.SortOrder,
             IsVisible = d.IsVisible,
             Note = d.Note,
+            RecordQuality = d.RecordQuality,
+            QualitySyncStatus = d.QualitySyncStatus,
             ResourceIds = d.Links.Where(l => l.ResourceId.HasValue).Select(l => l.ResourceId!.Value).ToList(),
             DivisionIds = d.Links.Where(l => l.DivisionId.HasValue).Select(l => l.DivisionId!.Value).ToList()
         };
@@ -383,7 +399,8 @@
                 NvrChannel = form.NvrChannel,
                 SortOrder = form.SortOrder,
                 IsVisible = form.IsVisible,
-                Note = form.Note
+                Note = form.Note,
+                RecordQuality = form.RecordQuality
             };
 
             var (ok, err, id) = form.CameraId.HasValue

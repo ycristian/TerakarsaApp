@@ -10,6 +10,23 @@ public static class CctvCameraStatus
     public const string Unknown = "UNKNOWN";   // server MediaMTX tidak terjangkau
 }
 
+// Prompt 97: kualitas rekaman per kamera (kolom cctv.cameras.record_quality).
+public static class CctvRecordQuality
+{
+    public const string Sub = "SUB";     // aliran ...02 (768x432)
+    public const string Main = "MAIN";   // aliran ...01 (1920x1080)
+}
+
+// Prompt 97: status sinkron kualitas ke MediaMTX -- hanya di memori API, tidak disimpan di DB.
+// Null = belum dicek / tidak diketahui.
+public static class CctvQualitySyncStatus
+{
+    public const string Sesuai = "SESUAI";
+    public const string Menunggu = "MENUNGGU";             // MediaMTX tak terjangkau / PATCH gagal
+    public const string TidakDidukung = "TIDAK_DIDUKUNG";  // source path bukan pola .../Streaming/Channels/<ch><01|02>
+    public const string PathTidakAda = "PATH_TIDAK_ADA";   // path tidak ada di konfigurasi MediaMTX
+}
+
 public class CctvCameraDto
 {
     public int CameraId { get; set; }
@@ -24,10 +41,20 @@ public class CctvCameraDto
     public string? Note { get; set; }
     public string? ResourceNames { get; set; }
     public string? DivisionNames { get; set; }
+    public string RecordQuality { get; set; } = CctvRecordQuality.Sub;
+
+    // Prompt 97: dari service sinkron kualitas (memori API), lihat CctvQualitySyncStatus.
+    public string? QualitySyncStatus { get; set; }
+
+    public bool IsMain => RecordQuality == CctvRecordQuality.Main;
 
     // Dari MediaMTX (bukan dari SP).
     public string Status { get; set; } = CctvCameraStatus.Unknown;
     public string? VideoCodec { get; set; }    // mis. "H264", "H265" -- null kalau tidak diketahui
+
+    // 2026-11-24: path ubahan H264 untuk live view (MediaMTX "<MtxPath>_h264", hasil ffmpeg) bila
+    // path itu siap. Null = live view memakai MtxPath. Rekaman/playback tetap dari MtxPath.
+    public string? LivePath { get; set; }
 
     // H265 tidak bisa diputar di kebanyakan browser.
     public bool IsH265 => VideoCodec is not null
@@ -72,6 +99,8 @@ public class CctvCameraDetailDto
     public int SortOrder { get; set; }
     public bool IsVisible { get; set; }
     public string? Note { get; set; }
+    public string RecordQuality { get; set; } = CctvRecordQuality.Sub;
+    public string? QualitySyncStatus { get; set; }   // Prompt 97, lihat CctvQualitySyncStatus
     public List<CctvCameraLinkDto> Links { get; set; } = new();
 }
 
@@ -86,6 +115,8 @@ public class CctvCameraSaveRequest
     public int SortOrder { get; set; }
     public bool IsVisible { get; set; } = true;
     public string? Note { get; set; }
+    // Prompt 97: SUB | MAIN. Null = tidak diubah (UPDATE) / SUB (CREATE).
+    public string? RecordQuality { get; set; }
 }
 
 public class CctvCameraLinksRequest

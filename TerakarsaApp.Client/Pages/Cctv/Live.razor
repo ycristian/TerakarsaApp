@@ -13,7 +13,11 @@
    Video lewat proxy HLS API (api/cctv/hls/{path}/...?t=token) -- browser tidak pernah
    menghubungi MediaMTX. Hemat beban (WAJIB): hanya kamera di halaman aktif yang diputar
    (maks 12); semua stream dihentikan saat ganti halaman/area/tampilan, saat keluar dari
-   halaman ini, dan saat tab browser disembunyikan. *@
+   halaman ini, dan saat tab browser tidak dilihat selama 10 menit (2026-11-24; sebelumnya langsung).
+   2026-11-25: permintaan owner -- pindah halaman/area TIDAK lagi memutus stream (tanpa glitch /
+   muat ulang): kamera yang pernah dimuat tetap jalan tersembunyi, halaman berikutnya dimuat lebih
+   dulu. Ditambah mode Layar penuh (grid mengisi layar) + rotasi halaman otomatis tiap N detik
+   (default 10, disimpan per komputer), bisa dijeda. Playback dibuka di tab baru. *@
 
 <PageTitle>CCTV · Live</PageTitle>
 
@@ -52,9 +56,22 @@
                 <option value="12">4 × 3 (12 kamera)</option>
                 <option value="9">3 × 3 (9 kamera)</option>
                 <option value="4">2 × 2 (4 kamera)</option>
+                <option value="@AllMode">Semua kamera (4 kolom)</option>
             </select>
+            <label for="rot" class="cc-sub" style="margin:0" title="Saat layar penuh, halaman kamera berganti otomatis. Disimpan per komputer.">Ganti halaman tiap</label>
+            <input id="rot" type="number" class="cc-inp cc-inp-num" min="@RotateMin" max="@RotateMax" value="@rotateSec" @onchange="GantiInterval" />
+            <span class="cc-sub" style="margin:0">dtk</span>
+            <button type="button" class="cc-btn cc-btn-p" disabled="@(!loaded || Filtered.Count == 0)" @onclick="MasukLayarPenuh">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"></path><path d="M20 9V4h-5"></path><path d="M4 15v5h5"></path><path d="M20 15v5h-5"></path></svg>
+                Layar penuh
+            </button>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(orderMsg))
+    {
+        <div class="cc-banner @(orderErr ? "cc-banner-err" : "")">@orderMsg</div>
+    }
 
     @if (!loaded)
     {
@@ -68,16 +85,53 @@
     }
     else
     {
-        <div class="cc-grid" style="--cc-cols:@Cols">
-            @foreach (var c in PageCams)
+        var pageIds = PageCams.Select(c => c.CameraId).ToHashSet();
+        @* Dinding layar penuh: grid mengisi layar (kolom × baris sesuai Tampilan), halaman berganti
+           otomatis tiap rotateSec detik. Dialog Ubah kamera ada DI DALAM elemen ini supaya tetap
+           terlihat saat Fullscreen API aktif. *@
+        <div id="cc-wall" class="cc-wall @(wall ? "is-on" : "") @(wall && perPage != AllMode ? "is-fit" : "")"
+             style="--cc-cols:@Cols;--cc-rows:@Rows">
+        @if (wall)
+        {
+            <div class="cc-wall-bar">
+                <span class="cc-wall-title">@(area ?? "Semua kamera") · @(page + 1) / @PageCount</span>
+                <span class="cc-grow"></span>
+                @if (PageCount > 1)
+                {
+                    <button type="button" class="cc-wall-btn" title="Halaman sebelumnya" @onclick="() => GeserHalaman(-1)">‹ Sebelumnya</button>
+                    <button type="button" class="cc-wall-btn" @onclick="ToggleJeda">@(rotatePaused ? "▶ Lanjut rotasi" : "❚❚ Jeda rotasi")</button>
+                    <button type="button" class="cc-wall-btn" title="Halaman berikutnya" @onclick="() => GeserHalaman(1)">Berikutnya ›</button>
+                    <span class="cc-wall-info">@(rotatePaused ? "Rotasi dijeda" : RotasiDitahan ? "Rotasi ditahan" : $"Ganti dalam {rotateLeft} dtk")</span>
+                    <label class="cc-wall-info" for="rot2">tiap</label>
+                    <input id="rot2" type="number" class="cc-wall-inp" min="@RotateMin" max="@RotateMax" value="@rotateSec" @onchange="GantiInterval" />
+                    <span class="cc-wall-info">dtk</span>
+                }
+                <button type="button" class="cc-wall-btn cc-wall-exit" @onclick="KeluarLayarPenuh">✕ Keluar layar penuh</button>
+            </div>
+        }
+        <div class="cc-grid">
+            @* SEMUA kamera dirender (urutan tetap); yang bukan area/halaman aktif disembunyikan. Stream
+               kamera yang sudah dimuat tetap jalan saat pindah halaman / area -> tidak memuat ulang. *@
+            @foreach (var c in cameras)
             {
                 var cam = c;
                 var st = StateOf(cam);
-                <div class="cc-cam" @key="cam.CameraId">
+                @* Seret kartu ke kartu lain = tukar urutan (sort_order disimpan). *@
+                <div class="cc-cam @(pageIds.Contains(cam.CameraId) ? "" : "is-hidden") @(dragId == cam.CameraId ? "is-drag" : "") @OverClass(cam.CameraId)"
+                     @key="cam.CameraId" draggable="@(savingOrder ? "false" : "true")"
+                     title="Seret ke kamera lain untuk memindah urutan"
+                     @ondragstart="() => { dragId = cam.CameraId; overId = null; }"
+                     @ondragenter="() => overId = cam.CameraId"
+                     @ondragover:preventDefault
+                     @ondrop="() => Sisipkan(cam.CameraId)"
+                     @ondrop:preventDefault
+                     @ondragend="() => { dragId = null; overId = null; }">
                     <div class="cc-video" id="cc-box-@cam.CameraId" @onclick="() => LayarPenuh(cam.CameraId)">
                         @if (IsStreamable(cam))
                         {
-                            <video id="cc-v-@cam.CameraId" muted playsinline autoplay
+                            @* Tanpa atribut autoplay: pemutar memanggil play() sendiri. Chrome bisa menjeda
+                               video "muted autoplay" yang tidak terlihat (kartu halaman lain disembunyikan). *@
+                            <video id="cc-v-@cam.CameraId" muted playsinline
                                    style="@(st == "playing" ? "" : "visibility:hidden")"></video>
                         }
                         @if (st == "playing")
@@ -88,14 +142,35 @@
                         {
                             <div class="cc-video-msg">@PesanState(cam, st)</div>
                         }
-                        <div class="cc-video-path">@cam.MtxPath</div>
+                        <div class="cc-video-path">@(cam.LivePath ?? cam.MtxPath)</div>
                     </div>
                     <div class="cc-cam-foot">
                         <div class="cc-grow" style="min-width:0">
-                            <div class="cc-cam-name">@cam.Name</div>
-                            <div class="cc-cam-area">@(cam.Area ?? "—")</div>
+                            <div class="cc-cam-name">@cam.Name@if (cam.IsMain) {<span class="cc-badge-hd" title="Kualitas rekaman Main (1080p)">HD</span>}</div>
+                            <div class="cc-cam-area">@(cam.Area ?? "—")@if (!string.IsNullOrWhiteSpace(cam.SerialNo)) {<span class="cc-cam-serial">@cam.SerialNo</span>}</div>
                         </div>
-                        <a href="/cctv/playback?cameraId=@cam.CameraId" class="cc-ico-link" aria-label="Putar ulang rekaman" title="Putar ulang rekaman">
+                        @* Sedang LIVE = tombol Stop; selain itu (memuat / tidak ada sinyal / dihentikan) = tombol Putar. *@
+                        @if (st == "playing")
+                        {
+                            <button type="button" class="cc-ico-link" aria-label="Hentikan kamera" title="Hentikan kamera"
+                                    @onclick="() => Hentikan(cam)">
+                                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="cc-ico-link" aria-label="Putar kamera" title="Putar kamera"
+                                    disabled="@H265Saja(cam)" @onclick="() => Putar(cam)">
+                                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5v15l12-7.5Z"></path></svg>
+                            </button>
+                        }
+                        <button type="button" class="cc-ico-link" aria-label="Ubah kamera" title="Ubah kamera"
+                                @onclick="() => editCameraId = cam.CameraId">
+                            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                        </button>
+                        @* Playback dibuka di TAB BARU -- grid live (dan layar penuh) tetap jalan. *@
+                        <a href="/cctv/playback?cameraId=@cam.CameraId" target="_blank" rel="noopener" class="cc-ico-link"
+                           aria-label="Putar ulang rekaman (tab baru)" title="Putar ulang rekaman (tab baru)">
                             <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"></path><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"></path><path d="M12 7v5l3 2"></path></svg>
                         </a>
                     </div>
@@ -103,13 +178,23 @@
             }
         </div>
 
-        <div class="cc-row" style="justify-content:space-between">
-            <div class="cc-sub" style="margin:0">Menampilkan @(page * perPage + 1)–@(page * perPage + PageCams.Count) dari @Filtered.Count kamera. Klik gambar untuk layar penuh.</div>
-            <div class="cc-row" style="gap:8px">
-                <button type="button" class="cc-btn" disabled="@(page == 0)" @onclick="() => KeHalaman(page - 1)">Sebelumnya</button>
-                <span class="cc-strong">@(page + 1) / @PageCount</span>
-                <button type="button" class="cc-btn" disabled="@(page >= PageCount - 1)" @onclick="() => KeHalaman(page + 1)">Berikutnya</button>
+        @if (!wall)
+        {
+            <div class="cc-row" style="justify-content:space-between">
+                <div class="cc-sub" style="margin:0">Menampilkan @(page * perPage + 1)–@(page * perPage + PageCams.Count) dari @Filtered.Count kamera. Klik gambar untuk layar penuh, seret kartu untuk memindah urutan.</div>
+                <div class="cc-row" style="gap:8px">
+                    <button type="button" class="cc-btn" disabled="@(page == 0)" @onclick="() => KeHalaman(page - 1)">Sebelumnya</button>
+                    <span class="cc-strong">@(page + 1) / @PageCount</span>
+                    <button type="button" class="cc-btn" disabled="@(page >= PageCount - 1)" @onclick="() => KeHalaman(page + 1)">Berikutnya</button>
+                </div>
             </div>
+        }
+
+        @if (editCameraId is int eid)
+        {
+            <CctvCameraEditModal @key="eid" CameraId="eid" OnClose="TutupEdit"
+                                 AreaSuggestions="@cameras.Select(c => c.Area).Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(a => a)" />
+        }
         </div>
     }
 </div>
@@ -132,13 +217,27 @@
     // kondisi tiap kamera di halaman aktif: loading | playing | retrying | nosignal | unsupported
     private readonly Dictionary<int, string> states = new();
     private readonly Dictionary<int, DateTimeOffset> tokenExpiry = new();
+    // Kamera yang dihentikan manual (tombol Stop): tidak diputar otomatis (ganti halaman, cek ulang,
+    // kembali ke tab) sampai tombol Putar ditekan. Berlaku selama halaman ini terbuka.
+    private readonly HashSet<int> stoppedIds = new();
     private int generation;
     private bool needStart;
+    // hidden = stream SUDAH diputus karena tab tidak dilihat. Tab disembunyikan sebentar (< HiddenStopAfter)
+    // stream tetap jalan, supaya kembali ke tab tidak memuat ulang semua kamera.
     private bool hidden;
+    private static readonly TimeSpan HiddenStopAfter = TimeSpan.FromMinutes(10);
+    private CancellationTokenSource? hideCts;
+    private DateTime? hiddenSince;
     private bool disposed;
 
     private DotNetObjectReference<Live>? selfRef;
     private System.Threading.Timer? tokenTimer;
+    // Kamera yang belum diputar (Offline saat dimuat / gagal ambil token) dicek ulang berkala,
+    // supaya kamera yang hanya putus sementara tampil lagi tanpa refresh halaman.
+    private static readonly TimeSpan RecheckInterval = TimeSpan.FromSeconds(20);
+    private System.Threading.Timer? recheckTimer;
+    private bool rechecking;
+    private readonly List<CctvCameraDto> pendingStart = new();
 
     private const string NoArea = "Tanpa area";
 
@@ -146,18 +245,73 @@
         ? cameras
         : cameras.Where(c => (c.Area ?? NoArea) == area).ToList();
 
-    private int PageCount => Math.Max(1, (int)Math.Ceiling(Filtered.Count / (double)perPage));
+    // Tampilan "Semua kamera (4 kolom)": semua kamera di satu halaman, 4 kolom, baris menyesuaikan (scroll).
+    // Batas 12 stream per halaman tidak berlaku di mode ini (dipilih sendiri oleh pengguna).
+    private const int AllMode = 0;
 
-    private List<CctvCameraDto> PageCams => Filtered.Skip(page * perPage).Take(Math.Min(perPage, 12)).ToList();
+    private int PageCount => perPage == AllMode ? 1 : Math.Max(1, (int)Math.Ceiling(Filtered.Count / (double)perPage));
 
-    private int Cols => perPage switch { 4 => 2, 9 => 3, _ => 4 };
+    private List<CctvCameraDto> PageCams => PageCamsAt(page);
 
-    private static bool IsStreamable(CctvCameraDto c) => c.Status != CctvCameraStatus.Offline && !c.IsH265;
+    private int Cols => perPage switch
+    {
+        4 => 2,
+        9 => 3,
+        _ => 4
+    };
+
+    // Baris grid saat layar penuh (kartu mengisi tinggi layar). AllMode: baris bebas (scroll).
+    private int Rows => perPage switch
+    {
+        4 => 2,
+        9 => 3,
+        12 => 3,
+        _ => 0
+    };
+
+    private List<CctvCameraDto> PageCamsAt(int p) => perPage == AllMode
+        ? Filtered
+        : Filtered.Skip(p * perPage).Take(Math.Min(perPage, 12)).ToList();
+
+    // Kamera yang stream-nya dimulai sekarang: halaman aktif + halaman BERIKUTNYA (dimuat di belakang
+    // layar, supaya pindah halaman / rotasi langsung tampil tanpa "Memuat...").
+    private List<CctvCameraDto> WarmCams => PageCount > 1
+        ? PageCams.Concat(PageCamsAt((page + 1) % PageCount)).ToList()
+        : PageCams;
+
+    // ---------- layar penuh + rotasi halaman otomatis ----------
+    private const string RotateKey = "cctv.live.rotateSec";   // per komputer (localStorage)
+    private const int RotateMin = 3;
+    private const int RotateMax = 3600;
+    private bool wall;          // mode layar penuh (dinding CCTV)
+    private bool wallNative;    // Fullscreen API browser aktif -> keluar (Esc) = mode layar penuh ikut mati
+    private bool fsOther;       // satu kamera sedang layar penuh di atas dinding -> rotasi ditahan
+    private bool rotatePaused;
+    private int rotateSec = 10;
+    private int rotateLeft;
+    private System.Threading.Timer? rotateTimer;
+
+    // Rotasi ditahan sementara (tanpa mengubah tombol Jeda): dialog terbuka, sedang menyeret kartu,
+    // atau satu kamera sedang layar penuh.
+    private bool RotasiDitahan => fsOther || editCameraId is not null || dragId is not null;
+
+    // drag & drop tukar urutan
+    private int? dragId;
+    private int? overId;
+    private bool savingOrder;
+    private string? orderMsg;
+    private bool orderErr;
+
+    // H265 tanpa path ubahan H264 ("<path>_h264" siap) tidak bisa tampil di browser.
+    private static bool H265Saja(CctvCameraDto c) => c.IsH265 && c.LivePath is null;
+
+    private static bool IsStreamable(CctvCameraDto c) => c.Status != CctvCameraStatus.Offline && !H265Saja(c);
 
     private string StateOf(CctvCameraDto c)
     {
+        if (stoppedIds.Contains(c.CameraId)) return "stopped";
         if (c.Status == CctvCameraStatus.Offline) return "nosignal";
-        if (c.IsH265) return "h265";
+        if (H265Saja(c)) return "h265";
         return states.TryGetValue(c.CameraId, out var s) ? s : "loading";
     }
 
@@ -165,6 +319,7 @@
     {
         "loading" => "Memuat...",
         "retrying" => "Menyambung ulang...",
+        "stopped" => "Dihentikan",
         "h265" => "H265 — tidak tampil di browser",
         "unsupported" => "Browser tidak bisa memutar video ini",
         _ => "Tidak ada sinyal"
@@ -175,11 +330,157 @@
         var resp = await CctvApi.GetCamerasAsync(onlyVisible: true);
         cameras = resp.Cameras;
         mtxReachable = resp.MtxReachable;
+        HitungArea();
+        loaded = true;
+    }
+
+    private void HitungArea()
+    {
         areas = cameras
             .GroupBy(c => c.Area ?? NoArea)
             .Select(g => new AreaChip(g.Key, g.Count()))
             .ToList();
-        loaded = true;
+    }
+
+    // Popup "Ubah kamera" (tombol pensil). Setelah tersimpan daftar kamera dibaca ulang; stream
+    // hanya di-restart kalau susunan kamera di halaman aktif berubah (area/urutan/tampil).
+    private int? editCameraId;
+
+    private async Task TutupEdit(bool saved)
+    {
+        editCameraId = null;
+        if (!saved || disposed) return;
+        await MuatUlangDaftar();
+    }
+
+    // Garis sisip saat menyeret: kiri kartu tujuan (masuk sebelum) atau kanan (masuk sesudah).
+    private string OverClass(int cameraId)
+    {
+        if (dragId is null || overId != cameraId || dragId == cameraId) return "";
+        var i = cameras.FindIndex(c => c.CameraId == dragId);
+        var j = cameras.FindIndex(c => c.CameraId == cameraId);
+        return j < i ? "is-over-before" : "is-over-after";
+    }
+
+    // Seret kamera `dragId` ke kartu `targetId`: sisipkan di posisi itu, simpan sort_order yang berubah.
+    // Kartu cukup dipindah (@key) -- video yang sedang diputar tidak di-restart.
+    private async Task Sisipkan(int targetId)
+    {
+        var src = dragId;
+        dragId = null;
+        overId = null;
+        if (src is null || src == targetId || savingOrder || disposed) return;
+
+        var i = cameras.FindIndex(c => c.CameraId == src);
+        var j = cameras.FindIndex(c => c.CameraId == targetId);
+        if (i < 0 || j < 0) return;
+
+        // SISIPKAN (bukan tukar): kamera yang diseret mengambil posisi kartu tujuan, kamera di
+        // antaranya bergeser satu langkah. Seret ke belakang -> masuk sebelum tujuan; seret ke
+        // depan -> masuk sesudah tujuan.
+        var urutUnik = cameras.Zip(cameras.Skip(1), (a, b) => a.SortOrder < b.SortOrder).All(x => x);
+        var dari = Math.Min(i, j);
+        var sampai = Math.Max(i, j);
+        var nilaiLama = cameras.Skip(dari).Take(sampai - dari + 1).Select(c => c.SortOrder).ToList();
+
+        var dipindah = cameras[i];
+        cameras.RemoveAt(i);
+        cameras.Insert(j, dipindah);
+
+        var ubah = new List<CctvCameraDto>();
+        if (urutUnik)
+        {
+            // nilai sort_order rentang yang bergeser dibagikan ulang sesuai urutan baru -> hanya
+            // kamera di rentang itu yang disimpan.
+            for (var k = dari; k <= sampai; k++)
+            {
+                var nilai = nilaiLama[k - dari];
+                if (cameras[k].SortOrder == nilai) continue;
+                cameras[k].SortOrder = nilai;
+                ubah.Add(cameras[k]);
+            }
+        }
+        else
+        {
+            for (var k = 0; k < cameras.Count; k++)
+            {
+                if (cameras[k].SortOrder == k + 1) continue;
+                cameras[k].SortOrder = k + 1;
+                ubah.Add(cameras[k]);
+            }
+        }
+
+        savingOrder = true;
+        orderErr = false;
+        orderMsg = "Menyimpan urutan...";
+        StateHasChanged();
+        try
+        {
+            var hasil = await Task.WhenAll(ubah.Select(c => CctvApi.UpdateCameraAsync(c.CameraId, new CctvCameraSaveRequest
+            {
+                Name = c.Name,
+                Area = c.Area,
+                MtxPath = c.MtxPath,
+                IpAddress = c.IpAddress,
+                SerialNo = c.SerialNo,
+                NvrChannel = c.NvrChannel,
+                SortOrder = c.SortOrder,
+                IsVisible = c.IsVisible,
+                Note = c.Note
+            })));
+            if (disposed) return;
+
+            var gagal = hasil.FirstOrDefault(h => !h.Success);
+            if (gagal != default)
+            {
+                orderErr = true;
+                orderMsg = $"Urutan gagal disimpan: {gagal.Error}";
+                await MuatUlangDaftar();
+                return;
+            }
+            orderMsg = null;
+        }
+        catch (HttpRequestException ex)
+        {
+            orderErr = true;
+            orderMsg = $"Urutan gagal disimpan: {ex.Message}";
+            await MuatUlangDaftar();
+        }
+        finally
+        {
+            savingOrder = false;
+            StateHasChanged();
+        }
+    }
+
+    // Baca ulang daftar kamera; stream di halaman aktif hanya di-restart kalau susunannya berubah.
+    private async Task MuatUlangDaftar()
+    {
+        var sebelum = PageCams.Select(c => c.CameraId).ToList();
+        var resp = await CctvApi.GetCamerasAsync(onlyVisible: true);
+        if (disposed) return;
+        // Status kamera yang sedang diputar dipertahankan (dibaca player, bukan dari daftar ini).
+        var lama = cameras.ToDictionary(c => c.CameraId);
+        foreach (var c in resp.Cameras)
+        {
+            if (lama.TryGetValue(c.CameraId, out var l) && states.ContainsKey(c.CameraId))
+            {
+                c.Status = l.Status;
+                c.VideoCodec = l.VideoCodec;
+            }
+        }
+        cameras = resp.Cameras;
+        if (resp.Cameras.Count > 0) mtxReachable = resp.MtxReachable;
+        HitungArea();
+        if (area is not null && areas.All(a => a.Name != area)) area = null;
+        page = Math.Min(page, PageCount - 1);
+
+        // Kamera yang tidak lagi ditampilkan (disembunyikan lewat Ubah kamera): putus stream-nya.
+        var ada = cameras.Select(c => c.CameraId).ToHashSet();
+        foreach (var id in sebelum.Concat(states.Keys).Where(id => !ada.Contains(id)).Distinct().ToList())
+            await StopKamera(id);
+
+        await TerapkanSelisih();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -192,10 +493,21 @@
             await JS.InvokeVoidAsync("cctvPlayer.watchVisibility", selfRef);
 
             var saved = await JS.InvokeAsync<string?>("localStorage.getItem", LayoutKey);
-            if (int.TryParse(saved, out var pp) && pp is 4 or 9 or 12) perPage = pp;
+            if (int.TryParse(saved, out var pp) && pp is 4 or 9 or 12 or AllMode) perPage = pp;
+            try
+            {
+                var rs = await JS.InvokeAsync<string?>("localStorage.getItem", RotateKey);
+                if (int.TryParse(rs, out var r) && r is >= RotateMin and <= RotateMax) rotateSec = r;
+            }
+            catch (JSException) { }
+
+            rotateTimer = new System.Threading.Timer(_ => InvokeAsync(TickRotasi), null,
+                TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
             tokenTimer = new System.Threading.Timer(_ => InvokeAsync(PerbaruiToken), null,
                 TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+            recheckTimer = new System.Threading.Timer(_ => InvokeAsync(CekUlangKamera), null,
+                RecheckInterval, RecheckInterval);
 
             await Restart();
             return;
@@ -205,6 +517,68 @@
         {
             needStart = false;
             await MulaiStream(generation);
+            return;
+        }
+
+        // kamera yang baru kembali online: <video>-nya sudah ter-render, baru diputar.
+        if (pendingStart.Count > 0 && loaded && !hidden)
+        {
+            var list = pendingStart.ToList();
+            pendingStart.Clear();
+            await MulaiKamera(list, generation);
+        }
+    }
+
+    // Cek ulang kamera di halaman aktif yang tidak sedang diputar:
+    // - Offline menurut server saat dimuat -> baca status terbaru; jika sudah tidak Offline, putar.
+    // - Online tapi gagal ambil token -> coba putar lagi.
+    // Kamera yang sudah diputar ditangani player JS sendiri (coba ulang terus).
+    private async Task CekUlangKamera()
+    {
+        if (disposed || hidden || !loaded || rechecking || needStart) return;
+        rechecking = true;
+        try
+        {
+            var gen = generation;
+            var cams = PageCams;
+
+            var gagalToken = cams
+                .Where(c => IsStreamable(c) && !tokenExpiry.ContainsKey(c.CameraId)
+                            && states.TryGetValue(c.CameraId, out var s) && s == "nosignal")
+                .ToList();
+            var offline = cams.Where(c => c.Status == CctvCameraStatus.Offline && !stoppedIds.Contains(c.CameraId)).ToList();
+            if (gagalToken.Count == 0 && offline.Count == 0) return;
+
+            var kembali = new List<CctvCameraDto>(gagalToken);
+            if (offline.Count > 0)
+            {
+                var resp = await CctvApi.GetCamerasAsync(onlyVisible: true);
+                if (gen != generation || disposed || hidden) return;
+                if (resp.Cameras.Count > 0) mtxReachable = resp.MtxReachable;
+
+                var baru = resp.Cameras.ToDictionary(c => c.CameraId);
+                foreach (var c in offline)
+                {
+                    if (!baru.TryGetValue(c.CameraId, out var b) || b.Status == CctvCameraStatus.Offline) continue;
+                    c.Status = b.Status;
+                    c.VideoCodec = b.VideoCodec;
+                    c.LivePath = b.LivePath;
+                    if (IsStreamable(c)) kembali.Add(c);
+                }
+            }
+
+            if (kembali.Count == 0) return;
+            foreach (var c in kembali) states[c.CameraId] = "loading";
+            pendingStart.AddRange(kembali);
+            StateHasChanged();
+        }
+        catch (HttpRequestException)
+        {
+            // server tidak terjangkau -- dicoba lagi pada siklus berikutnya
+        }
+        finally
+        {
+            rechecking = false;
         }
     }
 
@@ -215,15 +589,22 @@
         await StopAll();
         states.Clear();
         tokenExpiry.Clear();
+        pendingStart.Clear();
         needStart = true;
         StateHasChanged();
     }
 
     private async Task MulaiStream(int gen)
     {
-        var targets = PageCams.Where(IsStreamable).Take(12).ToList();
+        var targets = WarmCams.Where(c => IsStreamable(c) && !stoppedIds.Contains(c.CameraId)).ToList();
+        await MulaiKamera(targets, gen);
+    }
 
-        var tasks = targets.Select(async c => (Cam: c, Token: await CctvApi.GetStreamTokenAsync(c.CameraId))).ToList();
+    private async Task MulaiKamera(List<CctvCameraDto> targets, int gen)
+    {
+        if (targets.Count == 0) return;
+
+        var tasks = targets.Select(async c => (Cam: c, Token: await CctvApi.GetStreamTokenAsync(c.CameraId, live: true))).ToList();
         var hasil = await Task.WhenAll(tasks);
 
         if (gen != generation || disposed || hidden) return;   // sudah ganti halaman / tab tersembunyi
@@ -239,7 +620,7 @@
             tokenExpiry[cam.CameraId] = token.ExpiresAt;
             states[cam.CameraId] = "loading";
             await JS.InvokeVoidAsync("cctvPlayer.start", $"cc-v-{cam.CameraId}", CctvApi.HlsUrl(token.Path),
-                token.Token, selfRef, cam.CameraId);
+                token.Token, selfRef, cam.CameraId, CctvApi.WebRtcUrl(token.Path, token.WebRtcBaseUrl));
         }
 
         StateHasChanged();
@@ -256,7 +637,7 @@
         {
             if (exp - now > TokenRefreshBefore) continue;
 
-            var token = await CctvApi.GetStreamTokenAsync(id);
+            var token = await CctvApi.GetStreamTokenAsync(id, live: true);
             if (gen != generation || disposed) return;
             if (token is null) continue;
 
@@ -268,7 +649,7 @@
     [JSInvokable]
     public Task OnPlayerState(int cameraId, string state)
     {
-        if (disposed) return Task.CompletedTask;
+        if (disposed || stoppedIds.Contains(cameraId)) return Task.CompletedTask;
         states[cameraId] = state;
         StateHasChanged();
         return Task.CompletedTask;
@@ -278,39 +659,224 @@
     public async Task OnVisibilityChanged(bool isHidden)
     {
         if (disposed) return;
-        hidden = isHidden;
         if (isHidden)
         {
-            generation++;
-            await StopAll();
+            if (hidden || hideCts is not null) return;
+            hiddenSince = DateTime.UtcNow;
+            hideCts = new CancellationTokenSource();
+            var ct = hideCts.Token;
+            _ = Task.Delay(HiddenStopAfter, ct).ContinueWith(t =>
+            {
+                if (!t.IsCanceled) _ = InvokeAsync(HentikanKarenaTersembunyi);
+            }, TaskScheduler.Default);
+            return;
         }
-        else
+
+        // Kembali dilihat. Stream sudah diputus, atau timer tidak sempat jalan (HP layar mati
+        // membekukan halaman) padahal sudah lewat batas -> mulai ulang. Selain itu biarkan jalan.
+        var lewatBatas = hiddenSince is DateTime since && DateTime.UtcNow - since >= HiddenStopAfter;
+        hideCts?.Cancel();
+        hideCts = null;
+        hiddenSince = null;
+        if (hidden || lewatBatas)
         {
+            hidden = false;
             await Restart();
         }
+    }
+
+    // Tab/layar tidak dilihat >= HiddenStopAfter: putus semua stream (hemat bandwidth WiFi/internet).
+    private async Task HentikanKarenaTersembunyi()
+    {
+        hideCts = null;
+        if (disposed || hidden) return;
+        hidden = true;
+        generation++;
+        await StopAll();
     }
 
     private async Task PilihArea(string? nama)
     {
         area = nama;
         page = 0;
-        await Restart();
+        await TerapkanSelisih();
     }
 
     private async Task GantiTampilan(ChangeEventArgs e)
     {
-        if (!int.TryParse(e.Value?.ToString(), out var pp) || pp is not (4 or 9 or 12)) return;
+        if (!int.TryParse(e.Value?.ToString(), out var pp) || pp is not (4 or 9 or 12 or AllMode)) return;
         perPage = pp;
         page = 0;
         await JS.InvokeVoidAsync("localStorage.setItem", LayoutKey, pp.ToString());
-        await Restart();
+        await TerapkanSelisih();
     }
 
     private async Task KeHalaman(int p)
     {
         if (p < 0 || p >= PageCount) return;
         page = p;
-        await Restart();
+        await TerapkanSelisih();
+    }
+
+    // Ganti area/halaman/tampilan TANPA memutus kamera apa pun: semua kartu tetap di DOM (@key, urutan
+    // tetap), yang bukan area/halaman aktif hanya disembunyikan -- stream yang sudah jalan dibiarkan,
+    // jadi kembali ke halaman/area itu langsung tampil tanpa memuat ulang. Yang diputar hanya kamera
+    // halaman aktif + halaman berikutnya yang BELUM pernah dimulai (setelah render, lewat pendingStart).
+    // Stream baru diputus oleh: tombol Stop, tab tersembunyi > 10 menit, keluar dari halaman ini.
+    private Task TerapkanSelisih()
+    {
+        if (disposed) return Task.CompletedTask;
+        if (!hidden)
+        {
+            pendingStart.AddRange(WarmCams.Where(c => IsStreamable(c)
+                                                      && !stoppedIds.Contains(c.CameraId)
+                                                      && !states.ContainsKey(c.CameraId)
+                                                      && pendingStart.All(x => x.CameraId != c.CameraId)));
+        }
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task StopKamera(int id)
+    {
+        try { await JS.InvokeVoidAsync("cctvPlayer.stop", $"cc-v-{id}"); }
+        catch (JSDisconnectedException) { }
+        states.Remove(id);
+        tokenExpiry.Remove(id);
+        pendingStart.RemoveAll(c => c.CameraId == id);
+    }
+
+    // ---------- layar penuh + rotasi ----------
+
+    private async Task MasukLayarPenuh()
+    {
+        if (wall || disposed) return;
+        // Fullscreen API dulu (masih dalam gestur klik); elemen #cc-wall sudah ada di DOM.
+        try { wallNative = await JS.InvokeAsync<bool>("cctvPlayer.wallEnter", "cc-wall", selfRef); }
+        catch (JSException) { wallNative = false; }
+        wall = true;
+        fsOther = false;
+        rotatePaused = false;
+        rotateLeft = rotateSec;
+        StateHasChanged();
+    }
+
+    private async Task KeluarLayarPenuh()
+    {
+        if (!wall) return;
+        wall = false;
+        wallNative = false;
+        fsOther = false;
+        try { await JS.InvokeVoidAsync("cctvPlayer.wallExit"); }
+        catch (JSDisconnectedException) { }
+        StateHasChanged();
+    }
+
+    // mode: wall (dinding layar penuh) | other (satu kamera layar penuh) | none (keluar, mis. Esc).
+    [JSInvokable]
+    public async Task OnFullscreenChanged(string mode)
+    {
+        if (disposed || !wall) return;
+        if (mode == "none")
+        {
+            if (wallNative)
+            {
+                await KeluarLayarPenuh();
+                return;
+            }
+            fsOther = false;
+        }
+        else
+        {
+            fsOther = mode == "other";
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleJeda()
+    {
+        rotatePaused = !rotatePaused;
+        rotateLeft = rotateSec;
+    }
+
+    private async Task GeserHalaman(int arah)
+    {
+        if (PageCount <= 1) return;
+        rotateLeft = rotateSec;
+        await KeHalaman((page + arah + PageCount) % PageCount);
+    }
+
+    private async Task TickRotasi()
+    {
+        if (disposed || !wall || rotatePaused || RotasiDitahan || hidden || PageCount <= 1) return;
+        if (--rotateLeft > 0)
+        {
+            StateHasChanged();
+            return;
+        }
+        rotateLeft = rotateSec;
+        await KeHalaman((page + 1) % PageCount);
+    }
+
+    private async Task GantiInterval(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var s)) return;
+        rotateSec = Math.Clamp(s, RotateMin, RotateMax);
+        rotateLeft = rotateSec;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", RotateKey, rotateSec.ToString()); }
+        catch (JSException) { }
+        StateHasChanged();
+    }
+
+    // Tombol Stop per kamera (tampil saat LIVE): putus stream kamera itu dan tandai dihentikan.
+    private async Task Hentikan(CctvCameraDto cam)
+    {
+        if (disposed) return;
+        stoppedIds.Add(cam.CameraId);
+        try { await JS.InvokeVoidAsync("cctvPlayer.stop", $"cc-v-{cam.CameraId}"); }
+        catch (JSDisconnectedException) { }
+        tokenExpiry.Remove(cam.CameraId);
+        pendingStart.RemoveAll(c => c.CameraId == cam.CameraId);
+        states.Remove(cam.CameraId);
+        StateHasChanged();
+    }
+
+    // Tombol Putar per kamera (tampil saat memuat / tidak ada sinyal / dihentikan): hentikan player
+    // kamera itu, baca ulang status bila Offline, lalu putar lagi (token baru) setelah <video>-nya ter-render.
+    private async Task Putar(CctvCameraDto cam)
+    {
+        if (disposed || hidden) return;
+        var gen = generation;
+        stoppedIds.Remove(cam.CameraId);
+
+        try { await JS.InvokeVoidAsync("cctvPlayer.stop", $"cc-v-{cam.CameraId}"); }
+        catch (JSDisconnectedException) { }
+        tokenExpiry.Remove(cam.CameraId);
+        pendingStart.RemoveAll(c => c.CameraId == cam.CameraId);
+        states[cam.CameraId] = "loading";
+
+        if (cam.Status == CctvCameraStatus.Offline)
+        {
+            try
+            {
+                var resp = await CctvApi.GetCamerasAsync(onlyVisible: true);
+                if (gen != generation || disposed) return;
+                if (resp.Cameras.Count > 0) mtxReachable = resp.MtxReachable;
+                var b = resp.Cameras.FirstOrDefault(c => c.CameraId == cam.CameraId);
+                if (b is not null)
+                {
+                    cam.Status = b.Status;
+                    cam.VideoCodec = b.VideoCodec;
+                    cam.LivePath = b.LivePath;
+                }
+            }
+            catch (HttpRequestException) { }
+        }
+
+        // Status masih Offline: tetap dicoba putar (status MediaMTX bisa tertinggal).
+        if (cam.Status == CctvCameraStatus.Offline) cam.Status = CctvCameraStatus.Unknown;
+        if (IsStreamable(cam)) pendingStart.Add(cam);
+        StateHasChanged();
     }
 
     private async Task LayarPenuh(int cameraId)
@@ -328,11 +894,15 @@
     {
         disposed = true;
         generation++;
+        hideCts?.Cancel();
         tokenTimer?.Dispose();
+        recheckTimer?.Dispose();
+        rotateTimer?.Dispose();
         try
         {
             await JS.InvokeVoidAsync("cctvPlayer.stopAll");
             await JS.InvokeVoidAsync("cctvPlayer.unwatchVisibility");
+            if (wall) await JS.InvokeVoidAsync("cctvPlayer.wallExit");
         }
         catch (JSDisconnectedException) { }
         selfRef?.Dispose();

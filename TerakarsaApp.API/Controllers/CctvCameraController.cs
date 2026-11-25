@@ -18,11 +18,14 @@ public class CctvCameraController : ControllerBase
 {
     private readonly CctvCameraService _cameraService;
     private readonly CctvStreamTokenService _tokens;
+    private readonly CctvOptions _options;
 
-    public CctvCameraController(CctvCameraService cameraService, CctvStreamTokenService tokens)
+    public CctvCameraController(CctvCameraService cameraService, CctvStreamTokenService tokens,
+        Microsoft.Extensions.Options.IOptions<CctvOptions> options)
     {
         _cameraService = cameraService;
         _tokens = tokens;
+        _options = options.Value;
     }
 
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -41,20 +44,26 @@ public class CctvCameraController : ControllerBase
     }
 
     // Prompt 92: token stream pendek untuk satu kamera hidup (dipakai rute proxy ?t=).
+    // live=true (grid Live): path ubahan H264 "<path>_h264" dipakai kalau siap (kamera H265).
+    // Tanpa live (playback/rekaman): selalu path kamera.
     [HttpGet("{id:int}/stream-token")]
-    public async Task<IActionResult> StreamToken(int id, CancellationToken ct)
+    public async Task<IActionResult> StreamToken(int id, [FromQuery] bool live = false, CancellationToken ct = default)
     {
         var cam = await _cameraService.GetPathAsync(id, ct);
         if (cam is null) return NotFound("Kamera tidak ditemukan.");
 
-        var (token, expiresAt) = _tokens.Create(cam.Value.MtxPath, CurrentUserId);
+        var path = live ? await _cameraService.GetLivePathAsync(cam.Value.MtxPath, ct) : cam.Value.MtxPath;
+        var (token, expiresAt) = _tokens.Create(path, CurrentUserId);
         return Ok(new CctvStreamTokenDto
         {
             CameraId = id,
-            Path = cam.Value.MtxPath,
+            Path = path,
             Name = cam.Value.Name,
             Token = token,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt,
+            WebRtcBaseUrl = string.IsNullOrWhiteSpace(_options.PublicWebRtcBaseUrl)
+                ? null
+                : _options.PublicWebRtcBaseUrl.TrimEnd('/')
         });
     }
 

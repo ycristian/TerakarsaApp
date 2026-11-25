@@ -171,11 +171,20 @@ builder.Services.AddScoped<PayrollRekapService>();
 // Prompt 91-94: module CCTV (schema SQL `cctv`). Semua video lewat API (proxy ke MediaMTX
 // di 127.0.0.1) -- browser tidak pernah menghubungi MediaMTX langsung.
 builder.Services.Configure<CctvOptions>(builder.Configuration.GetSection("Cctv"));
+builder.Services.AddOptions<CctvOptions>().PostConfigure<ILoggerFactory>((o, lf) =>
+    CctvOptions.ApplyFallbackHost(o, lf.CreateLogger<CctvOptions>()));
 builder.Services.AddHttpClient<CctvMediaMtxClient>(c => c.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddScoped<CctvCameraService>();
+// Catatan kejadian di rekaman (Playback) -- tabel cctv.camera_notes.
+builder.Services.AddScoped<CctvNoteService>();
+// Prompt 97: kualitas rekaman per kamera -- status sinkron di memori + cek ulang berkala
+// (Cctv:QualitySyncSeconds) karena perubahan lewat API MediaMTX hilang saat MediaMTX restart.
+builder.Services.AddSingleton<CctvQualitySync>();
+builder.Services.AddHostedService<CctvQualitySyncHostedService>();
 // Prompt 92: token stream (HMAC, terikat path) + proxy HLS. Client proxy TANPA timeout total
 // (stream live / rekaman bisa lama), tapi koneksi ke MediaMTX dibatasi 5 detik; redirect
-// tidak diikuti (tujuan selalu base URL konfigurasi).
+// tidak diikuti otomatis -- CctvProxyService hanya mengikuti redirect ke host yang sama
+// (cookieCheck HLS MediaMTX), tujuan tetap base URL konfigurasi.
 builder.Services.AddSingleton<CctvStreamTokenService>();
 builder.Services.AddSingleton<CctvProxyService>();
 builder.Services.AddHttpClient(CctvProxyService.HttpClientName, c => c.Timeout = Timeout.InfiniteTimeSpan)
@@ -199,15 +208,16 @@ builder.Services.AddCors(options =>
 {
     // Origin diizinkan lewat pengecekan host, bukan AllowAnyOrigin, karena auth pakai Bearer
     // token (tidak butuh AllowCredentials): host *.terakarsa.id (akses publik via Cloudflare
-    // Tunnel) atau localhost/IP privat LAN (device lain di pabrik, IP berubah-ubah).
+    // Tunnel) atau localhost/IP privat LAN (device lain di pabrik, IP berubah-ubah), atau
+    // Tailscale (nama server tanpa titik mis. TKA001, *.ts.net, IP 100.64.0.0/10).
     options.AddPolicy("AllowBlazor", policy =>
         policy.SetIsOriginAllowed(origin => IsAllowedOrigin(origin))
               .AllowAnyHeader()
               .AllowAnyMethod()
               // Client beda origin (port lain) -- tanpa ini header Content-Disposition
               // tidak terbaca JS, sehingga nama file unduhan (Excel/PDF) jatuh ke
-              // nama default di client.
-              .WithExposedHeaders("Content-Disposition"));
+              // nama default di client. Location: sesi WebRTC dari proxy WHEP (CctvWhepController).
+              .WithExposedHeaders("Content-Disposition", "Location"));
 });
 
 var app = builder.Build();
@@ -250,7 +260,15 @@ static bool IsAllowedOrigin(string origin)
     if (host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase))
         return true;
 
-    if (!System.Net.IPAddress.TryParse(host, out var ip))
+    // Tailscale: nama server tanpa titik (mis. TKA001, MagicDNS pendek) atau FQDN *.ts.net.
+    if (host.EndsWith(".ts.net", StringComparison.OrdinalIgnoreCase))
+        return true;
+
+    var isIp = System.Net.IPAddress.TryParse(host, out var ip);
+    if (!isIp && !host.Contains('.'))
+        return true;
+
+    if (!isIp || ip is null)
         return false;
 
     var b = ip.GetAddressBytes();
@@ -262,6 +280,9 @@ static bool IsAllowedOrigin(string origin)
     if (b[0] == 172 && b[1] >= 16 && b[1] <= 31)
         return true;
     if (b[0] == 192 && b[1] == 168)
+        return true;
+    // Tailscale (CGNAT 100.64.0.0/10), mis. 100.124.15.85
+    if (b[0] == 100 && b[1] >= 64 && b[1] <= 127)
         return true;
 
     return false;

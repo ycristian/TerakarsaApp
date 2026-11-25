@@ -89,11 +89,11 @@ public class CctvApiService
 
     // ==================== stream (Prompt 92) ====================
 
-    public async Task<CctvStreamTokenDto?> GetStreamTokenAsync(int cameraId)
+    public async Task<CctvStreamTokenDto?> GetStreamTokenAsync(int cameraId, bool live = false)
     {
         try
         {
-            var response = await _http.GetAsync($"api/cctv/cameras/{cameraId}/stream-token");
+            var response = await _http.GetAsync($"api/cctv/cameras/{cameraId}/stream-token{(live ? "?live=true" : "")}");
             if (!response.IsSuccessStatusCode) return null;
             return await response.Content.ReadFromJsonAsync<CctvStreamTokenDto>();
         }
@@ -105,6 +105,20 @@ public class CctvApiService
 
     // URL playlist live lewat proxy API (TANPA token -- cctvPlayer.js menambahkan ?t= ke tiap request).
     public string HlsUrl(string path) => $"{ApiBaseUrl}/api/cctv/hls/{Uri.EscapeDataString(path)}/index.m3u8";
+
+    // Endpoint WebRTC (WHEP) MediaMTX :8889 untuk live view.
+    // 2026-11-25: sinyal WHEP lewat proxy API (api/cctv/whep/{path}, token ?t= ditambahkan
+    // cctvPlayer.js) untuk SEMUA alamat Client, termasuk https://app.terakarsa.id -- halaman https
+    // tidak boleh memanggil http://host:8889 langsung. Media tetap langsung browser <-> MediaMTX,
+    // jadi tersambung di LAN/Tailscale; dari internet gagal -> cctvPlayer.js pindah ke HLS proxy.
+    // baseOverride: CctvStreamTokenDto.WebRtcBaseUrl dari konfigurasi API (dev: MediaMTX langsung).
+    public string? WebRtcUrl(string path, string? baseOverride = null)
+    {
+        if (!string.IsNullOrWhiteSpace(baseOverride))
+            return $"{baseOverride.TrimEnd('/')}/{Uri.EscapeDataString(path)}/whep";
+
+        return $"{ApiBaseUrl}/api/cctv/whep/{Uri.EscapeDataString(path)}";
+    }
 
     // ==================== playback (Prompt 93) ====================
 
@@ -143,6 +157,47 @@ public class CctvApiService
     public string PlaybackUrl(string path, string token, DateTimeOffset start, int durationSec, bool download = false) =>
         $"{ApiBaseUrl}/api/cctv/playback/{Uri.EscapeDataString(path)}/{(download ? "download" : "get")}" +
         $"?start={Uri.EscapeDataString(CctvWaktu.Iso(start))}&duration={durationSec}&t={Uri.EscapeDataString(token)}";
+
+    // ==================== catatan kejadian (Playback) ====================
+
+    // null = gagal memuat (bukan "tidak ada catatan").
+    public async Task<List<CctvNoteDto>?> GetNotesAsync(DateOnly date, int? cameraId = null)
+    {
+        try
+        {
+            var url = $"api/cctv/notes?date={date:yyyy-MM-dd}" + (cameraId.HasValue ? $"&cameraId={cameraId.Value}" : "");
+            var response = await _http.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<List<CctvNoteDto>>() ?? new();
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<List<string>> GetNoteTagsAsync()
+    {
+        try
+        {
+            var response = await _http.GetAsync("api/cctv/notes/tags");
+            if (!response.IsSuccessStatusCode) return new();
+            return await response.Content.ReadFromJsonAsync<List<string>>() ?? new();
+        }
+        catch (HttpRequestException)
+        {
+            return new();
+        }
+    }
+
+    public Task<(bool Success, string Error, int Id)> CreateNoteAsync(CctvNoteSaveRequest request) =>
+        Kirim(_http.PostAsJsonAsync("api/cctv/notes", request));
+
+    public Task<(bool Success, string Error, int Id)> UpdateNoteAsync(int id, CctvNoteSaveRequest request) =>
+        Kirim(_http.PutAsJsonAsync($"api/cctv/notes/{id}", request));
+
+    public Task<(bool Success, string Error, int Id)> DeleteNoteAsync(int id) =>
+        Kirim(_http.DeleteAsync($"api/cctv/notes/{id}"));
 
     // ==================== bantuan ====================
 

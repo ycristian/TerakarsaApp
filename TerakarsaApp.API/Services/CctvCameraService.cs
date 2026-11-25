@@ -13,11 +13,13 @@ public class CctvCameraService
 {
     private readonly AppDbContext _db;
     private readonly CctvMediaMtxClient _mtx;
+    private readonly CctvQualitySync _qualitySync;
 
-    public CctvCameraService(AppDbContext db, CctvMediaMtxClient mtx)
+    public CctvCameraService(AppDbContext db, CctvMediaMtxClient mtx, CctvQualitySync qualitySync)
     {
         _db = db;
         _mtx = mtx;
+        _qualitySync = qualitySync;
     }
 
     // Baris mentah SP (tanpa Status/Codec -- kolom itu tidak ada di result set).
@@ -33,6 +35,7 @@ public class CctvCameraService
         public int SortOrder { get; set; }
         public bool IsVisible { get; set; }
         public string? Note { get; set; }
+        public string RecordQuality { get; set; } = CctvRecordQuality.Sub;   // Prompt 97
         public string? ResourceNames { get; set; }
         public string? DivisionNames { get; set; }
     }
@@ -73,10 +76,13 @@ public class CctvCameraService
                 Note = r.Note,
                 ResourceNames = r.ResourceNames,
                 DivisionNames = r.DivisionNames,
-                Status = !mtx.Reachable ? CctvCameraStatus.Unknown
+                RecordQuality = r.RecordQuality,
+                QualitySyncStatus = _qualitySync.GetStatus(r.MtxPath),
+                Status =!mtx.Reachable ? CctvCameraStatus.Unknown
                     : p is { Ready: true } ? CctvCameraStatus.Online
                     : CctvCameraStatus.Offline,
-                VideoCodec = p?.VideoCodec
+                VideoCodec = p?.VideoCodec,
+                LivePath = paths.TryGetValue(LiveAlias(r.MtxPath), out var alias) && alias.Ready ? alias.Name : null
             };
         }).ToList();
 
@@ -113,8 +119,10 @@ public class CctvCameraService
                 NvrChannel = Int(reader, "NvrChannel"),
                 SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
                 IsVisible = reader.GetBoolean(reader.GetOrdinal("IsVisible")),
-                Note = Str(reader, "Note")
+                Note = Str(reader, "Note"),
+                RecordQuality = Str(reader, "RecordQuality") ?? CctvRecordQuality.Sub
             };
+            hasil.QualitySyncStatus = _qualitySync.GetStatus(hasil.MtxPath);
 
             if (await reader.NextResultAsync(ct))
             {
@@ -144,25 +152,51 @@ public class CctvCameraService
 
     // ==================== MUTASI ====================
 
+    // Kamera baru dengan kualitas MAIN diterapkan oleh tick background berikutnya (CctvQualitySyncHostedService).
     public Task<(bool Success, string Error, int Id)> CreateAsync(CctvCameraSaveRequest r, int userId) =>
         ManageAsync(
             @"EXEC cctv.SIS_Camera_Manage @Action = 'CREATE', @Name = @Name, @Area = @Area, @MtxPath = @MtxPath,
                 @IpAddress = @IpAddress, @SerialNo = @SerialNo, @NvrChannel = @NvrChannel,
-                @SortOrder = @SortOrder, @IsVisible = @IsVisible, @Note = @Note, @UserId = @UserId",
+                @SortOrder = @SortOrder, @IsVisible = @IsVisible, @Note = @Note,
+                @RecordQuality = @RecordQuality, @UserId = @UserId",
             P("@Name", r.Name), P("@Area", r.Area), P("@MtxPath", r.MtxPath),
             P("@IpAddress", r.IpAddress), P("@SerialNo", r.SerialNo), P("@NvrChannel", r.NvrChannel),
             P("@SortOrder", r.SortOrder), P("@IsVisible", r.IsVisible), P("@Note", r.Note),
-            P("@UserId", userId));
+            P("@RecordQuality", NullIfEmpty(r.RecordQuality)), P("@UserId", userId));
 
-    public Task<(bool Success, string Error, int Id)> UpdateAsync(int cameraId, CctvCameraSaveRequest r, int userId) =>
-        ManageAsync(
+    // Prompt 97: simpan ke DB dulu, lalu langsung coba terapkan kualitas ke MediaMTX.
+    // Gagal menerapkan (MediaMTX mati / PATCH gagal) TIDAK menggagalkan simpan -> status "menunggu sinkron".
+    public async Task<(bool Success, string Error, int Id)> UpdateAsync(int cameraId, CctvCameraSaveRequest r, int userId)
+    {
+        var hasil = await ManageAsync(
             @"EXEC cctv.SIS_Camera_Manage @Action = 'UPDATE', @CameraId = @CameraId, @Name = @Name, @Area = @Area,
                 @IpAddress = @IpAddress, @SerialNo = @SerialNo, @NvrChannel = @NvrChannel,
-                @SortOrder = @SortOrder, @IsVisible = @IsVisible, @Note = @Note, @UserId = @UserId",
+                @SortOrder = @SortOrder, @IsVisible = @IsVisible, @Note = @Note,
+                @RecordQuality = @RecordQuality, @UserId = @UserId",
             P("@CameraId", cameraId), P("@Name", r.Name), P("@Area", r.Area),
             P("@IpAddress", r.IpAddress), P("@SerialNo", r.SerialNo), P("@NvrChannel", r.NvrChannel),
             P("@SortOrder", r.SortOrder), P("@IsVisible", r.IsVisible), P("@Note", r.Note),
-            P("@UserId", userId));
+            P("@RecordQuality", NullIfEmpty(r.RecordQuality)), P("@UserId", userId));
+
+        if (hasil.Success && !string.IsNullOrWhiteSpace(r.RecordQuality))
+        {
+            // Nilai dari DB (sumber kebenaran), bukan dari request.
+            var detail = await GetByIdAsync(cameraId);
+            if (detail is not null)
+                await _qualitySync.ApplyAsync(_mtx, detail.MtxPath, detail.RecordQuality, CancellationToken.None);
+        }
+
+        return hasil;
+    }
+
+    // Prompt 97: target sinkron kualitas -- semua kamera hidup (tampil atau tidak) di cctv.cameras.
+    public async Task<List<(string MtxPath, string RecordQuality)>> GetQualityTargetsAsync(CancellationToken ct = default)
+    {
+        var rows = await _db.Database
+            .SqlQueryRaw<CameraRow>("EXEC cctv.SIS_Camera_List @OnlyVisible = 0, @Area = NULL")
+            .ToListAsync(ct);
+        return rows.Select(r => (r.MtxPath, r.RecordQuality)).ToList();
+    }
 
     public Task<(bool Success, string Error, int Id)> DeleteAsync(int cameraId, int userId) =>
         ManageAsync(
@@ -185,7 +219,9 @@ public class CctvCameraService
         var hasil = new CctvSyncResultDto { Reachable = mtx.Reachable, PathCount = mtx.Paths.Count };
         if (!mtx.Reachable) return hasil;
 
-        foreach (var path in mtx.Paths.Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase))
+        // Path ubahan H264 ("<path>_h264") bukan kamera tersendiri -- dipakai live view kamera induknya.
+        foreach (var path in mtx.Paths.Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Where(n => !IsLiveAlias(n)))
         {
             var ids = await _db.Database.SqlQueryRaw<int>(
                     "EXEC cctv.SIS_Camera_Manage @Action = 'SYNC_ADD', @MtxPath = @MtxPath, @UserId = @UserId",
@@ -203,6 +239,23 @@ public class CctvCameraService
     {
         var detail = await GetByIdAsync(cameraId, ct);
         return detail is null ? null : (detail.MtxPath, detail.Name);
+    }
+
+    // 2026-11-24: kamera H265 di-ubah ke H264 oleh ffmpeg di MediaMTX (runOnReady) ke path "<path>_h264".
+    private const string LiveAliasSuffix = "_h264";
+
+    public static string LiveAlias(string mtxPath) => mtxPath + LiveAliasSuffix;
+
+    public static bool IsLiveAlias(string mtxPath) => mtxPath.EndsWith(LiveAliasSuffix, StringComparison.OrdinalIgnoreCase);
+
+    // Path untuk LIVE view: "<path>_h264" kalau path itu ada & siap di MediaMTX, selain itu path kamera.
+    public async Task<string> GetLivePathAsync(string mtxPath, CancellationToken ct = default)
+    {
+        var mtx = await _mtx.GetPathsAsync(ct);
+        var alias = LiveAlias(mtxPath);
+        return mtx.Paths.Any(p => p.Ready && string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase))
+            ? alias
+            : mtxPath;
     }
 
     // Prompt 94: kamera untuk sebuah transaksi. Result set 1 = tertaut resource (atau divisi

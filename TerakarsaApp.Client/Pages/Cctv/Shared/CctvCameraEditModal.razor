@@ -1,0 +1,271 @@
+@using TerakarsaApp.Client.Services
+@using TerakarsaApp.Shared.Cctv
+@inject CctvApiService CctvApi
+
+@* Popup "Ubah kamera" dari grid Live. Field sama dengan form di halaman Kamera (tanpa Hapus --
+   hapus/tambah kamera tetap di tab Kamera). Simpan = UpdateCamera + SetLinks, sama seperti Kamera. *@
+
+<div class="cc-modal-back" @onclick="Batal">
+    <div class="cc-modal cc-modal-lg" role="dialog" aria-modal="true" aria-labelledby="ce-title" @onclick:stopPropagation="true">
+        <div class="cc-h" id="ce-title">Ubah kamera@(form is null ? "" : $" · {form.MtxPath}")</div>
+
+        @if (!string.IsNullOrEmpty(formError))
+        {
+            <div class="cc-banner cc-banner-err">@formError</div>
+        }
+
+        @if (form is null)
+        {
+            <div class="cc-muted">@(loadFailed ? "Kamera tidak ditemukan." : "Memuat...")</div>
+            <div class="cc-row">
+                <span class="cc-grow"></span>
+                <button type="button" class="cc-btn" style="padding:0 18px" @onclick="Batal">Tutup</button>
+            </div>
+        }
+        else
+        {
+            <div class="cc-field">
+                <label class="cc-label" for="ce-nama">Nama kamera</label>
+                <input id="ce-nama" class="cc-inp" @bind="form.Name" @bind:event="oninput" maxlength="100" />
+            </div>
+
+            <div class="cc-grid2">
+                <div class="cc-field">
+                    <label class="cc-label" for="ce-area">Area</label>
+                    <input id="ce-area" class="cc-inp" list="ce-area-list" @bind="form.Area" maxlength="50"
+                           placeholder="mis. Sewing" />
+                    <datalist id="ce-area-list">
+                        @foreach (var a in AreaSuggestions)
+                        {
+                            <option value="@a"></option>
+                        }
+                    </datalist>
+                </div>
+                <div class="cc-field">
+                    <label class="cc-label" for="ce-urut">Urutan tampil</label>
+                    <input id="ce-urut" class="cc-inp" type="number" @bind="form.SortOrder" />
+                </div>
+            </div>
+
+            <div class="cc-grid2">
+                <div class="cc-field">
+                    <label class="cc-label" for="ce-ip">IP</label>
+                    <input id="ce-ip" class="cc-inp" @bind="form.IpAddress" maxlength="45" />
+                </div>
+                <div class="cc-field">
+                    <label class="cc-label" for="ce-sn">Serial</label>
+                    <input id="ce-sn" class="cc-inp" @bind="form.SerialNo" maxlength="30" />
+                </div>
+            </div>
+
+            <div class="cc-grid2">
+                <div class="cc-field">
+                    <label class="cc-label" for="ce-nvr">Channel NVR</label>
+                    <input id="ce-nvr" class="cc-inp" type="number" min="0" @bind="form.NvrChannel" />
+                </div>
+                <div class="cc-field">
+                    <span class="cc-label">Tampil di live</span>
+                    <label class="cc-check">
+                        <input type="checkbox" @bind="form.IsVisible" /> Ya, tampil di grid live
+                    </label>
+                </div>
+            </div>
+
+            <CctvQualityField IdPrefix="ce" @bind-Value="form.RecordQuality" SyncStatus="@form.QualitySyncStatus" />
+
+            <div class="cc-field">
+                <span class="cc-label">Station / line yang terlihat di kamera ini</span>
+                @if (form.ResourceIds.Count > 0)
+                {
+                    <div class="cc-tags">
+                        @foreach (var id in form.ResourceIds)
+                        {
+                            var rid = id;
+                            <span class="cc-tag">@NamaResource(rid)
+                                <button type="button" aria-label="Lepas" @onclick="() => form.ResourceIds.Remove(rid)">×</button>
+                            </span>
+                        }
+                    </div>
+                }
+                <SearchableSelect TItem="CctvLookupItemDto"
+                                  Items="@resourceOptions.Where(r => !form.ResourceIds.Contains(r.Id)).ToList()"
+                                  Value="0"
+                                  ValueChanged="TambahResource"
+                                  IdSelector="r => r.Id"
+                                  TextSelector="@(r => r.GroupName is null ? r.Name : $"{r.Name} · {r.GroupName}")"
+                                  Placeholder="Tambah station / line..." />
+            </div>
+
+            <div class="cc-field">
+                <span class="cc-label">Divisi yang terlihat di kamera ini</span>
+                @if (form.DivisionIds.Count > 0)
+                {
+                    <div class="cc-tags">
+                        @foreach (var id in form.DivisionIds)
+                        {
+                            var did = id;
+                            <span class="cc-tag">@NamaDivisi(did)
+                                <button type="button" aria-label="Lepas" @onclick="() => form.DivisionIds.Remove(did)">×</button>
+                            </span>
+                        }
+                    </div>
+                }
+                <SearchableSelect TItem="CctvLookupItemDto"
+                                  Items="@divisionOptions.Where(d => !form.DivisionIds.Contains(d.Id)).ToList()"
+                                  Value="0"
+                                  ValueChanged="TambahDivisi"
+                                  IdSelector="d => d.Id"
+                                  TextSelector="d => d.Name"
+                                  Placeholder="Tambah divisi..." />
+            </div>
+
+            <div class="cc-field">
+                <label class="cc-label" for="ce-note">Catatan</label>
+                <textarea id="ce-note" class="cc-inp" @bind="form.Note" maxlength="200"></textarea>
+            </div>
+
+            <div class="cc-row">
+                <span class="cc-grow"></span>
+                <button type="button" class="cc-btn" style="padding:0 18px" disabled="@isSaving" @onclick="Batal">Batal</button>
+                <button type="button" class="cc-btn cc-btn-p" style="padding:0 18px" disabled="@isSaving" @onclick="Simpan">
+                    @(isSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int CameraId { get; set; }
+    [Parameter] public IEnumerable<string> AreaSuggestions { get; set; } = Array.Empty<string>();
+    // true = tersimpan, false = batal / tutup.
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Area { get; set; }
+        public string MtxPath { get; set; } = string.Empty;
+        public string? IpAddress { get; set; }
+        public string? SerialNo { get; set; }
+        public int? NvrChannel { get; set; }
+        public int SortOrder { get; set; }
+        public bool IsVisible { get; set; }
+        public string? Note { get; set; }
+        public string RecordQuality { get; set; } = CctvRecordQuality.Sub;
+        public string? QualitySyncStatus { get; set; }
+        public List<int> ResourceIds { get; set; } = new();
+        public List<int> DivisionIds { get; set; } = new();
+    }
+
+    private FormModel? form;
+    private List<CctvLookupItemDto> resourceOptions = new();
+    private List<CctvLookupItemDto> divisionOptions = new();
+    private string? formError;
+    private bool isSaving;
+    private bool loadFailed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var lookupTask = CctvApi.GetLookupAsync();
+        var d = await CctvApi.GetCameraAsync(CameraId);
+        var lookup = await lookupTask;
+        resourceOptions = lookup.Where(x => x.Kind == "RESOURCE").ToList();
+        divisionOptions = lookup.Where(x => x.Kind == "DIVISION").ToList();
+
+        if (d is null)
+        {
+            loadFailed = true;
+            return;
+        }
+
+        form = new FormModel
+        {
+            Name = d.Name,
+            Area = d.Area,
+            MtxPath = d.MtxPath,
+            IpAddress = d.IpAddress,
+            SerialNo = d.SerialNo,
+            NvrChannel = d.NvrChannel,
+            SortOrder = d.SortOrder,
+            IsVisible = d.IsVisible,
+            Note = d.Note,
+            RecordQuality = d.RecordQuality,
+            QualitySyncStatus = d.QualitySyncStatus,
+            ResourceIds = d.Links.Where(l => l.ResourceId.HasValue).Select(l => l.ResourceId!.Value).ToList(),
+            DivisionIds = d.Links.Where(l => l.DivisionId.HasValue).Select(l => l.DivisionId!.Value).ToList()
+        };
+    }
+
+    private string NamaResource(int id) => resourceOptions.FirstOrDefault(x => x.Id == id)?.Name ?? $"#{id}";
+
+    private string NamaDivisi(int id) => divisionOptions.FirstOrDefault(x => x.Id == id)?.Name ?? $"#{id}";
+
+    private void TambahResource(int id)
+    {
+        if (form is not null && id > 0 && !form.ResourceIds.Contains(id)) form.ResourceIds.Add(id);
+    }
+
+    private void TambahDivisi(int id)
+    {
+        if (form is not null && id > 0 && !form.DivisionIds.Contains(id)) form.DivisionIds.Add(id);
+    }
+
+    private async Task Batal()
+    {
+        if (isSaving) return;
+        await OnClose.InvokeAsync(false);
+    }
+
+    private async Task Simpan()
+    {
+        if (form is null) return;
+        formError = null;
+
+        if (string.IsNullOrWhiteSpace(form.Name))
+        {
+            formError = "Nama kamera wajib diisi.";
+            return;
+        }
+
+        isSaving = true;
+        try
+        {
+            var (ok, err, _) = await CctvApi.UpdateCameraAsync(CameraId, new CctvCameraSaveRequest
+            {
+                Name = form.Name.Trim(),
+                Area = form.Area,
+                MtxPath = form.MtxPath,
+                IpAddress = form.IpAddress,
+                SerialNo = form.SerialNo,
+                NvrChannel = form.NvrChannel,
+                SortOrder = form.SortOrder,
+                IsVisible = form.IsVisible,
+                Note = form.Note,
+                RecordQuality = form.RecordQuality
+            });
+            if (!ok)
+            {
+                formError = err;
+                return;
+            }
+
+            var (okLink, errLink, _) = await CctvApi.SetLinksAsync(CameraId, new CctvCameraLinksRequest
+            {
+                ResourceIds = form.ResourceIds.ToList(),
+                DivisionIds = form.DivisionIds.ToList()
+            });
+            if (!okLink)
+            {
+                formError = $"Kamera tersimpan, tetapi station/divisi gagal disimpan: {errLink}";
+                return;
+            }
+        }
+        finally
+        {
+            isSaving = false;
+        }
+
+        await OnClose.InvokeAsync(true);
+    }
+}

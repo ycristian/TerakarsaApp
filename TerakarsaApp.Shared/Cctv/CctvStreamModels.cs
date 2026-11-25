@@ -9,6 +9,10 @@ public class CctvStreamTokenDto
     public string Name { get; set; } = string.Empty;
     public string Token { get; set; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; set; }
+
+    // 2026-11-24: base URL WebRTC (WHEP) MediaMTX yang dipakai browser, dari konfigurasi API
+    // (Cctv:PublicWebRtcBaseUrl). Null = klien memakai host halaman + port 8889.
+    public string? WebRtcBaseUrl { get; set; }
 }
 
 // Prompt 93: rentang rekaman (WIB, +07:00), sudah dipotong ke batas hari & digabung bila

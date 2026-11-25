@@ -21,7 +21,8 @@
 
 <div class="cc-body">
     <div class="cc-pb">
-        <div class="cc-card cc-pb-side" style="gap:14px">
+      <div class="cc-pb-side cc-pb-side-col">
+        <div class="cc-card" style="gap:14px">
             <div class="cc-field">
                 <label class="cc-label" for="pb-area">Area</label>
                 <select id="pb-area" class="cc-sel" value="@(selArea ?? "")" @onchange="GantiArea">
@@ -75,6 +76,73 @@
             </div>
         </div>
 
+        @* Catatan kejadian pada tanggal terpilih, urut waktu. Klik = lompat ke kamera & detik itu. *@
+        <div class="cc-card cc-notes">
+            <div class="cc-row" style="gap:8px">
+                <div class="cc-grow cc-label" style="font-size:15px">Catatan kejadian</div>
+                <span class="cc-sub" style="margin:0">@NotesShown.Count</span>
+            </div>
+            <div class="cc-seg" role="group" aria-label="Cakupan catatan">
+                <button type="button" class="@(notesAllCams ? "" : "is-on")" disabled="@(Cam is null)"
+                        @onclick="() => notesAllCams = false">Kamera ini</button>
+                <button type="button" class="@(notesAllCams || Cam is null ? "is-on" : "")"
+                        @onclick="() => notesAllCams = true">Semua kamera</button>
+            </div>
+            @if (TagsOfDay.Count > 0)
+            {
+                <select class="cc-sel" aria-label="Saring tag" value="@(noteTagFilter ?? "")" @onchange="@(e => noteTagFilter = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())">
+                    <option value="">Semua tag</option>
+                    @foreach (var t in TagsOfDay)
+                    {
+                        <option value="@t">@t</option>
+                    }
+                </select>
+            }
+            <div class="cc-hint" style="margin-top:-4px">@CctvWaktu.Tanggal(date) · klik untuk memutar</div>
+
+            @if (notesFailed)
+            {
+                <div class="cc-hint cc-c-offline">Catatan gagal dimuat.</div>
+            }
+            else if (NotesShown.Count == 0)
+            {
+                <div class="cc-hint">Belum ada catatan. Putar rekaman lalu klik "Tandai kejadian".</div>
+            }
+            else
+            {
+                <div class="cc-note-list">
+                    @foreach (var n in NotesShown)
+                    {
+                        var nn = n;
+                        <div class="cc-note @(nn.NoteId == activeNoteId ? "is-on" : "")" role="button" tabindex="0"
+                             title="Putar dari @CctvWaktu.Jam(nn.EventAt)"
+                             @onclick="() => LompatKeCatatan(nn)">
+                            <div class="cc-note-top">
+                                <span class="cc-note-time">@CctvWaktu.Jam(nn.EventAt)</span>
+                                @if (!string.IsNullOrWhiteSpace(nn.Tag))
+                                {
+                                    <span class="cc-note-tag">@nn.Tag</span>
+                                }
+                                <span class="cc-grow"></span>
+                                <button type="button" class="cc-btn cc-btn-link cc-note-edit" aria-label="Ubah catatan"
+                                        @onclick="() => UbahCatatan(nn)" @onclick:stopPropagation="true">Ubah</button>
+                            </div>
+                            @if (notesAllCams || Cam is null)
+                            {
+                                <div class="cc-note-cam">@nn.CameraName</div>
+                            }
+                            <div class="cc-note-text">@nn.Note</div>
+                            @if (!string.IsNullOrWhiteSpace(nn.CreatedByName))
+                            {
+                                <div class="cc-note-by">oleh @nn.CreatedByName</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+      </div>
+
         <div class="cc-pb-main">
             <div class="cc-video" id="cc-pb-box">
                 <video id="cc-pb-video" muted playsinline style="@(chunkActive ? "" : "visibility:hidden")"></video>
@@ -96,9 +164,11 @@
 
             <div class="cc-card" style="padding:14px 16px">
                 <div class="cc-row" style="gap:8px">
+                    <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(-60)">− 1 mnt</button>
                     <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(-10)">− 10 dtk</button>
                     <button type="button" class="cc-btn cc-btn-p" style="padding:0 20px" disabled="@(!chunkActive)" @onclick="JedaPutar">@(paused ? "Putar" : "Jeda")</button>
                     <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(10)">+ 10 dtk</button>
+                    <button type="button" class="cc-btn" disabled="@(!chunkActive)" @onclick="() => Geser(60)">+ 1 mnt</button>
                     <div class="cc-row cc-grow" style="gap:6px;margin-left:8px">
                         <label for="pb-speed" class="cc-sub" style="margin:0">Kecepatan</label>
                         <select id="pb-speed" class="cc-sel" style="width:auto" value="@rate" @onchange="GantiKecepatan">
@@ -107,6 +177,8 @@
                             <option value="4">4×</option>
                         </select>
                     </div>
+                    <button type="button" class="cc-btn cc-btn-p" disabled="@(Cam is null)" @onclick="BukaTandai"
+                            title="Catat kejadian pada detik yang sedang diputar">+ Tandai kejadian</button>
                     <button type="button" class="cc-btn" disabled="@(Cam is null)" @onclick="BukaUnduh">Unduh klip (MP4)</button>
                 </div>
 
@@ -132,11 +204,22 @@
                         {
                             <div class="cc-tl-pos" style="left:@Persen(pos)"></div>
                         }
+                        @foreach (var n in NotesOfCam)
+                        {
+                            var nn = n;
+                            var np = (nn.EventAt - CctvWaktu.DayStart(date)).TotalSeconds / 864.0;
+                            if (np is < 0 or > 100) continue;
+                            <button type="button" class="cc-tl-note @(nn.NoteId == activeNoteId ? "is-on" : "")" style="left:@Persen(np)"
+                                    title="@($"{CctvWaktu.Jam(nn.EventAt)}{(string.IsNullOrWhiteSpace(nn.Tag) ? "" : " · " + nn.Tag)} — {nn.Note}")"
+                                    aria-label="Kejadian @CctvWaktu.Jam(nn.EventAt)"
+                                    @onclick="() => LompatKeCatatan(nn)" @onclick:stopPropagation="true"></button>
+                        }
                     </div>
                     <div class="cc-legend">
                         <span><span class="cc-sw" style="background:#1F5FBF"></span>Ada rekaman</span>
                         <span><span class="cc-sw" style="background:#D5DBE3"></span>Kosong (kamera offline / belum terjadi)</span>
                         <span><span class="cc-sw" style="width:3px;height:12px;background:#E8590C"></span>Posisi putar</span>
+                        <span><span class="cc-sw cc-sw-note"></span>Catatan kejadian</span>
                     </div>
                 </div>
             </div>
@@ -156,6 +239,70 @@
                 <button type="button" class="cc-btn cc-grow" @onclick="() => Unduh(10)">10 menit</button>
             </div>
             <button type="button" class="cc-btn" @onclick="() => downloadOpen = false">Batal</button>
+        </div>
+    </div>
+}
+
+@if (noteForm is not null)
+{
+    <div class="cc-modal-back" @onclick="TutupCatatan">
+        <div class="cc-modal" role="dialog" aria-modal="true" aria-labelledby="nt-title" @onclick:stopPropagation="true">
+            <div class="cc-h" id="nt-title">@(noteForm.NoteId is null ? "Tandai kejadian" : "Ubah catatan kejadian")</div>
+            <div class="cc-sub" style="margin:0">@noteForm.CameraName · @CctvWaktu.Tanggal(noteForm.Date)</div>
+
+            @if (!string.IsNullOrEmpty(noteError))
+            {
+                <div class="cc-banner cc-banner-err">@noteError</div>
+            }
+
+            <div class="cc-field">
+                <label class="cc-label" for="nt-jam">Jam kejadian</label>
+                <input id="nt-jam" type="time" step="1" class="cc-inp" value="@noteForm.Time"
+                       @onchange="@(e => noteForm.Time = e.Value?.ToString() ?? noteForm.Time)" />
+            </div>
+
+            <div class="cc-field">
+                <label class="cc-label" for="nt-tag">Tag <span class="cc-muted" style="font-weight:400">(opsional)</span></label>
+                <input id="nt-tag" class="cc-inp" list="nt-tag-list" maxlength="30" placeholder="mis. Barang masuk"
+                       @bind="noteForm.Tag" @bind:event="oninput" />
+                <datalist id="nt-tag-list">
+                    @foreach (var t in noteTags)
+                    {
+                        <option value="@t"></option>
+                    }
+                </datalist>
+                @if (noteTags.Count > 0)
+                {
+                    <div class="cc-tags">
+                        @foreach (var t in noteTags.Take(8))
+                        {
+                            var tt = t;
+                            <button type="button" class="cc-note-chip @(string.Equals(noteForm.Tag, tt, StringComparison.OrdinalIgnoreCase) ? "is-on" : "")"
+                                    @onclick="() => noteForm.Tag = tt">@tt</button>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="cc-field">
+                <label class="cc-label" for="nt-note">Catatan</label>
+                <textarea id="nt-note" class="cc-inp" maxlength="500" rows="3" placeholder="Apa yang terjadi?"
+                          @bind="noteForm.Note" @bind:event="oninput"></textarea>
+            </div>
+
+            <div class="cc-row" style="gap:8px">
+                @if (noteForm.NoteId is not null)
+                {
+                    <button type="button" class="cc-btn cc-btn-danger" disabled="@noteSaving" @onclick="HapusCatatan">
+                        @(noteConfirmDelete ? "Yakin hapus?" : "Hapus")
+                    </button>
+                }
+                <span class="cc-grow"></span>
+                <button type="button" class="cc-btn" style="padding:0 18px" disabled="@noteSaving" @onclick="TutupCatatan">Batal</button>
+                <button type="button" class="cc-btn cc-btn-p" style="padding:0 18px" disabled="@noteSaving" @onclick="SimpanCatatan">
+                    @(noteSaving ? "Menyimpan..." : "Simpan")
+                </button>
+            </div>
         </div>
     </div>
 }
@@ -189,6 +336,7 @@
     private bool paused;
     private double rate = 1;
     private bool busy;
+    private bool errorRetried;
 
     private string? message;
     private bool downloadOpen;
@@ -231,20 +379,43 @@
             timeText = CctvWaktu.Jam(at);
             autoPlayAt = at;
         }
+        initDone = true;
     }
+
+    // 2026-11-25: render pertama terjadi SEBELUM daftar kamera selesai dimuat (OnInitializedAsync
+    // masih menunggu API) -> dulu Cam masih null di firstRender sehingga rekaman kamera dari query
+    // (?cameraId=, tombol dari Live / transaksi) tidak pernah dimuat ("Belum ada rekaman").
+    // Sekarang dimuat sekali pada render pertama SETELAH inisialisasi selesai.
+    private bool initDone;
+    private bool initialLoadDone;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || disposed) return;
+        if (disposed) return;
 
-        selfRef = DotNetObjectReference.Create(this);
-        tickTimer = new System.Threading.Timer(_ => InvokeAsync(Tick), null,
-            TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+        if (firstRender)
+        {
+            selfRef = DotNetObjectReference.Create(this);
+            tickTimer = new System.Threading.Timer(_ => InvokeAsync(Tick), null,
+                TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+            // 2026-11-25: zoom kotak (seret rectangle) di video rekaman -- cctvPlayer.js.
+            try { await JS.InvokeVoidAsync("cctvPlayer.zoomEnable", "cc-pb-box"); }
+            catch (JSException) { }
+        }
+
+        if (!initDone || initialLoadDone) return;
+        initialLoadDone = true;
+
+        await MuatCatatan();
+        if (disposed) return;
+        StateHasChanged();
 
         if (Cam is not null)
         {
             await MuatDataKamera();
+            if (disposed) return;
             if (autoPlayAt is DateTimeOffset at) await PutarDari(at);
+            StateHasChanged();
         }
     }
 
@@ -324,6 +495,7 @@
         {
             date = tgl;
             await MuatSpans();
+            await MuatCatatan();
         }
 
         var span = SpanBerisi(at);
@@ -387,8 +559,23 @@
             }
             await MulaiPotongan(next < span.Start ? span.Start : next, span);
         }
+        else if (state == "playing")
+        {
+            errorRetried = false;
+        }
         else if (state == "error")
         {
+            // 2026-11-25: sekali coba ulang otomatis dari posisi terakhir (potongan baru) sebelum
+            // menyerah -- mis. sambungan putus di tengah potongan.
+            var posisi = currentAbs;
+            if (!errorRetried && posisi is not null)
+            {
+                errorRetried = true;
+                await PutarDari(posisi.Value);
+                StateHasChanged();
+                return;
+            }
+
             chunkActive = false;
             currentAbs = null;
             message = "Rekaman tidak bisa diputar pada jam itu.";
@@ -475,6 +662,7 @@
     {
         selCameraId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
         message = null;
+        await JS.InvokeVoidAsync("cctvPlayer.zoomReset", "cc-pb-box");
         await Berhenti();
         await MuatDataKamera();
     }
@@ -485,6 +673,7 @@
         date = d;
         message = null;
         await MuatSpans();
+        await MuatCatatan();
     }
 
     // ==================== garis waktu ====================
@@ -534,6 +723,212 @@
         await PutarDari(span.Start > t ? span.Start : t);
     }
 
+    // ==================== catatan kejadian ====================
+    // Semua catatan tanggal terpilih (semua kamera) dimuat sekali; "Kamera ini", saring tag, dan
+    // penanda garis waktu disaring di klien.
+
+    private class NoteForm
+    {
+        public int? NoteId { get; set; }
+        public int CameraId { get; set; }
+        public string CameraName { get; set; } = string.Empty;
+        public DateOnly Date { get; set; }
+        public string Time { get; set; } = "00:00:00";
+        public string? Tag { get; set; }
+        public string Note { get; set; } = string.Empty;
+    }
+
+    private List<CctvNoteDto> notesDay = new();
+    private bool notesFailed;
+    private bool notesAllCams;
+    private string? noteTagFilter;
+    private int? activeNoteId;
+
+    private NoteForm? noteForm;
+    private string? noteError;
+    private bool noteSaving;
+    private bool noteConfirmDelete;
+    private List<string> noteTags = new();
+    private bool noteTagsLoaded;
+
+    private List<CctvNoteDto> NotesOfCam => notesDay.Where(n => n.CameraId == selCameraId).ToList();
+
+    private List<CctvNoteDto> NotesShown => (notesAllCams || Cam is null ? notesDay : NotesOfCam)
+        .Where(n => noteTagFilter is null || string.Equals(n.Tag, noteTagFilter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    private List<string> TagsOfDay => notesDay.Where(n => !string.IsNullOrWhiteSpace(n.Tag)).Select(n => n.Tag!)
+        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+
+    private async Task MuatCatatan()
+    {
+        var list = await CctvApi.GetNotesAsync(date);
+        notesFailed = list is null;
+        notesDay = list ?? new();
+        if (noteTagFilter is not null && !TagsOfDay.Contains(noteTagFilter, StringComparer.OrdinalIgnoreCase))
+            noteTagFilter = null;
+    }
+
+    private async Task MuatTag()
+    {
+        if (noteTagsLoaded) return;
+        noteTags = await CctvApi.GetNoteTagsAsync();
+        noteTagsLoaded = true;
+    }
+
+    // Klik catatan / penanda garis waktu: pindah kamera kalau perlu, lalu putar dari detik kejadian.
+    private async Task LompatKeCatatan(CctvNoteDto n)
+    {
+        activeNoteId = n.NoteId;
+        if (n.CameraId != selCameraId)
+        {
+            var cam = cameras.FirstOrDefault(c => c.CameraId == n.CameraId);
+            if (cam is null)
+            {
+                message = "Kamera untuk catatan ini tidak tersedia.";
+                return;
+            }
+
+            selCameraId = cam.CameraId;
+            if (selArea is not null && cam.Area != selArea) selArea = cam.Area;
+            message = null;
+            await JS.InvokeVoidAsync("cctvPlayer.zoomReset", "cc-pb-box");
+            await Berhenti();
+            await MuatDataKamera();
+        }
+
+        await PutarDari(n.EventAt);
+    }
+
+    // Detik yang sedang diputar (atau Jam mulai di form) -> dialog catatan baru. Video dijeda dulu.
+    private async Task BukaTandai()
+    {
+        if (Cam is null) return;
+
+        DateTimeOffset at;
+        if (currentAbs is not null) at = currentAbs.Value;
+        else if (TimeOnly.TryParse(timeText, System.Globalization.CultureInfo.InvariantCulture, out var t)) at = CctvWaktu.Of(date, t);
+        else at = CctvWaktu.Now();
+        at = CctvWaktu.ToWib(at);
+
+        if (chunkActive && !paused) paused = await JS.InvokeAsync<bool>("cctvPlayer.togglePause", VideoId);
+
+        noteForm = new NoteForm
+        {
+            CameraId = Cam.CameraId,
+            CameraName = Cam.Name,
+            Date = DateOnly.FromDateTime(at.DateTime),
+            Time = CctvWaktu.Jam(at)
+        };
+        noteError = null;
+        noteConfirmDelete = false;
+        await MuatTag();
+    }
+
+    private async Task UbahCatatan(CctvNoteDto n)
+    {
+        var at = CctvWaktu.ToWib(n.EventAt);
+        noteForm = new NoteForm
+        {
+            NoteId = n.NoteId,
+            CameraId = n.CameraId,
+            CameraName = n.CameraName,
+            Date = DateOnly.FromDateTime(at.DateTime),
+            Time = CctvWaktu.Jam(at),
+            Tag = n.Tag,
+            Note = n.Note
+        };
+        noteError = null;
+        noteConfirmDelete = false;
+        await MuatTag();
+    }
+
+    private void TutupCatatan()
+    {
+        if (noteSaving) return;
+        noteForm = null;
+        noteError = null;
+        noteConfirmDelete = false;
+    }
+
+    private async Task SimpanCatatan()
+    {
+        if (noteForm is null) return;
+        noteError = null;
+
+        if (!TimeOnly.TryParse(noteForm.Time, System.Globalization.CultureInfo.InvariantCulture, out var t))
+        {
+            noteError = "Jam kejadian tidak valid.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(noteForm.Note))
+        {
+            noteError = "Catatan kejadian wajib diisi.";
+            return;
+        }
+
+        var req = new CctvNoteSaveRequest
+        {
+            CameraId = noteForm.CameraId,
+            EventAt = CctvWaktu.Of(noteForm.Date, t),
+            Tag = string.IsNullOrWhiteSpace(noteForm.Tag) ? null : noteForm.Tag.Trim(),
+            Note = noteForm.Note.Trim()
+        };
+
+        noteSaving = true;
+        try
+        {
+            var (ok, err, id) = noteForm.NoteId is int nid
+                ? await CctvApi.UpdateNoteAsync(nid, req)
+                : await CctvApi.CreateNoteAsync(req);
+            if (!ok)
+            {
+                noteError = err;
+                return;
+            }
+
+            activeNoteId = noteForm.NoteId ?? id;
+            noteForm = null;
+            noteTagsLoaded = false;   // tag baru ikut jadi saran
+            await MuatCatatan();
+        }
+        finally
+        {
+            noteSaving = false;
+        }
+    }
+
+    private async Task HapusCatatan()
+    {
+        if (noteForm?.NoteId is not int nid) return;
+        if (!noteConfirmDelete)
+        {
+            noteConfirmDelete = true;
+            return;
+        }
+
+        noteSaving = true;
+        try
+        {
+            var (ok, err, _) = await CctvApi.DeleteNoteAsync(nid);
+            if (!ok)
+            {
+                noteError = err;
+                noteConfirmDelete = false;
+                return;
+            }
+
+            if (activeNoteId == nid) activeNoteId = null;
+            noteForm = null;
+            noteConfirmDelete = false;
+            await MuatCatatan();
+        }
+        finally
+        {
+            noteSaving = false;
+        }
+    }
+
     // ==================== unduh ====================
 
     private void BukaUnduh()
@@ -566,7 +961,11 @@
     {
         disposed = true;
         tickTimer?.Dispose();
-        try { await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId); }
+        try
+        {
+            await JS.InvokeVoidAsync("cctvPlayer.stopClip", VideoId);
+            await JS.InvokeVoidAsync("cctvPlayer.zoomDisable", "cc-pb-box");
+        }
         catch (JSDisconnectedException) { }
         selfRef?.Dispose();
     }

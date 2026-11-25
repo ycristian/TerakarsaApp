@@ -12,6 +12,7 @@ namespace TerakarsaApp.API.Services;
 public class CctvProxyService
 {
     public const string HttpClientName = "cctv-proxy";
+    private const int MaxRedirects = 2;
 
     private static readonly string[] ResponseHeaderWhitelist =
     {
@@ -48,16 +49,39 @@ public class CctvProxyService
         Action<HttpResponse>? beforeBody = null)
     {
         var ct = ctx.RequestAborted;
-        using var req = new HttpRequestMessage(HttpMethod.Get, targetUrl);
-
-        if (forwardRange && ctx.Request.Headers.TryGetValue("Range", out var range))
-            req.Headers.TryAddWithoutValidation("Range", (IEnumerable<string>)range!);
-
         var http = _httpFactory.CreateClient(HttpClientName);
         HttpResponseMessage upstream;
         try
         {
-            upstream = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            // MediaMTX (HLS) menjawab request pertama dengan 302 ke "?cookieCheck=1". Redirect
+            // diikuti DI SINI (maks. MaxRedirects), hanya ke host:port yang sama dengan tujuan
+            // awal -- tujuan tetap base URL konfigurasi. Cookie tidak dikirim -> MediaMTX memakai
+            // mode tanpa cookie (?session=... di URI playlist, ikut diteruskan klien).
+            var url = new Uri(targetUrl);
+            var hop = 0;
+            while (true)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (forwardRange && ctx.Request.Headers.TryGetValue("Range", out var range))
+                    req.Headers.TryAddWithoutValidation("Range", (IEnumerable<string>)range!);
+
+                upstream = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+                var code = (int)upstream.StatusCode;
+                if (code is < 300 or > 399 || upstream.Headers.Location is null || hop >= MaxRedirects)
+                    break;
+
+                var next = upstream.Headers.Location.IsAbsoluteUri
+                    ? upstream.Headers.Location
+                    : new Uri(url, upstream.Headers.Location);
+                if (Uri.Compare(next, url, UriComponents.SchemeAndServer, UriFormat.Unescaped,
+                        StringComparison.OrdinalIgnoreCase) != 0)
+                    break; // redirect ke host lain -> tidak diikuti
+
+                upstream.Dispose();
+                url = next;
+                hop++;
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

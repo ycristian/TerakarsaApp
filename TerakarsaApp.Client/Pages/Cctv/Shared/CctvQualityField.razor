@@ -1,0 +1,39 @@
+@using TerakarsaApp.Shared.Cctv
+
+@* Prompt 97: pilihan "Kualitas rekaman" (Sub / Main) di form Ubah Kamera (halaman Kamera & popup Live).
+   Penerapan ke MediaMTX dikerjakan API; SyncStatus = status sinkron terakhir dari API (memori). *@
+
+<div class="cc-field">
+    <label class="cc-label" for="@($"{IdPrefix}-kualitas")">Kualitas rekaman</label>
+    <select id="@($"{IdPrefix}-kualitas")" class="cc-sel" value="@Value" @onchange="Ganti">
+        <option value="@CctvRecordQuality.Sub">Sub — 768×432, ringan</option>
+        <option value="@CctvRecordQuality.Main">Main — 1080p, data sekitar 4× lebih besar</option>
+    </select>
+    <div class="cc-hint">Main memakai WiFi dan harddisk sekitar 4× lebih banyak. Rekaman terputus beberapa detik saat diganti.</div>
+    @switch (SyncStatus)
+    {
+        case CctvQualitySyncStatus.TidakDidukung:
+            <div class="cc-hint cc-c-warn">Alamat kamera di server rekaman tidak berformat standar — kualitas tidak bisa diganti otomatis.</div>
+            break;
+        case CctvQualitySyncStatus.PathTidakAda:
+            <div class="cc-hint cc-c-warn">Path kamera ini tidak ada di server rekaman — kualitas tidak bisa diterapkan.</div>
+            break;
+        case CctvQualitySyncStatus.Menunggu:
+            <div class="cc-hint">Menunggu sinkron ke server rekaman.</div>
+            break;
+    }
+</div>
+
+@code {
+    [Parameter] public string IdPrefix { get; set; } = "q";
+    [Parameter] public string Value { get; set; } = CctvRecordQuality.Sub;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string? SyncStatus { get; set; }
+
+    private Task Ganti(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString() == CctvRecordQuality.Main ? CctvRecordQuality.Main : CctvRecordQuality.Sub;
+        Value = v;
+        return ValueChanged.InvokeAsync(v);
+    }
+}
