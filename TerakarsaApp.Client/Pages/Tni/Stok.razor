@@ -7,6 +7,7 @@
 @inject TniStokApiService StokApi
 @inject TniPolaApiService PolaApi
 @inject TniOrderState OrderState
+@inject IJSRuntime JS
 @implements IDisposable
 
 @* Prompt 64: stok kemeja & celana PDH TNI AD (mockup layar 9).
@@ -315,10 +316,17 @@ else
         <input class="tni-inp tni-search" placeholder="Cari kode pola..."
                @bind="searchSaldo" @bind:event="oninput" @onkeyup="HandleSaldoKeyUp" />
 
-        <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
-            <input type="checkbox" @bind="hanyaAda" @bind:after="LoadSaldoAsync" />
-            Hanya yang ada stoknya
-        </label>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+            <label class="tni-k" style="display:flex;align-items:center;gap:6px;margin:0">
+                <input type="checkbox" @bind="hanyaAda" @bind:after="LoadSaldoAsync" />
+                Hanya yang ada stoknya
+            </label>
+            @* 2026-11-19: tabel di bawah (apa adanya: jenis, pencarian, centang) -> gambar -> clipboard. *@
+            <button class="tni-btn tni-btn-o" style="padding:3px 9px;font-size:11.5px"
+                    disabled="@(isMenyalin || isLoading || saldo.Count == 0)" @onclick="SalinGambarTabelAsync">
+                @(isMenyalin ? "Menyalin..." : "Salin gambar")
+            </button>
+        </div>
 
         @if (isLoading)
         {
@@ -344,6 +352,7 @@ else
                                 <th title="Ditahan untuk satuan yang dikunci di Perintah Kerja"><i class="fe fe-lock"></i> Kunci</th>
                             }
                             <th>Bebas</th><th>Butuh</th><th>Kurang</th>
+                            <th title="Saldo melebihi kebutuhan (Saldo − Butuh)">Lebih</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -354,7 +363,7 @@ else
                             @if (i == 0 || saldo[i - 1].GrupGender != s.GrupGender)
                             {
                                 <tr class="tni-tbl-grp">
-                                    <td colspan="@(adaKunci ? 6 : 5)">
+                                    <td colspan="@(adaKunci ? 7 : 6)">
                                         _@s.GrupGender · @TniUrutStok.Label(s.GrupGender)
                                         <span style="font-weight:400">(@saldo.Count(x => x.GrupGender == s.GrupGender) pola)</span>
                                     </td>
@@ -376,7 +385,9 @@ else
                                 }
                                 <td>@s.BebasTanpaKunci</td>
                                 <td>@s.KebutuhanSisa</td>
-                                <td style="font-weight:700;color:@(s.Kurang ? "var(--tni-ink)" : "var(--tni-mut)")">@s.Kekurangan</td>
+                                @* 2026-11-19: Kurang kuning, Lebih biru, 0 ditulis "-". *@
+                                <td style="font-weight:700;color:@(s.Kekurangan > 0 ? WarnaKurang : "var(--tni-mut)")">@Strip(s.Kekurangan)</td>
+                                <td style="font-weight:700;color:@(s.Kelebihan > 0 ? WarnaLebih : "var(--tni-mut)")">@Strip(s.Kelebihan)</td>
                             </tr>
                         }
                     </tbody>
@@ -1107,6 +1118,84 @@ else
         riwayatPola = s;
         var result = await StokApi.GetRiwayatAsync(s.JenisItem, s.PolaId, pageSize: 50);
         riwayat = result.Items;
+    }
+
+    // 2026-11-19: warna kolom Kurang (kuning tua, terbaca di latar putih) & Lebih (biru);
+    // sama dengan warna di gambar (tniCapture.js C.kuning / C.biru).
+    private const string WarnaKurang = "#B7791F";
+    private const string WarnaLebih = "#1D6FD1";
+
+    private static string Strip(int n) => n > 0 ? n.ToString() : "-";
+
+    // 2026-11-19: tabel tab Stok APA ADANYA (jenis, pencarian, centang yang sedang aktif;
+    // kolom sama dengan layar) -> gambar PNG lewat js/tniCapture.js -> clipboard,
+    // supaya bisa di-paste ke WhatsApp (pola sama dengan Kekurangan stok di Perintah Kerja).
+    private bool isMenyalin;
+
+    private async Task SalinGambarTabelAsync()
+    {
+        if (saldo.Count == 0) return;
+        isMenyalin = true;
+        errorMessage = string.Empty;
+        infoMessage = string.Empty;
+        try
+        {
+            var adaKunci = saldo.Any(x => x.Dikunci > 0);
+            var kolom = new List<string> { "Pola", "Saldo" };
+            if (adaKunci) kolom.Add("Kunci");
+            kolom.AddRange(new[] { "Bebas", "Butuh", "Kurang", "Lebih" });
+
+            var baris = new List<object>();
+            for (var i = 0; i < saldo.Count; i++)
+            {
+                var s = saldo[i];
+                if (i == 0 || saldo[i - 1].GrupGender != s.GrupGender)
+                    baris.Add(new { grp = true,
+                                    teks = $"_{s.GrupGender} · {TniUrutStok.Label(s.GrupGender)} ({saldo.Count(x => x.GrupGender == s.GrupGender)} pola)" });
+
+                var sel = new List<string> { s.IsActive ? s.Kode : s.Kode + " (nonaktif)", s.Saldo.ToString() };
+                var warna = new List<string> { "ink", s.SaldoMinus ? "bad" : "ink" };
+                var tebal = new List<bool> { false, s.SaldoMinus };
+                if (adaKunci)
+                {
+                    sel.Add(s.Dikunci.ToString());
+                    warna.Add(s.Dikunci > 0 ? "navy" : "mut");
+                    tebal.Add(s.Dikunci > 0);
+                }
+                sel.AddRange(new[] { s.BebasTanpaKunci.ToString(), s.KebutuhanSisa.ToString(),
+                                     Strip(s.Kekurangan), Strip(s.Kelebihan) });
+                warna.AddRange(new[] { "ink", "ink",
+                                       s.Kekurangan > 0 ? "kuning" : "mut", s.Kelebihan > 0 ? "biru" : "mut" });
+                tebal.AddRange(new[] { false, false, true, true });
+                baris.Add(new { sel, warna, tebal });
+            }
+
+            var jenis = jenisSaldo == "KEMEJA" ? "Kemeja" : "Celana";
+            var info = new List<string[]>
+            {
+                new[] { "Order", OrderState.IsLoaded ? OrderState.Subjudul : "-" },
+                new[] { "Jenis", jenis },
+                new[] { "Per", DateTime.Now.ToString("dd/MM/yyyy HH:mm") }
+            };
+            if (!string.IsNullOrWhiteSpace(searchSaldo)) info.Add(new[] { "Cari", searchSaldo.Trim() });
+            if (hanyaAda) info.Add(new[] { "Filter", "hanya yang ada stoknya" });
+
+            var data = new
+            {
+                judul = "Stok " + jenis.ToLower(),
+                info,
+                kolom,
+                baris,
+                namaFile = $"stok-{jenis.ToLower()}-{DateTime.Now:yyyyMMdd-HHmm}.png"
+            };
+
+            var hasil = await JS.InvokeAsync<string>("tniCapture.salinTabel", data);
+            infoMessage = hasil == "COPY"
+                ? "Gambar tabel stok disalin — tinggal paste (Ctrl+V) di WhatsApp."
+                : "Browser tidak mengizinkan salin gambar di alamat ini — gambar diunduh sebagai file.";
+        }
+        catch (Exception ex) { errorMessage = "Gagal membuat gambar: " + ex.Message; }
+        finally { isMenyalin = false; }
     }
 
     public void Dispose() => debounceTimer?.Dispose();

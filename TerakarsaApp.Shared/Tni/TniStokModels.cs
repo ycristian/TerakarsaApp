@@ -40,6 +40,9 @@ public class TniStokSaldoDto
     // sama dengan dashboard: Butuh - Saldo.
     public bool Kurang => Saldo < KebutuhanSisa;
     public int Kekurangan => Math.Max(0, KebutuhanSisa - Saldo);
+
+    // 2026-11-19: saldo melebihi kebutuhan -> stok berlebih (Saldo - Butuh).
+    public int Kelebihan => Math.Max(0, Saldo - KebutuhanSisa);
 }
 
 // Urutan SEMUA tampilan stok (2026-10-07): grup gender P, PG, W, WH (celana P, W),
